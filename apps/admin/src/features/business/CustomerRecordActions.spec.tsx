@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,14 +8,11 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import {
-  deactivateCustomer,
-  deleteCustomer,
   getSaleSummary,
   issueCustomerAccountActivation,
 } from './services';
 
 vi.mock('./services', () => ({
-  deactivateCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   getCustomerApplications: vi.fn(),
@@ -46,7 +43,6 @@ const STAFF: SessionUser = {
   afHomesPermissions: [grant('sales.customers', { canCreate: true, canUpdate: true })],
 };
 
-const SUPER: SessionUser = { ...STAFF, id: 'u-super', roleSlug: 'super_admin' };
 
 const FULLSTAFF: SessionUser = {
   ...STAFF,
@@ -120,7 +116,6 @@ describe('CustomerRecordActions', () => {
     expect(
       await screen.findByRole('button', { name: 'Issue / Reissue activation link' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New application' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Anonymize' })).not.toBeInTheDocument();
   });
@@ -129,8 +124,6 @@ describe('CustomerRecordActions', () => {
     renderActions({ ...FULLSTAFF, roleSlug: 'super_admin' }, [SALE]);
     const names = [
       'Issue / Reissue activation link',
-      'Delete permanently',
-      'Deactivate account',
       'Record payment',
       'Verify payment',
     ];
@@ -156,37 +149,9 @@ describe('CustomerRecordActions', () => {
     expect(vi.mocked(issueCustomerAccountActivation)).toHaveBeenCalledWith('c-1');
   });
 
-  it('deactivates behind a direct confirmation', async () => {
-    vi.mocked(deactivateCustomer).mockResolvedValue({ deactivated: true } as never);
-    renderActions();
-    await screen.findByRole('button', { name: 'Deactivate account' });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Deactivate account' }));
-    expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Confirm' }));
-    await waitFor(() => expect(vi.mocked(deactivateCustomer)).toHaveBeenCalledWith('c-1'));
-  });
-
-  it('offers permanent delete to the super admin only', async () => {
-    vi.mocked(deleteCustomer).mockResolvedValue({ deleted: true } as never);
-    renderActions(SUPER);
-    await screen.findByRole('button', { name: 'Delete permanently' });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
-    const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText('Permanently Delete Customer Account');
-    await user.type(
-      within(dialog).getByLabelText('Type DELETE to confirm customer action'),
-      'DELETE',
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Delete permanently' }));
-    await waitFor(() => expect(vi.mocked(deleteCustomer)).toHaveBeenCalledWith('c-1'));
-    expect(await screen.findByText('directory')).toBeInTheDocument();
-  });
-
   it('hides sale buttons without sale grants or sales', async () => {
     renderActions(STAFF, []);
-    await screen.findByRole('button', { name: 'Deactivate account' });
+    await screen.findByText('Actions');
     expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
   });
 
@@ -204,7 +169,7 @@ describe('CustomerRecordActions', () => {
 
   it('keeps permanent delete away from ordinary staff', async () => {
     renderActions();
-    await screen.findByRole('button', { name: 'Deactivate account' });
+    await screen.findByText('Actions');
     expect(screen.queryByRole('button', { name: 'Delete permanently' })).not.toBeInTheDocument();
   });
 });

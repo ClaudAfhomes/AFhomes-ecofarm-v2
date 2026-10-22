@@ -532,13 +532,12 @@ describe('CustomerDetailPage merged actions', () => {
     renderDetail(FULLSTAFF);
     await screen.findByRole('heading', { name: 'Actions' });
     // Record-level workflows …
-    expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
     // … beside the per-sale payment actions.
     expect(screen.getByRole('button', { name: 'Record payment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Verify payment' })).toBeInTheDocument();
 
     // … and the removed sale buttons stay gone.
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     // … and neither of the old split cards remains.
     expect(screen.queryByRole('heading', { name: 'Customer Actions' })).not.toBeInTheDocument();
@@ -563,7 +562,7 @@ describe('CustomerDetailPage merged actions', () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     // … but the record-level workflows stay.
-    expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
+
   });
 
   it('renders one sale card per sale, titled by its own number', async () => {

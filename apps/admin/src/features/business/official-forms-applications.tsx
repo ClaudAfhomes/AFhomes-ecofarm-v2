@@ -1919,17 +1919,6 @@ export function CustomerApplicationEditorPage() {
                 >
                   Reopen
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => void proposal.refetch()}
-                  disabled={proposal.isFetching || existing.data?.status !== 'approved' || !!proposal.data}
-                  loading={proposal.isFetching}
-                  loadingLabel="Loading offer…"
-                  type="button"
-                >
-                  Load offer
-                </Button>
-
               </div>
             </div>
           </section>

@@ -73,14 +73,26 @@ import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 import { humanizeApplicationIssues } from './official-forms-applications';
 
-import {
+import {
   today,
   fieldLabel,
   filterReservationFieldInput,
   VIP_TIER_FIELD_OPTIONS,
   Field,
+  SelectField,
   QUEUE_PAGE_SIZE,
 } from './official-forms-fields';
+
+/**
+ * A holder's name as the agreement records it.
+ *
+ * One composition, used twice: the copy effect that fills the agreement from
+ * an application, and the source panel that names the application it is
+ * attached to. Two spellings of the same name would let the panel describe a
+ * different person than the agreement carries.
+ */
+const holderFullName = (value: ApplicationHolder) =>
+  [value.firstName, value.middleName, value.lastName, value.suffix].filter(Boolean).join(' ');
 
 export function ReservationAgreementsPage() {
   const navigate = useNavigate();
@@ -477,9 +489,7 @@ export function ReservationAgreementEditorPage() {
     if (!app.primary) return;
     const holder = (value: ApplicationHolder) => ({
       holderType: value.holderType,
-      name: [value.firstName, value.middleName, value.lastName, value.suffix]
-        .filter(Boolean)
-        .join(' '),
+      name: holderFullName(value),
       address: [
         value.permanentAddressLine1,
         value.permanentAddressLine2,
@@ -847,66 +857,101 @@ export function ReservationAgreementEditorPage() {
             Source &amp; references
           </h2>
           <p className={styles.panelNote}>Link application or sale here.</p>
-          <div className={styles.editorGrid}>
-            {/* Application-origin reservations have NO sale: the agreement comes
-                first and the sale arrives at finalization. */}
-            {applicationOrigin ? null : (
-              <>
+          <div className={styles.sourceLayout}>
+            {/* The two pickers are alternative origins of the SAME slot, so
+                they travel together under one group. The auto-fill action
+                belongs to the sale control it acts on, which is why it sits
+                under that control instead of beside it as a third field. */}
+            <fieldset className={styles.sourceGroup}>
+              <legend className={styles.sourceGroupTitle}>Source</legend>
+              <div className={styles.sourceFields}>
+                {/* Application-origin reservations have NO sale: the agreement comes
+                    first and the sale arrives at finalization. */}
+                {applicationOrigin ? null : (
+                  <div className={styles.sourceField}>
+                    <label className={styles.filterLabel}>
+                      Card sale
+                      <Select
+                        aria-label="Card sale"
+                        value={saleId}
+                        loading={sales.isPending}
+                        onChange={(e) => setSaleId(e.target.value)}
+                        options={[
+                          { value: '', label: 'Select sale' },
+                          ...(sales.data?.map((sale) => ({
+                            value: sale.id,
+                            label: `${sale.saleNumber} — ${sale.customerName}`,
+                          })) ?? []),
+                        ]}
+                      />
+                    </label>
+                    <div className={styles.sourceAction}>
+                      <Button variant="secondary" size="sm" onClick={autoFill}>
+                        Auto-fill from sale
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <label className={styles.filterLabel}>
-                  Card sale
+                  Source Customer Application
                   <Select
-                    aria-label="Card sale"
-                    value={saleId}
-                    loading={sales.isPending}
-                    onChange={(e) => setSaleId(e.target.value)}
+                    aria-label="Source Customer Application"
+                    value={customerApplicationId}
+                    loading={applications.isPending}
+                    onChange={(e) => setCustomerApplicationId(e.target.value)}
                     options={[
-                      { value: '', label: 'Select sale' },
-                      ...(sales.data?.map((sale) => ({
-                        value: sale.id,
-                        label: `${sale.saleNumber} — ${sale.customerName}`,
-                      })) ?? []),
+                      { value: '', label: 'Choose Customer' },
+                      ...(applications.data
+                        ?.filter((app) => ['submitted', 'approved'].includes(app.status))
+                        .map((app) => ({
+                          value: app.id,
+                          label: `${app.applicationNumber} — ${app.applicantName}`,
+                        })) ?? []),
                     ]}
                   />
                 </label>
-                <div className={styles.actions}>
-                  <Button variant="secondary" onClick={autoFill}>
-                    Auto-fill from sale
-                  </Button>
-                </div>
-              </>
-            )}
-            <label className={styles.filterLabel}>
-              Source Customer Application
-              <Select
-                aria-label="Source Customer Application"
-                value={customerApplicationId}
-                loading={applications.isPending}
-                onChange={(e) => setCustomerApplicationId(e.target.value)}
-                options={[
-                  { value: '', label: 'Choose a submitted or approved application' },
-                  ...(applications.data
-                    ?.filter((app) => ['submitted', 'approved'].includes(app.status))
-                    .map((app) => ({
-                      value: app.id,
-                      label: `${app.applicationNumber} — ${app.applicantName}`,
-                    })) ?? []),
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Imported Tier
-              <Select
-                aria-label="Imported Tier"
-                value={vipTier}
-                onChange={(e) => setVipTier(e.target.value)}
-                options={VIP_TIER_FIELD_OPTIONS}
-              />
-            </label>
+              </div>
+            </fieldset>
+            {/* Imported tier is carried in from the IST workbook, not another
+                source. The server always derives the authoritative tier from
+                the selected sale, so this never decides anything. It sits in
+                its own band because a third picker in the source group would
+                read as a third source. */}
+            <div className={styles.sourceContext}>
+              <label className={styles.filterLabel}>
+                Imported Tier
+                <Select
+                  aria-label="Imported Tier"
+                  value={vipTier}
+                  onChange={(e) => setVipTier(e.target.value)}
+                  options={VIP_TIER_FIELD_OPTIONS}
+                />
+              </label>
+            </div>
           </div>
           {sourceApplication.data ? (
-            <p className={styles.note}>
-              Copied from {sourceApplication.data.applicationNumber}. Verify before saving.
-            </p>
+            /* The attached source, named. The copy lands after the application
+               loads, so the strip announces itself when it appears. */
+            <div className={styles.sourceLinked} aria-live="polite">
+              <p className={styles.sourceLinkedLabel}>Linked source</p>
+              <p className={styles.sourceLinkedMeta}>
+                <span className={styles.sourceLinkedId}>
+                  {sourceApplication.data.applicationNumber}
+                </span>
+                {/* A thin application payload carries no holder. The strip
+                    still names the linked application; the copy effect
+                    already refuses to prefill from one. */}
+                {sourceApplication.data.primary ? (
+                  <span className={styles.sourceLinkedName}>
+                    {holderFullName(sourceApplication.data.primary)}
+                  </span>
+                ) : null}
+                <StatusChip label={sourceApplication.data.status} />
+              </p>
+              <p className={styles.sourceLinkedNote}>
+                Copied holder, tier and sale. Verify before saving.
+              </p>
+            </div>
           ) : null}
         </section>
         <section className={styles.panel} aria-labelledby="reservation-dates-heading">
@@ -915,19 +960,39 @@ export function ReservationAgreementEditorPage() {
           </h2>
           <p className={styles.panelNote}>Dates bounding this agreement.</p>
           <div className={styles.editorGrid}>
-            {Object.entries(dates).map(([key, value]) => (
-              <Field
-                key={key}
-                label={key === 'revisionNumber' ? 'Reservation Number' : fieldLabel(key)}
-                value={value}
-                type={
-                  key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
-                    ? 'date'
-                    : 'text'
-                }
-                onChange={(v) => setDates({ ...dates, [key]: v })}
-              />
-            ))}
+            {Object.entries(dates).map(([key, value]) => {
+              if (key === 'paymentDueDay') {
+                const dayOptions = [
+                  { value: '', label: 'Not specified' },
+                  { value: '1', label: '1 day' },
+                  { value: '3', label: '3 days' },
+                  { value: '5', label: '5 days' },
+                  { value: '7', label: '7 days' },
+                ];
+                return (
+                  <SelectField
+                    key={key}
+                    label={fieldLabel(key)}
+                    value={value}
+                    onChange={(v) => setDates({ ...dates, [key]: v })}
+                    options={dayOptions}
+                  />
+                );
+              }
+              return (
+                <Field
+                  key={key}
+                  label={key === 'revisionNumber' ? 'Reservation Number' : fieldLabel(key)}
+                  value={value}
+                  type={
+                    key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
+                      ? 'date'
+                      : 'text'
+                  }
+                  onChange={(v) => setDates({ ...dates, [key]: v })}
+                />
+              );
+            })}
           </div>
         </section>
         <section className={styles.panel} aria-labelledby="reservation-primary-heading">

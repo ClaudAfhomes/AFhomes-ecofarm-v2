@@ -1729,3 +1729,142 @@ button.stepperLink:disabled {
     flex-wrap: wrap;
   }
 }
+
+/* ==================================================================
+   Reservation source panel.
+
+   The section groups TWO alternative origins of the same slot (a card
+   sale, or a customer application) and one piece of imported context
+   (the tier). The layout says so: the pickers travel together under a
+   "Source" group, the tier sits apart as context, and the attached
+   source is named in a strip of its own once it is linked.
+   ================================================================== */
+
+/* Two columns: the pickers take the room, the context takes exactly
+   the width of the control it holds.
+
+   --sourceTitleSpace is the line the source group's legend occupies. The
+   context column carries no heading of its own, so it reserves that line to
+   keep every control on one baseline. */
+.sourceLayout {
+  --sourceTitleSpace: calc(var(--text-caption) * var(--line-height-body) + var(--space-3));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 15rem);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* The source group is a real fieldset, so the browser exposes the two
+   pickers as one group. The legend is styled, not the box. */
+.sourceGroup {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.sourceGroupTitle {
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  /* Explicit, so --sourceTitleSpace reserves exactly this line. */
+  line-height: var(--line-height-body);
+  color: var(--color-text-secondary);
+}
+
+/* The pickers sit side by side when the column allows it, and stack
+   when it does not. `start` keeps them on one baseline: the sale field
+   carries an extra action row, and a stretched track would push the
+   application control down to meet it. */
+.sourceFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.sourceField {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  align-content: start;
+}
+
+/* The auto-fill action belongs to the sale control above it. */
+.sourceAction {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* The imported tier, set apart from the pickers by a rule rather than by a
+   second card, so the panel keeps one visual hierarchy. It reserves the
+   source group's heading line so its control stays level with the others. */
+.sourceContext {
+  min-width: 0;
+  padding-top: var(--sourceTitleSpace);
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+/* The attached source, named. The strip appears once the application
+   loads and the copy lands, so it is announced when it appears. */
+.sourceLinked {
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sourceLinkedLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.sourceLinkedMeta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.sourceLinkedId {
+  font-weight: 600;
+}
+
+.sourceLinkedName {
+  color: var(--color-text-secondary);
+}
+
+.sourceLinkedNote {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Below the two-column threshold the context band moves under the
+   pickers and its rule turns horizontal. */
+@media (max-width: 1023px) {
+  .sourceLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sourceContext {
+    padding-left: 0;
+    /* Stacked, there is no heading line to align to, so the reservation is
+       dropped and the band keeps its own spacing. */
+    padding-top: var(--space-4);
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+}
