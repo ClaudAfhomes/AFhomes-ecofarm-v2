@@ -107,7 +107,7 @@ begin
   -- Ephemeral onboarding tokens.
   delete from public.customer_onboarding_tokens where customer_id = p_customer_id;
 
-  -- Customer applications and their children.
+  -- Customer applications and their children (holders, documents, import linkage).
   delete from public.customer_application_holders
     where application_id in (select id from public.customer_applications where customer_id = p_customer_id);
   delete from public.customer_application_documents
@@ -120,11 +120,9 @@ begin
   delete from private.customer_external_import_receipts
     where source_id in (select id from private.customer_import_purchase_sources where customer_id = p_customer_id);
   delete from private.customer_import_purchase_sources where customer_id = p_customer_id;
-  -- (customer applications and their purchase terms are deleted after
-  --  reservation agreements, to satisfy circular FKs.)
+  -- applications/purchase_terms deferred until after reservations are deleted.
 
-  -- Null application purchase_terms_id now that reservations are about to be
-  -- removed (avoids PURCHASE_TERMS_REVIEW_REQUIRED / origin check).
+  -- Null application purchase_terms_id (safe once reservations are about to be removed).
   update public.customer_applications set purchase_terms_id = null where customer_id = p_customer_id;
 
   -- Reservation agreements and their children.
@@ -181,15 +179,15 @@ begin
   delete from public.card_sale_hierarchy_snapshots
     where sale_id in (select id from public.card_sales where customer_id = p_customer_id);
 
-  -- Purchase terms and applications (after reservations are gone).
-  delete from public.customer_application_purchase_terms where customer_id = p_customer_id;
-  delete from public.customer_applications where customer_id = p_customer_id;
-
   -- Memberships.
   delete from public.memberships where customer_id = p_customer_id;
 
-  -- Reservation agreements.
+  -- Reservation agreements (after their children and referenced terms are gone).
   delete from public.reservation_agreements where customer_id = p_customer_id;
+
+  -- Purchase terms and applications (after reservations are gone).
+  delete from public.customer_application_purchase_terms where customer_id = p_customer_id;
+  delete from public.customer_applications where customer_id = p_customer_id;
 
   -- Card sales.
   delete from public.card_sales where customer_id = p_customer_id;
