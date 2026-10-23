@@ -79,10 +79,16 @@ export const ostOfficialFormSchema = z
     }
   });
 
-export const ostIdentitySchema = submitOstApplicationSchema.omit({ referralCode: true }).extend({
-  // Legacy imports may lack official codes; supplied codes are always re-verified server-side.
-  addressHierarchy: addressHierarchySchema.extend({ regionCode: geographicCodeSchema }).strict().optional(),
-}).strict();
+export const ostIdentitySchema = submitOstApplicationSchema
+  .omit({ referralCode: true })
+  .extend({
+    // Legacy imports may lack official codes; supplied codes are always re-verified server-side.
+    addressHierarchy: addressHierarchySchema
+      .extend({ regionCode: geographicCodeSchema.optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
 export const submitOstAccreditationSchema = z
   .object({
     requestId: z.string().uuid(),
@@ -122,7 +128,11 @@ export const submitOstRenewalSchema = z
         message: 'Expiry must be on or after the start',
       });
     else if (v.requestedEnd !== ostAnnualExpiry(v.requestedStart))
-      ctx.addIssue({ code: 'custom', path: ['requestedEnd'], message: 'OST renewal must last one calendar year' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['requestedEnd'],
+        message: 'OST renewal must last one calendar year',
+      });
     if (v.proposedNewSponsorStaffId && v.reasonForReferrerChange.length < 5)
       ctx.addIssue({
         code: 'custom',

@@ -15,10 +15,9 @@ import { useOstAddress } from '../address/useOstAddress';
  * - Save pending records the application and its provenance and leaves the
  *   sponsored workflow (sponsor endorsement, management approval) to finish it.
  *
- * Neither outcome issues an AA number by hand: the database allocates AAO from
- * the same monthly sequence every other accreditation uses.
+ * Completed members use a temporary-password login and automatic or manual AAO.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   createOstMemberSchema,
@@ -31,6 +30,7 @@ import {
   Button,
   DateField,
   Dialog,
+  PasswordField,
   OstOfficialFields,
   Select,
   TextField,
@@ -44,12 +44,10 @@ const IDENTITY_FIELDS = [
   { name: 'firstName', label: 'First Name' },
   { name: 'middleName', label: 'Middle Name', optional: true },
   { name: 'lastName', label: 'Last Name' },
-  { name: 'email', label: 'Email' },
   { name: 'phone', label: 'Mobile Number' },
-  { name: 'line1', label: 'No. / Street' },
 ] as const;
 
-type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate';
+type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate' | 'email' | 'line1';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -67,7 +65,11 @@ export function CreateOstDialog({
   const [mode, setMode] = useState<'complete' | 'pending'>('complete');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [geography, setGeography] = useState(emptyOstAddress);
-  const addressOptions = useOstAddress(geography);
+  const addressOptions = useOstAddress(geography, false);
+  const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [aaNumberMode, setAaNumberMode] = useState<'auto' | 'manual'>('auto');
+  const [aaNumber, setAaNumber] = useState('');
   const [official, setOfficial] = useState(officialOstFormDefaults);
   const [sponsorStaffId, setSponsorStaffId] = useState('');
   const [startsOn, setStartsOn] = useState(today);
@@ -76,6 +78,10 @@ export function CreateOstDialog({
   // the application already recorded instead of writing a second one.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   const sponsors = useQuery({
     queryKey: ['ost', 'manual-sponsors'],
     queryFn: getOstSponsors,
@@ -94,6 +100,10 @@ export function CreateOstDialog({
   };
 
   const submit = () => {
+    if (mode === 'complete' && temporaryPassword !== confirmPassword) {
+      setError('Passwords must match.');
+      return;
+    }
     const form = parseOfficialOstFields(official);
     if (!form.success) {
       setError(form.error.issues[0]?.message ?? 'Check the official form.');
@@ -101,6 +111,9 @@ export function CreateOstDialog({
     }
     const parsed = createOstMemberSchema.safeParse({
       mode,
+      ...(mode === 'complete'
+        ? { temporaryPassword, aaNumberMode, ...(aaNumberMode === 'manual' ? { aaNumber } : {}) }
+        : {}),
       requestId,
       sponsorStaffId,
       identity: {
@@ -119,7 +132,6 @@ export function CreateOstDialog({
           countryCode: 'PH',
         },
         addressHierarchy: {
-          regionCode: geography.regionCode,
           provinceCode: geography.provinceCode,
           localityCode: geography.localityCode,
           barangayCode: geography.barangayCode,
@@ -155,38 +167,52 @@ export function CreateOstDialog({
             Cancel
           </Button>
           <Button
-            type="button"
+            type="submit"
+            form="create-ost-form"
             loading={create.isPending}
             loadingLabel="Creating…"
-            onClick={submit}
           >
             {mode === 'complete' ? 'Create and accredit' : 'Save application'}
           </Button>
         </>
       }
     >
-      <div className={styles.dialogBody}>
-        <section className={styles.formSection} aria-labelledby="create-ost-applicant">
-          <h2 id="create-ost-applicant" className={styles.sectionTitle}>
-            Applicant identity
-          </h2>
-          <p className={styles.sectionHint}>
-            The official form's identity page. The email becomes the member's own login.
-          </p>
+      <form
+        id="create-ost-form"
+        className={styles.dialogBody}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        aria-busy={create.isPending}
+      >
+        <p className={styles.sectionHint}>
+          Create the OST login, choose an active Sales Manager, and record the signed accreditation
+          form. Fields marked * are required.
+        </p>
+        {error ? (
+          <div ref={errorRef} tabIndex={-1}>
+            <Alert variant="danger" title="Review the form">
+              <p className={styles.alertText}>{error}</p>
+            </Alert>
+          </div>
+        ) : null}
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>Personal information</legend>
           <div className={styles.formFields}>
-            {IDENTITY_FIELDS.map(({ name, label, ...rest }) => (
-              <TextField
-                key={name}
-                id={`create-ost-${name}`}
-                name={`create-ost-${name}`}
-                label={label}
-                type={name === 'email' ? 'email' : 'text'}
-                value={fields[name] ?? ''}
-                onChange={onChange(name)}
-                {...('optional' in rest && rest.optional ? { optional: true as const } : {})}
-              />
-            ))}
-            <OstAddressFields value={geography} onChange={setGeography} {...addressOptions} />
+            <div className={styles.inlinePair}>
+              {IDENTITY_FIELDS.map(({ name, label, ...rest }) => (
+                <TextField
+                  key={name}
+                  id={`create-ost-${name}`}
+                  name={`create-ost-${name}`}
+                  label={label}
+                  value={fields[name] ?? ''}
+                  onChange={onChange(name)}
+                  {...('optional' in rest && rest.optional ? { optional: true as const } : {})}
+                />
+              ))}
+            </div>
             <DateField
               id="create-ost-birthDate"
               name="create-ost-birthDate"
@@ -194,6 +220,41 @@ export function CreateOstDialog({
               max={today()}
               value={fields.birthDate ?? ''}
               onChange={onChange('birthDate')}
+            />
+          </div>
+        </fieldset>
+
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>Home address</legend>
+          <div className={styles.formFields}>
+            <TextField
+              id="create-ost-line1"
+              name="create-ost-line1"
+              label="No. / Street"
+              value={fields.line1 ?? ''}
+              onChange={onChange('line1')}
+            />
+            <div className={styles.inlinePair}>
+              <OstAddressFields
+                showRegion={false}
+                value={geography}
+                onChange={setGeography}
+                {...addressOptions}
+              />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>Assignment</legend>
+          <div className={styles.formFields}>
+            <TextField
+              id="create-ost-role"
+              name="position"
+              label="Position"
+              value="OST"
+              onChange={() => {}}
+              readOnly
             />
             <label className={styles.fieldLabel}>
               Sponsor (active Sales Manager)
@@ -213,19 +274,62 @@ export function CreateOstDialog({
           </div>
           {sponsors.isError ? (
             <p className={styles.sectionHint} role="alert">
-              The Sales Manager list could not be loaded. Close the dialog and retry.
+              The Sales Manager list could not be loaded.
+              <Button type="button" variant="secondary" onClick={() => void sponsors.refetch()}>
+                Retry Sales Managers
+              </Button>
             </p>
           ) : null}
-        </section>
+        </fieldset>
+
+        <fieldset className={styles.formSection}>
+          <legend className={styles.sectionTitle}>Account</legend>
+          <div className={styles.formFields}>
+            <TextField
+              id="create-ost-email"
+              name="email"
+              label="Email"
+              type="email"
+              value={fields.email ?? ''}
+              onChange={onChange('email')}
+            />
+            {mode === 'complete' ? (
+              <>
+                <div className={styles.inlinePair}>
+                  <PasswordField
+                    id="create-ost-password"
+                    label="Temporary password"
+                    value={temporaryPassword}
+                    onChange={setTemporaryPassword}
+                    autoComplete="new-password"
+                  />
+                  <PasswordField
+                    id="create-ost-confirm-password"
+                    label="Confirm password"
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <p className={styles.sectionHint}>
+                  The member must change this password at first sign-in. No invitation email is
+                  sent.
+                </p>
+              </>
+            ) : null}
+          </div>
+        </fieldset>
 
         <OstOfficialFields
+          grouped
+          className={`${styles.formSection} ${styles.officialFields}`}
           values={official}
           onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
         />
 
         <section className={styles.formSection} aria-labelledby="create-ost-finish">
           <h2 id="create-ost-finish" className={styles.sectionTitle}>
-            Finish
+            Accreditation and completion
           </h2>
           <div className={styles.formFields}>
             <label className={styles.fieldLabel}>
@@ -244,6 +348,27 @@ export function CreateOstDialog({
             </label>
             {mode === 'complete' ? (
               <>
+                <label className={styles.fieldLabel}>
+                  AA number mode
+                  <Select
+                    value={aaNumberMode}
+                    onChange={(e) => setAaNumberMode(e.target.value as 'auto' | 'manual')}
+                    options={[
+                      { value: 'auto', label: 'Automatic' },
+                      { value: 'manual', label: 'Manual input' },
+                    ]}
+                  />
+                </label>
+                {aaNumberMode === 'manual' ? (
+                  <TextField
+                    id="create-ost-aa-number"
+                    name="aaNumber"
+                    label="AA number"
+                    value={aaNumber}
+                    onChange={(value) => setAaNumber(value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    placeholder="AAO26100001"
+                  />
+                ) : null}
                 <DateField
                   id="create-ost-starts-on"
                   name="create-ost-starts-on"
@@ -271,13 +396,7 @@ export function CreateOstDialog({
               : 'Records the application only. The sponsor endorses it, then management approves it in the OST queue.'}
           </p>
         </section>
-
-        {error ? (
-          <Alert variant="danger" title="OST was not created">
-            <p className={styles.alertText}>{error}</p>
-          </Alert>
-        ) : null}
-      </div>
+      </form>
     </Dialog>
   );
 }

@@ -322,6 +322,7 @@ describe('member contracts', () => {
   it('completes an OST only with signatures and approved validity', () => {
     const complete = {
       mode: 'complete',
+      temporaryPassword: 'SyntheticPass123!',
       requestId,
       sponsorStaffId,
       identity: ostIdentity,
@@ -330,6 +331,23 @@ describe('member contracts', () => {
       expiresOn: '2027-10-16',
     };
     expect(createOstMemberSchema.safeParse(complete).success).toBe(true);
+    expect(
+      createOstMemberSchema.safeParse({ ...complete, temporaryPassword: undefined }).success,
+    ).toBe(false);
+    expect(createOstMemberSchema.safeParse({ ...complete, aaNumberMode: 'manual' }).success).toBe(
+      false,
+    );
+    expect(
+      createOstMemberSchema.safeParse({
+        ...complete,
+        aaNumberMode: 'manual',
+        aaNumber: 'AAO26100001',
+      }).success,
+    ).toBe(true);
+    for (const aaNumber of ['AAI26100001', 'AAO26130001', 'AAO26100000'])
+      expect(
+        createOstMemberSchema.safeParse({ ...complete, aaNumberMode: 'manual', aaNumber }).success,
+      ).toBe(false);
     // Expiry before the start, a missing date, and a missing signature fail.
     expect(createOstMemberSchema.safeParse({ ...complete, expiresOn: '2026-10-15' }).success).toBe(
       false,

@@ -13,6 +13,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 import { AddressProviderError } from '../_lib/address-provider.js';
+import { MEMBER_ENTRY_TABS, memberWorkbook } from '../_lib/member-workbook.js';
+import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
+import { zipStored } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as FakeSupabase }));
 
@@ -24,6 +27,7 @@ vi.mock('../_lib/rest.js', () => ({
 const upstream = vi.hoisted(() => ({
   provinces: vi.fn(),
   localities: vi.fn(),
+  barangays: vi.fn(),
 }));
 
 vi.mock('../_lib/psgc-cloud-provider.js', () => ({
@@ -31,7 +35,7 @@ vi.mock('../_lib/psgc-cloud-provider.js', () => ({
     name: 'psgc-cloud-stub',
     provinces: upstream.provinces,
     localities: upstream.localities,
-    barangays: vi.fn(),
+    barangays: upstream.barangays,
   },
 }));
 
@@ -248,6 +252,8 @@ function install(
     rpcs?: { fn: string; result: unknown | ((args: Record<string, unknown>) => unknown) }[];
     /** Id handed back by inviteUserByEmail; must be a UUID to pass contracts. */
     inviteUserId?: string;
+    createUserId?: string;
+    createUser?: NonNullable<ConstructorParameters<typeof FakeSupabase>[0]>['createUser'];
   },
 ) {
   holder.db = new FakeSupabase({
@@ -339,6 +345,9 @@ beforeEach(() => {
   install();
   resetAddressProviderCache();
   upstream.provinces.mockResolvedValue([LAGUNA]);
+  upstream.barangays.mockResolvedValue([
+    { code: '0403406001', name: 'Dayap', localityCode: CALAUAN.code },
+  ]);
   upstream.localities.mockImplementation(async (code: string) =>
     code === LAGUNA.code ? [CALAUAN] : [LEMERY],
   );
@@ -1205,6 +1214,7 @@ const directForm = {
 };
 const directBody = (extra: Record<string, unknown> = {}) => ({
   mode: 'complete',
+  temporaryPassword: 'SyntheticPass123!',
   requestId: '22222222-3333-4444-8555-666666666666',
   sponsorStaffId: SM_ID,
   identity: directIdentity,
@@ -1215,16 +1225,74 @@ const directBody = (extra: Record<string, unknown> = {}) => ({
 });
 const installDirect = (extra: Record<string, unknown> = {}) =>
   install(undefined, {
+    createUserId: DIRECT_MEMBER_ID,
     inviteUserId: DIRECT_MEMBER_ID,
     rpcs: [
       { fn: 'submit_ost_accreditation', result: DIRECT_APP_ID },
       { fn: 'confirm_ost_application_signatures', result: DIRECT_APP_ID },
-      { fn: 'install_direct_ost_accreditation', result: DIRECT_TERM_ID },
+      { fn: 'install_direct_ost_password', result: DIRECT_TERM_ID },
     ],
     ...extra,
   });
 
 describe('POST /members/ost (direct OST creation)', () => {
+  it('rejects a missing password before any submission or account write', async () => {
+    const db = installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody({ temporaryPassword: undefined }),
+    });
+    expect(state.status).toBe(400);
+    expect(rpcCalls('submit_ost_accreditation')).toHaveLength(0);
+    expect(db.calls.filter((c) => c.op === 'createUser')).toHaveLength(0);
+  });
+  it('removes only its new login after a confirmed atomic SQL rejection', async () => {
+    const db = installDirect({
+      rpcErrors: {
+        install_direct_ost_password: { message: 'ACCREDITATION_NUMBER_TAKEN', code: '23505' },
+      },
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody(),
+    });
+    expect(state.status).toBe(409);
+    expect(db.deletedAuthUsers).toEqual([DIRECT_MEMBER_ID]);
+  });
+  it('does not reuse or delete a pre-existing Auth identity', async () => {
+    const db = installDirect({
+      createUser: async () => ({ data: { user: null }, error: { message: 'Already registered' } }),
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody(),
+    });
+    expect(state.status).toBe(409);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
+    expect(db.deletedAuthUsers).toEqual([]);
+  });
+  it('creates a password login without an invitation and forwards the manual AA', async () => {
+    const db = installDirect();
+    const state = await call({
+      method: 'POST',
+      familyPath: 'ost',
+      token: ADMIN_TOKEN,
+      body: directBody({ aaNumberMode: 'manual', aaNumber: 'AAO26100001' }),
+    });
+    expect(state.status).toBe(201);
+    expect(db.calls.filter((c) => c.op === 'createUser')).toHaveLength(1);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(0);
+    expect(rpcArgs('install_direct_ost_password')[0]?.arg).toMatchObject({
+      p_aa_number: 'AAO26100001',
+    });
+    expect(JSON.stringify(state.body)).not.toContain('SyntheticPass123!');
+  });
   const ORIGINAL_ADMIN_URL = process.env.AFHOMES_ADMIN_URL;
   beforeEach(() => {
     process.env.AFHOMES_ADMIN_URL = 'https://afhomes.test/admin';
@@ -1244,7 +1312,7 @@ describe('POST /members/ost (direct OST creation)', () => {
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(201);
-    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(1);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(1);
     expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
     expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
   });
@@ -1273,13 +1341,13 @@ describe('POST /members/ost (direct OST creation)', () => {
     const signatures = rpcArgs('confirm_ost_application_signatures')[0]!.arg!;
     expect(signatures.p_applicant_date).toBe('2026-10-01');
     expect(signatures.p_referrer_date).toBe('2026-10-01');
-    // The install re-validates the sponsor in SQL and never receives a number.
-    const installed = rpcArgs('install_direct_ost_accreditation')[0]!.arg!;
+    // SQL revalidates the sponsor; null selects automatic numbering.
+    const installed = rpcArgs('install_direct_ost_password')[0]!.arg!;
     expect(installed.p_actor_id).toBe(ADMIN_ID);
     expect(installed.p_auth_id).toBe(DIRECT_MEMBER_ID);
     expect(installed.p_starts_on).toBe('2026-10-01');
     expect(installed.p_expires_on).toBe('2027-10-01');
-    expect(installed).not.toHaveProperty('p_aa_number');
+    expect(installed.p_aa_number).toBeNull();
   });
 
   it('saves the application as pending and invites nobody', async () => {
@@ -1297,7 +1365,7 @@ describe('POST /members/ost (direct OST creation)', () => {
       status: 'submitted',
     });
     expect(rpcCalls('confirm_ost_application_signatures')).toHaveLength(0);
-    expect(rpcCalls('install_direct_ost_accreditation')).toHaveLength(0);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
     expect(
       (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
         (c) => c.op === 'inviteUserByEmail',
@@ -1305,10 +1373,10 @@ describe('POST /members/ost (direct OST creation)', () => {
     ).toHaveLength(0);
   });
 
-  it('keeps the invitation when the install is refused', async () => {
+  it('preserves a newly created login on an uncertain install outcome', async () => {
     installDirect({
       rpcErrors: {
-        install_direct_ost_accreditation: { message: 'OST_SIGNATURE_EVIDENCE_REQUIRED' },
+        install_direct_ost_password: { message: 'OST_SIGNATURE_EVIDENCE_REQUIRED' },
       },
     });
     const state = await call({
@@ -1319,12 +1387,10 @@ describe('POST /members/ost (direct OST creation)', () => {
     });
     expect(state.status).toBe(400);
     expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
-    // The invitation is deliberately preserved: an invite response does not
-    // prove the account was newly created, so deleting it could destroy a
-    // pre-existing login. The operator retries from the OST queue.
+    // No confirmed SQL error code: preserve the login for administrator review.
     expect(
       (holder.db as unknown as { calls: { op: string }[] }).calls.filter(
-        (c) => c.op === 'inviteUserByEmail',
+        (c) => c.op === 'createUser',
       ),
     ).toHaveLength(1);
   });
@@ -1360,6 +1426,72 @@ describe('POST /members/ost (direct OST creation)', () => {
 });
 
 describe('POST /members/:id/transfer', () => {
+  it('reads the current OST team from genealogy even when there is no profile row', async () => {
+    const db = install();
+    db.tables.referral_relationships = [
+      {
+        subject_staff_id: OST_ID,
+        upline_staff_id: SM_ID,
+        hierarchy_role: 'ost',
+        is_active: true,
+        is_authoritative: true,
+      },
+    ];
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ position: 'ost', referrerStaffId: SM_ID });
+  });
+  it('requires explicit team approval and refuses expired-eligibility failures without kind conversion', async () => {
+    const db = install(undefined, {
+      rpcErrors: { transfer_ost_team: { message: 'OST_ACCREDITATION_EXPIRED_REQUIRED' } },
+    });
+    const body = {
+      requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
+      sponsorStaffId: SM2_ID,
+      reason: 'Management reviewed team change',
+      managementApproved: true,
+    };
+    const missingApproval = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body: { ...body, managementApproved: false },
+    });
+    expect(missingApproval.status).toBe(400);
+    expect(rpcCalls('transfer_ost_team')).toHaveLength(0);
+    const active = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body,
+    });
+    expect(active.status).toBe(409);
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+    expect(db.calls.some((c) => c.op === 'createUser' || c.op === 'inviteUserByEmail')).toBe(false);
+  });
+  it('moves an OST team through the genealogy RPC without invoking kind conversion', async () => {
+    const db = install(undefined, {
+      rpcs: [
+        { fn: 'transfer_ost_team', result: null },
+        { fn: 'get_sale_team_accreditation', result: null },
+      ],
+    });
+    const state = await call({
+      method: 'POST',
+      familyPath: `${OST_ID}/team-transfer`,
+      token: ADMIN_TOKEN,
+      body: {
+        requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
+        sponsorStaffId: SM2_ID,
+        reason: 'Management approved new team',
+        managementApproved: true,
+      },
+    });
+    expect(state.status).toBe(200);
+    expect(rpcCalls('transfer_ost_team')).toHaveLength(1);
+    expect(rpcCalls('transfer_sale_team_member')).toHaveLength(0);
+    expect(db.calls.some((c) => c.op === 'createUser' || c.op === 'inviteUserByEmail')).toBe(false);
+  });
   const toOstBody = (extra: Record<string, unknown> = {}) => ({
     direction: 'IST_TO_OST',
     requestId: 'ec801800-1234-4321-8765-aaaaaaaaaaaa',
@@ -1486,5 +1618,171 @@ describe('POST /members/:id/transfer', () => {
       body: toOstBody(),
     });
     expect(anonymous.status).toBe(401);
+  });
+});
+
+describe('member workbook read-only endpoints', () => {
+  function uploadFields(fields: Record<string, string>) {
+    const parts = readWorkbookParts(memberWorkbook('IST', []));
+    Object.values(MEMBER_ENTRY_TABS).forEach((headers, index) => {
+      const path = `xl/worksheets/sheet${index + 2}.xml`;
+      let text = new TextDecoder().decode(parts.get(path));
+      headers.forEach((h, c) => {
+        if (fields[h] === undefined) return;
+        const ref = String.fromCharCode(65 + c) + '2';
+        text = text.replace(
+          new RegExp(`<c r="${ref}"[^>]*?(?:/>|>[\\s\\S]*?</c>)`),
+          () => `<c r="${ref}" t="inlineStr"><is><t>${fields[h]}</t></is></c>`,
+        );
+      });
+      parts.set(path, new TextEncoder().encode(text));
+    });
+    return Buffer.from(
+      zipStored(
+        [...parts].map(([name, data]) => ({ name, data })),
+        true,
+      ),
+    ).toString('base64');
+  }
+  it('previews a real workbook read-only, including normalized-phone duplicate detection', async () => {
+    const f = {
+      first_name: 'Synthetic',
+      last_name: 'Seller',
+      email: 'synthetic@example.invalid',
+      mobile: '09171111111',
+      birth_date: '1990-01-01',
+      sex: 'Male',
+      civil_status: 'Single',
+      province: 'Laguna',
+      city: 'Calauan',
+      barangay: 'Dayap',
+      address_line_1: 'One Street',
+      position: 'vice_director',
+      aa_mode: 'auto',
+      employer_name: 'Example',
+      employer_address: 'Calauan',
+      job_position: 'Seller',
+      government_id_type: 'passport',
+      government_id_number: 'P1234567',
+    };
+    const response = await call({
+      method: 'POST',
+      familyPath: 'workbook/preview',
+      body: { kind: 'IST', contentBase64: uploadFields(f) },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    const result = response.body as {
+      rows: { fields: Record<string, string>; errors: string[] }[];
+    };
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.fields.postal_code).toBe('4012');
+    expect(result.rows[0]!.errors).toContain(
+      'mobile: an existing member already uses this mobile.',
+    );
+    expect(
+      holder.db.calls.filter((c) =>
+        ['createUser', 'inviteUserByEmail', 'insert', 'update', 'upsert', 'delete'].includes(c.op),
+      ),
+    ).toEqual([]);
+    const clean = await call({
+      method: 'POST',
+      familyPath: 'workbook/preview',
+      body: { kind: 'IST', contentBase64: uploadFields({ ...f, mobile: '09999999999' }) },
+      token: ADMIN_TOKEN,
+    });
+    expect((clean.body as typeof result).rows[0]!.errors).toEqual([]);
+  });
+  it('requires authentication and rejects unsupported kind and invalid uploads', async () => {
+    expect((await call({ familyPath: 'workbook/template', query: { kind: 'IST' } })).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await call({
+          familyPath: 'workbook/template',
+          query: { kind: 'admin' },
+          token: ADMIN_TOKEN,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call({
+          method: 'POST',
+          familyPath: 'workbook/preview',
+          body: { kind: 'IST', contentBase64: 'bad!' },
+          token: ADMIN_TOKEN,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
+  });
+  it('downloads a guided template without running any business mutation', async () => {
+    const response = await call({
+      familyPath: 'workbook/template',
+      query: { kind: 'OST' },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ filename: 'afhomes-ost-template.xlsx' });
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
+  });
+  it('exports only the selected kind and excludes credentials and private identifiers', async () => {
+    const response = await call({
+      familyPath: 'workbook/export',
+      query: { kind: 'IST' },
+      token: ADMIN_TOKEN,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ filename: 'afhomes-ist-roster.xlsx' });
+    const sheets = readWorkbook(
+      Buffer.from((response.body as { content: string }).content, 'base64'),
+      ['IST'],
+    );
+    const cells = sheets.get('IST')!;
+    expect(cells[0]).not.toContain('TIN');
+    expect(cells.slice(1).every((r) => r[5] !== 'ost')).toBe(true);
+    expect(cells.flat()).not.toContain('D7654321');
+    expect(
+      holder.db.calls.filter((c) =>
+        [
+          'createUser',
+          'inviteUserByEmail',
+          'updateUserById',
+          'deleteUser',
+          'insert',
+          'update',
+          'upsert',
+          'delete',
+        ].includes(c.op),
+      ),
+    ).toEqual([]);
   });
 });

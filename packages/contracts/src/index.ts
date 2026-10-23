@@ -509,6 +509,7 @@ export {
   transferMemberToOstSchema,
   transferMemberToIstSchema,
   transferMemberSchema,
+  transferOstTeamSchema,
   updateMemberProfileSchema,
   memberSchema,
   memberDetailSchema,
@@ -745,3 +746,4 @@ export * from './schemas/service-refunds.js';
 export * from './schemas/customer-workbook.js';
 
 export { servicePolicyManagementResultSchema } from './schemas/points.js';
+export * from './schemas/member-workbook.js';

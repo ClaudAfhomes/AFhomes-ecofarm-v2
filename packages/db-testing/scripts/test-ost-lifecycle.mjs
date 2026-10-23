@@ -288,10 +288,11 @@ try {
       'insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug=$2',
       [id, role],
     );
-    if (upline) await db.query(
-      'insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,assigned_by) values($1,$2,$3,$4)',
-      [id, upline, role, ids.super_admin],
-    );
+    if (upline)
+      await db.query(
+        'insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,assigned_by) values($1,$2,$3,$4)',
+        [id, upline, role, ids.super_admin],
+      );
     await db.query(profileSql, [id, phone]);
     if (role !== 'ost')
       await db.query(
@@ -465,15 +466,49 @@ try {
   );
   await db.query('drop trigger synthetic_transfer_failure on public.audit_events');
   check((await db.query(transferSql, rollbackArgs)).rows[0].result.aaNumber, 'AAO26100072');
-  const collision = await addIst('sales_manager','AAI26100074',ids.senior_sales_manager,'+639189990074');
-  await db.query("insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AAO26100074','SYNTHETIC COLLISION','OST','active','2026-01-01','2027-01-01',$2)",[child,ids.super_admin]);
-  await assert.rejects(db.query(transferSql,await transferArgs(collision)),/ACCREDITATION_NUMBER_TAKEN/); checks++;
-  check((await db.query('select aa_number from private.sale_team_accreditations where staff_id=$1',[collision])).rows[0].aa_number,'AAI26100074');
-  check((await db.query('select count(*)::int n from public.ost_members where id=$1',[collision])).rows[0].n,0);
+  const collision = await addIst(
+    'sales_manager',
+    'AAI26100074',
+    ids.senior_sales_manager,
+    '+639189990074',
+  );
+  await db.query(
+    "insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AAO26100074','SYNTHETIC COLLISION','OST','active','2026-01-01','2027-01-01',$2)",
+    [child, ids.super_admin],
+  );
+  await assert.rejects(
+    db.query(transferSql, await transferArgs(collision)),
+    /ACCREDITATION_NUMBER_TAKEN/,
+  );
+  checks++;
+  check(
+    (
+      await db.query('select aa_number from private.sale_team_accreditations where staff_id=$1', [
+        collision,
+      ])
+    ).rows[0].aa_number,
+    'AAI26100074',
+  );
+  check(
+    (await db.query('select count(*)::int n from public.ost_members where id=$1', [collision]))
+      .rows[0].n,
+    0,
+  );
 
-  const rootIst = await addIst('vice_director','AAI26100076',null,'+639189990076');
-  check((await db.query(transferSql,await transferArgs(rootIst))).rows[0].result.aaNumber,'AAO26100076');
-  check((await db.query('select from_upline_staff_id from private.ost_ist_conversions where staff_id=$1',[rootIst])).rows[0].from_upline_staff_id,null);
+  const rootIst = await addIst('vice_director', 'AAI26100076', null, '+639189990076');
+  check(
+    (await db.query(transferSql, await transferArgs(rootIst))).rows[0].result.aaNumber,
+    'AAO26100076',
+  );
+  check(
+    (
+      await db.query(
+        'select from_upline_staff_id from private.ost_ist_conversions where staff_id=$1',
+        [rootIst],
+      )
+    ).rows[0].from_upline_staff_id,
+    null,
+  );
   // The operation CHECK must stay a forward-only union: an already-applied
   // database keeps rows for operations this batch never wrote, so the list may
   // grow but must never shrink.
@@ -1283,6 +1318,331 @@ try {
     ).rows[0].allowed,
     false,
   );
+  // Password-based management creation is additive; the legacy path above still works.
+  const passwordInstall =
+    "select public.install_direct_ost_password($1,$2,$3,'2026-10-17','2027-10-17',$4) id";
+  async function passwordApplication(index) {
+    const person = randomUUID();
+    const applicant = {
+      ...identity,
+      email: `${person}@example.invalid`,
+      phone: `+6391899901${index}`,
+    };
+    const app = (
+      await db.query("select public.submit_ost_accreditation($1,$2,$3,null,$4,$5,'manual') id", [
+        randomUUID(),
+        ids.super_admin,
+        ids.sales_manager,
+        applicant,
+        form,
+      ])
+    ).rows[0].id;
+    await db.query('insert into auth.users(id,email) values($1,$2)', [person, applicant.email]);
+    return { person, app };
+  }
+  for (const [index, number] of [
+    [11, null],
+    [12, 'AAO99129999'],
+  ]) {
+    const { person, app } = await passwordApplication(index);
+    const args = [app, ids.super_admin, person, number];
+    const term = (await db.query(passwordInstall, args)).rows[0].id;
+    const state = (
+      await db.query(
+        `select s.status,s.must_change_password,a.aa_number from public.staff_users s
+      join private.sale_team_accreditations a on a.staff_id=s.id where s.id=$1`,
+        [person],
+      )
+    ).rows[0];
+    check(state.status, 'active');
+    check(state.must_change_password, true);
+    check(number ? state.aa_number === number : /^AAO2610\d{4}$/.test(state.aa_number), true);
+    check(
+      (
+        await db.query(
+          'select count(*)::int n from public.staff_invitations where auth_user_id=$1',
+          [person],
+        )
+      ).rows[0].n,
+      0,
+    );
+    check((await db.query(passwordInstall, args)).rows[0].id, term);
+    await assert.rejects(
+      db.query(passwordInstall, [app, ids.super_admin, person, 'AAO99129998']),
+      /MUTATION_PAYLOAD_CONFLICT/,
+    );
+    checks++;
+  }
+  const denied = await passwordApplication(13);
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.senior_sales_manager, denied.person, null]),
+    /OST_AA_ISSUANCE_FORBIDDEN/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.super_admin, denied.person, 'AAI99129999']),
+    /INVALID_ACCREDITATION_NUMBER/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(passwordInstall, [denied.app, ids.super_admin, denied.person, 'AAO99129999']),
+    /ACCREDITATION_NUMBER_TAKEN/,
+  );
+  checks++;
+  check(
+    (await db.query('select count(*)::int n from public.staff_users where id=$1', [denied.person]))
+      .rows[0].n,
+    0,
+  );
+  check(
+    (await db.query('select status from public.ost_applications where id=$1', [denied.app])).rows[0]
+      .status,
+    'submitted',
+  );
+  check(
+    (
+      await db.query(
+        "select has_function_privilege('authenticated','public.install_direct_ost_password(uuid,uuid,uuid,date,date,text)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  check(
+    (
+      await db.query(
+        "select has_function_privilege('anon','public.install_direct_ost_password(uuid,uuid,uuid,date,date,text)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  // Team changes keep the role, number, term and historical origin unchanged.
+  const team = {};
+  for (const role of ['vice_director', 'senior_sales_manager', 'sales_manager']) {
+    const person = (team[role] = randomUUID());
+    await db.query('insert into auth.users(id,email) values($1,$2)', [
+      person,
+      `${person}@example.invalid`,
+    ]);
+    await db.query(
+      "insert into public.staff_users(id,email,full_name,status) values($1,$2,'SYNTHETIC NEW TEAM','active')",
+      [person, `${person}@example.invalid`],
+    );
+    await db.query(
+      'insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug=$2',
+      [person, role],
+    );
+  }
+  for (const [child, parent] of [
+    ['sales_manager', 'senior_sales_manager'],
+    ['senior_sales_manager', 'vice_director'],
+  ])
+    await db.query(
+      'insert into public.referral_relationships(subject_staff_id,upline_staff_id,hierarchy_role,assigned_by) values($1,$2,$3,$4)',
+      [team[child], team[parent], child, ids.super_admin],
+    );
+  const moving = await passwordApplication(21);
+  await db.query(
+    "select public.install_direct_ost_password($1,$2,$3,'2020-01-01','2021-01-01',null)",
+    [moving.app, ids.super_admin, moving.person],
+  );
+  const snapshot = async () =>
+    (
+      await db.query(
+        `select
+    (select to_jsonb(a) from private.sale_team_accreditations a where staff_id=$1) aa,
+    (select to_jsonb(t) from private.ost_accreditation_terms t where ost_id=$1 and status='active') term`,
+        [moving.person],
+      )
+    ).rows[0];
+  const preserved = await snapshot();
+  const moveSql = 'select public.transfer_ost_team($1,$2,$3,$4,$5) id';
+  const moveArgs = [
+    ids.super_admin,
+    moving.person,
+    randomUUID(),
+    team.sales_manager,
+    'Approved expired OST team move',
+  ];
+  await assert.rejects(
+    db.query(
+      'update public.referral_relationships set upline_staff_id=$1 where subject_staff_id=$2 and is_active',
+      [team.sales_manager, moving.person],
+    ),
+    /OST_TRANSFER_APPROVAL_REQUIRED/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(moveSql, [...moveArgs.slice(0, 3), ids.sales_manager, moveArgs[4]]),
+    /OST_TRANSFER_SAME_TEAM/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(moveSql, [...moveArgs.slice(0, 3), team.senior_sales_manager, moveArgs[4]]),
+    /OST_ACTIVE_SM_REQUIRED/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(moveSql, [ids.sales_manager, ...moveArgs.slice(1)]),
+    /MUTATION_FORBIDDEN/,
+  );
+  checks++;
+  check((await db.query(moveSql, moveArgs)).rows[0].id, moveArgs[2]);
+  check((await db.query(moveSql, moveArgs)).rows[0].id, moveArgs[2]);
+  check(await snapshot(), preserved);
+  check(
+    (await db.query('select private.staff_role_slug($1) role', [moving.person])).rows[0].role,
+    'ost',
+  );
+  check(
+    (await db.query('select sponsor_staff_id from public.ost_members where id=$1', [moving.person]))
+      .rows[0].sponsor_staff_id,
+    team.sales_manager,
+  );
+  check(
+    (
+      await db.query('select sponsor_staff_id from public.ost_applications where id=$1', [
+        moving.app,
+      ])
+    ).rows[0].sponsor_staff_id,
+    ids.sales_manager,
+  );
+  check(
+    (
+      await db.query(
+        'select count(*)::int n from public.referral_relationships where subject_staff_id=$1 and not is_active and upline_staff_id=$2',
+        [moving.person, ids.sales_manager],
+      )
+    ).rows[0].n,
+    1,
+  );
+  check(
+    (
+      await db.query(
+        'select count(*)::int n from public.referral_relationships where subject_staff_id=$1 and is_active and upline_staff_id=$2',
+        [moving.person, team.sales_manager],
+      )
+    ).rows[0].n,
+    1,
+  );
+  check(
+    (
+      await db.query('select count(*)::int n from private.ost_team_transfers where ost_id=$1', [
+        moving.person,
+      ])
+    ).rows[0].n,
+    1,
+  );
+  await assert.rejects(
+    db.query(
+      "update private.ost_team_transfers set reason='Rewrite forbidden' where request_id=$1",
+      [moveArgs[2]],
+    ),
+    /OST_TEAM_TRANSFER_HISTORY_IMMUTABLE/,
+  );
+  checks++;
+  await assert.rejects(
+    db.query(moveSql, [...moveArgs.slice(0, 4), 'A different reason']),
+    /MUTATION_PAYLOAD_CONFLICT/,
+  );
+  checks++;
+  const activeMove = await passwordApplication(22);
+  await db.query(passwordInstall, [activeMove.app, ids.super_admin, activeMove.person, null]);
+  await assert.rejects(
+    db.query(moveSql, [
+      ids.super_admin,
+      activeMove.person,
+      randomUUID(),
+      team.sales_manager,
+      'Must reject active accreditation',
+    ]),
+    /OST_ACCREDITATION_EXPIRED_REQUIRED/,
+  );
+  checks++;
+  check(
+    (
+      await db.query(
+        "select has_function_privilege('authenticated','public.transfer_ost_team(uuid,uuid,uuid,uuid,text)','execute') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  check(
+    (
+      await db.query(
+        "select has_table_privilege('service_role','private.ost_team_transfers','insert') allowed",
+      )
+    ).rows[0].allowed,
+    false,
+  );
+  const competing = await passwordApplication(23);
+  await db.query(
+    "select public.install_direct_ost_password($1,$2,$3,'2020-01-01','2021-01-01',null)",
+    [competing.app, ids.super_admin, competing.person],
+  );
+  const moveFirst = await connect(),
+    moveSecond = await connect();
+  const pidFirst = (await moveFirst.query('select pg_backend_pid() pid')).rows[0].pid;
+  const pidSecond = (await moveSecond.query('select pg_backend_pid() pid')).rows[0].pid;
+  const raceArgs = [
+    ids.super_admin,
+    competing.person,
+    randomUUID(),
+    team.sales_manager,
+    'Concurrent approved team transfer',
+  ];
+  await moveFirst.query('begin');
+  await moveFirst.query(moveSql, raceArgs);
+  const waitingMove = moveSecond.query(moveSql, raceArgs);
+  let blocked = false;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    blocked = (
+      await db.query('select $1::int=any(pg_blocking_pids($2)) blocked', [pidFirst, pidSecond])
+    ).rows[0].blocked;
+    if (blocked) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  check(blocked, true);
+  await moveFirst.query('commit');
+  check((await waitingMove).rows[0].id, raceArgs[2]);
+  check(
+    (
+      await db.query('select count(*)::int n from private.ost_team_transfers where ost_id=$1', [
+        competing.person,
+      ])
+    ).rows[0].n,
+    1,
+  );
+  const pendingMove = await passwordApplication(24);
+  await db.query(
+    "select public.install_direct_ost_password($1,$2,$3,'2020-01-01','2021-01-01',null)",
+    [pendingMove.app, ids.super_admin, pendingMove.person],
+  );
+  await db.query('select public.submit_ost_renewal($1,$2,$3,$4)', [
+    randomUUID(),
+    ids.super_admin,
+    pendingMove.person,
+    {
+      requestId: randomUUID(),
+      dateOfRenewal: '2026-10-17',
+      requestedStart: '2026-10-17',
+      requestedEnd: '2027-10-17',
+      proposedNewSponsorStaffId: null,
+      reasonForReferrerChange: '',
+      applicantSignatureStatus: 'pending',
+      referrerSignatureStatus: 'pending',
+    },
+  ]);
+  await assert.rejects(
+    db.query(moveSql, [
+      ids.super_admin,
+      pendingMove.person,
+      randomUUID(),
+      team.sales_manager,
+      'Pending renewal must block this transfer',
+    ]),
+    /OST_RENEWAL_IN_PROGRESS/,
+  );
+  checks++;
   const acl = await db.query(fs.readFileSync('supabase/security/rls_invariants.sql', 'utf8'));
   for (const result of Array.isArray(acl) ? acl : [acl]) check(result.rowCount, 0);
   console.log(

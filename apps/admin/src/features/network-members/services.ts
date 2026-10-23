@@ -7,6 +7,9 @@
  * single-record read returns the identification fields for the record view.
  */
 import {
+  memberWorkbookFileSchema,
+  memberWorkbookPreviewSchema,
+  type MemberWorkbookKind,
   afHomesDepartmentSchema,
   createOstMemberResultSchema,
   memberDetailSchema,
@@ -97,6 +100,15 @@ export const transferMember = (id: string, input: TransferMember): Promise<Membe
     body: JSON.stringify(input),
   });
 
+export const transferOstTeam = (
+  id: string,
+  input: { requestId: string; sponsorStaffId: string; reason: string; managementApproved: true },
+): Promise<Member> =>
+  request(`/members/${id}/team-transfer`, memberSchema, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
 export const updateMember = (id: string, input: UpdateMemberProfile): Promise<Member> =>
   request(`/members/${id}`, memberSchema, { method: 'PATCH', body: JSON.stringify(input) });
 
@@ -108,3 +120,11 @@ export const issueMemberAccreditation = (id: string, input: IssueAccreditation):
 
 export const getMemberDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
+
+export const downloadMemberWorkbook = (kind: MemberWorkbookKind, action: 'template' | 'export') =>
+  request(`/members/workbook/${action}?kind=${kind}`, memberWorkbookFileSchema);
+
+export const previewMemberWorkbook = (kind: MemberWorkbookKind, contentBase64: string) =>
+  request('/members/workbook/preview', memberWorkbookPreviewSchema, {
+    method: 'POST', body: JSON.stringify({ kind, contentBase64 }),
+  });

@@ -125,6 +125,7 @@ export function readWorkbook(
   bytes: Uint8Array | Map<string, Uint8Array>,
   selected?: readonly string[],
   requireSingleSheet = selected === undefined,
+  ignoredFormulaColumns: Readonly<Record<string, readonly number[]>> = {},
 ): Map<string, string[][]> {
   const parts = bytes instanceof Map ? bytes : readWorkbookParts(bytes);
   const part = (name: string) => {
@@ -199,6 +200,11 @@ export function readWorkbook(
         if (col > XLSX_LIMITS.columns) throw new Error('Worksheet column limit exceeded');
         if (cells[col - 1] !== undefined) throw new Error('Duplicate worksheet cell');
         if (children(c, 'f').length) {
+          // Derived workbook columns are recomputed by their importer, never evaluated here.
+          if (ignoredFormulaColumns[name]?.includes(col)) {
+            cells[col - 1] = '';
+            continue;
+          }
           // Age is discarded; postal caches are unverified candidate text. Nothing is evaluated.
           if (
             selected &&
