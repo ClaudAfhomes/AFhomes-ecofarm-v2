@@ -315,3 +315,15 @@
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
+
+/* Restricted upline profile display */
+.headName {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.headName[style*="cursor: default"] {
+  cursor: default;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}

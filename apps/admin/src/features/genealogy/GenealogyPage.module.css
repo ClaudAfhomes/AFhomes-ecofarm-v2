@@ -387,3 +387,94 @@
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-body-s);
 }
+
+/* Genealogy Tree Section */
+.genealogyTreeSection {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+/* Upline Chain (read-only for sellers) */
+.uplineChain {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+
+.uplineTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.uplineList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.uplineItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+}
+
+.uplineConnector {
+  font-size: var(--text-body-s);
+  color: var(--color-brand-primary);
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+}
+
+.uplineInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.uplineRole {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-brand-primary);
+}
+
+.uplineName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.uplineLabel {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  background: color-mix(in srgb, var(--color-brand-primary) 15%, transparent);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+/* Tree Root */
+.treeRoot {
+  margin-top: var(--space-4);
+}
+
+.genealogyTreeWrapper {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}

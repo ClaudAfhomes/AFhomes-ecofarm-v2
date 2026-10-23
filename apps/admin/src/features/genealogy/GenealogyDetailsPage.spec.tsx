@@ -73,10 +73,9 @@ it('renders the head with scoped summary badges, never the full chain', async ()
     },
   ]);
   renderDetails();
-  expect(await screen.findByRole('link', { name: 'QA HEAD' })).toHaveAttribute(
-    'href',
-    '/admin/genealogy/22222222-2222-4222-8222-222222222222',
-  );
+  // SM cannot view SSM profile - head name is not a link
+  expect(await screen.findByText('QA HEAD')).not.toBeNull();
+  expect(screen.queryByRole('link', { name: 'QA HEAD' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'QA GRANDHEAD' })).toBeNull();
   expect(screen.queryByText('Total descendants: 3')).toBeNull();
   expect(await screen.findByText('Direct downline: 1')).toBeInTheDocument();

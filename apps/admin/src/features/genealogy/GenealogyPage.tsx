@@ -21,6 +21,7 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { humanizeCode } from '../business/format';
 import { genealogyKeys } from '../business/queryKeys';
 import { useSession } from '../../lib/session';
+import { GenealogyTree } from './GenealogyTree';
 import styles from './GenealogyPage.module.css';
 
 const ROLES = ['all', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'];
@@ -83,6 +84,49 @@ export function GenealogyPage() {
     enabled: user?.roleSlug === 'admin' || user?.roleSlug === 'super_admin',
     placeholderData: keepPreviousData,
   });
+
+  // Determine the genealogy root for the current user
+  // VD: self (top-level)
+  // SSM: self, with VD as read-only head reference
+  // SM: self, with SSM/VD as read-only head references
+  // OST: self, with SM/SSM/VD as read-only head references
+  // Admin/Super Admin: all heads (existing behavior)
+  const isSellerRole = !!user && ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(user.roleSlug ?? '');
+  const isAdmin = !!user && (user.roleSlug === 'admin' || user.roleSlug === 'super_admin');
+
+  // Build upline chain for the current user (for seller roles)
+  const uplineChain = useMemo(() => {
+    if (!user || !user.id || !isSellerRole) return [];
+    const allNodes = query.data ?? [];
+    const nodeMap = new Map(allNodes.map(n => [n.staffId, n]));
+    const chain: GenealogyNode[] = [];
+    let currentId = user.id;
+    // Walk up the upline chain (max 4 levels for VD->SSM->SM->OST)
+    for (let i = 0; i < 4; i++) {
+      const node = nodeMap.get(currentId);
+      if (!node || !node.uplineStaffId) break;
+      const upline = nodeMap.get(node.uplineStaffId);
+      if (!upline) break;
+      chain.unshift(upline); // Add to beginning so VD is first
+      currentId = upline.staffId;
+    }
+    return chain;
+  }, [query.data, user?.id, user?.roleSlug]);
+
+  // Determine the root node for the genealogy tree
+  // For sellers: their own node
+  // For admin: first head (existing behavior)
+  const treeRoot = useMemo(() => {
+    if (!user || !user.id) return null;
+    if (isSellerRole) {
+      // For sellers, find their own node in the data
+      return (query.data ?? []).find(n => n.staffId === user.id) ?? null;
+    }
+    // Admin: use existing heads logic
+    const ids = new Set((query.data ?? []).map((n) => n.staffId));
+    const heads = (query.data ?? []).filter((n) => !n.uplineStaffId || !ids.has(n.uplineStaffId));
+    return heads[0] ?? null;
+  }, [query.data, user?.id, user?.roleSlug]);
 
   const debouncedSearch = useDebouncedValue(search);
   const filtering = debouncedSearch.trim() !== '' || role !== 'all' || status !== 'all';
@@ -372,14 +416,70 @@ export function GenealogyPage() {
           ))}
         </ul>
       ) : (
-        <div className={styles.heads} aria-label="Network heads">
-          {heads.length === 0
-            ? rows.slice(0, 1).map((n) => <HeadCard key={n.staffId} node={n} />)
-            : heads.map((n) => <HeadCard key={n.staffId} node={n} />)}
-        </div>
+        <>
+          {/* Genealogy Tree View */}
+          <section className={styles.genealogyTreeSection} aria-label="Genealogy tree">
+            {treeRoot && (
+              <>
+                {/* Upline Chain (read-only for sellers) */}
+                {uplineChain.length > 0 && (
+                  <div className={styles.uplineChain} aria-label="Upline chain">
+                    <h3 className={styles.uplineTitle}>Your Upline</h3>
+                    <div className={styles.uplineList}>
+                      {uplineChain.map((upline, index) => (
+                        <div key={upline.staffId} className={styles.uplineItem}>
+                          <span className={styles.uplineConnector} aria-hidden="true">{index < uplineChain.length - 1 ? '▼' : ''}</span>
+                          <div className={styles.uplineInfo}>
+                            <span className={styles.uplineRole}>{humanizeCode(upline.role)}</span>
+                            <span className={styles.uplineName}>{upline.fullName}</span>
+                            <StatusChip label={humanizeCode(upline.ostStatus ?? upline.status)} tone="neutral" />
+                          </div>
+                          <span className={styles.uplineLabel}>Your Head</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Current User as Root */}
+                <div className={styles.treeRoot}>
+                  <GenealogyTree
+                    rootStaffId={treeRoot.staffId}
+                    viewerRole={user?.roleSlug ?? ''}
+                    viewerId={user?.id ?? ''}
+                    onMemberClick={(member) => navigate(`/admin/genealogy/${member.staffId}`)}
+                  />
+                </div>
+              </>
+            )}
+            {!treeRoot && (
+              <EmptyState title="No genealogy data" description="Your genealogy record could not be found." />
+            )}
+          </section>
+
+          {/* Admin: Traditional heads view (for admin/super_admin) */}
+          {isAdmin && (
+            <div className={styles.heads} aria-label="Network heads">
+              {heads.length === 0
+                ? rows.slice(0, 1).map((n) => <HeadCard key={n.staffId} node={n} />)
+                : heads.map((n) => <HeadCard key={n.staffId} node={n} />)}
+            </div>
+          )}
+        </>
       )}
     </section>
   );
+}
+
+/**
+ * Short failure guidance per cause. Raw server
+ * internals never render, only next steps.
+ */
+function describeGenealogyLoadError(error: unknown): string | undefined {
+  if (error instanceof ApiNetworkError) return 'Check connection. Try again.';
+  if (error instanceof ApiError && error.status === 401) return 'Session expired. Sign in again.';
+  if (error instanceof ApiError && error.status === 403) return 'No access. Ask administrator.';
+  return undefined;
 }
 
 function HeadCard({ node }: { node: GenealogyNode }) {
@@ -442,15 +542,4 @@ function NodeCard({ node }: { node: GenealogyNode }) {
       </div>
     </article>
   );
-}
-
-/**
- * Short failure guidance per cause. Raw server
- * internals never render, only next steps.
- */
-function describeGenealogyLoadError(error: unknown): string | undefined {
-  if (error instanceof ApiNetworkError) return 'Check connection. Try again.';
-  if (error instanceof ApiError && error.status === 401) return 'Session expired. Sign in again.';
-  if (error instanceof ApiError && error.status === 403) return 'No access. Ask administrator.';
-  return undefined;
 }

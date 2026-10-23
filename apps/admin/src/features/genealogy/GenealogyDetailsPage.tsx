@@ -24,6 +24,38 @@ import { getMember } from '../network-members/services';
 import styles from './GenealogyDetailsPage.module.css';
 
 /**
+ * Check if the current user can view the full profile of an upline member.
+ * SSM cannot view VD profile, SM cannot view SSM/VD profiles, OST cannot view any upline.
+ * VD can view all upline (none). Admin can view all.
+ */
+function canViewUplineProfile(upline: { role: string; staffId: string }, viewer: { roleSlug?: string; id?: string } | null): boolean {
+  if (!viewer) return false;
+  // Admin can view all
+  if (viewer.roleSlug === 'admin' || viewer.roleSlug === 'super_admin') return true;
+  // Self can always view own profile
+  if (viewer.id === upline.staffId) return true;
+  // Seller roles: check hierarchy
+  const viewerRole = viewer.roleSlug;
+  const uplineRole = upline.role;
+  if (!viewerRole) return false;
+  // VD can view all upline (none)
+  if (viewerRole === 'vice_director') return true;
+  // SSM can view VD? No - VD is upline, SSM cannot view VD profile
+  if (viewerRole === 'senior_sales_manager') {
+    return uplineRole !== 'vice_director';
+  }
+  // SM can view SSM/VD? No - both are upline
+  if (viewerRole === 'sales_manager') {
+    return !['vice_director', 'senior_sales_manager'].includes(uplineRole);
+  }
+  // OST cannot view any upline profile
+  if (viewerRole === 'ost') {
+    return false;
+  }
+  return false;
+}
+
+/**
  * One seller's network record: identity, upline chain, team summary,
  * interactive downline tree, and team sales activity.
  *
@@ -198,14 +230,23 @@ export function GenealogyDetailsPage() {
               {(chain.data[0]!.fullName.trim().charAt(0) || '•').toUpperCase()}
             </span>
             <div className={styles.headText}>
-              <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`} className={styles.headName}>
-                {chain.data[0]!.fullName}
-              </Link>
+              {canViewUplineProfile(chain.data[0]!, user) ? (
+                <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`} className={styles.headName}>
+                  {chain.data[0]!.fullName}
+                </Link>
+              ) : (
+                <span className={styles.headName} style={{ cursor: 'default', color: 'var(--color-text-primary)' }}>
+                  {chain.data[0]!.fullName}
+                </span>
+              )}
               <p className={styles.headMeta}>
                 <StatusChip label={humanizeCode(chain.data[0]!.role)} />
                 {chain.data.length > 1 ? (
                   <span className={styles.panelNote}> · reads through an unavailable head</span>
                 ) : null}
+                {chain.data.length > 1 && !canViewUplineProfile(chain.data[1]!, user) && (
+                  <span className={styles.panelNote}> · upline profile restricted</span>
+                )}
               </p>
             </div>
           </article>

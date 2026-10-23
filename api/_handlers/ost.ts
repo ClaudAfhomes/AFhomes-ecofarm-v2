@@ -18,6 +18,7 @@ import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
  * No commission, payout, ranking or cost-sharing rule lives here.
  */
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 
 import {
   OST_REVIEWABLE_STATUSES,
@@ -28,6 +29,15 @@ import {
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
+  ostDashboardSchema,
+  ostHeadInfoSchema,
+  ostPersonalSalesSchema,
+  ostPersonalCommissionsSchema,
+  ostCommissionRecordSchema,
+  ostSalesRecordSchema,
+  ostCommissionListRecordSchema,
+  ostSalesListSchema,
+  ostCommissionsListSchema,
 } from '@afhomes/contracts';
 
 import {
@@ -995,6 +1005,325 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         expiresAt,
         maxUses: parsed.data.maxUses,
       });
+    }
+
+    /* ---------------- authenticated OST personal dashboard ---------------- */
+    if (subPath(req) === 'me/dashboard' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error } = await db
+        .from('ost_members')
+        .select('id, ost_number, full_name, email, status, sponsor_staff_id, approved_at')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      // Get head info (sponsor)
+      const { data: sponsor, error: sponsorError } = await db
+        .from('staff_users')
+        .select('id, full_name, status')
+        .eq('id', member.sponsor_staff_id)
+        .maybeSingle();
+      if (sponsorError) throw sponsorError;
+      const { data: sponsorRole } = sponsor
+        ? await db.from('staff_role_assignments').select('role_id').eq('staff_id', member.sponsor_staff_id).maybeSingle()
+        : { data: null };
+      const { data: sponsorRoleName } = sponsorRole
+        ? await db.from('roles').select('slug').eq('id', sponsorRole.role_id).maybeSingle()
+        : { data: null };
+
+      const headInfo = {
+        headId: sponsor?.id ?? '',
+        headName: sponsor?.full_name ?? 'Unknown',
+        headRole: sponsorRoleName?.slug ?? 'Unknown',
+        headStatus: sponsor?.status ?? 'unknown',
+        relationship: 'Direct Sponsor',
+      };
+
+      // Get personal sales (qualifying sales where this OST is the seller)
+      const { data: sales, error: salesError } = await db
+        .from('card_sales')
+        .select('id, sale_number, status, created_at, cash_price_snapshot')
+        .eq('origin', 'normal')
+        .eq('seller_ost_id', userId)
+        .order('created_at', { ascending: false });
+      if (salesError) throw salesError;
+      const qualifyingSales = (sales ?? []).filter((s: { status: string }) => s.status === 'active');
+      const periodSales = qualifyingSales.length; // For now, all qualifying sales
+
+      const salesInfo = {
+        totalSales: qualifyingSales.length,
+        periodSales,
+        qualifyingSaleStatus: 'active',
+      };
+
+      // Get personal commissions
+      const { data: commissions, error: commError } = await db
+        .from('commissions')
+        .select(`
+          id,
+          commission_number,
+          sale_id,
+          amount,
+          status,
+          qualified_at,
+          earned_at,
+          paid_at,
+          created_at,
+          card_sales!inner(sale_number)
+        `)
+        .eq('beneficiary_ost_id', userId)
+        .order('created_at', { ascending: false });
+      if (commError) throw commError;
+
+      const commissionRecords = (commissions ?? []).map((row: any) => ({
+        id: row.id,
+        commissionNumber: row.commission_number ?? null,
+        saleNumber: row.card_sales?.sale_number ?? '',
+        amount: row.amount,
+        status: row.status,
+        qualifiedAt: row.qualified_at ?? null,
+        earnedAt: row.earned_at ?? null,
+        paidAt: row.paid_at ?? null,
+        createdAt: row.created_at,
+      }));
+
+      // Calculate commission KPIs
+      const toEarn = commissionRecords.filter((c: { status: string }) => ['pending', 'payment_verified', 'final_qualification_pending'].includes(c.status));
+      const earned = commissionRecords.filter((c: { status: string }) => c.status === 'earned');
+      const paid = commissionRecords.filter((c: { status: string }) => c.status === 'paid');
+      const cancelled = commissionRecords.filter((c: { status: string }) => c.status === 'cancelled');
+
+      const sumAmount = (records: { amount: string | null }[]) => records.reduce((sum, r) => {
+        const match = String(r.amount ?? '0').match(/^(\d+)(?:\.(\d{1,2}))?$/);
+        if (match) return sum + BigInt(match[1]) * 100n + BigInt((match[2] ?? '').padEnd(2, '0'));
+        return sum;
+      }, 0n);
+
+      const formatAmount = (cents: bigint) => `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
+
+      const commissionsInfo = {
+        toEarn: {
+          count: toEarn.length,
+          amount: formatAmount(sumAmount(toEarn)),
+        },
+        earned: {
+          count: earned.length,
+          amount: formatAmount(sumAmount(earned)),
+        },
+        paid: {
+          count: paid.length,
+          amount: formatAmount(sumAmount(paid)),
+        },
+        cancelled: {
+          count: cancelled.length,
+          amount: formatAmount(sumAmount(cancelled)),
+        },
+      };
+
+      const dashboardData = {
+        head: headInfo,
+        sales: salesInfo,
+        commissions: commissionsInfo,
+        commissionHistory: commissionRecords,
+      };
+
+      const parsed = ostDashboardSchema.safeParse(dashboardData);
+      if (!parsed.success) return fail(res, 'INTERNAL', 'Dashboard data validation failed', 500);
+      return res.status(200).json(parsed.data);
+    }
+
+    /* ---------------- authenticated OST personal sales list ---------------- */
+    if (subPath(req) === 'me/sales' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error: memberError } = await db
+        .from('ost_members')
+        .select('id, status')
+        .eq('id', userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      const querySchema = z.object({
+        status: z.string().trim().max(40).optional(),
+        search: z.string().trim().max(100).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(20),
+        offset: z.coerce.number().int().min(0).default(0),
+      });
+      const parsed = querySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
+      const { status, search, limit, offset } = parsed.data;
+
+      let query = db
+        .from('card_sales')
+        .select('id, sale_number, status, created_at, cash_price_snapshot, customer_id', { count: 'exact' })
+        .eq('origin', 'normal')
+        .eq('seller_ost_id', userId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (status) query = query.eq('status', status);
+      if (search) {
+        query = query.or(`sale_number.ilike.%${search}%,customer_id.ilike.%${search}%`);
+      }
+
+      const { data: sales, error: salesError, count } = await query;
+      if (salesError) throw salesError;
+
+      // Fetch customer names for the sales
+      const customerIds = [...new Set((sales ?? []).map((s: Record<string, unknown>) => s.customer_id).filter(Boolean))];
+      const customerNames = new Map<string, { name: string; number: string }>();
+      if (customerIds.length > 0) {
+        const { data: customers } = await db
+          .from('customers')
+          .select('id, customer_number, first_name, last_name')
+          .in('id', customerIds);
+        for (const c of customers ?? []) {
+          customerNames.set(c.id, {
+            name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+            number: c.customer_number,
+          });
+        }
+      }
+
+      const salesRecords = (sales ?? []).map((s: Record<string, unknown>) => {
+        const cust = customerNames.get(String(s.customer_id ?? ''));
+        return {
+          id: s.id,
+          saleNumber: s.sale_number,
+          customerName: cust?.name ?? null,
+          customerNumber: cust?.number ?? null,
+          status: s.status,
+          cashPriceSnapshot: s.cash_price_snapshot,
+          createdAt: s.created_at,
+        };
+      });
+
+      const validated = ostSalesListSchema.safeParse({
+        data: salesRecords,
+        meta: { total: count ?? 0, limit, offset },
+      });
+      if (!validated.success) return fail(res, 'INTERNAL', 'Sales list validation failed', 500);
+      return res.status(200).json(validated.data);
+    }
+
+    /* ---------------- authenticated OST personal commissions list ---------------- */
+    if (subPath(req) === 'me/commissions' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error: memberError } = await db
+        .from('ost_members')
+        .select('id, status')
+        .eq('id', userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      const querySchema = z.object({
+        status: z.string().trim().max(40).optional(),
+        search: z.string().trim().max(100).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(20),
+        offset: z.coerce.number().int().min(0).default(0),
+      });
+      const parsed = querySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
+      const { status, search, limit, offset } = parsed.data;
+
+      let query = db
+        .from('commissions')
+        .select(
+          'id, commission_number, sale_id, amount, status, qualified_at, earned_at, paid_at, created_at, card_sales!inner(sale_number)',
+          { count: 'exact' },
+        )
+        .eq('beneficiary_ost_id', userId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (status) query = query.eq('status', status);
+      if (search) {
+        query = query.or(`commission_number.ilike.%${search}%,sale_number.ilike.%${search}%`);
+      }
+
+      const { data: commissions, error: commError, count } = await query;
+      if (commError) throw commError;
+
+      const commissionRecords = (commissions ?? []).map((row: Record<string, unknown>) => {
+        const sale = (row.card_sales ?? {}) as Record<string, unknown>;
+        return {
+          id: row.id,
+          commissionNumber: row.commission_number ?? null,
+          saleNumber: String(sale.sale_number ?? ''),
+          amount: row.amount,
+          status: row.status,
+          qualifiedAt: row.qualified_at ?? null,
+          earnedAt: row.earned_at ?? null,
+          paidAt: row.paid_at ?? null,
+          createdAt: row.created_at,
+        };
+      });
+
+      const validated = ostCommissionsListSchema.safeParse({
+        data: commissionRecords,
+        meta: { total: count ?? 0, limit, offset },
+      });
+      if (!validated.success) return fail(res, 'INTERNAL', 'Commissions list validation failed', 500);
+      return res.status(200).json(validated.data);
     }
 
     return fail(res, 'NOT_FOUND', 'OST endpoint not found', 404);
