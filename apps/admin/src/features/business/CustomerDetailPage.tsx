@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Customer, Sale } from '@afhomes/contracts';
@@ -28,7 +28,8 @@ import { formatDate, formatDateTime, formatTin } from '../../lib/format';
 import { formatPaymentMethod, humanizeCode } from './format';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
-import { deleteCustomer, getCustomerById, getSalePayments, getSales } from './services';
+import { deleteCustomer, getCustomerById, getMemberships, getSalePayments, getSales } from './services';
+import { updateCustomer } from './services-customers';
 import { businessKeys } from './queryKeys';
 import { compareMoney, formatMoneyOrDash, formatStatedMoney, subtractMoney } from '@afhomes/shared';
 import { notifyError, notifySuccess } from '@afhomes/ui';
@@ -194,6 +195,25 @@ export function CustomerDetailPage() {
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
   });
+
+  // Auto-issue a VIP card number for active members that don't have one yet.
+  useEffect(() => {
+    if (!customer.data || !customer.data.hasActiveMembership || customer.data.vipCardNumber) return;
+    void updateCustomer(customer.data.id, { raNumber: customer.data.raNumber ?? undefined })
+      .then(() => {
+        void customer.refetch();
+      })
+      .catch(() => {
+        /* Auto-issue is best-effort; manual edit remains available. */
+      });
+  }, [customer.data?.id, customer.data?.vipCardNumber, customer.data?.hasActiveMembership]);
+  const memberships = useQuery({
+    queryKey: ['customer-memberships', id],
+    queryFn: async () => (await getMemberships()).filter((m) => m.customerId === id),
+    enabled: Boolean(id) && (customer.data?.hasActiveMembership ?? false),
+    placeholderData: keepPreviousData,
+  });
+  const membership = memberships.data?.[0];
   const salesHidden = sales.error instanceof ApiError && sales.error.status === 403;
 
   if (customer.isPending)
@@ -473,12 +493,26 @@ export function CustomerDetailPage() {
           ),
         ],
         ['VIP tier', <TierBadge tier={record.tier ?? record.statedVipPackage} />],
+        ['VIP Card Number', record.vipCardNumber ?? 'Not Recorded'],
         [
           'Valid until',
           record.membershipExpiresAt ? formatDate(record.membershipExpiresAt) : 'Not applicable',
         ],
       ],
     },
+  ...(membership
+    ? [
+        {
+          title: 'Points',
+          fields: [
+            ['Points balance', membership.pointsBalance.toLocaleString('en-US')],
+            ['Total points', membership.pointsBalance.toLocaleString('en-US')],
+            ['Weekday (70%)', Math.round(membership.pointsBalance * 0.7).toLocaleString('en-US')],
+            ['Weekend (30%)', (membership.pointsBalance - Math.round(membership.pointsBalance * 0.7)).toLocaleString('en-US')],
+          ] as Array<[string, ReactNode]>,
+        },
+      ]
+    : []),
   ];
   const workingGroups = groups.filter((group) => !group.company);
   const companyGroups = groups.filter((group) => group.company);
@@ -491,6 +525,7 @@ export function CustomerDetailPage() {
           open={editing}
           onClose={() => setEditing(false)}
           onSaved={() => void customer.refetch()}
+          sales={sales.data ?? []}
         />
       ) : null}
       <ConfirmDialog

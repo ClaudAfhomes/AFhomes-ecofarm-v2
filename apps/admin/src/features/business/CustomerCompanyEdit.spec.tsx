@@ -187,11 +187,11 @@ describe('Customer company edit', () => {
     expect(screen.getByRole('checkbox', { name: 'Edit TIN' })).not.toBeChecked();
 
     // Locked: saving keeps the stored value, so the payload omits it.
-    await user.click(screen.getByRole('button', { name: 'Save company record' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(vi.mocked(updateCustomer)).toHaveBeenCalledTimes(1));
     expect(vi.mocked(updateCustomer).mock.calls[0]![1]).not.toHaveProperty('tinNumber');
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Save company record' })).toBeEnabled(),
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(),
     );
 
     // Unlocked: the formatted edit is sent.
@@ -200,7 +200,7 @@ describe('Customer company edit', () => {
     await user.clear(tin!);
     await user.type(tin!, '987654321');
     expect(tin!.value).toBe('987-654-321');
-    await user.click(screen.getByRole('button', { name: 'Save company record' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(vi.mocked(updateCustomer)).toHaveBeenCalledTimes(2));
     expect(vi.mocked(updateCustomer).mock.calls[1]![1]).toMatchObject({
       tinNumber: '987-654-321',

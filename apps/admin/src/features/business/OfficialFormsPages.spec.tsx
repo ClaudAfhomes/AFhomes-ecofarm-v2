@@ -112,6 +112,7 @@ vi.mock('../address/services', () => ({
 }));
 
 beforeEach(() => {
+  sessionStorage.clear();
   // Default: no current identity document. Tests that need one set it through
   // their own setup so the value is in place before the query first runs.
   vi.mocked(getCurrentDocument).mockResolvedValue(null);

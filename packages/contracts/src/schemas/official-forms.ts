@@ -177,6 +177,7 @@ export const applicationHolderSchema = z.object({
   mobile: phoneSchema,
   email: emailSchema,
   tinNumber: tinNumberSchema,
+  raNumber: z.string().trim().max(40).optional(),
   occupationBusinessName: z.string().trim().max(160).transform(normalizeAddressField).optional(),
   officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
@@ -277,7 +278,7 @@ const customerApplicationInputSchema = z.object({
   acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
   consentAcknowledged: z.boolean(),
   acknowledgedAt: dateSchema,
-  primarySignatureStatus: signatureStatusSchema,
+  primarySignatureStatus: signatureStatusSchema.optional(),
   secondarySignatureStatus: signatureStatusSchema.optional(),
   validIdReceived: z.boolean(),
   reservationPaymentProofReceived: z.boolean(),
@@ -363,6 +364,7 @@ export const storedApplicationHolderSchema = applicationHolderSchema.extend({
   citizenship: z.string().max(80).optional(),
   civilStatus: z.string().max(40).optional(),
   tinNumber: z.string().max(40).optional(),
+  raNumber: z.string().max(40).optional(),
 });
 
 export const customerApplicationSchema = customerApplicationInputSchema

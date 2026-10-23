@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Customer } from '@afhomes/contracts';
+import type { Customer, Sale } from '@afhomes/contracts';
 import {
   CIVIL_STATUS_OPTIONS,
   PAYMENT_SCHEMES,
@@ -28,6 +28,7 @@ import { businessKeys } from './queryKeys';
 import { withStoredValue } from './official-forms-fields';
 import { getGenealogy } from '../genealogy/services';
 import { updateCustomer } from './services-customers';
+import { getSalePayments } from './services';
 import styles from './CustomerDetailPage.module.css';
 
 type Props = {
@@ -35,6 +36,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  sales?: Sale[];
 };
 
 type EditSection = 'primary' | 'supplementary' | 'related' | 'package';
@@ -151,7 +153,7 @@ function hasSupplementaryRecord(customer: Customer): boolean {
   ].some((value) => typeof value === 'string' && value.trim() !== '');
 }
 
-export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: Props) {
+export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sales = [] }: Props) {
   const client = useQueryClient();
   const [form, setForm] = useState(() => ({
     firstName: text(customer.firstName),
@@ -202,13 +204,14 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     relatedEmail: text(customer.relatedEmail),
     statedVipPackage: text(customer.statedVipPackage),
     statedPaymentTerms: text(customer.statedPaymentTerms),
-    statedRegularPrice: text(customer.statedRegularPrice),
-    statedDiscount: text(customer.statedDiscount),
-    statedTotalAmount: text(customer.statedTotalAmount),
-    statedRf: text(customer.statedRf),
+    statedRegularPrice: formatMoneyInput(text(customer.statedRegularPrice)),
+    statedDiscount: formatMoneyInput(text(customer.statedDiscount)),
+    statedTotalAmount: formatMoneyInput(text(customer.statedTotalAmount)),
+    statedRf: formatMoneyInput(text(customer.statedRf)),
     statedPaymentType: text(customer.statedPaymentType),
     statedRefNo: text(customer.statedRefNo),
     statedPaymentDate: text(customer.statedPaymentDate),
+    vipCardNumber: text(customer.vipCardNumber),
   }));
   const [hasSupplementary, setHasSupplementary] = useState(() => hasSupplementaryRecord(customer));
   const [tinEditable, setTinEditable] = useState(false);
@@ -242,6 +245,43 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     }));
     return withStoredValue(options, stored || undefined);
   };
+
+  // Primary (latest) sale for pre-filling blank Package fields from system data.
+  const primarySale = [...sales].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0];
+  const paymentsQuery = useQuery({
+    queryKey: ['sale-payments', primarySale?.id],
+    queryFn: () => (primarySale ? getSalePayments(primarySale.id) : Promise.resolve([])),
+    enabled: Boolean(primarySale?.id) && open,
+    staleTime: 60 * 1000,
+  });
+  const payments = paymentsQuery.data ?? [];
+  const latestVerifiedPayment = [...payments]
+    .filter((p) => p.status === 'verified')
+    .sort((a, b) => (b.verifiedAt ?? b.recordedAt ?? '').localeCompare(a.verifiedAt ?? a.recordedAt ?? ''))[0];
+  const latestPayment = latestVerifiedPayment ?? [...payments].sort((a, b) =>
+    (b.recordedAt ?? '').localeCompare(a.recordedAt ?? ''),
+  )[0];
+
+  // Pre-fill blank Package fields from system data (never overwrite user edits).
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setForm((f) => {
+      const next = { ...f };
+      if (!next.statedVipPackage && primarySale?.productName) next.statedVipPackage = primarySale.productName;
+      if (!next.statedPaymentTerms && primarySale?.paymentScheme) next.statedPaymentTerms = primarySale.paymentScheme;
+      if (!next.statedRegularPrice && primarySale?.cashPrice) next.statedRegularPrice = formatMoneyInput(primarySale.cashPrice);
+      if (!next.statedRf && primarySale?.reservationFee) next.statedRf = formatMoneyInput(primarySale.reservationFee);
+      if (!next.statedTotalAmount && primarySale?.cashPrice) next.statedTotalAmount = formatMoneyInput(primarySale.cashPrice);
+      if (!next.statedPaymentType && latestPayment) next.statedPaymentType = latestPayment.method ?? latestPayment.paymentType;
+      if (!next.statedRefNo && latestPayment?.reference) next.statedRefNo = latestPayment.reference;
+      if (!next.statedPaymentDate && latestPayment) {
+        const raw = latestPayment.verifiedAt ?? latestPayment.recordedAt;
+        if (raw) next.statedPaymentDate = raw.slice(0, 10);
+      }
+      return next;
+    });
+  }, [open, primarySale, latestPayment]);
 
   const save = useBusinessMutation({
     mutationFn: () => {
@@ -319,6 +359,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         statedPaymentType: orNull(form.statedPaymentType),
         statedRefNo: orNull(form.statedRefNo),
         statedPaymentDate: orNull(form.statedPaymentDate),
+        vipCardNumber: orNull(form.vipCardNumber),
       });
     },
     onSuccess: async () => {
@@ -347,7 +388,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             Cancel
           </Button>
           <Button onClick={() => save.mutate()} loading={save.isPending} loadingLabel="Saving…">
-            Save company record
+            Save
           </Button>
         </>
       }
@@ -374,6 +415,13 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
           <div className={styles.editCardBody}>
             <div className={styles.editFields}>
+        <TextField
+          id="ce-ra"
+          name="raNumber"
+          label="RA No. (Customer ID)"
+          value={form.raNumber}
+          onChange={set('raNumber')}
+        />
         <Field
           label="Last Name"
           value={form.lastName}
@@ -432,13 +480,6 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           normalize={filterMobileInput}
           onChange={(v) => set('phone')(v)}
           required
-        />
-        <TextField
-          id="ce-ra"
-          name="raNumber"
-          label="Ra No"
-          value={form.raNumber}
-          onChange={set('raNumber')}
         />
         <label className={styles.filterLabel}>
           Payment Status
@@ -871,7 +912,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           name="statedRf"
           label="Reservation Fee"
           value={form.statedRf}
-          onChange={(value) => set('statedRf')(filterMoneyInput(value))}
+          onChange={(value) => set('statedRf')(formatMoneyInput(value))}
           inputMode="decimal"
           hint={form.statedRf ? formatStatedMoney(form.statedRf) : undefined}
         />
@@ -917,6 +958,13 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           optional
           value={form.statedPaymentDate}
           onChange={set('statedPaymentDate')}
+        />
+        <TextField
+          id="ce-vipcard"
+          name="vipCardNumber"
+          label="VIP Card Number"
+          value={form.vipCardNumber}
+          onChange={set('vipCardNumber')}
         />
             </div>
           </div>

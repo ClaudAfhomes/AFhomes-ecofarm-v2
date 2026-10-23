@@ -51,6 +51,7 @@ export const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHol
   province: '',
   mobile: '',
   email: '',
+  raNumber: '',
   printedName: '',
 });
 export const asBase64 = async (file: File) => {
@@ -726,10 +727,16 @@ export function RecommenderFields({
       })
     : [];
 
-  const emailOptions = contactsQuery.data
-    ? Object.entries(contactsQuery.data).flatMap(([staffId, { email }]) =>
-        email ? [{ value: email.toLowerCase(), label: `${email.toLowerCase()} (${chainNames[staffId] ?? 'Recommender'})` }] : []
-      )
+  // Recommender Email shows only the selected VIP recommender's email.
+  const vipRecommenderStaffId = meta.vipRecommenderName
+    ? nodes.find((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost')?.staffId
+    : undefined;
+  const emailOptions = contactsQuery.data && vipRecommenderStaffId
+    ? Object.entries(contactsQuery.data)
+        .filter(([staffId]) => staffId === vipRecommenderStaffId)
+        .flatMap(([, { email }]) =>
+          email ? [{ value: email.toLowerCase(), label: email.toLowerCase() }] : []
+        )
     : [];
 
   return (

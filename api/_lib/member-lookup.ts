@@ -94,9 +94,10 @@ export async function gsdActiveVipLookupFromDirectory(
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) return null;
   const totalAvailablePoints = Number(r.available_points ?? 0);
-  const weekendAvailablePoints = Math.round(totalAvailablePoints * 0.5);
+  const weekendAvailablePoints = Math.round(totalAvailablePoints * 0.3);
   const weekdayAvailablePoints = totalAvailablePoints - weekendAvailablePoints;
   const raNumber = typeof r.ra_number === 'string' ? r.ra_number : null;
+  const vipCardNumber = typeof r.vip_card_number === 'string' ? r.vip_card_number : null;
 
   // Government ID image: fetch the latest identity_document for this customer
   // and issue a short-lived signed URL (300s) from the private bucket.
@@ -128,6 +129,7 @@ export async function gsdActiveVipLookupFromDirectory(
     firstName,
     lastName,
     raNumber,
+    vipCardNumber,
     vipTier: tier as 'BRONZE' | 'SILVER' | 'GOLD',
     validUntil,
     totalAvailablePoints,

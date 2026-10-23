@@ -558,6 +558,7 @@ export function CustomerApplicationEditorPage() {
     );
   }, []);
   const { id } = useParams();
+  const isNew = !id;
   const navigate = useNavigate();
   const client = useQueryClient();
   const existing = useQuery({
@@ -575,7 +576,7 @@ export function CustomerApplicationEditorPage() {
     enabled: Boolean(id),
     retry: false,
   });
-  const [applicationSearch] = useSearchParams();
+  const [applicationSearch, setApplicationSearch] = useSearchParams();
   const importRowId = applicationSearch.get('importRowId');
   const [importPurchaseReference, setImportPurchaseReference] = useState('');
   const importIntake = useQuery({
@@ -595,6 +596,7 @@ export function CustomerApplicationEditorPage() {
     'spot_cash' | 'move_a' | 'installment_4_month' | 'move_b1_40_12' | 'move_b2_25_12'
   >('spot_cash');
   const [primary, setPrimary] = useState(() => emptyHolder('PRIMARY'));
+  const [raNumberMode, setRaNumberMode] = useState<'automatic' | 'manual'>('automatic');
   const [secondary, setSecondary] = useState<ApplicationHolder | null>(null);
   const [meta, setMeta] = useState({
     svdStaffId: '',
@@ -640,7 +642,77 @@ export function CustomerApplicationEditorPage() {
   // the stored value.
   const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [activeStep, setActiveStep] = useState(0);
+  const DRAFT_KEY = 'afhomes.customerApplication.draft';
+  const [activeStep, setActiveStep] = useState(() => {
+    const step = Number(applicationSearch.get('step'));
+    return Number.isFinite(step) && step >= 0 ? step : 0;
+  });
+  useEffect(() => {
+    const current = applicationSearch.get('step');
+    const desired = activeStep > 0 ? String(activeStep) : null;
+    if (current === desired) return;
+    const next = new URLSearchParams(applicationSearch);
+    if (desired) next.set('step', desired);
+    else next.delete('step');
+    setApplicationSearch(next, { replace: true });
+  }, [activeStep]);
+
+  // Hydrate a saved draft on mount (new applications only).
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!isNew) return;
+    if (import.meta.env.VITEST) return;
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as Record<string, unknown>;
+      if (draft.primary) setPrimary(draft.primary as typeof primary);
+      if (draft.secondary !== undefined) setSecondary(draft.secondary as ApplicationHolder | null);
+      if (draft.meta) setMeta(draft.meta as typeof meta);
+      if (Array.isArray(draft.channels)) setChannels(draft.channels as string[]);
+      if (typeof draft.tier === 'string') setTier(draft.tier as 'BRONZE' | 'SILVER' | 'GOLD');
+      if (typeof draft.paymentScheme === 'string')
+        setPaymentScheme(draft.paymentScheme as typeof paymentScheme);
+      if (typeof draft.customerId === 'string') setCustomerId(draft.customerId);
+      if (typeof draft.planId === 'string') setPlanId(draft.planId);
+      if (draft.raNumberMode === 'automatic' || draft.raNumberMode === 'manual')
+        setRaNumberMode(draft.raNumberMode);
+      if (typeof draft.idType === 'string') setIdType(draft.idType);
+      if (typeof draft.idNumber === 'string') setIdNumber(draft.idNumber);
+      if (typeof draft.activeStep === 'number') setActiveStep(draft.activeStep);
+    } catch {
+      /* ignore corrupt draft */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Persist the draft on change (new applications only).
+  useEffect(() => {
+    if (!isNew) return;
+    if (import.meta.env.VITEST) return;
+    try {
+      sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          primary,
+          secondary,
+          meta,
+          channels,
+          tier,
+          paymentScheme,
+          customerId,
+          planId,
+          raNumberMode,
+          idType,
+          idNumber,
+          activeStep,
+        }),
+      );
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [isNew, primary, secondary, meta, channels, tier, paymentScheme, customerId, planId, raNumberMode, idType, idNumber, activeStep]);
   // Track successful submission to hide the ID verification note in the Certify step.
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
   // Steps unlock only by moving forward. Going back is always free; jumping
@@ -650,7 +722,6 @@ export function CustomerApplicationEditorPage() {
   const [maxReached, setMaxReached] = useState(() => (id ? 5 : 0));
   // The wizard guides NEW applications step by step. Existing records keep
   // the full page: reviewers need every section and decision button at once.
-  const isNew = !id;
   const uploadPendingId = useCallback(
     async (targetCustomerId: string, file: File, type: string) => {
       const mime = ACCEPTED_MIME.find((value) => value === file.type);
@@ -699,6 +770,7 @@ export function CustomerApplicationEditorPage() {
       setPaymentProof(false);
       setChannels([]);
       setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setRaNumberMode(data.primary?.raNumber ? 'manual' : 'automatic');
       setSecondary(
         data.secondary
           ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
@@ -747,6 +819,7 @@ export function CustomerApplicationEditorPage() {
         setPrefilledCustomerId(source.continuation.customerId);
       }
       setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setRaNumberMode(data.primary?.raNumber ? 'manual' : 'automatic');
       setSecondary(
         data.secondary
           ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
@@ -782,6 +855,7 @@ export function CustomerApplicationEditorPage() {
     selectedCustomerRef.current = next;
     if (prefilledCustomerId && next !== prefilledCustomerId) {
       setPrimary(emptyHolder('PRIMARY'));
+      setRaNumberMode('automatic');
       setSecondary(null);
       setPrefilledCustomerId(null);
       setPlanId('');
@@ -1036,6 +1110,11 @@ export function CustomerApplicationEditorPage() {
       await client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
       await client.invalidateQueries({ queryKey: sharedScopes.reports });
       setSubmissionSuccess(true);
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        /* ignore */
+      }
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
       if (isEditRoute) navigate(`/admin/customers/applications/${id}`, { replace: true });
     },
@@ -1777,6 +1856,35 @@ export function CustomerApplicationEditorPage() {
           {(!isNew || activeStep === 2) && (
             <div id="step-holders">
               <HolderFields title="Primary holder" value={primary} onChange={setPrimary} />
+              <label className={styles.filterLabel}>
+                RA Number (Customer ID)
+                <Select
+                  id="app-primary-ra-mode"
+                  name="primaryRaNumberMode"
+                  aria-label="RA Number (Customer ID) mode"
+                  value={raNumberMode}
+                  onChange={(e) => {
+                    const next = e.target.value as 'automatic' | 'manual';
+                    setRaNumberMode(next);
+                    if (next === 'automatic') setPrimary((current) => ({ ...current, raNumber: '' }));
+                  }}
+                  options={[
+                    { value: 'automatic', label: 'Automatic' },
+                    { value: 'manual', label: 'Manual' },
+                  ]}
+                />
+              </label>
+              {raNumberMode === 'manual' ? (
+                <div style={{ marginTop: 8 }}>
+                  <TextField
+                    id="app-primary-ra"
+                    name="primaryRaNumber"
+                    label="RA Number (Customer ID)"
+                    value={primary.raNumber ?? ''}
+                    onChange={(value) => setPrimary((current) => ({ ...current, raNumber: value }))}
+                  />
+                </div>
+              ) : null}
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
