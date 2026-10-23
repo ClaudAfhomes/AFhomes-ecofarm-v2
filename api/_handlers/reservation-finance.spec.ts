@@ -110,8 +110,6 @@ function reservationRow(overrides: Record<string, unknown> = {}) {
     yearly_points_snapshot: 10000,
     annual_points_tranches_snapshot: 5,
     holder_limit_snapshot: 1,
-    primary_signature_status: 'received',
-    secondary_signature_status: null,
     status: 'executed',
     created_by: '11111111-1111-4111-8111-111111111111',
     created_at: new Date().toISOString(),

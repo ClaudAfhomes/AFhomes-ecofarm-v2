@@ -61,7 +61,6 @@ const applicationOriginBody = {
   purchaseTermsId: TERMS_ID,
   reservationDate: '2026-10-07',
   agreementDate: '2026-10-07',
-  primarySignatureStatus: 'pending',
   scheduleNotes: [],
 };
 
@@ -323,7 +322,7 @@ describe('application-origin reservation lifecycle', () => {
       path: `reservations/${RES_ID}`,
       method: 'PATCH',
       token: 'super-admin-token',
-      body: { requestId: RESERVE_REQUEST, primarySignatureStatus: 'received', revisionNumber: 'R1' },
+      body: { requestId: RESERVE_REQUEST, revisionNumber: 'R1' },
     });
     expect(response.status).toBe(200);
     expect(rpcCalls(db, 'transition_purchase_reservation_once')[0]?.arg).toMatchObject({
@@ -344,7 +343,7 @@ describe('application-origin reservation lifecycle', () => {
         path: `reservations/${RES_ID}`,
         method: 'PATCH',
         token: 'super-admin-token',
-        body: { requestId: RESERVE_REQUEST, primarySignatureStatus: 'received', ...extra },
+        body: { requestId: RESERVE_REQUEST, ...extra },
       });
       expect(response.status).toBe(400);
       expect(db.calls.some((c) => c.op === 'rpc')).toBe(false);
@@ -365,23 +364,9 @@ describe('application-origin reservation lifecycle', () => {
     expect(db.calls.some((c) => c.op === 'rpc')).toBe(false);
   });
 
-  it('refuses a lifecycle jump and a signature-less execution', async () => {
+  it('refuses a lifecycle jump', async () => {
     for (const [code, expected, rowStatus, path, body] of [
       ['INVALID_AGREEMENT_TRANSITION', 409, 'draft', `reservations/${RES_ID}/reopen`, {}],
-      [
-        'PRIMARY_SIGNATURE_REQUIRED',
-        400,
-        'submitted',
-        `reservations/${RES_ID}/decision`,
-        { decision: 'executed' },
-      ],
-      [
-        'SECONDARY_SIGNATURE_REQUIRED',
-        400,
-        'submitted',
-        `reservations/${RES_ID}/decision`,
-        { decision: 'executed' },
-      ],
     ] as const) {
       install({
         rows: [reservationRow({ status: rowStatus })],

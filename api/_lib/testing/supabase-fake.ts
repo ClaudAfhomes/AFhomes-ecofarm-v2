@@ -1252,6 +1252,65 @@ export class FakeSupabase {
       );
       return { data: records.map((record) => ({ record, total_count: total })), error: null };
     }
+    if (!entry && fn === 'purge_customer') {
+      // Mirror of public.purge_customer so handler tests can exercise the
+      // cascade without a live database. The real SQL is the authority.
+      const id = args.p_customer_id;
+      if (!id) return { data: null, error: { message: 'p_customer_id is required' } };
+      if (!this.rows('customers').some((r) => r.id === id))
+        return { data: null, error: { code: 'P0002', message: 'customer not found' } };
+      const saleIds = this.rows('card_sales')
+        .filter((r) => r.customer_id === id)
+        .map((r) => r.id);
+      this.tables.identity_documents = this.rows('identity_documents').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_onboarding_tokens = this.rows('customer_onboarding_tokens').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.payments = this.rows('payments').filter(
+        (r) => r.customer_id !== id && !saleIds.includes(r.sale_id),
+      );
+      this.tables.commissions = this.rows('commissions').filter(
+        (r) => !saleIds.includes(r.sale_id),
+      );
+      this.tables.redemptions = this.rows('redemptions').filter((r) => r.customer_id !== id);
+      this.tables.redemption_quotes = this.rows('redemption_quotes').filter(
+        (r) => r.approval_customer_id !== id,
+      );
+      const membershipIds = this.rows('memberships')
+        .filter((r) => r.customer_id === id)
+        .map((r) => r.id);
+      const accountIds = this.rows('points_accounts')
+        .filter((r) => membershipIds.includes(r.membership_id))
+        .map((r) => r.id);
+      this.tables.points_ledger = this.rows('points_ledger').filter(
+        (r) => !accountIds.includes(r.account_id),
+      );
+      this.tables.points_accounts = this.rows('points_accounts').filter(
+        (r) => !membershipIds.includes(r.membership_id),
+      );
+      this.tables.memberships = this.rows('memberships').filter((r) => r.customer_id !== id);
+      this.tables.reservation_agreements = this.rows('reservation_agreements').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_application_purchase_terms = this.rows(
+        'customer_application_purchase_terms',
+      ).filter((r) => r.customer_id !== id);
+      this.tables.customer_applications = this.rows('customer_applications').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_import_rows = this.rows('customer_import_rows').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.purchases = this.rows('purchases').filter((r) => r.customer_id !== id);
+      this.tables.earning_claims = this.rows('earning_claims').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.card_sales = this.rows('card_sales').filter((r) => r.customer_id !== id);
+      this.tables.customers = this.rows('customers').filter((r) => r.id !== id);
+      return { data: null, error: null };
+    }
     if (!entry) return { data: null, error: { code: '42883', message: `${fn} does not exist` } };
     return {
       data: typeof entry.result === 'function' ? entry.result(args) : entry.result,

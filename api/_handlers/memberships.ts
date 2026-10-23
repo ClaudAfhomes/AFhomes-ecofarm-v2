@@ -272,9 +272,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // response additionally has no field a Membership Code could be rendered into.
       // Strict allowlist: only the four approved display fields are emitted; rows
       // missing a required value are dropped (fail closed).
-      const data = directory
-        .map(({ record: r }) => gsdActiveVipLookupFromDirectory(r))
-        .filter((row): row is NonNullable<typeof row> => row !== null);
+      const mapped = await Promise.all(
+        directory.map(({ record: r }) => gsdActiveVipLookupFromDirectory(r, db)),
+      );
+      const data = mapped.filter((row): row is NonNullable<typeof row> => row !== null);
       res.setHeader('Cache-Control', 'no-store');
       return res
         .status(200)
