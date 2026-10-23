@@ -286,7 +286,6 @@ export async function runIdempotencyChecks(ctx: Context) {
     saleId: sale,
     reservationDate: '2026-10-01',
     agreementDate: '2026-10-01',
-    primarySignatureStatus: 'pending',
     vipTier: 'GOLD',
   };
   const resPrimary = {
@@ -353,7 +352,7 @@ export async function runIdempotencyChecks(ctx: Context) {
     [
       badResKey,
       actor,
-      JSON.stringify({ ...input, primarySignatureStatus: 'INVALID' }),
+      JSON.stringify({ ...input, paymentDueDay: 99 }),
       ...resArgs.slice(3),
     ],
     /check constraint/,

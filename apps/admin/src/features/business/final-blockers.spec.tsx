@@ -288,7 +288,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   // The save now validates the whole official form. A tier assertion needs a
   // valid holder fixture; an empty form must not reach a creation API.
   await user.selectOptions(
-    screen.getByRole('combobox', { name: 'Source Customer Application' }),
+    screen.getByRole('combobox', { name: 'Source Application' }),
     '00000000-0000-4000-8000-000000000003',
   );
   // Application-origin mode: there is NO Card sale to pick. A first-time
@@ -300,7 +300,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   await user.type(screen.getByLabelText('Address'), '1 QA STREET');
   await user.type(screen.getByLabelText('Contact Number'), '09171234567');
   await user.type(screen.getByLabelText('Email'), 'qa@example.com');
-  await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
+  await user.click(screen.getByRole('button', { name: 'Create' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalled());
   // Application-origin carries the frozen terms reference and no sale id.
   expect(calls.reservation.mock.calls[0]?.[0]).toMatchObject({ origin: 'application' });
@@ -312,13 +312,13 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   // SweetAlert removes the dialog before its delayed focus restoration completes.
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Create Reservation Agreement' })).toHaveFocus(),
+    expect(screen.getByRole('button', { name: 'Create' })).toHaveFocus(),
   );
   // An application-origin payload carries no vipTier by design, so this asserts
   // the stronger, real property: a tier can only ever be a value the schema
   // accepts, and clearing it never emits an empty or invented tier.
   await user.selectOptions(select, '');
-  await user.click(await screen.findByRole('button', { name: 'Create Reservation Agreement' }));
+  await user.click(await screen.findByRole('button', { name: 'Create' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalledTimes(2));
   expect(calls.reservation.mock.calls[1]?.[0]).not.toHaveProperty('vipTier');
 });

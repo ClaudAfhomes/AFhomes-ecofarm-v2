@@ -18021,6 +18021,13 @@ async function main(): Promise<void> {
         // Reservation-origin payments are protected history, so the owner-only cleanup
         // escape is armed before this delete, not just before the evidence one.
         await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+        // Immutable purchase evidence RESTRICTs the payment it describes, so the
+        // payment-keyed evidence rows go before the payments themselves.
+        await db?.query(
+          `delete from private.purchase_document_evidence where payment_id in
+           (select id from public.payments where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
         await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
           custSet,
         ]);

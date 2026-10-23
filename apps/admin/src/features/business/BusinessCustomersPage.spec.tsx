@@ -10,7 +10,6 @@ import type { SessionUser } from '../../lib/session';
 import { getCardProducts, getCustomersPage, issueCustomerAccountActivation } from './services';
 
 vi.mock('./services', () => ({
-  anonymizeCustomer: vi.fn(),
   createCustomer: vi.fn(),
   deactivateCustomer: vi.fn(),
   deleteCustomer: vi.fn(),

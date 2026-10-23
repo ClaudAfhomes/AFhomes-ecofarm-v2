@@ -78,12 +78,6 @@ export const getCustomerById = (id: string): Promise<Customer> =>
 export const updateCustomer = (id: string, input: UpdateCustomerRequest): Promise<Customer> =>
   patch(`/customers/${id}`, customerSchema, updateCustomerSchema.parse(input));
 
-/** Change a customer's lifecycle status. Audited server-side as CUSTOMER_EDITED. */
-export const updateCustomerStatus = (
-  id: string,
-  status: 'prospect' | 'active' | 'suspended',
-): Promise<Customer> => patch(`/customers/${id}`, customerSchema, { status });
-
 /**
  * One server-paginated customer page. The list endpoint already accepts
  * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
@@ -125,12 +119,9 @@ export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnbo
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
 
 const customerDeactivationSchema = z.object({ deactivated: z.literal(true) });
-const customerAnonymizationSchema = z.object({ anonymized: z.literal(true) });
 const customerDeletionSchema = z.object({ deleted: z.literal(true) });
 export const deactivateCustomer = (id: string) =>
   post(`/customers/${id}/deactivate`, customerDeactivationSchema, {});
-export const anonymizeCustomer = (id: string) =>
-  post(`/customers/${id}/anonymize`, customerAnonymizationSchema, {});
 export const deleteCustomer = (id: string) =>
   request(`/customers/${id}`, customerDeletionSchema, { method: 'DELETE' });
 

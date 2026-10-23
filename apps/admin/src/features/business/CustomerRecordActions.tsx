@@ -1,38 +1,31 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import type { Customer, CustomerOnboardingRecovery, Sale } from '@afhomes/contracts';
 import {
   Alert,
   Button,
-  ConfirmDialog,
   DetailCard,
   DetailCardTitle,
   Dialog,
   Select,
-  Spinner,
   TextField,
 } from '@afhomes/ui';
-import { useNavigate } from 'react-router';
+
 
 import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/format';
 import styles from './CustomerDetailPage.module.css';
 import {
-  anonymizeCustomer,
-  deactivateCustomer,
-  deleteCustomer,
   issueCustomerAccountActivation,
-  updateCustomerStatus,
 } from './services';
 import { RecordPaymentDialog, VerifyDialog } from './BusinessFinanceQueuePage';
-import { businessKeys } from './queryKeys';
+
 import { useSaleRowActions } from './useSaleRowActions';
 
 /**
  * All actions for one customer in a single card, mirroring the directory row
  * menu so the detail page carries the same workflows: the one-time activation
- * link, deactivation, and (super admin only) anonymize and permanent delete -
+ * link, deactivation, and (super admin only) permanent delete -
  * plus the per-sale payment actions (record/verify) aimed at a selected sale.
  * Edit/cancel of a sale stay on the sales directory. Same guards, same dialogs,
  * same auditing - the server re-checks everything.
@@ -40,52 +33,26 @@ import { useSaleRowActions } from './useSaleRowActions';
 export function CustomerRecordActions({
   customer,
   sales,
-  onChanged,
+  onEdit,
+  onDelete,
+  canEdit,
 }: {
   customer: Customer;
   sales: Sale[];
-  onChanged: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  canEdit?: boolean;
 }) {
   const saleActions = useSaleRowActions();
-  const client = useQueryClient();
   const { user } = useSession();
-  const navigate = useNavigate();
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
     ) === true;
-  const isSuperAdmin = user?.roleSlug === 'super_admin';
-
-  const [accountAction, setAccountAction] = useState<'deactivate' | 'delete' | 'anonymize' | null>(
-    null,
-  );
-  const [confirmation, setConfirmation] = useState('');
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
-
-  const refresh = async () => {
-    await client.invalidateQueries({ queryKey: businessKeys.customerScope });
-    onChanged();
-  };
-
-  const changeAccount = useBusinessMutation({
-    mutationFn: async () => {
-      if (accountAction === 'delete') await deleteCustomer(customer.id);
-      else if (accountAction === 'anonymize') await anonymizeCustomer(customer.id);
-      else await deactivateCustomer(customer.id);
-    },
-    onSuccess: async () => {
-      setAccountAction(null);
-      setConfirmation('');
-      if (accountAction === 'delete' || accountAction === 'anonymize') {
-        navigate('/admin/customers');
-        return;
-      }
-      await refresh();
-    },
-  });
 
   const issueActivation = useBusinessMutation({
     mutationFn: () => issueCustomerAccountActivation(customer.id),
@@ -111,37 +78,16 @@ export function CustomerRecordActions({
   const showActivation =
     canIssueActivation && customer.hasActiveMembership && !customer.portalAccountActivated;
 
-  const canUpdateCustomer =
-    user?.roleSlug === 'super_admin' ||
-    user?.afHomesPermissions.some(
-      (permission) => permission.moduleKey === 'sales.customers' && permission.canUpdate,
-    ) === true;
-
-  const statusMutation = useBusinessMutation({
-    mutationFn: (status: 'prospect' | 'active' | 'suspended') =>
-      updateCustomerStatus(customer.id, status),
-    onSuccess: async () => {
-      await refresh();
-    },
-  });
-
   // Only the payment actions are offered here; edit/cancel of a sale stay on the
   // sales directory, so a user with only those grants sees no dead sale card.
   const showSaleActions = sales.length > 0 && saleActions.canRecord;
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const selectedSale = sales.find((sale) => sale.id === selectedSaleId) ?? sales[0];
-  const deactivationBlocked = customer.status === 'suspended' || customer.status === 'cancelled';
 
   return (
     <>
       <DetailCard>
         <DetailCardTitle>Actions</DetailCardTitle>
-        {deactivationBlocked ? (
-          <Alert variant="warning">
-            Deactivation is unavailable while this account is {customer.status}. Only active or
-            prospect accounts can be deactivated.
-          </Alert>
-        ) : null}
         {sales.length > 1 && showSaleActions && selectedSale ? (
           <label className={styles.filterLabel}>
             Sale
@@ -162,41 +108,6 @@ export function CustomerRecordActions({
               onClick={() => issueActivation.mutate()}
             >
               Issue / Reissue activation link
-            </Button>
-          ) : null}
-          {isSuperAdmin ? (
-            <>
-              <Button
-                variant="secondary"
-                className={styles.toneSlate}
-                onClick={() => {
-                  setAccountAction('anonymize');
-                  setConfirmation('');
-                }}
-              >
-                Anonymize
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setAccountAction('delete');
-                  setConfirmation('');
-                }}
-              >
-                Delete permanently
-              </Button>
-            </>
-          ) : null}
-          {!deactivationBlocked ? (
-            <Button
-              variant="secondary"
-              className={styles.toneInfo}
-              onClick={() => {
-                setAccountAction('deactivate');
-                setConfirmation('');
-              }}
-            >
-              Deactivate account
             </Button>
           ) : null}
           {showSaleActions && selectedSale ? (
@@ -224,38 +135,20 @@ export function CustomerRecordActions({
               ) : null}
             </>
           ) : null}
-          {canUpdateCustomer ? (
-            <span className={styles.statusWrap}>
-              <Select
-                aria-label="Membership status"
-                value={
-                  ['prospect', 'active', 'suspended'].includes(customer.status)
-                    ? customer.status
-                    : ''
-                }
-                disabled={statusMutation.isPending}
-                onChange={(e) => {
-                  const next = e.target.value as 'prospect' | 'active' | 'suspended' | '';
-                  if (next && next !== customer.status) statusMutation.mutate(next);
-                }}
-                options={[
-                  { value: '', label: 'Select Status', disabled: true },
-                  { value: 'prospect', label: 'Prospect' },
-                  { value: 'active', label: 'Active' },
-                  { value: 'suspended', label: 'Suspended' },
-                ]}
-              />
-              {statusMutation.isPending ? (
-                <span className={styles.statusSpinner}>
-                  <Spinner size="sm" label="Updating status" />
-                </span>
-              ) : null}
-            </span>
+          {onEdit && canEdit ? (
+            <Button variant="secondary" onClick={onEdit}>
+              Edit
+            </Button>
+          ) : null}
+          {onDelete && user?.roleSlug === 'super_admin' ? (
+            <Button
+              variant="danger"
+              onClick={onDelete}
+            >
+              Delete
+            </Button>
           ) : null}
         </div>
-        {statusMutation.error ? (
-          <Alert variant="danger">{statusMutation.error.message}</Alert>
-        ) : null}
         {issueActivation.error && !activationResult ? (
           <Alert variant="danger">{issueActivation.error.message}</Alert>
         ) : null}
@@ -322,52 +215,6 @@ export function CustomerRecordActions({
           </div>
         ) : null}
       </Dialog>
-      <ConfirmDialog
-        open={accountAction !== null}
-        onCancel={() => {
-          setAccountAction(null);
-          setConfirmation('');
-        }}
-        onConfirm={() => changeAccount.mutate()}
-        title={
-          accountAction === 'delete'
-            ? 'Permanently Delete Customer Account'
-            : accountAction === 'anonymize'
-              ? 'Anonymize Customer Account'
-              : 'Deactivate Customer Account'
-        }
-        message={
-          <div>
-            <p>
-              {accountAction === 'delete'
-                ? 'This permanently removes an unused customer account only when no protected business records exist.'
-                : accountAction === 'anonymize'
-                  ? 'Direct profile information and login access will be removed while business history remains.'
-                  : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
-            </p>
-            {accountAction !== 'deactivate' ? (
-              <TextField
-                id="record-account-confirm"
-                name="accountConfirm"
-                label="Type DELETE to confirm customer action"
-                value={confirmation}
-                onChange={setConfirmation}
-              />
-            ) : null}
-            {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
-          </div>
-        }
-        danger
-        confirmLabel={
-          accountAction === 'delete'
-            ? 'Delete permanently'
-            : accountAction === 'anonymize'
-              ? 'Anonymize'
-              : 'Confirm'
-        }
-        confirmDisabled={accountAction !== 'deactivate' && confirmation !== 'DELETE'}
-        confirmLoading={changeAccount.isPending}
-      />
     </>
   );
 }

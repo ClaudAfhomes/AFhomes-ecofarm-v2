@@ -26,7 +26,7 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
 import { TierBadge } from './TierBadge';
 import {
-  anonymizeCustomer,
+
   deactivateCustomer,
   deleteCustomer,
   getCustomersPage,
@@ -129,7 +129,7 @@ export function BusinessCustomersPage() {
     ) === true;
 
   const [accountAction, setAccountAction] = useState<{
-    kind: 'deactivate' | 'delete' | 'anonymize';
+    kind: 'deactivate' | 'delete';
     customer: Customer;
   } | null>(null);
   const [confirmation, setConfirmation] = useState('');
@@ -139,8 +139,6 @@ export function BusinessCustomersPage() {
   const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteCustomer(accountAction.customer.id);
-      else if (accountAction?.kind === 'anonymize')
-        await anonymizeCustomer(accountAction.customer.id);
       else await deactivateCustomer(accountAction!.customer.id);
     },
     onSuccess: async () => {
@@ -406,11 +404,6 @@ export function BusinessCustomersPage() {
                           ? [
                               { label: '-', onClick: undefined },
                               {
-                                label: 'Anonymize',
-                                icon: 'pencil' as const,
-                                onClick: () => setAccountAction({ kind: 'anonymize', customer }),
-                              },
-                              {
                                 label: 'Delete permanently',
                                 icon: 'trash' as const,
                                 danger: true,
@@ -500,18 +493,14 @@ export function BusinessCustomersPage() {
         title={
           accountAction?.kind === 'delete'
             ? 'Permanently Delete Customer Account'
-            : accountAction?.kind === 'anonymize'
-              ? 'Anonymize Customer Account'
-              : 'Deactivate Customer Account'
+            : 'Deactivate Customer Account'
         }
         message={
           <div>
             <p>
               {accountAction?.kind === 'delete'
-                ? 'This permanently removes an unused customer account only when no protected business records exist.'
-                : accountAction?.kind === 'anonymize'
-                  ? 'Direct profile information and login access will be removed while business history remains.'
-                  : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
+                ? 'This permanently removes the customer and ALL of their sales, payments, membership, points, redemptions, applications and ID image. This cannot be undone.'
+                : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
             </p>
             {accountAction?.kind !== 'deactivate' ? (
               <TextField
@@ -527,11 +516,7 @@ export function BusinessCustomersPage() {
         }
         danger
         confirmLabel={
-          accountAction?.kind === 'delete'
-            ? 'Delete permanently'
-            : accountAction?.kind === 'anonymize'
-              ? 'Anonymize'
-              : 'Confirm'
+          accountAction?.kind === 'delete' ? 'Delete permanently' : 'Confirm'
         }
         confirmDisabled={accountAction?.kind !== 'deactivate' && confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}

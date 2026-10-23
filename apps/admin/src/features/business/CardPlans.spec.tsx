@@ -35,7 +35,6 @@ vi.mock('./services', () => ({
   createSale: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   deactivateCustomer: vi.fn(),
-  anonymizeCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
 }));
 
@@ -273,7 +272,7 @@ describe('Customer onboarding recovery', () => {
   });
 
   it('calls the onboarding-token endpoint for the row customer and reports email_sent', async () => {
-    const { getCustomers, createSale, deactivateCustomer, anonymizeCustomer, deleteCustomer } =
+    const { getCustomers, createSale, deactivateCustomer, deleteCustomer } =
       await import('./services');
     vi.mocked(getCustomers).mockResolvedValue([ACTIVE_CUSTOMER]);
     mockedGetCardProducts.mockResolvedValue([]);
@@ -299,7 +298,6 @@ describe('Customer onboarding recovery', () => {
     // points, commission, or credential mutation is reachable from this page.
     expect(vi.mocked(createSale)).not.toHaveBeenCalled();
     expect(vi.mocked(deactivateCustomer)).not.toHaveBeenCalled();
-    expect(vi.mocked(anonymizeCustomer)).not.toHaveBeenCalled();
     expect(vi.mocked(deleteCustomer)).not.toHaveBeenCalled();
   });
 });

@@ -61,16 +61,29 @@ export function customerLookupFromDirectory(r: Record<string, unknown>) {
  * Unicode grapheme of the surname + a fixed `***` (no length preservation).
  * `validUntil` is the authoritative `expires_at` formatted in Asia/Manila.
  */
-export function gsdActiveVipLookupFromDirectory(r: Record<string, unknown>) {
+export async function gsdActiveVipLookupFromDirectory(
+  r: Record<string, unknown>,
+  db?: {
+    from: (t: string) => {
+      select: (c: string) => {
+        eq: (col: string, val: string) => {
+          eq: (col: string, val: string) => {
+            order: (col: string, opts: { ascending: boolean }) => {
+              limit: (n: number) => Promise<{ data?: Array<{ storage_path?: string }> | null; error?: unknown }>;
+            };
+          };
+        };
+      };
+    };
+    storage: { from: (b: string) => { createSignedUrl: (p: string, t: number) => Promise<{ data?: { signedUrl?: string } | null; error?: unknown }> } };
+  },
+): Promise<ReturnType<typeof gsdActiveVipLookupSchema.parse> | null> {
   const firstName = typeof r.first_name === 'string' ? r.first_name.trim() : '';
   const lastName = typeof r.last_name === 'string' ? r.last_name.trim() : '';
   const tier = typeof r.tier === 'string' ? r.tier.trim().toUpperCase() : '';
   const expiresAt = isoOrNull(r.expires_at);
   if (!firstName || !lastName || !tier || !expiresAt) return null;
   if (tier !== 'BRONZE' && tier !== 'SILVER' && tier !== 'GOLD') return null;
-  const firstGrapheme = [...lastName][0];
-  if (!firstGrapheme) return null;
-  const maskedLastName = `${firstGrapheme}***`;
   let validUntil: string;
   try {
     validUntil = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(
@@ -80,10 +93,46 @@ export function gsdActiveVipLookupFromDirectory(r: Record<string, unknown>) {
     return null;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) return null;
+  const totalAvailablePoints = Number(r.available_points ?? 0);
+  const weekendAvailablePoints = Math.round(totalAvailablePoints * 0.5);
+  const weekdayAvailablePoints = totalAvailablePoints - weekendAvailablePoints;
+  const raNumber = typeof r.ra_number === 'string' ? r.ra_number : null;
+
+  // Government ID image: fetch the latest identity_document for this customer
+  // and issue a short-lived signed URL (300s) from the private bucket.
+  let governmentIdImageUrl: string | null = null;
+  const customerId = typeof r.id === 'string' ? r.id : null;
+  if (customerId && db) {
+    try {
+      const { data: docs } = await db
+        .from('identity_documents')
+        .select('storage_path')
+        .eq('customer_id', customerId)
+        .eq('subject_type', 'customer')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const storagePath = (docs as Array<{ storage_path?: string }> | null)?.[0]?.storage_path;
+      if (storagePath) {
+        const slash = storagePath.indexOf('/');
+        const bucket = slash > 0 ? storagePath.slice(0, slash) : 'afhomes-customer-ids';
+        const objectPath = slash > 0 ? storagePath.slice(slash + 1) : storagePath;
+        const signed = await db.storage.from(bucket).createSignedUrl(objectPath, 300);
+        governmentIdImageUrl = signed?.data?.signedUrl ?? null;
+      }
+    } catch {
+      governmentIdImageUrl = null;
+    }
+  }
+
   return gsdActiveVipLookupSchema.parse({
     firstName,
-    maskedLastName,
+    lastName,
+    raNumber,
     vipTier: tier as 'BRONZE' | 'SILVER' | 'GOLD',
     validUntil,
+    totalAvailablePoints,
+    weekendAvailablePoints,
+    weekdayAvailablePoints,
+    governmentIdImageUrl,
   });
 }

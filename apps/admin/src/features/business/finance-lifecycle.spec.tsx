@@ -382,19 +382,18 @@ describe('Phase 26 finance queue states', () => {
   it('badges queue statuses capitalized, never snake_case', async () => {
     render('/admin/finance/payments');
     await screen.findByText('SALE-260001');
-    expect(screen.getByText('Payment in progress')).toBeInTheDocument();
+    expect(screen.getByText('Partial')).toBeInTheDocument();
     expect(screen.queryByText('payment_in_progress')).toBeNull();
   });
 
-  it('opens Record payment by clicking the row', async () => {
+  it('opens payment details by clicking the row', async () => {
     const user = userEvent.setup();
     render('/admin/finance/payments');
     const row = await screen.findByRole('link', {
       name: 'Record a payment for SALE-260001',
     });
     await user.click(row);
-    expect(await screen.findByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
+    expect(await screen.findByText('Within 7 days')).toBeInTheDocument();
   });
 
   it('opens payment details from the row menu', async () => {
@@ -646,7 +645,7 @@ describe('payment exact-decimal input UX', () => {
     });
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter the transaction or reference number/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Amount'), '1000.00');
     await user.type(screen.getByLabelText('Payment reference(Optional)'), 'QA-REF');
 

@@ -364,9 +364,12 @@
   background: var(--color-bg-surface);
   text-align: left;
   font-size: var(--text-caption);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-secondary);
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid var(--color-border-default);
 }
 
 .queueTable th,
@@ -378,6 +381,24 @@
 
 .queueTable tbody tr:last-child td {
   border-bottom: 0;
+}
+
+/* Column widths keep the wide table from reflowing on every data change. */
+.queueTable thead th:nth-child(1),
+.queueTable tbody td:nth-child(1) { width: 12%; }
+.queueTable thead th:nth-child(5),
+.queueTable tbody td:nth-child(5) { width: 11%; text-align: right; font-variant-numeric: tabular-nums; }
+.queueTable thead th:nth-child(6),
+.queueTable tbody td:nth-child(6) { width: 9%; text-align: center; }
+.queueTable thead th:nth-child(7),
+.queueTable tbody td:nth-child(7) { width: 10%; text-align: center; }
+.queueTable thead th:nth-child(8),
+.queueTable tbody td:nth-child(8) { width: 11%; }
+
+/* Zebra striping: a hairline tint on alternate rows so a wide table stays
+   readable without heavy grid lines. */
+.queueTable tbody tr:nth-child(even) td {
+  background-color: var(--color-bg-surface);
 }
 
 /* White rows need an explicit base: `--color-state-hover` is a translucent
@@ -560,9 +581,28 @@
    alert, and the first panel. */
 .editorSection {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   align-content: start;
   padding-bottom: 6rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Numbered editor panels, same card pattern as the redemption and
+   import/export workflows. Works on <section> and <fieldset> alike. */
+.panel {
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, var(--radius-md));
+  background: var(--color-bg-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 160ms ease;
+}
+
+.panel:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 /* Editor form root: the disabling wrapper stays a fieldset for behavior, but
@@ -860,6 +900,27 @@
   gap: var(--space-2);
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+}
+
+.moneyVerified {
+  font-weight: 600;
+  color: var(--color-text-success, var(--color-text-primary));
+  font-variant-numeric: tabular-nums;
+}
+
+.moneyRemaining {
+  font-weight: 600;
+  color: var(--color-text-warning, var(--color-text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.moneyDivider {
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  opacity: 0.6;
 }
 
 /* Buttons grouped so primary, secondary, and destructive actions read as
@@ -1727,5 +1788,144 @@ button.stepperLink:disabled {
   /* Money keeps its tabular figures; wrap the action buttons instead. */
   .ledgerWrap tbody > tr > td[data-label='Actions'] {
     flex-wrap: wrap;
+  }
+}
+
+/* ==================================================================
+   Reservation source panel.
+
+   The section groups TWO alternative origins of the same slot (a card
+   sale, or a customer application) and one piece of imported context
+   (the tier). The layout says so: the pickers travel together under a
+   "Source" group, the tier sits apart as context, and the attached
+   source is named in a strip of its own once it is linked.
+   ================================================================== */
+
+/* Two columns: the pickers take the room, the context takes exactly
+   the width of the control it holds.
+
+   --sourceTitleSpace is the line the source group's legend occupies. The
+   context column carries no heading of its own, so it reserves that line to
+   keep every control on one baseline. */
+.sourceLayout {
+  --sourceTitleSpace: calc(var(--text-caption) * var(--line-height-body) + var(--space-3));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 15rem);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* The source group is a real fieldset, so the browser exposes the two
+   pickers as one group. The legend is styled, not the box. */
+.sourceGroup {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.sourceGroupTitle {
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  /* Explicit, so --sourceTitleSpace reserves exactly this line. */
+  line-height: var(--line-height-body);
+  color: var(--color-text-secondary);
+}
+
+/* The pickers sit side by side when the column allows it, and stack
+   when it does not. `start` keeps them on one baseline: the sale field
+   carries an extra action row, and a stretched track would push the
+   application control down to meet it. */
+.sourceFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.sourceField {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  align-content: start;
+}
+
+/* The auto-fill action belongs to the sale control above it. */
+.sourceAction {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* The imported tier, set apart from the pickers by a rule rather than by a
+   second card, so the panel keeps one visual hierarchy. It reserves the
+   source group's heading line so its control stays level with the others. */
+.sourceContext {
+  min-width: 0;
+  padding-top: var(--sourceTitleSpace);
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+/* The attached source, named. The strip appears once the application
+   loads and the copy lands, so it is announced when it appears. */
+.sourceLinked {
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sourceLinkedLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.sourceLinkedMeta {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.sourceLinkedId {
+  font-weight: 600;
+}
+
+.sourceLinkedName {
+  color: var(--color-text-secondary);
+}
+
+.sourceLinkedNote {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+/* Below the two-column threshold the context band moves under the
+   pickers and its rule turns horizontal. */
+@media (max-width: 1023px) {
+  .sourceLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sourceContext {
+    padding-left: 0;
+    /* Stacked, there is no heading line to align to, so the reservation is
+       dropped and the band keeps its own spacing. */
+    padding-top: var(--space-4);
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
   }
 }

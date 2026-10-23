@@ -206,8 +206,8 @@ describe('purchase workflow next step', () => {
     saleNumber: null,
     paymentScheme: 'spot_cash' as const,
     totalPrice: '60000.00',
-    primarySignatureStatus: 'received' as const,
-    secondarySignatureStatus: null,
+    verifiedTotal: null,
+    fullyPaid: false,
     hasSecondaryHolder: false,
     tier: 'BRONZE' as const,
     applicantName: 'ANA SANTOS',
@@ -215,6 +215,7 @@ describe('purchase workflow next step', () => {
     createdAt: '2026-10-08',
     submittedAt: null,
     status: status as 'draft' | 'submitted' | 'executed' | 'cancelled',
+    paymentStatus: null,
   });
 
   it('offers Create Reservation for an approved application with no reservation', async () => {

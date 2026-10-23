@@ -62,7 +62,7 @@ const MAX_SUGGESTIONS = 6;
  * stay on the result cards below.
  */
 function displayName(row: GsdActiveVipLookup): string {
-  return `${row.firstName} ${row.maskedLastName}`;
+  return `${row.firstName} ${row.lastName}`;
 }
 
 function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVipLookup[] {
@@ -73,7 +73,7 @@ function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVip
   const seen = new Set<string>();
   for (const row of rows) {
     const name = displayName(row);
-    const key = `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+    const key = `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
     if (seen.has(key)) continue;
     const matches = name.toLowerCase().includes(needle) || row.vipTier.toLowerCase().includes(needle);
     if (!matches) continue;
@@ -101,30 +101,58 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
   const tier = tierKey(customer.vipTier);
   const artwork = tier === 'NONE' ? null : tierArtwork(tier);
   const name = displayName(customer);
+  const [flipped, setFlipped] = useState(false);
+  const toggle = () => setFlipped((v) => !v);
   return (
     <article className={styles.member} data-tier={tier} aria-label={name}>
-      <div className={styles.artWrap} aria-hidden={artwork ? undefined : true}>
-        {artwork ? (
-          <img className={styles.art} src={artwork.src} alt={artwork.alt} loading="lazy" />
-        ) : (
-          <div className={styles.artPlaceholder}>
-            <Icon name="user" size={28} />
-            <span>No card on file</span>
+      <button
+        type="button"
+        className={styles.flipWrap}
+        onClick={toggle}
+        aria-pressed={flipped}
+        aria-label={flipped ? 'Show VIP card' : 'Show government ID'}
+      >
+        <div className={`${styles.flipInner} ${flipped ? styles.flipped : ''}`}>
+          <div className={styles.flipFront}>
+            {artwork ? (
+              <img className={styles.art} src={artwork.src} alt={artwork.alt} loading="lazy" />
+            ) : (
+              <div className={styles.artPlaceholder}>
+                <Icon name="user" size={28} />
+                <span>No card on file</span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+          <div className={styles.flipBack}>
+            {customer.governmentIdImageUrl ? (
+              <img
+                className={styles.art}
+                src={customer.governmentIdImageUrl}
+                alt="Government ID"
+                loading="lazy"
+              />
+            ) : (
+              <div className={styles.artPlaceholder}>
+                <Icon name="image" size={28} />
+                <span>No ID on file</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </button>
       <div className={styles.cardBody}>
-        <h2>{name}</h2>
+        <div className={styles.cardTitle}>
+          <h2>{name}</h2>
+          <TierBadge tier={customer.vipTier} />
+        </div>
         <dl className={styles.details}>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
               <Icon name="image" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>VIP Tier</dt>
-              <dd>
-                <TierBadge tier={customer.vipTier} />
-              </dd>
+              <dt>RA No.</dt>
+              <dd>{customer.raNumber ?? '—'}</dd>
             </div>
           </div>
           <div className={styles.fact}>
@@ -136,6 +164,26 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
               <dd>{customer.validUntil}</dd>
             </div>
           </div>
+          <div className={styles.pointsGrid}>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Total Points</dt>
+                <dd>{customer.totalAvailablePoints}</dd>
+              </div>
+            </div>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Weekend Points</dt>
+                <dd>{customer.weekendAvailablePoints}</dd>
+              </div>
+            </div>
+            <div className={styles.fact}>
+              <div className={styles.factText}>
+                <dt>Weekday Points</dt>
+                <dd>{customer.weekdayAvailablePoints}</dd>
+              </div>
+            </div>
+          </div>
         </dl>
       </div>
     </article>
@@ -144,7 +192,13 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
 
 export function CustomerLookupPage() {
   const [search, setSearch] = useState('');
-  const debouncedTerm = useDebouncedValue(search.trim());
+  // The fetch term is tracked separately from the input value: picking a
+  // suggestion rewrites the input to the full name, but the underlying query
+  // must keep using the term the operator actually typed, otherwise the
+  // refetch returns a different (often empty) page and the picked card
+  // disappears a few seconds later.
+  const [queryTerm, setQueryTerm] = useState('');
+  const debouncedTerm = useDebouncedValue(queryTerm.trim());
   const activeTerm = debouncedTerm.length >= 2 ? debouncedTerm : '';
   const customers = useQuery({
     queryKey: membershipKeys.customerLookup(activeTerm),
@@ -190,13 +244,15 @@ export function CustomerLookupPage() {
   // second, permission-gated fetch: everything the card needs is already in the
   // authorized lookup row.
   const rowKey = (row: GsdActiveVipLookup) =>
-    `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+    `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedLookup =
     (customers.data ?? []).find((row) => rowKey(row) === selectedKey) ?? null;
 
   const pickSuggestion = (row: GsdActiveVipLookup) => {
     setSearch(displayName(row));
+    // Keep the fetch term as the originally typed value so the fetched page
+    // (and therefore the resolved card) stays stable.
     setSelectedKey(rowKey(row));
     setActiveIndex(-1);
     setSuggestOpen(false);
@@ -265,6 +321,7 @@ export function CustomerLookupPage() {
             value={search}
             onChange={(value) => {
               setSearch(value);
+              setQueryTerm(value);
               // Typing on unpicks: the card below belongs to the last pick.
               setSelectedKey(null);
               setActiveIndex(-1);
