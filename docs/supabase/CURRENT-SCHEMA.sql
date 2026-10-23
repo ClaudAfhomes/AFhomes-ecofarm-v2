@@ -6,6 +6,12 @@
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
 -- Migration count: 133. Public table inventory: 60. Private table inventory: 27.
+-- Read-only live verification 2026-10-23: shared production ikaevepedpqygdlipsei has 120 history entries.
+-- Its 60 public and 27 private application table names match this inventory; no SQL was applied.
+-- Thirteen local migration versions remain absent from live history; two live versions lack local files.
+-- The manifest below includes pending SQL and MUST NOT be interpreted as an applied-schema dump.
+-- Full function/column definition equality is not established by matching table names.
+-- See ../DEVELOPMENT-FINALIZATION-2026-10-23.md for exact pending versions and verification limits.
 -- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
 -- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
 -- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.

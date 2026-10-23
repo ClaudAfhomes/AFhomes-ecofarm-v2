@@ -53,6 +53,7 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * `route-coverage` can still prove every handler is reachable.
  */
 export const BUSINESS_FAMILIES = [
+  { prefix: 'ist-portal', module: 'ist-portal', load: () => import('../_handlers/ist-portal.js') },
   {
     prefix: 'profile-photo',
     module: 'profile-photo',

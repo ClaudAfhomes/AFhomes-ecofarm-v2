@@ -3,10 +3,15 @@ import { Outlet, useLocation } from 'react-router';
 import { AppShell, Breadcrumbs, ConfirmDialog, Icon, Skeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
-import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions } from './navigation';
+import {
+  breadcrumbItems,
+  canAccessNavTarget,
+  navItemsForPermissions,
+  istNavItemsForPermissions,
+} from './navigation';
 import { AdminForbiddenPage } from './AdminForbiddenPage';
 import styles from './AdminLayout.module.css';
-import { staffPortalPath, operationsPath } from '@afhomes/contracts';
+import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
 import { useProfilePhoto } from '../features/account/profile-photo';
 import logo from '../assets/logo.png';
 
@@ -26,6 +31,16 @@ export function AdminLayout() {
   // AFHomes pattern: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
+  const ist = isIstRole(user?.roleSlug);
+  const navigation = ist ? istNavItemsForPermissions : navItemsForPermissions;
+  const portalTarget = (target: string) => {
+    const path = staffPortalPath(user?.roleSlug, target);
+    if (!ist || (target !== '/admin' && !target.startsWith('/admin/ist/'))) return path;
+    const params = new URLSearchParams(location.search);
+    params.delete('page');
+    const query = params.toString();
+    return `${path}${query ? `?${query}` : ''}`;
+  };
   // Denied paths render standalone: no sidebar, no topbar, professional card.
   // RequireRole still guards the route; this only removes the shell chrome.
   const denied =
@@ -43,19 +58,19 @@ export function AdminLayout() {
             <img src={logo} alt="AFHomes logo" />
             <div className={styles.brandTextBlock}>
               <span className={styles.brandName}>AFHomes</span>
-              <span className={styles.brandText}>Operations</span>
+              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
             </div>
           </div>
         }
         navItems={
           gated
             ? []
-            : navItemsForPermissions(user?.afHomesPermissions).map((item) => ({
+            : navigation(user?.afHomesPermissions).map((item) => ({
                 ...item,
-                to: staffPortalPath(user?.roleSlug, item.to),
+                to: portalTarget(item.to),
                 dropdown: item.dropdown?.map((child) =>
                   'to' in child
-                    ? { ...child, to: staffPortalPath(user?.roleSlug, child.to) }
+                    ? { ...child, to: portalTarget(child.to) }
                     : child,
                 ),
               }))

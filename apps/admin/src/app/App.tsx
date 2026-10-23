@@ -229,6 +229,10 @@ import {
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
+import { isIstRole } from '@afhomes/contracts';
+
+const IstPortalPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstPortalPage })));
+const IstAccreditationPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstAccreditationPage })));
 
 const protectedPage = (page: ReactNode) => <RequireRole>{page}</RequireRole>;
 
@@ -269,7 +273,12 @@ export default function App() {
               {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
           Redemption rather than from the global nav. */}
               <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
-              <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
+              <Route path="/admin" element={protectedPage(isIstRole(user?.roleSlug) ? <IstPortalPage /> : <AfHomesDashboardPage />)} />
+              <Route path="/admin/ist/my-sales" element={protectedPage(<IstPortalPage view="my-sales" />)} />
+              <Route path="/admin/ist/team-sales" element={protectedPage(<IstPortalPage view="team-sales" />)} />
+              <Route path="/admin/ist/my-commissions" element={protectedPage(<IstPortalPage view="my-commissions" />)} />
+              <Route path="/admin/ist/team-commissions" element={protectedPage(<IstPortalPage view="team-commissions" />)} />
+              <Route path="/admin/ist/accreditation" element={protectedPage(<IstAccreditationPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
               sales.card_sales nav key like the sales list; customers and
               anonymous visitors never reach the staff app at all. */}

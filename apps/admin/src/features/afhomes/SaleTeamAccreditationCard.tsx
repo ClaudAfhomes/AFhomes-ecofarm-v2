@@ -34,9 +34,11 @@ const ACCREDITATION_STATUS_TONES: Record<
 export function SaleTeamAccreditationCard({
   staffId,
   kind,
+  showValidityDates = false,
 }: {
   staffId?: string;
   kind: 'IST' | 'OST';
+  showValidityDates?: boolean;
 }) {
   const { user } = useSession();
   const [action, setAction] = useState<'approve' | 'revoke' | null>(null);
@@ -102,10 +104,10 @@ export function SaleTeamAccreditationCard({
               {value.fullName}
             </DetailField>
           ) : null}
-          {value && kind === 'OST' ? (
+          {value && (kind === 'OST' || showValidityDates) ? (
             <>
-              <DetailField label="Valid from">{value.startsOn}</DetailField>
-              <DetailField label="Valid until">{value.expiresOn}</DetailField>
+              <DetailField label="Valid from">{value.startsOn ?? 'Not defined'}</DetailField>
+              <DetailField label="Valid until">{value.expiresOn ?? 'Not defined'}</DetailField>
             </>
           ) : null}
         </DetailFieldGrid>

@@ -298,12 +298,10 @@ export default function SaleTeamSearch() {
                   </div>
                 </div>
               </div>
-              <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="accreditation-details">
                 <div>
-                  <dt className="label-caps text-ink-400">Valid until</dt>
-                  <dd className="mt-2">
-                    {result.kind === 'IST' ? 'No accreditation expiry' : result.expiresOn}
-                  </dd>
+                  <dt className="label-caps text-ink-400">Registration Status</dt>
+                  <dd className="mt-2">Accredited</dd>
                 </div>
                 <div className="sm:col-span-2">
                   <dt className="label-caps text-ink-400">Company verification contact</dt>
