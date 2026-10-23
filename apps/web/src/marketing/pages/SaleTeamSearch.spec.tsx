@@ -43,7 +43,11 @@ beforeEach(() => {
   });
 });
 async function begin() {
-  await screen.findByText('Privacy notice — Data Privacy Act of 2012');
+  await screen.findByText(
+    (_, element) =>
+      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'Privacy notice: Data Privacy Act of 2012',
+    { selector: 'summary' },
+  );
   const field = screen.getByLabelText('AA number');
   await userEvent.clear(field);
   await userEvent.type(field, record.aaNumber);
@@ -127,7 +131,11 @@ it('discards a canceled start and never reveals its late response', async () => 
 });
 it('rejects malformed input before starting a lookup', async () => {
   renderWithProviders(<SaleTeamSearch />);
-  await screen.findByText('Privacy notice — Data Privacy Act of 2012');
+  await screen.findByText(
+    (_, element) =>
+      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'Privacy notice: Data Privacy Act of 2012',
+    { selector: 'summary' },
+  );
   await userEvent.type(screen.getByLabelText('AA number'), '%');
   await userEvent.click(screen.getByRole('button', { name: 'Search' }));
   expect(await screen.findByText('Enter a valid AA number.')).toBeInTheDocument();
