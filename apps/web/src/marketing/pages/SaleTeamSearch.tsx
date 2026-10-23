@@ -9,7 +9,7 @@ import {
   type PublicSaleTeamSearchResult,
   type SaleTeamSearchContact,
 } from '@afhomes/contracts';
-import { AccreditationId, Alert, Button, Dialog, TextField, TurnstileChallenge } from '@afhomes/ui';
+import { AccreditationId, Alert, Button, Dialog, Icon, TextField, TurnstileChallenge } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
 import { ApiError } from '../../lib/api/errors';
 import { Container } from '../components/ui/Container';
@@ -220,14 +220,6 @@ export default function SaleTeamSearch() {
                 Select Search to read the privacy notice, enter your name, email and mobile number,
                 and complete Cloudflare verification. Validated details are reused during this session.
               </p>
-              <details className="mt-4 text-body-sm">
-                <summary className="cursor-pointer">
-                  Privacy notice — Data Privacy Act of 2012
-                </summary>
-                <div className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap" tabIndex={0}>
-                  {config.privacyNotice}
-                </div>
-              </details>
             </>
           ) : null}
           {configQuery.isLoading ? <p role="status">Loading verification…</p> : null}
@@ -241,7 +233,8 @@ export default function SaleTeamSearch() {
               id="sale-team-aa"
               name="aaNumber"
               label="AA number"
-              placeholder="AAI26100001 or AAO26100001"
+              placeholder="Enter AAI or AAO number"
+              normalize={(value) => value.toUpperCase()}
               value={input}
               onChange={(value) => {
                 discard();
@@ -255,6 +248,19 @@ export default function SaleTeamSearch() {
               Search
             </Button>
           </form>
+          {config?.available ? (
+            <details className="group mt-6 rounded-xl border border-line bg-cream-50 text-body-sm [&::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium text-navy-900">
+                <span>
+                  Privacy notice: <strong className="font-semibold text-navy-900">Data Privacy Act of 2012</strong>
+                </span>
+                <Icon name="chevron-down" size={16} className="shrink-0 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="max-h-80 overflow-y-auto whitespace-pre-wrap border-t border-line px-5 py-4 leading-relaxed text-ink-700" tabIndex={0}>
+                {config.privacyNotice}
+              </div>
+            </details>
+          ) : null}
         </section>
         <div aria-live="polite" className="mt-8">
           {phase === 'idle' || phase === 'result' ? dialogError : null}
@@ -298,13 +304,15 @@ export default function SaleTeamSearch() {
                   </div>
                 </div>
               </div>
-              <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="accreditation-details">
-                <div>
+              <dl className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2" data-testid="accreditation-details">
+                <div className="rounded-xl border border-line bg-cream-50 p-4">
                   <dt className="label-caps text-ink-400">Registration Status</dt>
-                  <dd className="mt-2">Accredited</dd>
+                  <dd className="mt-2 text-navy-900">Accredited</dd>
                 </div>
-                <div className="sm:col-span-2">
-                  <dt className="label-caps text-ink-400">Company verification contact</dt>
+                <div className="rounded-xl border border-line bg-cream-50 p-4 sm:col-span-2">
+                  <dt className="flex items-center gap-2 label-caps text-ink-400">
+                    <Icon name="bell" size={14} /> Company verification contact
+                  </dt>
                   <dd className="mt-2">
                     <a
                       className="font-semibold text-leaf-700 underline"
@@ -317,8 +325,9 @@ export default function SaleTeamSearch() {
               </dl>
               <aside
                 aria-label="Transaction safety notice"
-                className="mt-6 rounded-xl border border-l-4 border-gold-500 bg-gold-100 p-5 text-ink-900"
+                className="mt-6 flex gap-3 rounded-xl border border-gold-500 bg-gold-100 p-5 text-ink-900"
               >
+                <Icon name="alert" size={20} className="mt-0.5 shrink-0 text-gold-700" />
                 <p className="text-body leading-relaxed">
                   <strong>
                     For your protection, conduct all transactions only through AFHomes and its
