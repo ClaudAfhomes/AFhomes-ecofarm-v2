@@ -179,7 +179,7 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
   const data = report.data;
   const isCommissions = view.endsWith('commissions');
   return (
-    <div className={view === 'dashboard' ? styles.page : styles.lightPage}>
+    <div className={styles.lightPage}>
       <PageHeader
         title={TITLES[view]}
         description={
@@ -497,7 +497,7 @@ export function IstAccreditationPage() {
   const { user } = useSession();
   if (!isIstRole(user?.roleSlug)) return <Forbidden />;
   return (
-    <div className={styles.page}>
+    <div className={styles.lightPage}>
       <PageHeader
         title="Accreditation"
         description="Your existing AA identity and approved validity dates."

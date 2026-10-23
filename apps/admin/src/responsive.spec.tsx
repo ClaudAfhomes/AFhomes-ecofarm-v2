@@ -103,7 +103,12 @@ vi.mock('./features/cms/services', () => ({
 vi.mock('./features/genealogy/services', () => ({
   getGenealogy: vi.fn(),
   getGenealogyNode: vi.fn(),
+  getGenealogyDownline: vi.fn(),
   getGenealogySummary: vi.fn(),
+  teamSalesKeys: {
+    overview: (period: string, dateFrom?: string, dateTo?: string) => ['team-sales', 'overview', period, dateFrom, dateTo],
+  },
+  getTeamSalesOverview: vi.fn(),
 }));
 
 vi.mock('./features/ost/services', () => ({
@@ -125,7 +130,7 @@ import { getMemberships } from './features/memberships/services';
 import { getRedemptionItems, getRedemptions } from './features/redemption/services';
 import { getAudit, getReport } from './features/reports/services';
 import { getCmsHistory, getCmsPages } from './features/cms/services';
-import { getGenealogy } from './features/genealogy/services';
+import { getGenealogy, getGenealogyNode, getGenealogyDownline, getTeamSalesOverview } from './features/genealogy/services';
 import { getOstApplications } from './features/ost/services';
 import {
   getPurchaseSummary,
@@ -476,6 +481,15 @@ function install() {
   vi.mocked(getCmsPages).mockResolvedValue([CMS_ROW] as never);
   vi.mocked(getCmsHistory).mockResolvedValue([] as never);
   vi.mocked(getGenealogy).mockResolvedValue([GENEALOGY_ROW] as never);
+  vi.mocked(getGenealogyNode).mockResolvedValue(GENEALOGY_ROW as never);
+  vi.mocked(getGenealogyDownline).mockResolvedValue([] as never);
+  vi.mocked(getTeamSalesOverview).mockResolvedValue({
+    totalSales: 0,
+    totalEligibleSellers: 0,
+    sellersWithSales: 0,
+    sellersNoSales: 0,
+    teams: [],
+  } as never);
   vi.mocked(getOstApplications).mockResolvedValue([OST_ROW] as never);
 }
 
@@ -531,13 +545,13 @@ describe('Phase 33 tables scroll instead of breaking', () => {
     expect(document.querySelector('.table-scroll')).not.toBeNull();
   });
 
-  it('/admin/genealogy shows the head card with a View Genealogy action', async () => {
+  it('/admin/genealogy shows the genealogy tree for the first head', async () => {
     atWidth(390, false);
     renderApp('/admin/genealogy');
     expect(await screen.findByText('SM Ana Santos')).not.toBeNull();
-    expect(
-      screen.getByRole('button', { name: 'View genealogy of SM Ana Santos' }),
-    ).not.toBeNull();
+    // Genealogy tree is rendered for the first head (admin view)
+    expect(screen.getByRole('region', { name: 'Genealogy tree' })).not.toBeNull();
+    // Old standalone toggle is gone
     expect(screen.queryByRole('button', { name: 'Hide Genealogy' })).toBeNull();
   });
 

@@ -220,3 +220,114 @@ export const ostReferralCodeRecordSchema = z.object({
   createdAt: z.string(),
 });
 export type OstReferralCodeRecord = z.infer<typeof ostReferralCodeRecordSchema>;
+
+/* ------------------------------------------------------------------ */
+/* OST Personal Dashboard                                              */
+/* ------------------------------------------------------------------ */
+
+/** OST member's head (upline sponsor) information */
+export const ostHeadInfoSchema = z.object({
+  headId: z.string().uuid(),
+  headName: z.string(),
+  headRole: z.string(),
+  headStatus: z.string(),
+  relationship: z.string(), // e.g., "Direct Sponsor"
+});
+export type OstHeadInfo = z.infer<typeof ostHeadInfoSchema>;
+
+/** OST personal sales summary */
+export const ostPersonalSalesSchema = z.object({
+  totalSales: z.number().int().nonnegative(),
+  periodSales: z.number().int().nonnegative(),
+  qualifyingSaleStatus: z.string(),
+});
+export type OstPersonalSales = z.infer<typeof ostPersonalSalesSchema>;
+
+/** OST personal commission summary */
+export const ostPersonalCommissionsSchema = z.object({
+  toEarn: z.object({
+    count: z.number().int().nonnegative(),
+    amount: z.string(), // exact decimal string
+  }),
+  earned: z.object({
+    count: z.number().int().nonnegative(),
+    amount: z.string(),
+  }),
+  paid: z.object({
+    count: z.number().int().nonnegative(),
+    amount: z.string(),
+  }),
+  cancelled: z.object({
+    count: z.number().int().nonnegative(),
+    amount: z.string(),
+  }),
+});
+export type OstPersonalCommissions = z.infer<typeof ostPersonalCommissionsSchema>;
+
+/** Individual commission record for OST dashboard */
+export const ostCommissionRecordSchema = z.object({
+  id: z.string().uuid(),
+  commissionNumber: z.string().nullable(),
+  saleNumber: z.string(),
+  amount: z.string(),
+  status: z.string(),
+  qualifiedAt: z.string().nullable(),
+  earnedAt: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type OstCommissionRecord = z.infer<typeof ostCommissionRecordSchema>;
+
+/** OST personal sales record */
+export const ostSalesRecordSchema = z.object({
+  id: z.string().uuid(),
+  saleNumber: z.string(),
+  customerName: z.string().nullable(),
+  customerNumber: z.string().nullable(),
+  status: z.string(),
+  cashPriceSnapshot: z.string(),
+  createdAt: z.string(),
+});
+export type OstSalesRecord = z.infer<typeof ostSalesRecordSchema>;
+
+/** OST personal commission record (for list view) */
+export const ostCommissionListRecordSchema = z.object({
+  id: z.string().uuid(),
+  commissionNumber: z.string().nullable(),
+  saleNumber: z.string(),
+  amount: z.string(),
+  status: z.string(),
+  qualifiedAt: z.string().nullable(),
+  earnedAt: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type OstCommissionListRecord = z.infer<typeof ostCommissionListRecordSchema>;
+
+/** Paginated response wrapper */
+export const paginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+  z.object({
+    data: z.array(itemSchema),
+    meta: z.object({
+      total: z.number().int().nonnegative(),
+      limit: z.number().int().positive(),
+      offset: z.number().int().nonnegative(),
+    }),
+  });
+
+/** OST personal sales list response */
+export const ostSalesListSchema = paginatedResponseSchema(ostSalesRecordSchema);
+export type OstSalesList = z.infer<typeof ostSalesListSchema>;
+
+/** OST personal commissions list response */
+export const ostCommissionsListSchema = paginatedResponseSchema(ostCommissionListRecordSchema);
+export type OstCommissionsList = z.infer<typeof ostCommissionsListSchema>;
+
+/** OST personal dashboard response */
+export const ostDashboardSchema = z.object({
+  head: ostHeadInfoSchema,
+  sales: ostPersonalSalesSchema,
+  commissions: ostPersonalCommissionsSchema,
+  commissionHistory: z.array(ostCommissionRecordSchema),
+});
+export type OstDashboard = z.infer<typeof ostDashboardSchema>;

@@ -3,10 +3,12 @@ import { Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { GenealogyPage } from './GenealogyPage';
-import { getGenealogy } from './services';
+import { getGenealogy, getGenealogyDownline, getGenealogyNode } from './services';
 
 vi.mock('./services', () => ({
   getGenealogy: vi.fn(),
+  getGenealogyDownline: vi.fn(),
+  getGenealogyNode: vi.fn(),
   getTeamSalesOverview: vi.fn(),
   teamSalesKeys: {
     overview: (period: string) => ['team-sales', 'overview', period],
@@ -24,13 +26,26 @@ const node = {
 };
 
 describe('authorized genealogy live search', () => {
+  const testUser = {
+    id: node.staffId,
+    name: node.fullName,
+    email: 'test@test.com',
+    roleId: 'role-sm',
+    roleSlug: 'sales_manager' as const,
+    roleName: 'Sales Manager',
+    status: 'active' as const,
+    afHomesPermissions: [],
+  };
+
   beforeEach(() => {
     vi.mocked(getGenealogy).mockReset().mockResolvedValue([node]);
+    vi.mocked(getGenealogyNode).mockReset().mockResolvedValue(node);
+    vi.mocked(getGenealogyDownline).mockReset().mockResolvedValue([]);
   });
   it.each(['claud', 'SELL', '11111111', 'sales manager', 'sales_manager'])(
     'matches %s within the returned tree',
     async (term) => {
-      renderWithProviders(<GenealogyPage />);
+      renderWithProviders(<GenealogyPage />, { user: testUser });
       await screen.findByText(node.fullName);
       fireEvent.change(screen.getByLabelText('Search genealogy'), {
         target: { value: '__NO_SUCH_SELLER__' },
@@ -42,7 +57,7 @@ describe('authorized genealogy live search', () => {
     },
   );
   it('debounces unmatched text, retains filters, and clears to the authorized tree', async () => {
-    renderWithProviders(<GenealogyPage />);
+    renderWithProviders(<GenealogyPage />, { user: testUser });
     await screen.findByText(node.fullName);
     fireEvent.change(screen.getByLabelText('Filter role'), { target: { value: 'sales_manager' } });
     const input = screen.getByLabelText('Search genealogy');
@@ -86,24 +101,46 @@ describe('genealogy head and tree', () => {
     totalDescendantCount: 0,
   };
 
+  const testUser = {
+    id: vd.staffId,
+    name: vd.fullName,
+    email: 'vd@test.com',
+    roleId: 'role-vd',
+    roleSlug: 'vice_director' as const,
+    roleName: 'Vice Director',
+    status: 'active' as const,
+    afHomesPermissions: [],
+  };
+
   beforeEach(() => {
     vi.mocked(getGenealogy).mockReset().mockResolvedValue([vd, sm, ost]);
+    vi.mocked(getGenealogyNode).mockReset().mockImplementation((id) => {
+      if (id === vd.staffId) return Promise.resolve(vd);
+      if (id === sm.staffId) return Promise.resolve(sm);
+      if (id === ost.staffId) return Promise.resolve(ost);
+      return Promise.resolve(vd); // Return a valid node instead of null
+    });
+    vi.mocked(getGenealogyDownline).mockReset().mockImplementation((id) => {
+      if (id === vd.staffId) return Promise.resolve([sm, ost]);
+      if (id === sm.staffId) return Promise.resolve([ost]);
+      return Promise.resolve([]);
+    });
   });
 
-  it('shows the head card with a per-card View Genealogy action', async () => {
-    renderWithProviders(<GenealogyPage />);
+  it('shows own genealogy tree with downline for VD user', async () => {
+    renderWithProviders(<GenealogyPage />, { user: testUser });
     await screen.findByText('VD TOP HEAD');
-    expect(screen.getByText('Network head')).toBeInTheDocument();
-    // Only the head shows; the rest of the network opens from a card.
-    expect(screen.queryByText('SM DOWN ONE')).toBeNull();
-    expect(
-      screen.getByRole('button', { name: 'View genealogy of VD TOP HEAD' }),
-    ).toBeInTheDocument();
-    // The old standalone toggle is gone.
-    expect(screen.queryByRole('button', { name: 'View Genealogy' })).toBeNull();
+    // VD is at the top - no upline chain shown
+    expect(screen.queryByText('Your Upline')).toBeNull();
+    // Tree shows VD as root with direct downline (SM)
+    expect(screen.getByText('SM DOWN ONE')).toBeInTheDocument();
+    // OST is under SM which is collapsed by default
+    expect(screen.queryByText('OST DOWN TWO')).toBeNull();
+    // No "View genealogy" button for self
+    expect(screen.queryByRole('button', { name: 'View genealogy of VD TOP HEAD' })).toBeNull();
   });
 
-  it('opens the seller record from the card button', async () => {
+  it('can click downline member to navigate to their genealogy', async () => {
     const Probe = () => {
       const location = useLocation();
       return (
@@ -117,18 +154,19 @@ describe('genealogy head and tree', () => {
         <Route path="/admin/genealogy" element={<GenealogyPage />} />
         <Route path="*" element={<Probe />} />
       </Routes>,
-      { route: '/admin/genealogy' },
+      { route: '/admin/genealogy', user: testUser },
     );
-    await screen.findByText('VD TOP HEAD');
-    fireEvent.click(screen.getByRole('button', { name: 'View genealogy of VD TOP HEAD' }));
+    await screen.findByText('SM DOWN ONE');
+    // Click on SM node in the tree (it's clickable)
+    fireEvent.click(screen.getByText('SM DOWN ONE'));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent(
-        '/admin/genealogy/00000000-0000-4000-8000-0000000000a1',
+        '/admin/genealogy/00000000-0000-4000-8000-0000000000a2',
       ),
     );
   });
 
-  it('opens the detail record from each head name link', async () => {
+  it('can expand SM and click OST member to navigate to their genealogy', async () => {
     const Probe = () => {
       const location = useLocation();
       return (
@@ -142,13 +180,16 @@ describe('genealogy head and tree', () => {
         <Route path="/admin/genealogy" element={<GenealogyPage />} />
         <Route path="*" element={<Probe />} />
       </Routes>,
-      { route: '/admin/genealogy' },
+      { route: '/admin/genealogy', user: testUser },
     );
-    await screen.findByText('VD TOP HEAD');
-    fireEvent.click(screen.getByRole('link', { name: 'VD TOP HEAD' }));
+    await screen.findByText('SM DOWN ONE');
+    // Expand SM to reveal OST
+    fireEvent.click(screen.getByRole('button', { name: 'Expand SM DOWN ONE' }));
+    await screen.findByText('OST DOWN TWO');
+    fireEvent.click(screen.getByText('OST DOWN TWO'));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent(
-        '/admin/genealogy/00000000-0000-4000-8000-0000000000a1',
+        '/admin/genealogy/00000000-0000-4000-8000-0000000000a3',
       ),
     );
   });

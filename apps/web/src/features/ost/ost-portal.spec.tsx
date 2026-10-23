@@ -60,11 +60,34 @@ const OST_ME = {
   approvedAt: '2026-09-01T00:00:00.000Z',
 };
 
+const OST_DASHBOARD = {
+  head: {
+    headId: '22222222-2222-4222-8222-222222222222',
+    headName: 'Sam Manager',
+    headRole: 'sales_manager',
+    headStatus: 'active',
+    relationship: 'Direct Sponsor',
+  },
+  sales: {
+    totalSales: 0,
+    periodSales: 0,
+    qualifyingSaleStatus: 'active',
+  },
+  commissions: {
+    toEarn: { count: 0, amount: '0.00' },
+    earned: { count: 0, amount: '0.00' },
+    paid: { count: 0, amount: '0.00' },
+    cancelled: { count: 0, amount: '0.00' },
+  },
+  commissionHistory: [],
+};
+
 function installFetch() {
   routes.clear();
   // Read the current probe result lazily: tests reassign it per case.
   routes.set('/auth/portals', () => ok(portalsBody.current)());
   routes.set('/ost/me', ok(OST_ME));
+  routes.set('/ost/me/dashboard', ok(OST_DASHBOARD));
   routes.set(
     '/profile-photo/staff',
     ok({ url: null, expiresAt: null, canUpload: true, notice: null }),
