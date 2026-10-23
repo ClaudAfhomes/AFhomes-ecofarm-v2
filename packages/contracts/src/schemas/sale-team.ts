@@ -15,7 +15,7 @@ export const aaNumberSchema = z
 export const saleTeamKindSchema = z.enum(['IST', 'OST']);
 export const saleTeamAccreditationSchema = z
   .object({
-    staffId: z.uuid(),
+    staffId: z.uuid().optional(),
     aaNumber: aaNumberSchema,
     kind: saleTeamKindSchema,
     fullName: z.string(),
