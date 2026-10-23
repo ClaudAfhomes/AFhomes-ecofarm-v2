@@ -174,9 +174,10 @@ it('opens and closes a larger photo and groups the name with the AA number', asy
   const identity = within(await screen.findByRole('group', { name: 'Seller identity' }));
   expect(identity.getByRole('heading', { name: record.maskedName })).toBeInTheDocument();
   expect(identity.getByText(record.aaNumber)).toBeInTheDocument();
-  expect(screen.getByText('Valid until')).toBeInTheDocument();
-  expect(screen.getByText('2027-10-21')).toBeInTheDocument();
-  expect(screen.queryByText(/valid from|sales team details/i)).not.toBeInTheDocument();
+  const dl = screen.getByTestId('accreditation-details');
+  expect(within(dl).getByText('Registration Status')).toBeInTheDocument();
+  expect(within(dl).getByText('Accredited')).toBeInTheDocument();
+  expect(screen.queryByText('2027-10-21')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Enlarge profile photo' }));
   expect(screen.getByRole('dialog', { name: 'Profile photo' })).toBeInTheDocument();
   await userEvent.keyboard('{Escape}');

@@ -172,6 +172,23 @@ async function buildGenealogyMaps(db: Db) {
   };
 }
 
+/** Read-only reporting context using the existing member-detail visibility rules. */
+export async function getSalesDownlineContext(db: Db, userId: string, roleSlug: string) {
+  const maps = await buildGenealogyMaps(db);
+  const candidates =
+    roleSlug === 'sales_manager'
+      ? maps.ostDescendants(userId)
+      : ['vice_director', 'senior_sales_manager'].includes(roleSlug)
+        ? maps.descendants(userId)
+        : [];
+  const ids = candidates.filter((id) => sellerRoles.includes(maps.roleByStaff.get(id) as SellerRole));
+  return {
+    ids,
+    ostIds: ids.filter((id) => maps.ostById.has(id) && maps.roleByStaff.get(id) === 'ost'),
+    headId: maps.parent.get(userId) ?? null,
+  };
+}
+
 /**
  * LIST VISIBILITY: Which member IDs can appear in list responses.
  * Includes upline names for reference (but detail access is separate).

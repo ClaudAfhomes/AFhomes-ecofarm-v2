@@ -766,3 +766,4 @@ export * from './schemas/customer-import-continuation.js';
 export { servicePolicyManagementResultSchema } from './schemas/points.js';
 export * from './schemas/member-workbook.js';
 export * from './schemas/public-verification-settings.js';
+export * from './schemas/ist-portal.js';

@@ -304,14 +304,10 @@ export default function SaleTeamSearch() {
                   </div>
                 </div>
               </div>
-              <dl className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <dl className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2" data-testid="accreditation-details">
                 <div className="rounded-xl border border-line bg-cream-50 p-4">
-                  <dt className="flex items-center gap-2 label-caps text-ink-400">
-                    <Icon name="clock" size={14} /> Valid until
-                  </dt>
-                  <dd className="mt-2 text-navy-900">
-                    {result.kind === 'IST' ? 'No accreditation expiry' : result.expiresOn}
-                  </dd>
+                  <dt className="label-caps text-ink-400">Registration Status</dt>
+                  <dd className="mt-2 text-navy-900">Accredited</dd>
                 </div>
                 <div className="rounded-xl border border-line bg-cream-50 p-4 sm:col-span-2">
                   <dt className="flex items-center gap-2 label-caps text-ink-400">

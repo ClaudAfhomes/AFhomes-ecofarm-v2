@@ -208,8 +208,11 @@ const REPORT_MODULES: readonly AfHomesModuleKey[] = [
 const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
   REPORT_MODULES.some((key) => canViewModule(permissions, key));
 
-export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
-  return ADMIN_NAV_ITEMS.flatMap((item) => {
+export function navItemsForPermissions(
+  permissions?: readonly AfHomesPermission[],
+  items = ADMIN_NAV_ITEMS,
+): SidebarItem[] {
+  return items.flatMap((item) => {
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
@@ -222,6 +225,31 @@ export function navItemsForPermissions(permissions?: readonly AfHomesPermission[
     if (!canViewParent && !dropdown?.length) return [];
     return [{ to: item.to, label: item.label, icon: item.icon, end: item.end, dropdown }];
   });
+}
+
+export function istNavItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
+  return navItemsForPermissions(permissions, [
+    ADMIN_NAV_ITEMS[0]!,
+    {
+      to: '/admin/ist/my-sales', label: 'Sales', icon: 'file-text', module: 'sales.card_sales',
+      dropdown: [
+        { to: '/admin/ist/my-sales', label: 'My Sales', module: 'sales.card_sales' },
+        { to: '/admin/ist/team-sales', label: 'Team Sales', module: 'sales.card_sales' },
+      ],
+    },
+    {
+      to: '/admin/ist/my-commissions', label: 'Commissions', icon: 'wallet', module: 'network.commissions',
+      dropdown: [
+        { to: '/admin/ist/my-commissions', label: 'My Commissions', module: 'network.commissions' },
+        { to: '/admin/ist/team-commissions', label: 'Team Commissions', module: 'network.commissions' },
+      ],
+    },
+    ADMIN_NAV_ITEMS.find((item) => item.to === '/admin/genealogy')!,
+    {
+      to: '/admin/ist/accreditation', label: 'Accreditation', icon: 'file-text', module: 'dashboard.view',
+    },
+    { to: '/admin/profile', label: 'Profile', icon: 'user', module: 'dashboard.view' },
+  ]);
 }
 
 /**
@@ -238,6 +266,11 @@ export const EXTRA_GATED_ROUTES: readonly {
   pathPrefix: string;
   module: AfHomesModuleKey;
 }[] = [
+  { pathPrefix: '/admin/ist/my-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/team-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/my-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/team-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/accreditation', module: 'dashboard.view' },
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
   // `/admin/documents` list/review route removed; the scan travels with the
