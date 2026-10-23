@@ -204,11 +204,15 @@
 
 /* Points stat row: three compact stat tiles spanning the full details width. */
 .pointsGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   background: var(--color-bg-surface-raised, var(--color-bg-surface));
+}
+.pointsGrid .fact {
+  flex: 1 1 calc(33.333% - var(--space-2));
+  min-width: 0;
 }
 
 .pointsGrid .fact {
@@ -238,6 +242,44 @@
 .pointsGrid .fact:last-child {
   border-bottom: 1px solid var(--color-border-default);
 }
+
+.capsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, var(--color-bg-surface-raised, #f8f9fa) 0%, var(--color-bg-surface) 100%);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.capCard {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.capLabel {
+  font-size: var(--text-caption, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.capValue {
+  font-size: var(--text-h3, 20px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #111827);
+}
+
+.capsGrid[data-tier='GOLD'] .capValue { color: #b45309; }
+.capsGrid[data-tier='SILVER'] .capValue { color: #475569; }
+.capsGrid[data-tier='BRONZE'] .capValue { color: #92400e; }
 
 /* Contain, never cover: the whole card face stays visible, letterboxed on
    the tier wash. Nothing on the printed card is ever cropped away. */

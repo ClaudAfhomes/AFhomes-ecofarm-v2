@@ -34,6 +34,7 @@ import {
 } from './services';
 import { businessKeys } from './queryKeys';
 import { CustomerApplicationsPage } from './official-forms-applications';
+import { RecordPointsDialog } from './RecordPointsDialog';
 
 /**
  * Customer registration and card application.
@@ -132,6 +133,7 @@ export function BusinessCustomersPage() {
     kind: 'deactivate' | 'delete';
     customer: Customer;
   } | null>(null);
+  const [recordPointsCustomer, setRecordPointsCustomer] = useState<Customer | null>(null);
   const [confirmation, setConfirmation] = useState('');
   const [activationResult, setActivationResult] = useState<CustomerOnboardingRecovery | null>(null);
   const [activationCustomerId, setActivationCustomerId] = useState<string | null>(null);
@@ -392,13 +394,20 @@ export function BusinessCustomersPage() {
                               },
                             ]
                           : []),
+                        ...(customer.status === 'active'
+                          ? [
+                              {
+                                label: 'Deactivate account',
+                                icon: 'user-x' as const,
+                                danger: true,
+                                onClick: () => setAccountAction({ kind: 'deactivate', customer }),
+                              },
+                            ]
+                          : []),
                         {
-                          label: 'Deactivate account',
-                          icon: 'user-x' as const,
-                          danger: true,
-                          disabled:
-                            customer.status === 'suspended' || customer.status === 'cancelled',
-                          onClick: () => setAccountAction({ kind: 'deactivate', customer }),
+                          label: 'Record Points',
+                          icon: 'plus' as const,
+                          onClick: () => setRecordPointsCustomer(customer),
                         },
                         ...(user?.roleSlug === 'super_admin'
                           ? [
@@ -483,6 +492,15 @@ export function BusinessCustomersPage() {
       {issueActivation.error && !activationResult ? (
         <p role="alert">{issueActivation.error.message}</p>
       ) : null}
+      <RecordPointsDialog
+        customer={{
+          id: recordPointsCustomer?.id ?? '',
+          fullName: recordPointsCustomer?.fullName ?? '',
+          tier: recordPointsCustomer?.tier,
+        }}
+        open={recordPointsCustomer !== null}
+        onClose={() => setRecordPointsCustomer(null)}
+      />
       <ConfirmDialog
         open={accountAction !== null}
         onCancel={() => {

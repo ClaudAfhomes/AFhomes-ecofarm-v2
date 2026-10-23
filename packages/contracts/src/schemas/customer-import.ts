@@ -714,13 +714,15 @@ export const gsdActiveVipLookupSchema = z.object({
   lastName: z.string().min(1),
   /** Customer's RA number (company customer ID). */
   raNumber: z.string().nullable().optional(),
+  /** Official VIP card number (YYMMDDNNNNNVTPMMS). */
+  vipCardNumber: z.string().nullable().optional(),
   /** Authoritative VIP tier of the qualifying membership. */
   vipTier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
   /** Authoritative `memberships.expires_at` formatted in Asia/Manila, `YYYY-MM-DD`. */
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   /** Total available points (from points_accounts.balance). */
   totalAvailablePoints: z.number().int().nonnegative(),
-  /** Weekend available points (total * 0.5). */
+  /** Weekend available points (total * 0.3). */
   weekendAvailablePoints: z.number().int().nonnegative(),
   /** Weekday available points (total - weekend). */
   weekdayAvailablePoints: z.number().int().nonnegative(),

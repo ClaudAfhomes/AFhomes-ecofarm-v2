@@ -193,13 +193,13 @@ describe('BusinessCustomersPage row actions', () => {
     expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeInTheDocument();
   });
 
-  it('disables deactivation for suspended customers inside the menu', async () => {
+  it('hides deactivation for non-active customers inside the menu', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
-    expect(screen.getByRole('menuitem', { name: 'Deactivate account' })).toBeDisabled();
+    expect(screen.queryByRole('menuitem', { name: 'Deactivate account' })).not.toBeInTheDocument();
   });
 
   it('reports an empty directory with the canonical copy', async () => {
