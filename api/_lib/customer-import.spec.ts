@@ -456,16 +456,14 @@ describe('template and headers', () => {
     expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
     expect(MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(44);
     expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(45);
-    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX]).toBe(
-      'ost_ist_name',
-    );
+    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX]).toBeNull();
     // Every other legacy position matches the current map exactly.
     LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP.forEach((target, index) => {
       if (index === LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX) return;
       const current = index < LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? index : index - 1;
       expect(target).toBe(MEMBERSHIP_TEMPLATE_POSITION_MAP[current]);
     });
-    // And the legacy map remaps a full legacy row without dropping the column.
+    // The removed column now surfaces as an ignored column with a warning.
     const legacyHeaders = [
       ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
       LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
@@ -478,8 +476,8 @@ describe('template and headers', () => {
       [legacyHeaders, legacyRow],
       LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
     );
-    expect(remapped.dropped.map((d) => d.header)).not.toContain('OST/IST NAME');
-    expect(remapped.matrix[0]).toContain('ost_ist_name');
+    expect(remapped.dropped.map((d) => d.header)).toContain('OST/IST NAME');
+    expect(remapped.matrix[0]).not.toContain('ost_ist_name');
   });
   it('flags unknown columns without failing the file', () => {
     const { unknownHeaders, rows } = matrixToRecords([

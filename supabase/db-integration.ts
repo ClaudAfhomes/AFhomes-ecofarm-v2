@@ -17514,12 +17514,11 @@ async function main(): Promise<void> {
         eq('the round trip retires the OST number', back.out.previousAaNumber, afterOst.aa_number);
         check('the IST successor is an AAI number', /^AAI\d{8}$/.test(back.out.aaNumber));
         eq('the round trip reports the IST kind', back.out.kind, 'IST');
-        eq(
-          'the fresh IST validity starts today',
-          back.out.startsOn,
-          (await one<{ today: string }>(`select (now() at time zone 'UTC')::date::text as today`))
-            .today,
-        );
+        // IST identities are open-ended: `sale_team_identity_dates` requires
+        // starts_on and expires_on to be both set or both null, so a fresh IST
+        // accreditation carries no validity dates (startsOn/expiresOn = null).
+        // The conversion date is reported separately as identityIssuedOn.
+        eq('the fresh IST validity is open-ended (no fixed dates)', back.out.startsOn, null);
         eq(
           'the member holds the IST role again',
           (
@@ -17667,6 +17666,281 @@ async function main(): Promise<void> {
           'delete from private.sale_team_accreditations where staff_id = any($1::uuid[])',
           [[mover.id, blocked.id]],
         );
+      }
+      section('78. application intake reaches the customer record on EVERY write path');
+      try {
+        // UAT defect: an operator filled every field of /admin/customers/new and
+        // the Company record tab read "Not Recorded" for almost all of it. Three
+        // independent causes, each proven here:
+        //   1. the mirror lived ONLY in the register path, so an application for
+        //      an EXISTING customer never wrote to `customers` at all;
+        //   2. `save_customer_application` (every draft EDIT) never wrote to
+        //      `customers`, so a correction could never propagate;
+        //   3. nothing backfilled rows created before the mirror existed.
+        const m78Actor = staff['super-admin']!;
+        const m78PlanId = (
+          await one<{ id: string }>(`select id from public.card_plans where code = 'BRONZE'`)
+        ).id;
+        const m78Holder = (payload: Record<string, unknown>): Record<string, unknown> => ({
+          lastName: 'Mirrored',
+          firstName: 'Mia',
+          middleName: '',
+          suffix: '',
+          birthDate: '1991-07-07',
+          sex: 'Female',
+          citizenship: 'Filipino',
+          civilStatus: 'Married',
+          permanentAddressLine1: '2 Mirror Street',
+          permanentAddressLine2: '',
+          cityMunicipality: 'Calamba',
+          province: 'Laguna',
+          barangay: 'Parian',
+          provinceCode: '1000000001',
+          cityMunicipalityCode: '1000000002',
+          barangayCode: '1000000003',
+          postalCode: '4027',
+          landline: '(049) 555-9999',
+          mobile: '09170000078',
+          email: `${RUN}-m78@example.invalid`,
+          tinNumber: '123456789',
+          occupationBusinessName: 'Architect',
+          officeBusinessAddress: 'Makati',
+          employedPosition: 'Principal',
+          printedName: 'MIA MIRRORED',
+          ...payload,
+        });
+        const m78CustomerId = { value: '' };
+        const m78Header = (payload: Record<string, unknown>): Record<string, unknown> => ({
+          planId: m78PlanId,
+          paymentScheme: 'spot_cash',
+          // The application always carries its customer; omitting it would null a
+          // NOT NULL column, which is a different defect from the one under test.
+          customerId: m78CustomerId.value,
+          raNumber: 'RA-2026-9078',
+          companyStatus: 'Active Member',
+          statedVipPackage: 'BRONZE VIP',
+          statedPaymentTerms: '30 days',
+          statedRegularPrice: '60000.00',
+          statedTotalAmount: '54000.00',
+          salesManagerName: '',
+          vipRecommenderName: '',
+          recommenderContact: '',
+          recommenderEmail: '',
+          vipReferrer: '',
+          acquisitionChannels: ['Referral'],
+          consentAcknowledged: true,
+          acknowledgedAt: '2026-10-01',
+          primarySignatureStatus: 'received',
+          validIdReceived: true,
+          reservationPaymentProofReceived: false,
+          ...payload,
+        });
+        const m78CustomerColumns =
+          'citizenship, civil_status, occupation_business_name, office_business_address, employed_position, ra_number, company_status, stated_vip_package, stated_payment_terms, stated_regular_price, stated_total_amount, tin_number, government_id_number';
+        const readMirror = async (id: string) =>
+          one<Record<string, string | null>>(
+            `select ${m78CustomerColumns} from public.customers where id = $1`,
+            [id],
+          );
+
+        // PATH 1 - an application created for an ALREADY-EXISTING customer.
+        const m78Existing = (
+          await one<{ id: string }>(
+            `insert into public.customers(customer_number, first_name, last_name, email, phone, created_by)
+             values ($1, 'Pre', 'Existing', $2, '+639170000078', $3) returning id`,
+            [
+              `AF-CUS-M78${Date.now().toString().slice(-4)}`,
+              `${RUN}-m78-existing@example.invalid`,
+              m78Actor,
+            ],
+          )
+        ).id;
+        createdCustomerIds.push(m78Existing);
+        m78CustomerId.value = m78Existing;
+        const m78CreateApp = (
+          await one<{ id: string }>(
+            'select public.create_customer_application_once($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+            [
+              uuidFor('import:m78:create'),
+              m78Actor,
+              // The customer rides in on the header; the RPC has no id argument.
+              JSON.stringify(
+                m78Header({ customerId: m78Existing, governmentIdNumber: 'M78-ID-0001' }),
+              ),
+              m78Holder({}),
+            ],
+          )
+        ).id;
+        createdApplicationIds.push(m78CreateApp);
+        const afterCreate = await readMirror(m78Existing);
+        eq('create-for-existing mirrors citizenship', afterCreate.citizenship, 'Filipino');
+        eq('create-for-existing mirrors civil status', afterCreate.civil_status, 'Married');
+        eq(
+          'create-for-existing mirrors occupation',
+          afterCreate.occupation_business_name,
+          'Architect',
+        );
+        eq('create-for-existing mirrors RA NO', afterCreate.ra_number, 'RA-2026-9078');
+        eq(
+          'create-for-existing mirrors the government ID number',
+          afterCreate.government_id_number,
+          'M78-ID-0001',
+        );
+        eq(
+          'create-for-existing mirrors stated package',
+          afterCreate.stated_vip_package,
+          'BRONZE VIP',
+        );
+        eq(
+          'create-for-existing mirrors the stated total',
+          afterCreate.stated_total_amount,
+          '54000.00',
+        );
+
+        // PATH 2 - a later DRAFT EDIT of the same application.
+        await db.query(
+          'update public.customers set citizenship = null, ra_number = null where id = $1',
+          [m78Existing],
+        );
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [
+            m78CreateApp,
+            m78Actor,
+            m78Header({ raNumber: 'RA-2026-9079', governmentIdNumber: 'M78-ID-0002' }),
+            m78Holder({ occupationBusinessName: 'Landscape Architect' }),
+          ],
+        );
+        const afterEdit = await readMirror(m78Existing);
+        eq('a draft edit re-mirrors citizenship', afterEdit.citizenship, 'Filipino');
+        eq('a draft edit re-mirrors RA NO', afterEdit.ra_number, 'RA-2026-9079');
+        eq(
+          'a draft edit re-mirrors the occupation',
+          afterEdit.occupation_business_name,
+          'Landscape Architect',
+        );
+        // The already-recorded number wins: the mirror never rewrites an
+        // identity value the row already carries (same rule as document review).
+        eq(
+          'a draft edit cannot overwrite the recorded government ID number',
+          afterEdit.government_id_number,
+          'M78-ID-0001',
+        );
+
+        // A number another customer already holds is skipped, never written:
+        // the unique index would abort the save otherwise.
+        const m78Dup = (
+          await one<{ id: string }>(
+            `insert into public.customers(customer_number, first_name, last_name, email, phone, government_id_number, created_by)
+             values ($1, 'Dup', 'Holder', $2, '+639170000079', 'M78-ID-0003', $3) returning id`,
+            [
+              `AF-CUS-M78D${Date.now().toString().slice(-4)}`,
+              `${RUN}-m78-dup@example.invalid`,
+              m78Actor,
+            ],
+          )
+        ).id;
+        createdCustomerIds.push(m78Dup);
+        await db.query('update public.customers set government_id_number = null where id = $1', [
+          m78Existing,
+        ]);
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [
+            m78CreateApp,
+            m78Actor,
+            m78Header({ raNumber: 'RA-2026-9079', governmentIdNumber: 'M78-ID-0003' }),
+            m78Holder({ occupationBusinessName: 'Landscape Architect' }),
+          ],
+        );
+        eq(
+          'a duplicate government ID number is skipped, never written',
+          (await readMirror(m78Existing)).government_id_number,
+          null,
+        );
+
+        // The "blank never clears" rule still holds across both paths.
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [
+            m78CreateApp,
+            m78Actor,
+            m78Header({ raNumber: '', companyStatus: '', statedTotalAmount: '' }),
+            m78Holder({ occupationBusinessName: '' }),
+          ],
+        );
+        const afterBlank = await readMirror(m78Existing);
+        eq('a blank in a later edit never clears RA NO', afterBlank.ra_number, 'RA-2026-9079');
+        eq(
+          'a blank in a later edit never clears the occupation',
+          afterBlank.occupation_business_name,
+          'Landscape Architect',
+        );
+
+        // Policy, stated plainly: the builder WINS when it supplies a value, and a
+        // blank never clears. That is what makes a correction typed on the form
+        // reach the record; "the customer always wins" would mean a re-typed
+        // field could never be corrected from the builder at all.
+        await db.query(
+          `update public.customers set company_status = 'Corrected by hand' where id = $1`,
+          [m78Existing],
+        );
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [m78CreateApp, m78Actor, m78Header({ companyStatus: 'Typed Again' }), m78Holder({})],
+        );
+        eq(
+          'the builder wins when it supplies a value',
+          (await readMirror(m78Existing)).company_status,
+          'Typed Again',
+        );
+        await one<{ id: string }>(
+          'select public.save_customer_application($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+          [m78CreateApp, m78Actor, m78Header({ companyStatus: '' }), m78Holder({})],
+        );
+        eq(
+          'a blank never clears a value already on the record',
+          (await readMirror(m78Existing)).company_status,
+          'Typed Again',
+        );
+
+        // PATH 3 - the backfill reaches a customer whose mirrored columns are still
+        // null while their application already exists. Built through the REAL
+        // create path (rather than a hand-rolled INSERT) so the fixture cannot
+        // drift from the table's NOT NULL columns, then blanked to stand for a
+        // row written before the mirror existed.
+        const m78LegacyApp = (
+          await one<{ id: string }>(
+            'select public.create_customer_application_once($1::uuid, $2::uuid, $3::jsonb, $4::jsonb, null::jsonb) as id',
+            [
+              uuidFor('import:m78:legacy'),
+              m78Actor,
+              JSON.stringify(m78Header({ raNumber: 'RA-2026-9080' })),
+              m78Holder({ occupationBusinessName: 'Surveyor' }),
+            ],
+          )
+        ).id;
+        createdApplicationIds.push(m78LegacyApp);
+        await db.query(
+          `update public.customers set citizenship = null, ra_number = null,
+                  occupation_business_name = null where id = $1`,
+          [m78Existing],
+        );
+        await one<{ n: number }>('select private.backfill_application_onto_customer() as n');
+        const afterBackfill = await readMirror(m78Existing);
+        check(
+          'the backfill reaches a customer whose mirrored columns were still null',
+          afterBackfill.citizenship === 'Filipino' &&
+            afterBackfill.occupation_business_name === 'Surveyor',
+          JSON.stringify(afterBackfill),
+        );
+        check(
+          'the backfill cannot invent the stated block: it was never an application column',
+          afterBackfill.ra_number === null,
+          `ra_number=${String(afterBackfill.ra_number)}`,
+        );
+      } catch (error) {
+        check('section 78 completed', false, safeErrorMessage(error));
       }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));

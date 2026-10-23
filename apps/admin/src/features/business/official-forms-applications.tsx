@@ -15,6 +15,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
+import { getImportRowIntake } from './import-workflow-services';
+import { ImportContinuationPanel } from './ImportContinuationPanel';
+import { canViewImportContinuations } from './import-continuation-access';
 import {
   createCustomerApplicationSchema,
   canTransitionCustomerApplication,
@@ -22,6 +25,8 @@ import {
   optionalContactNumberSchema,
   paymentSchemeLabel,
   governmentIdTypeSchema,
+  GOVERNMENT_ID_TYPE_LABELS,
+  type GovernmentIdType,
   optionalLandlineSchema,
 } from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
@@ -30,14 +35,20 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { formatDateTime } from '../../lib/format';
-import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
+import {
+  applicationKeys,
+  businessKeys,
+  membershipKeys,
+  reservationKeys,
+  sharedScopes,
+} from './queryKeys';
 import {
   notifySuccess,
   notifyWarning,
   Alert,
   Button,
-  DateField,
   Dialog,
+  DateField,
   IdCapturePicker,
   DetailCard,
   DetailCardTitle,
@@ -53,6 +64,7 @@ import {
   Skeleton,
   StatusChip,
   TextAreaField,
+  TextField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
 import { tierArtwork } from '@afhomes/ui';
@@ -85,6 +97,8 @@ import {
   updateCustomerApplication,
 } from './services';
 
+import { filterGovernmentIdInput } from '../../lib/normalize';
+
 import {
   today,
   emptyHolder,
@@ -106,11 +120,14 @@ export function CustomerApplicationsPage() {
     user?.afHomesPermissions.some(
       (permission) => permission.moduleKey === 'governance.customer_import' && permission.canView,
     ) === true;
+  const canSeeImportedPurchases = canViewImportContinuations(user);
+  // The tab is URL state so the queue is shareable and the browser back
+  // button works. An unauthorized imports link falls back to applications.
+  const activeTab: 'applications' | 'imports' =
+    urlParams.get('tab') === 'imports' && canSeeImportedPurchases ? 'imports' : 'applications';
   const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   // Default: only applications that still need APPLICATION work. Turning this
   // off reveals the progressed history, which is never deleted or archived.
@@ -124,15 +141,7 @@ export function CustomerApplicationsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: applicationKeys.list(
-      status,
-      tier,
-      debouncedSearch,
-      from,
-      to,
-      applicationWorkOnly,
-      page,
-    ),
+    queryKey: applicationKeys.list(status, tier, debouncedSearch, applicationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
@@ -141,12 +150,13 @@ export function CustomerApplicationsPage() {
         ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
         ...(applicationWorkOnly ? { queue: 'application_work' as const } : {}),
         limit: QUEUE_PAGE_SIZE,
         offset: page * QUEUE_PAGE_SIZE,
       }),
+    // The applications queue is not the active tab's concern. Switching back
+    // re-enables it and fetches the current page.
+    enabled: activeTab === 'applications',
     // Application decisions happen in review screens and other sessions.
     refetchInterval: 30_000,
   });
@@ -162,21 +172,60 @@ export function CustomerApplicationsPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  // First load skeletonizes the whole page - header, filters, and table - so
-  // no static content flashes before the data it describes. Refetches keep the
-  // previous list visible and never reach this branch.
-  if (query.isPending)
-    return (
-      <section>
+  const tabHref = (tab: 'applications' | 'imports') => {
+    const next = new URLSearchParams(urlParams);
+    next.set('tab', tab);
+    return `?${next.toString()}`;
+  };
+  return (
+    <section className={styles.listSection}>
+      <PageHeader
+        title="Customer Applications"
+        description="Applications and imported purchases."
+        actions={
+          <>
+            {canSeeImportExport ? (
+              <Button
+                variant="secondary"
+                onClick={() => navigate('/admin/customers/applications/import-export')}
+              >
+                Import/Export Data
+              </Button>
+            ) : null}
+            <Button onClick={() => navigate('/admin/customers/new')}>
+              New application
+            </Button>
+          </>
+        }
+      />
+      {canSeeImportedPurchases ? (
+        <nav className={styles.tabs} aria-label="Customer application views">
+          <Link
+            to={tabHref('applications')}
+            className={
+              activeTab === 'applications' ? `${styles.tab} ${styles.tabCurrent}` : styles.tab
+            }
+            aria-current={activeTab === 'applications' ? 'page' : undefined}
+          >
+            Applications
+          </Link>
+          <Link
+            to={tabHref('imports')}
+            className={activeTab === 'imports' ? `${styles.tab} ${styles.tabCurrent}` : styles.tab}
+            aria-current={activeTab === 'imports' ? 'page' : undefined}
+          >
+            Imported purchases
+          </Link>
+        </nav>
+      ) : null}
+      {activeTab === 'imports' ? (
+        <ImportContinuationPanel variant="page" />
+      ) : query.isPending ? (
         <div
           style={{ display: 'grid', gap: 'var(--space-4)' }}
           role="status"
           aria-label="Loading applications"
         >
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <Skeleton style={{ height: 32, maxWidth: 280 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
-          </div>
           <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
             <Skeleton style={{ height: 40, width: 180 }} />
@@ -191,189 +240,148 @@ export function CustomerApplicationsPage() {
             <Skeleton style={{ height: 48 }} />
           </div>
         </div>
-      </section>
-    );
-  return (
-    <section className={styles.listSection}>
-      <PageHeader
-        title="Customer Applications"
-        description="Applications still needing application work."
-        actions={
-          <>
-            {canSeeImportExport ? (
-              <Button
-                variant="secondary"
-                onClick={() => navigate('/admin/customers/applications/import-export')}
-              >
-                Import/Export Data
-              </Button>
-            ) : null}
-            <Button onClick={() => navigate('/admin/customers/applications/new')}>
-              New application
-            </Button>
-          </>
-        }
-      />
-      <FilterBar
-        filtersToggleLabel="Expand Filters"
-        search={
-          <SearchField
-            label="Search applications"
-            placeholder="Application number"
-            value={search}
-            onChange={setSearch}
-            busy={query.isPending}
-          />
-        }
-        filters={
-          <>
-            <label className={styles.filterLabel}>
-              Queue
-              <Select
-                aria-label="Queue"
-                value={applicationWorkOnly ? 'application_work' : 'all'}
-                onChange={(e) => {
-                  setApplicationWorkOnly(e.target.value === 'application_work');
-                  setPage(0);
-                }}
-                options={[
-                  { value: 'application_work', label: 'Needs application work' },
-                  { value: 'all', label: 'Include progressed' },
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Status
-              <Select
-                aria-label="Status"
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(0);
-                }}
-                options={[
-                  { value: '', label: 'All' },
-                  ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
-                    value: s,
-                    label: s[0]!.toUpperCase() + s.slice(1),
-                  })),
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Tier
-              <Select
-                aria-label="Tier"
-                value={tier}
-                onChange={(e) => {
-                  setTier(e.target.value);
-                  setPage(0);
-                }}
-                options={[
-                  { value: '', label: 'All' },
-                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
-                ]}
-              />
-            </label>
-            <DateField
-              id="applications-from"
-              name="from"
-              label="From date"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                setPage(0);
-              }}
-            />
-            <DateField
-              id="applications-to"
-              name="to"
-              label="To date"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                setPage(0);
-              }}
-            />
-          </>
-        }
-      />
-      {query.isError ? (
-        <ErrorState
-          error={query.error}
-          title="Applications could not be loaded"
-          onRetry={() => void query.refetch()}
-        />
-      ) : rows.length ? (
-        <div
-          role="region"
-          aria-label="Customer application records"
-          tabIndex={0}
-          className={`table-scroll ${styles.tableWrap}`}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th>Application</th>
-                <th>Applicant</th>
-                <th>Tier</th>
-                <th>Seller</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((app) => (
-                <tr
-                  key={app.id}
-                  tabIndex={0}
-                  role="link"
-                  aria-label={`Review application ${app.applicationNumber}`}
-                  onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ')
-                      navigate(`/admin/customers/applications/${app.id}`);
-                  }}
-                  className={styles.clickable}
-                >
-                  <td data-label="Application">
-                    <span className={styles.appRef}>
-                      <span className={styles.appRefDot} aria-hidden="true" />
-                      {app.applicationNumber}
-                    </span>
-                  </td>
-                  <td data-label="Applicant">{app.applicantName ?? '—'}</td>
-                  <td data-label="Tier">{app.tier}</td>
-                  <td data-label="Seller">{app.sellerName ?? '—'}</td>
-                  <td data-label="Status">
-                    <StatusChip
-                      label={app.status}
-                      tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       ) : (
-        <EmptyState
-          title="No customer applications"
-          description="Create the first official application draft."
-        />
-      )}
-
-      {total > 0 ? (
-        <div className={styles.pagination}>
-          <Pagination
-            page={safePage + 1}
-            pageCount={pageCount}
-            onChange={(next) => setPage(next - 1)}
-            label="Customer applications pagination"
+        <>
+          <FilterBar
+            filtersToggleLabel="Expand Filters"
+            search={
+              <SearchField
+                label="Search applications"
+                placeholder="Application number"
+                value={search}
+                onChange={setSearch}
+                busy={query.isPending}
+              />
+            }
+            filters={
+              <>
+                <label className={styles.filterLabel}>
+                  Queue
+                  <Select
+                    aria-label="Queue"
+                    value={applicationWorkOnly ? 'application_work' : 'all'}
+                    onChange={(e) => {
+                      setApplicationWorkOnly(e.target.value === 'application_work');
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: 'application_work', label: 'Needs application work' },
+                      { value: 'all', label: 'Include progressed' },
+                    ]}
+                  />
+                </label>
+                <label className={styles.filterLabel}>
+                  Status
+                  <Select
+                    aria-label="Status"
+                    value={status}
+                    onChange={(e) => {
+                      setStatus(e.target.value);
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: '', label: 'All' },
+                      ...['draft', 'submitted', 'approved', 'rejected', 'cancelled'].map((s) => ({
+                        value: s,
+                        label: s[0]!.toUpperCase() + s.slice(1),
+                      })),
+                    ]}
+                  />
+                </label>
+                <label className={styles.filterLabel}>
+                  Tier
+                  <Select
+                    aria-label="Tier"
+                    value={tier}
+                    onChange={(e) => {
+                      setTier(e.target.value);
+                      setPage(0);
+                    }}
+                    options={[
+                      { value: '', label: 'All' },
+                      ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                    ]}
+                  />
+                </label>
+              </>
+            }
           />
-        </div>
-      ) : null}
+          {query.isError ? (
+            <ErrorState
+              error={query.error}
+              title="Applications could not be loaded"
+              onRetry={() => void query.refetch()}
+            />
+          ) : rows.length ? (
+            <div
+              role="region"
+              aria-label="Customer application records"
+              tabIndex={0}
+              className={`table-scroll ${styles.tableWrap}`}
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>Application</th>
+                    <th>Applicant</th>
+                    <th>Tier</th>
+                    <th>Seller</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((app) => (
+                    <tr
+                      key={app.id}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Review application ${app.applicationNumber}`}
+                      onClick={() => navigate(`/admin/customers/applications/${app.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ')
+                          navigate(`/admin/customers/applications/${app.id}`);
+                      }}
+                      className={styles.clickable}
+                    >
+                      <td data-label="Application">
+                        <span className={styles.appRef}>
+                          <span className={styles.appRefDot} aria-hidden="true" />
+                          {app.applicationNumber}
+                        </span>
+                      </td>
+                      <td data-label="Applicant">{app.applicantName ?? '—'}</td>
+                      <td data-label="Tier">{app.tier}</td>
+                      <td data-label="Seller">{app.sellerName ?? '—'}</td>
+                      <td data-label="Status">
+                        <StatusChip
+                          label={app.status}
+                          tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              title="No customer applications"
+              description="Create the first official application draft."
+            />
+          )}
+
+          {!query.isError && total > 0 ? (
+            <div className={styles.pagination}>
+              <Pagination
+                page={safePage + 1}
+                pageCount={pageCount}
+                onChange={(next) => setPage(next - 1)}
+                label="Customer applications pagination"
+              />
+            </div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -535,9 +543,11 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
 export function CustomerApplicationEditorPage() {
   const { user: applicationUser } = useSession();
   const mayLoadImport =
-    applicationUser?.afHomesPermissions.some(
+    applicationUser?.roleSlug === 'super_admin' ||
+    (applicationUser?.afHomesPermissions.some(
       (p) => p.moduleKey === 'governance.customer_import' && p.canView,
-    ) ?? false;
+    ) ??
+      false);
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>({});
   const reportValidity = useCallback((field: string, invalid: boolean) => {
     setInvalidFields((current) =>
@@ -563,6 +573,14 @@ export function CustomerApplicationEditorPage() {
     retry: false,
   });
   const [applicationSearch] = useSearchParams();
+  const importRowId = applicationSearch.get('importRowId');
+  const [importPurchaseReference, setImportPurchaseReference] = useState('');
+  const importIntake = useQuery({
+    queryKey: ['customer-import-intake', importRowId],
+    queryFn: () => getImportRowIntake(importRowId!),
+    enabled: Boolean(importRowId && !id && mayLoadImport),
+    retry: false,
+  });
   const [customerId, setCustomerId] = useState(() => applicationSearch.get('customerId') ?? '');
   // The picker resolves against the authoritative record, and a prefill click
   // is only accepted for the customer it was started for.
@@ -583,7 +601,7 @@ export function CustomerApplicationEditorPage() {
     vipRecommenderName: '',
     recommenderContact: '',
     recommenderEmail: '',
-    acknowledgedAt: today(),
+    acknowledgedAt: importRowId ? '' : today(),
   });
   const [channels, setChannels] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
@@ -615,6 +633,9 @@ export function CustomerApplicationEditorPage() {
     };
   }, [idPreviewUrl]);
   const [idType, setIdType] = useState('');
+  // Write-only (never returned): starts blank on every open, blank never clears
+  // the stored value.
+  const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   // Steps unlock only by moving forward. Going back is always free; jumping
@@ -701,7 +722,58 @@ export function CustomerApplicationEditorPage() {
     onError: (error) =>
       setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
   });
+  const loadedImport = useRef<string | null>(null);
+  useEffect(() => {
+    const source = importIntake.data;
+    if (!source || !importRowId || loadedImport.current === importRowId || plans.isPending) return;
+    if (source.continuation.applicationId) {
+      navigate(`/admin/customers/applications/${source.continuation.applicationId}`, {
+        replace: true,
+      });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      loadedImport.current = importRowId;
+      const data = source.prefill;
+      setImportPurchaseReference(source.purchaseReference ?? '');
+      if (source.continuation.customerId) {
+        setCustomerId(source.continuation.customerId);
+        selectedCustomerRef.current = source.continuation.customerId;
+        setPrefilledCustomerId(source.continuation.customerId);
+      }
+      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setSecondary(
+        data.secondary
+          ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
+          : null,
+      );
+      const plan = plans.data?.find((p) => p.code === data.tier);
+      if (plan && data.tier) {
+        setPlanId(plan.id);
+        setTier(data.tier);
+      }
+      if (data.paymentScheme) setPaymentScheme(data.paymentScheme);
+      setMeta((current) => ({
+        ...current,
+        ...source.team,
+        acknowledgedAt: '',
+        vipRecommenderName: data.recommenderName,
+        recommenderContact: data.recommenderContact,
+        recommenderEmail: data.recommenderEmail,
+      }));
+      setMessage(
+        'Imported details loaded for review. Enter the actual acknowledgement date and confirm the required evidence. Imported payment claims are reviewed separately by Finance.',
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [importIntake.data, importRowId, plans.data, plans.isPending, navigate]);
   const pickCustomer = (next: string) => {
+    if (importRowId && next !== importIntake.data?.continuation.customerId) {
+      setMessage(
+        'This imported purchase belongs to its linked customer. Open a separate application to select another customer.',
+      );
+      return;
+    }
     selectedCustomerRef.current = next;
     if (prefilledCustomerId && next !== prefilledCustomerId) {
       setPrimary(emptyHolder('PRIMARY'));
@@ -758,6 +830,19 @@ export function CustomerApplicationEditorPage() {
   // the single save-and-submit action. Transient states (a mutation in flight)
   // are deliberately NOT blockers - they are not something to fix.
   const blockers: string[] = [];
+  if (importRowId) {
+    if (!mayLoadImport)
+      blockers.push('Customer import access is required to review this purchase.');
+    else if (importIntake.isError)
+      blockers.push(
+        'Imported purchase review could not be loaded. Return to the customer record and retry.',
+      );
+    else if (!importIntake.data) blockers.push('Wait for the imported purchase review to load.');
+    if (!importPurchaseReference.trim()) blockers.push('Enter the actual purchase reference.');
+    if (importIntake.data?.continuation.conflicts.length)
+      blockers.push('Resolve the imported customer conflicts before saving.');
+    if (!meta.acknowledgedAt) blockers.push('Enter the actual acknowledgement date.');
+  }
   if (!planId) blockers.push('Select a VIP plan.');
   if (!consent) blockers.push('Certification and consent must be ticked.');
   // A picked file uploads on Save, so it satisfies the gate.
@@ -785,7 +870,7 @@ export function CustomerApplicationEditorPage() {
         vipRecommenderName: app.vipRecommenderName ?? '',
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
-        acknowledgedAt: app.acknowledgedAt,
+        acknowledgedAt: app.acknowledgedAt ?? '',
       });
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);
@@ -798,10 +883,17 @@ export function CustomerApplicationEditorPage() {
     // Unchosen selectors stay absent: never send "" as a UUID.
     customerId: customerId || undefined,
     planId: planId || undefined,
-    tier,
+  tier,
     paymentScheme,
+    // Company-stated mirror: the selected card tier and payment scheme are the
+    // company-stated VIP package / payment terms, so the customer record's
+    // "Package and Payment (company stated)" block reflects the application
+    // without a separate "Edit stated record" pass. Prices stay manual.
+    statedVipPackage: tier,
+    statedPaymentTerms: paymentScheme,
     primary: { ...primary, holderType: 'PRIMARY' as const },
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
+    governmentIdNumber: idNumber.trim() || undefined,
     ...meta,
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
@@ -852,6 +944,14 @@ export function CustomerApplicationEditorPage() {
             await currentDocument.refetch();
           }
         } else {
+          if (importRowId && (!importIntake.data || importIntake.isError))
+            throw new Error('Load the imported purchase review before saving.');
+          if (importRowId && !importPurchaseReference.trim())
+            throw new Error(
+              'Enter the actual purchase reference. Reuse the same reference for the same purchase.',
+            );
+          if (importIntake.data?.continuation.conflicts.length)
+            throw new Error('Resolve the imported purchase conflicts before saving.');
           const checkedForSubmit = createCustomerApplicationSchema.safeParse(payload());
           if (!checkedForSubmit.success)
             throw new Error(humanizeApplicationIssues(checkedForSubmit.error.issues));
@@ -894,6 +994,17 @@ export function CustomerApplicationEditorPage() {
             const created = await createCustomerApplication({
               ...checkedForSubmit.data,
               requestId: applicationRequest.forPayload(checkedForSubmit.data),
+              ...(importRowId && importIntake.data
+                ? {
+                    importContext: {
+                      rowId: importRowId,
+                      purchaseReference: importPurchaseReference.trim(),
+                      requestId: applicationRequest.forPayload(checkedForSubmit.data),
+                      expectedSourceHash: importIntake.data.continuation.expectedSourceHash,
+                      expectedTargetVersion: importIntake.data.continuation.expectedTargetVersion,
+                    },
+                  }
+                : {}),
             });
             appId = created.id;
           }
@@ -1100,7 +1211,7 @@ export function CustomerApplicationEditorPage() {
         ? 'Complete primary holder fields.'
         : null,
     !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
-    null,
+  null,
     null,
   ];
   const steps = [
@@ -1129,15 +1240,35 @@ export function CustomerApplicationEditorPage() {
     { id: 'step-channel', label: 'Channel', done: channels.length > 0 },
     { id: 'step-cert', label: 'Certify', done: consent },
   ];
+  // Every step change puts the operator back at the top of the page.
+  //
+  // This used to scroll the step's own element into view, which is the wrong
+  // target for a wizard whose steps unmount each other: advancing UNMOUNTS the
+  // panel just left behind, so the document can get much shorter underneath
+  // the scroll. A smooth scroll then animates toward a height the layout no
+  // longer has and stops short, leaving the operator looking at empty ground
+  // instead of the step they pressed Next for.
+  //
+  // Scrolling the window to 0 has no target element to miss and cannot be
+  // clamped short. The stepper sits at the top of the page and marks the open
+  // step, so the operator lands on the new step's heading with their place in
+  // the flow still visible.
+  const revealStep = () => {
+    // After the swap has committed, so the shortened document is already in
+    // place and the browser has nothing left to clamp against.
+    window.setTimeout(() => window.scrollTo({ top: 0, left: 0 }), 0);
+  };
   const goStep = (index: number) => {
     if (index < 0 || index > steps.length - 1 || index > maxReached) return;
     setActiveStep(index);
+    revealStep();
   };
   const goNext = () => {
     if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
     const next = activeStep + 1;
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
+    revealStep();
   };
   // Edit entry point for the record-actions panel: the form below is the only
   // editor (there is no separate edit route), so editing means revealing it.
@@ -1229,15 +1360,15 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>Submitted</dt>
-                <dd>{existing.data.submittedAt ?? '—'}</dd>
+                <dd>{existing.data.submittedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Approved</dt>
-                <dd>{existing.data.approvedAt ?? '—'}</dd>
+                <dd>{existing.data.approvedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Rejected</dt>
-                <dd>{existing.data.rejectedAt ?? '—'}</dd>
+                <dd>{existing.data.rejectedAt ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Customer</dt>
@@ -1253,7 +1384,7 @@ export function CustomerApplicationEditorPage() {
               </div>
               <div className={styles.snapshotField}>
                 <dt>Sale</dt>
-                <dd>{existing.data.saleId ?? '—'}</dd>
+                <dd>{existing.data.saleId ?? '-'}</dd>
               </div>
             </dl>
           </section>
@@ -1261,7 +1392,7 @@ export function CustomerApplicationEditorPage() {
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
         {relatedCustomer ? (
           <section aria-label="Linked company record" className={styles.panel}>
-            <h2 className={styles.panelTitle}>Linked company record — read-only</h2>
+            <h2 className={styles.panelTitle}>Linked company record (read-only)</h2>
             <p className={styles.hint}>
               Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
               on the customer page. Stated figures never change the offer.
@@ -1269,36 +1400,35 @@ export function CustomerApplicationEditorPage() {
             <dl className={styles.snapshotGrid}>
               <div className={styles.snapshotField}>
                 <dt>RA NO</dt>
-                <dd>{relatedCustomer.raNumber ?? '—'}</dd>
+                <dd>{relatedCustomer.raNumber ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATUS (company)</dt>
-                <dd>{relatedCustomer.companyStatus ?? '—'}</dd>
+                <dd>{relatedCustomer.companyStatus ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>CITIZENSHIP</dt>
-                <dd>{relatedCustomer.citizenship ?? '—'}</dd>
+                <dd>{relatedCustomer.citizenship ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>SUPPLEMENTARY</dt>
-                <dd>{relatedCustomer.supplementaryFullName ?? '—'}</dd>
+                <dd>{relatedCustomer.supplementaryFullName ?? '-'}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>RELATED</dt>
                 <dd>
                   {[
-                    relatedCustomer.ostIstName,
                     relatedCustomer.svdName,
                     relatedCustomer.ssmName,
                     relatedCustomer.smName,
                   ]
                     .filter(Boolean)
-                    .join(' · ') || '—'}
+                    .join(' · ') || '-'}
                 </dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>STATED PACKAGE</dt>
-                <dd>{relatedCustomer.statedVipPackage ?? '—'}</dd>
+                <dd>{relatedCustomer.statedVipPackage ?? '-'}</dd>
               </div>
             </dl>
             <div className={styles.actions}>
@@ -1388,7 +1518,6 @@ export function CustomerApplicationEditorPage() {
           >
             <div className={styles.planBenefitsHead}>
               <div>
-                <p className={styles.planEyebrow}>Official plan benefits</p>
                 <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
               </div>
               <TierBadge tier={selectedPlan.code} />
@@ -1422,9 +1551,37 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="application-panel-heading"
             >
               <h2 id="application-panel-heading" className={styles.panelTitle}>
-                1. Application
+                Application
               </h2>
               <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+              {importRowId ? (
+                <>
+                  <label className={styles.filterLabel}>
+                    Purchase reference
+                    <input
+                      value={importPurchaseReference}
+                      maxLength={200}
+                      onChange={(e) => setImportPurchaseReference(e.target.value)}
+                      readOnly={Boolean(importIntake.data?.purchaseReference)}
+                    />
+                    <span>
+                      Use the actual purchase reference. Reuse the same reference for this purchase;
+                      Customer ID (RA No.) identifies the person.
+                    </span>
+                  </label>
+                  <DateField
+                    id="import-acknowledgement-date"
+                    name="acknowledgedAt"
+                    label="Actual acknowledgement date"
+                    value={meta.acknowledgedAt}
+                    max={today()}
+                    onChange={(value) =>
+                      setMeta((current) => ({ ...current, acknowledgedAt: value }))
+                    }
+                    hint="Enter the date the customer actually acknowledged the application."
+                  />
+                </>
+              ) : null}
               <div className={styles.editorGrid}>
                 <div className={styles.pickerWrap}>
                   <label className={styles.filterLabel}>
@@ -1433,6 +1590,7 @@ export function CustomerApplicationEditorPage() {
                       aria-label="Customer"
                       value={customerId}
                       disabled={saveAndSubmit.isPending}
+                      loading={customerOptions.isPending}
                       onChange={(e) => pickCustomer(e.target.value)}
                       options={[
                         { value: '', label: 'New Register' },
@@ -1443,11 +1601,6 @@ export function CustomerApplicationEditorPage() {
                       ]}
                     />
                   </label>
-                  {customerOptions.isPending ? (
-                    <div role="status" aria-label="Searching customers">
-                      <Skeleton style={{ height: 40 }} />
-                    </div>
-                  ) : null}
                   {customerId && linkedCustomer.isPending ? (
                     <p role="status" className={styles.pickedLine}>
                       Loading customer…
@@ -1519,7 +1672,7 @@ export function CustomerApplicationEditorPage() {
               aria-labelledby="identity-panel-heading"
             >
               <h2 id="identity-panel-heading" className={styles.panelTitle}>
-                2. Identity
+                Identity
               </h2>
               <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
               <fieldset className={styles.subGroup}>
@@ -1535,8 +1688,11 @@ export function CustomerApplicationEditorPage() {
                     <p>Current ID: {serverCurrentDocument.originalFilename}</p>
                     <p>
                       ID type:{' '}
-                      {serverCurrentDocument.reviewedFields?.idType?.replace(/_/g, ' ') ??
-                        'Missing: choose the type and upload again'}
+                      {serverCurrentDocument.reviewedFields?.idType
+                        ? (GOVERNMENT_ID_TYPE_LABELS[
+                            serverCurrentDocument.reviewedFields.idType as GovernmentIdType
+                          ] ?? serverCurrentDocument.reviewedFields.idType)
+                        : 'Missing: choose the type and upload again'}
                     </p>
                   </>
                 ) : null}
@@ -1577,13 +1733,21 @@ export function CustomerApplicationEditorPage() {
                       { value: '', label: 'Select ID type' },
                       ...governmentIdTypeSchema.options.map((value) => ({
                         value,
-                        label: value
-                          .replace(/_/g, ' ')
-                          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                        label: GOVERNMENT_ID_TYPE_LABELS[value],
                       })),
                     ]}
                   />
                 </label>
+                <TextField
+                  id="application-government-id-number"
+                  name="governmentIdNumber"
+                  label="Government ID number"
+                  optional
+                  value={idNumber}
+                  onChange={(value) => setIdNumber(filterGovernmentIdInput(value))}
+                  maxLength={40}
+                  disabled={saveAndSubmit.isPending}
+                />
                 <IdCapturePicker
                   onFile={setIdFile}
                   disabled={saveAndSubmit.isPending}
@@ -1611,7 +1775,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 2) && (
             <div id="step-holders">
-              <HolderFields title="3. Primary holder" value={primary} onChange={setPrimary} />
+              <HolderFields title="Primary holder" value={primary} onChange={setPrimary} />
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
@@ -1632,8 +1796,8 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 3) && (
             <fieldset id="step-recommender" className={styles.panel}>
-              <legend className={styles.panelTitle}>4. Recommender details</legend>
-              <p className={styles.hint}>Referrer is OST staff. Recommender is free text.</p>
+              <legend className={styles.panelTitle}>Recommender details</legend>
+              <p className={styles.hint}>Referrer and VIP recommender are active OST staff.</p>
               <div className={styles.editorGrid}>
                 <RecommenderFields
                   meta={meta}
@@ -1646,7 +1810,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 4) && (
             <fieldset id="step-channel" className={styles.panel}>
-              <legend className={styles.panelTitle}>5. Acquisition channel</legend>
+              <legend className={styles.panelTitle}>Acquisition channel</legend>
               {[
                 'CMP',
                 'DRP',
@@ -1675,7 +1839,7 @@ export function CustomerApplicationEditorPage() {
           )}
           {(!isNew || activeStep === 5) && (
             <fieldset id="step-cert" className={styles.panel}>
-              <legend className={styles.panelTitle}>6. Certification</legend>
+              <legend className={styles.panelTitle}>Certification</legend>
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
@@ -1758,8 +1922,8 @@ export function CustomerApplicationEditorPage() {
                     </Button>
                   </div>
                   <p className={styles.hint}>
-                    Approval needs reviewed purchase terms; reopening returns the record to
-                    draft for corrections.
+                    Approval needs reviewed purchase terms; reopening returns the record to draft
+                    for corrections.
                   </p>
                 </div>
               ) : null}
@@ -1850,7 +2014,9 @@ export function CustomerApplicationEditorPage() {
                       Cancel
                     </Button>
                   </div>
-                  <p className={styles.hint}>Cancelling ends this application. This cannot be undone.</p>
+                  <p className={styles.hint}>
+                    Cancelling ends this application. This cannot be undone.
+                  </p>
                 </div>
               ) : null}
               <div className={styles.actionGroup}>

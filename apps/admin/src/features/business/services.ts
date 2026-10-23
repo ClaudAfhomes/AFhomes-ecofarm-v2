@@ -306,6 +306,8 @@ export const getCustomerApplicationsPage = (
     from?: string;
     to?: string;
     search?: string;
+    /** Every application belonging to one customer, newest first. */
+    customerId?: string;
     /** Omit to see every application, including progressed ones. */
     queue?: 'application_work';
     limit?: number;
@@ -318,6 +320,7 @@ export const getCustomerApplicationsPage = (
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.search) query.set('search', params.search);
+  if (params.customerId) query.set('customerId', params.customerId);
   if (params.queue) query.set('queue', params.queue);
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined) query.set('offset', String(params.offset));
@@ -342,7 +345,17 @@ export const registerCustomerApplication = (
     method: 'POST',
     body: JSON.stringify(input),
   });
-export const createCustomerApplication = (input: CreateCustomerApplicationRequest) =>
+export const createCustomerApplication = (
+  input: CreateCustomerApplicationRequest & {
+    importContext?: {
+      rowId: string;
+      requestId: string;
+      expectedSourceHash: string;
+      expectedTargetVersion: string;
+      purchaseReference?: string;
+    };
+  },
+) =>
   post(
     '/official-forms/customer-applications',
     customerApplicationSchema,
@@ -610,8 +623,12 @@ export const getFinanceQueue = (
   }));
 };
 
-export const getActivationQueue = (): Promise<FinanceQueueItem[]> =>
-  requestList('/queues/activation', financeQueueItemSchema);
+export const getActivationQueue = (search = ''): Promise<FinanceQueueItem[]> => {
+  const query = new URLSearchParams();
+  if (search) query.set('search', search);
+  const suffix = query.toString();
+  return requestList(`/queues/activation${suffix ? `?${suffix}` : ''}`, financeQueueItemSchema);
+};
 
 /* ------------------------------------------------------------------ */
 /* Application-origin collection and finalization                      */
@@ -745,6 +762,7 @@ export const getCustomerImportTemplate = (format: 'xlsx' | 'csv'): Promise<Gener
   request(`/customer-imports/template/${format}`, generatedImportFileSchema);
 
 export const parseCustomerImport = (input: {
+  externalVerificationReason?: string;
   source: 'excel' | 'csv' | 'google_sheets';
   contentBase64?: string;
   sheetUrl?: string;

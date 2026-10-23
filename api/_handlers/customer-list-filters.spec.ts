@@ -102,4 +102,11 @@ describe('GET /customers list filters', () => {
     expect(state.status).toBe(400);
     expect(captured).toEqual({});
   });
+
+  it('forwards the companyStatus filter to the directory RPC', async () => {
+    install();
+    const state = await call({ companyStatus: 'CANCELLED' });
+    expect(state.status).toBe(200);
+    expect(captured).toMatchObject({ companyStatus: 'CANCELLED' });
+  });
 });

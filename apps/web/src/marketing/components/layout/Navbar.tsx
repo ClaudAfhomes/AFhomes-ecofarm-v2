@@ -60,7 +60,7 @@ export function Navbar() {
   const experiencesActive = location.pathname.startsWith('/experiences');
   const hasDarkTop =
     location.pathname === '/' ||
-    ['/about', '/vip', '/faq', '/compliance', '/contact', '/experiences', '/stories'].some(
+    ['/about', '/vip', '/faq', '/compliance', '/contact', '/experiences', '/stories', '/sale-team-search'].some(
       (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
     );
   const lightText = hasDarkTop && !scrolled && !menuOpen;

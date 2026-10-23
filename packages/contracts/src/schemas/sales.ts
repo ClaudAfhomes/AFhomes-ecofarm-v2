@@ -367,7 +367,6 @@ export const createCustomerSchema = z.object({
   supplementaryOccupationBusinessName: z.string().trim().max(200).optional(),
   supplementaryOfficeAddress: z.string().trim().max(200).optional(),
   supplementaryPosition: z.string().trim().max(100).optional(),
-  ostIstName: z.string().trim().max(120).optional(),
   svdName: z.string().trim().max(120).optional(),
   ssmName: z.string().trim().max(120).optional(),
   smName: z.string().trim().max(120).optional(),
@@ -401,6 +400,7 @@ export const updateCustomerSchema = z
     lastName: personNameSchema.optional(),
     suffix: z.string().trim().max(20).nullable().optional(),
     gender: genderSchema.nullable().optional(),
+    dateOfBirth: dateOfBirthSchema.nullable().optional(),
     email: emailSchema.optional(),
     phone: optionalPhoneSchema,
     landline: optionalLandlineSchema.nullable().optional(),
@@ -430,7 +430,6 @@ export const updateCustomerSchema = z
     supplementaryOccupationBusinessName: z.string().trim().max(200).nullable().optional(),
     supplementaryOfficeAddress: z.string().trim().max(200).nullable().optional(),
     supplementaryPosition: z.string().trim().max(100).nullable().optional(),
-    ostIstName: z.string().trim().max(120).nullable().optional(),
     svdName: z.string().trim().max(120).nullable().optional(),
     ssmName: z.string().trim().max(120).nullable().optional(),
     smName: z.string().trim().max(120).nullable().optional(),
@@ -479,8 +478,14 @@ export const customerSchema = z.object({
   address: z.unknown().nullable(),
   governmentIdType: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
-  /** Company-stated TIN, masked like the government ID. Never the raw value. */
+  /** Company-stated TIN, masked like the government ID on list reads. */
   tinNumberMasked: z.string().nullable().optional(),
+  /**
+   * Raw company-stated TIN. Returned only by the single-record detail read so
+   * authorized staff can show the current value. List, create and update
+   * reads expose `tinNumberMasked` only, and audits never carry either.
+   */
+  tinNumber: z.string().nullable().optional(),
   raNumber: z.string().nullable().optional(),
   companyStatus: z.string().nullable().optional(),
   citizenship: z.string().nullable().optional(),
@@ -495,13 +500,14 @@ export const customerSchema = z.object({
   supplementaryCitizenship: z.string().nullable().optional(),
   supplementaryCivilStatus: z.string().nullable().optional(),
   supplementaryTinNumberMasked: z.string().nullable().optional(),
+  /** Raw supplementary TIN; single-record detail read only. */
+  supplementaryTinNumber: z.string().nullable().optional(),
   supplementaryMobile: z.string().nullable().optional(),
   supplementaryEmail: z.string().nullable().optional(),
   supplementaryLandline: z.string().nullable().optional(),
   supplementaryOccupationBusinessName: z.string().nullable().optional(),
   supplementaryOfficeAddress: z.string().nullable().optional(),
   supplementaryPosition: z.string().nullable().optional(),
-  ostIstName: z.string().nullable().optional(),
   svdName: z.string().nullable().optional(),
   ssmName: z.string().nullable().optional(),
   smName: z.string().nullable().optional(),
@@ -524,7 +530,8 @@ export const customerSchema = z.object({
   /**
    * Membership facts mirrored from general Customer Lookup so the customer
    * detail page carries everything the lookup shows. Card plan code when the
-   * customer holds a membership, else null. Never a membership number: codes
+   * customer holds a membership, otherwise the latest canonical purchase or
+   * application plan. Never a membership number: codes
    * are transaction credentials and stay off this read model.
    */
   tier: z.string().nullable().optional(),
@@ -533,9 +540,11 @@ export const customerSchema = z.object({
   membershipExpiresAt: z.string().nullable().optional(),
   /** Derived payment state from the directory RPC; absent on raw rows. */
   paymentStatus: z.enum(['no_payment', 'partially_paid', 'fully_paid']).nullable().optional(),
-  /** Latest-sale aggregates backing the settlement rule; '0.00' when none. */
+  /** Verified sales and open-reservation aggregates; pending application quotes are excluded. */
   verifiedPaid: z.string().nullable().optional(),
   frozenTotal: z.string().nullable().optional(),
+  openReservationTotal: exactDecimalStringSchema.optional(),
+  openReservationPaid: exactDecimalStringSchema.optional(),
   derivedCategory: customerCategorySchema.optional(),
   portalAccountActivated: z.boolean().optional(),
   createdBy: z.string().uuid().nullable(),

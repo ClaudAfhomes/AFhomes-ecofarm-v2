@@ -4,6 +4,7 @@ import { companyTemplate } from './customer-workbook-export.js';
 import { workbookDate } from './customer-workbook.js';
 import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
 import { toXlsxMulti, zipStored, type XlsxSheetSpec } from './report-export.js';
+import { readCompanyMemberWorkbook } from './member-company-workbook.js';
 
 export const MEMBER_ENTRY_TABS = {
   Identity: [
@@ -303,8 +304,18 @@ export function memberWorkbook(kind: MemberWorkbookKind, members: Member[]): Uin
   );
 }
 
-export function readMemberWorkbook(bytes: Uint8Array) {
+export function readMemberWorkbook(bytes: Uint8Array, kind?: MemberWorkbookKind) {
   const parts = readWorkbookParts(bytes);
+  const identity = readWorkbook(parts, ['Identity'], false, { Identity: [8, 14, 15] }).get(
+    'Identity',
+  )!;
+  const first = identity[0]?.[0];
+  if (first === 'AAI Number' || first === 'AAO Number') {
+    const detected = first === 'AAI Number' ? 'IST' : 'OST';
+    if (kind && kind !== detected)
+      throw new Error(`This is a ${detected} workbook; select ${detected}.`);
+    return readCompanyMemberWorkbook(parts, detected);
+  }
   const date1904 = /\bdate1904=["'](?:1|true)["']/.test(decode(parts.get('xl/workbook.xml')));
   const sheets = readWorkbook(parts, Object.keys(MEMBER_ENTRY_TABS), false, DERIVED);
   const entries = Object.entries(MEMBER_ENTRY_TABS);

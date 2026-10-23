@@ -186,10 +186,6 @@ export function CreateOstDialog({
         }}
         aria-busy={create.isPending}
       >
-        <p className={styles.sectionHint}>
-          Create the OST login, choose an active Sales Manager, and record the signed accreditation
-          form. Fields marked * are required.
-        </p>
         {error ? (
           <div ref={errorRef} tabIndex={-1}>
             <Alert variant="danger" title="Review the form">
@@ -257,7 +253,7 @@ export function CreateOstDialog({
               readOnly
             />
             <label className={styles.fieldLabel}>
-              Sponsor (active Sales Manager)
+              Sponsor
               <Select
                 required
                 value={sponsorStaffId}
@@ -274,7 +270,7 @@ export function CreateOstDialog({
           </div>
           {sponsors.isError ? (
             <p className={styles.sectionHint} role="alert">
-              The Sales Manager list could not be loaded.
+              Sales Managers failed to load.
               <Button type="button" variant="secondary" onClick={() => void sponsors.refetch()}>
                 Retry Sales Managers
               </Button>
@@ -311,10 +307,6 @@ export function CreateOstDialog({
                     autoComplete="new-password"
                   />
                 </div>
-                <p className={styles.sectionHint}>
-                  The member must change this password at first sign-in. No invitation email is
-                  sent.
-                </p>
               </>
             ) : null}
           </div>
@@ -338,10 +330,10 @@ export function CreateOstDialog({
                 value={mode}
                 onChange={(e) => setMode(e.target.value as 'complete' | 'pending')}
                 options={[
-                  { value: 'complete', label: 'Complete now — the signed form is in hand' },
+                  { value: 'complete', label: 'Complete now' },
                   {
                     value: 'pending',
-                    label: 'Save as pending — the sponsored workflow finishes it',
+                    label: 'Save as pending',
                   },
                 ]}
               />
@@ -390,11 +382,6 @@ export function CreateOstDialog({
               </>
             ) : null}
           </div>
-          <p className={styles.sectionHint}>
-            {mode === 'complete'
-              ? 'Approves the accreditation now. The record keeps the signature dates you state and does not claim a sponsor endorsement.'
-              : 'Records the application only. The sponsor endorses it, then management approves it in the OST queue.'}
-          </p>
         </section>
       </form>
     </Dialog>

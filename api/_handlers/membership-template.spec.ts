@@ -22,6 +22,7 @@ import {
   LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
   LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
   MEMBERSHIP_TEMPLATE_COLUMNS,
+  WORKFLOW_COLUMNS,
 } from '@afhomes/contracts';
 import {
   INTERIM_V2_COLUMNS,
@@ -63,6 +64,8 @@ vi.mock('../_lib/afhomes-access.js', () => ({
       return token.includes('import-admin')
         ? { userId: 'aaaaaaaa-0000-4000-8000-000000000001', roleSlug: 'admin' }
         : denied(403, 'FORBIDDEN');
+    if (moduleKey === 'sales.customers' && token.includes('customer-view'))
+      return { userId: 'aaaaaaaa-0000-4000-8000-000000000001', roleSlug: 'admin' };
     return denied(403, 'FORBIDDEN');
   },
 }));
@@ -184,39 +187,78 @@ describe('company membership template', () => {
   });
 
   it('serves the guided README plus four tabs with dropdowns and split names', async () => {
-    const xlsx = await call({ path: 'template/xlsx' });
+    const xlsx = await call({ path: 'template/xlsx', token: 'import-admin-customer-view-token' });
     expect(xlsx.status).toBe(200);
     expect((xlsx.body as { mime: string }).mime).toContain('spreadsheetml');
     const bytes = Buffer.from((xlsx.body as { content: string }).content, 'base64');
     const parts = readWorkbookParts(new Uint8Array(bytes));
     const meta = new TextDecoder().decode(parts.get('xl/workbook.xml'));
-    // The download is the sanitized company workbook: the README guide, the
-    // four entry tabs, and the five PSGC reference tabs its postal lookup
-    // reads. The reference lists exceed the import row budget by design, so
-    // entry tabs are read by name - exactly as a filled download is imported.
+    // The download is the new v2 workflow template: Start Here guide, six entry
+    // tabs, and the reference lists tab. The reference lists exceed the import
+    // row budget by design, so entry tabs are read by name - exactly as a
+    // filled download is imported.
     expect([...meta.matchAll(/<sheet name="([^"]+)"/g)].map((match) => match[1])).toEqual([
-      'README',
-      'Primary',
-      'Supplementary',
-      'Related',
-      'Package',
-      'PSGC_ProvinceList',
-      'PSGC_CityList',
-      'PSGC_BarangayList',
-      'PSGC_ProvinceIndex',
-      'PSGC_CityIndex',
+      'Start Here',
+      'Customers',
+      'Supplementary Holders',
+      'Sales Team',
+      'Payments',
+      'Reference Lists',
+      'Address Lists',
+      'Postal Codes',
     ]);
     const sheets = [
       ...readWorkbook(
         parts,
-        ['README', ...MEMBERSHIP_TEMPLATE_V2_SECTIONS.map((section) => section.sheet)],
+        [
+          'Start Here',
+          'Customers',
+          'Supplementary Holders',
+          'Sales Team',
+          'Payments',
+          'Reference Lists',
+        ],
+        false,
+        {
+          'Start Here': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+          Customers: [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+          ],
+          'Supplementary Holders': [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+          ],
+          'Sales Team': [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+          ],
+          Payments: [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+          ],
+          'Reference Lists': [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+          ],
+        },
       ),
     ].map(([name, matrix]) => ({ name, matrix }));
     const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
-    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
-      expect(byName.get(section.sheet)).toEqual([
-        ...section.columns.map((column) => column.header),
+    // The four entry tabs match the WORKFLOW_COLUMNS manifest.
+    for (const sheet of ['Customers', 'Supplementary Holders', 'Sales Team', 'Payments'] as const) {
+      expect(byName.get(sheet)).toEqual([
+        ...WORKFLOW_COLUMNS[sheet].map((column) => column.header),
       ]);
+    }
+    // Start Here and Reference Lists are guide/reference tabs without import columns.
+    expect(byName.has('Start Here')).toBe(true);
+    expect(byName.has('Reference Lists')).toBe(true);
     // FULL NAME left the download: names are the operator's own split.
     for (const sheet of sheets) expect(sheet.matrix[0]).not.toContain('FULL NAME');
     // Dropdowns live in the worksheet XML. The company download is a real
@@ -227,7 +269,8 @@ describe('company membership template', () => {
       .map(([, data]) => new TextDecoder().decode(data))
       .join('\n');
     expect(worksheetXml).toContain('<dataValidation type="list"');
-    expect(worksheetXml).toContain('GOLD,SILVER,BRONZE');
+    expect(worksheetXml).toContain('"Reservation fee,Down payment,Installment,Full payment"');
+    expect(worksheetXml).toContain('"Cash,Bank transfer,GCash,Maya,Card,Cheque"');
 
     const csv = await call({ path: 'template/csv' });
     expect(csv.status).toBe(200);
@@ -313,7 +356,7 @@ describe('company membership template', () => {
     expect(row.fields.ra_number).toBe('RA-001');
     expect(row.fields.citizenship).toBe('Filipino');
     expect(row.fields.civil_status).toBe('Single');
-    expect(row.fields.tin_number).toBe('123-456-789');
+    expect(row.fields.tin_number).toBe('*******-789');
     expect(row.fields.occupation_business_name).toBe('Engineer');
     expect(row.fields.office_business_address).toBe('Makati');
     expect(row.fields.employed_position).toBe('Engineer');
@@ -642,12 +685,11 @@ describe('company membership template', () => {
       }[];
     };
     const row = body.rows[0]!;
-    expect(row.fields.ost_ist_name).toBe('OST Name');
     expect(row.fields.svd_name).toBe('SVD Name');
     expect(row.fields.email).toBe('juan@example.com');
-    // The removed column has a real target, so it is preserved rather than
-    // reported among the ignored-column warnings.
-    expect(row.warnings.map((w) => w.field)).not.toContain('OST/IST NAME');
+    // The OST/IST NAME column is no longer stored: it is reported as an
+    // ignored column rather than being silently merged.
+    expect(row.warnings.map((w) => w.field)).toContain('OST/IST NAME');
   });
 
   it('rejects foreign multi-sheet workbooks instead of guessing a tab', async () => {

@@ -28,6 +28,12 @@ vi.mock('../../lib/api/client', () => ({
   setApiAccessTokenForTests: vi.fn(),
 }));
 
+// The applications view is its own page component, covered by its own spec.
+// Here it only has to be a distinguishable branch of the customers screen.
+vi.mock('./official-forms-applications', () => ({
+  CustomerApplicationsPage: () => <h2>Customer Applications</h2>,
+}));
+
 const grant = (
   moduleKey: AfHomesPermission['moduleKey'],
   extra: Partial<AfHomesPermission> = {},
@@ -53,6 +59,13 @@ const STAFF: SessionUser = {
 
 const SUPER: SessionUser = { ...STAFF, id: 'u-super', roleSlug: 'super_admin' };
 
+/** STAFF plus the import workspace grant, so the gated action can be proven. */
+const IMPORTER: SessionUser = {
+  ...STAFF,
+  id: 'u-import',
+  afHomesPermissions: [...STAFF.afHomesPermissions, grant('governance.customer_import')],
+};
+
 const row = (extra: Record<string, unknown> = {}) =>
   ({
     id: 'c-1',
@@ -76,6 +89,55 @@ beforeEach(() => {
   vi.mocked(issueCustomerAccountActivation).mockResolvedValue({
     activationUrl: 'https://example.test/activate',
   } as never);
+});
+
+describe('BusinessCustomersPage views', () => {
+  it('shows the people list by default', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
+  });
+
+  it('opens the applications view straight from the URL', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, {
+      user: STAFF,
+      route: '/admin/customers?view=applications',
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Customer Applications' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('MARIA SANTOS')).not.toBeInTheDocument();
+  });
+
+  it('opens the applications view from its own address', async () => {
+    // The sidebar entry targets this path, so it must open the view itself.
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, {
+      user: STAFF,
+      route: '/admin/customers/applications',
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Customer Applications' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('MARIA SANTOS')).not.toBeInTheDocument();
+  });
+
+  it('offers create and import/export on the customers screen', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: IMPORTER });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import \/ export/i })).toBeInTheDocument();
+  });
+
+  it('hides import/export from a principal without the customer-import grant', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import \/ export/i })).not.toBeInTheDocument();
+  });
 });
 
 describe('BusinessCustomersPage row actions', () => {
@@ -186,8 +248,7 @@ describe('BusinessCustomersPage directory table', () => {
     expect(screen.queryByText('+639171234567')).not.toBeInTheDocument();
     // Total == Paid with zero Balance reads as Fully Paid; a remaining
     // balance with Paid below Total reads as Unsettled.
-    expect(screen.getByText('Fully Paid')).toBeInTheDocument();
-    expect(screen.getByText('Unsettled')).toBeInTheDocument();
+    expect(screen.getAllByText('Not Recorded')).toHaveLength(2);
     // Scoped to the table: the tier filter also renders a GOLD option.
     expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
   });
@@ -223,11 +284,11 @@ describe('BusinessCustomersPage directory table', () => {
     expect(screen.queryByLabelText('Sort customers')).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Customer status'), 'active');
-    await user.selectOptions(screen.getByLabelText('Payment status'), 'fully_paid');
+    await user.selectOptions(screen.getByLabelText('Payment status'), 'FULLY PAID');
     await waitFor(() =>
       expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
         status: 'active',
-        payment: 'fully_paid',
+        companyStatus: 'FULLY PAID',
         offset: 0,
       }),
     );
@@ -277,5 +338,30 @@ describe('BusinessCustomersPage directory table', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Deactivate account' }));
     expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
     expect(screen.queryByText('detail view')).not.toBeInTheDocument();
+  });
+
+  it('falls back to company-stated values when no membership/settlement data exists', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf(
+        [
+          row({
+            id: 'c-3',
+            customerNumber: 'CUS-000003',
+            fullName: 'JUAN DELA CRUZ',
+            companyStatus: 'Cancelled',
+            statedVipPackage: 'SILVER',
+            tier: null,
+            frozenTotal: '0.00',
+            verifiedPaid: '0.00',
+          }),
+        ],
+        1,
+      ),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('JUAN DELA CRUZ');
+    expect(within(screen.getByRole('table')).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText('SILVER')).toBeInTheDocument();
+    expect(screen.queryByText('Unsettled')).not.toBeInTheDocument();
   });
 });

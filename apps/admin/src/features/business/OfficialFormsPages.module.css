@@ -19,14 +19,310 @@
   }
 }
 
-.queueSummary {
-  margin: 0;
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
+/* In-page view tabs. Same segmented-pill grammar as the customer record tabs so
+   the two customer surfaces read as one product. Links keep router semantics;
+   only the presentation is button-like. */
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  width: fit-content;
+  max-width: 100%;
 }
 
-.queueSummary strong {
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  background: transparent;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.tab:hover {
   color: var(--color-text-primary);
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-subtle);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.tabCurrent {
+  color: var(--color-text-on-brand);
+  font-weight: 600;
+  background: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabCurrent:hover {
+  color: var(--color-text-on-brand);
+  background: var(--color-brand-primary-hover);
+  border-color: var(--color-brand-primary-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}
+
+/* Imported purchases tab: a page-level card grid. The card is deliberately a
+   record summary, not a second table: identity and stage lead, workbook figures
+   stay visibly separate from verified money, and the next action closes it. */
+.importsView {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.importsHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.importsTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.01em;
+}
+
+.importsDescription {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+.importsPageCount {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.purchaseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.purchaseCard {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.purchaseHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.purchaseIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.purchaseName {
+  margin: 0;
+  font-size: var(--text-body-l);
+  line-height: 1.3;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.purchaseReference {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.purchaseFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.purchaseFacts > div {
+  min-width: 0;
+}
+
+.purchaseFacts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+.purchaseFacts dd {
+  margin: 2px 0 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.purchasePayment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-brand-primary) 18%, white);
+  border-radius: var(--radius-control);
+  background: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-body-s);
+}
+
+.purchasePaymentReview {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, white);
+  background: var(--color-accent-soft);
+  color: var(--color-warning-strong);
+}
+
+.purchasePaymentLead {
+  flex-basis: 100%;
+  font-weight: 700;
+}
+
+.purchaseNotice {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 7%, white);
+}
+
+.purchaseConflict {
+  border-left-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 7%, white);
+}
+
+.purchaseNoticeTitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.purchaseList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+.purchaseFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.purchasePaging {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 639px) {
+  .purchaseFacts {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+
+  .purchaseFooter {
+    justify-content: flex-start;
+  }
+}
+
+/*
+ * Queue summary: two figures in ONE container split by 1px dividers, the same
+ * treatment the customer-import Job history uses. Deliberately duplicated
+ * here rather than promoted to @afhomes/ui: this is the second screen to want
+ * it, and promoting it would mean re-touching the Job history panel, which is
+ * already reviewed. Promote it when a third screen asks for the same strip.
+ */
+.queueSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.queueSummaryCell {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.queueSummaryCell + .queueSummaryCell {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.queueSummaryCell dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.queueSummaryCell dd {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The only figure here that can take colour, and only when it is not zero. */
+.queueSummaryCell[data-alert='true'] dd {
+  color: var(--color-warning-strong);
+}
+
+/* A settled fact needs no chip: the pending one next to it is the signal. */
+.settled {
+  color: var(--color-text-muted);
 }
 
 .tableWrap {
@@ -47,7 +343,8 @@
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
   background: var(--color-bg-surface-raised);
-  box-shadow: var(--shadow-sm);
+  /* Border OR shadow, never both - the rule the shared DetailCard already
+     follows. A resting table is separated by its edge. */
   overflow: auto;
 }
 
@@ -252,6 +549,13 @@
   max-width: 100%;
 }
 
+/* A locked field still shows its stored value but cannot be edited. */
+.filterLabel input[readonly] {
+  background: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+  cursor: default;
+}
+
 /* Editor top-level section: breathing room between the header, the guidance
    alert, and the first panel. */
 .editorSection {
@@ -304,8 +608,8 @@
 .hint {
   margin-top: 0;
   margin-bottom: var(--space-3);
-  font-size: var(--text-body-s);
-  color: var(--color-text-secondary);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
 }
 
 /* Real editor grid replacing the undefined `form-grid` class: responsive
@@ -376,14 +680,18 @@
   overflow-wrap: anywhere;
 }
 
-/* ID preview thumbnail: opens the fullscreen modal. */
+/* ID preview thumbnail: opens the fullscreen modal. Shrink-wraps its content
+   so the control measures the image, not a fixed box. */
 .thumbnailButton {
+  display: inline-block;
+  max-width: 100%;
   padding: 0;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-control);
   background: none;
   cursor: zoom-in;
   line-height: 0;
+  vertical-align: top;
 }
 
 .thumbnailButton:focus-visible {
@@ -399,17 +707,23 @@
   border-radius: var(--radius-control);
 }
 
-/* Large ID thumbnail: filename, size and zoom hint under the image. */
+/* Large ID thumbnail: shown at the image's OWN size.
+   The button wraps it, so its width and height are whatever the uploaded file
+   measures - no fixed box, no max-height crop, no `cover` trimming. `100%` is a
+   layout guard for an oversized photo only; it never upscales or distorts. */
 .thumbnailLarge {
-  width: min(100%, 20rem);
+  width: auto;
   height: auto;
-  max-height: 14rem;
-  object-fit: cover;
+  max-width: 100%;
   border-radius: var(--radius-control);
 }
 
+/* Filename, size and zoom hint under the image. `min-width: 0` lets a long
+   filename WRAP instead of stretching the button past the image beside it. */
 .thumbnailZoom {
   display: block;
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-caption);
   color: var(--color-text-secondary);
@@ -893,17 +1207,17 @@ button.stepperLink:disabled {
 
 .planGOLD {
   border-color: #c9a227;
-  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 45%, var(--color-bg-surface) 100%);
+  background-color: #fff8e1;
 }
 
 .planSILVER {
   border-color: #9aa3ad;
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 45%, var(--color-bg-surface) 100%);
+  background-color: #f1f5f9;
 }
 
 .planBRONZE {
   border-color: #b0793a;
-  background: linear-gradient(135deg, #fdf0e0 0%, #f5d6a8 45%, var(--color-bg-surface) 100%);
+  background-color: #fdf0e0;
 }
 
 /* Official card artwork banner: the physical card, full width. */
@@ -913,7 +1227,7 @@ button.stepperLink:disabled {
   margin-bottom: var(--space-4);
   padding: var(--space-4);
   border-radius: var(--radius-md);
-  background: linear-gradient(180deg, rgb(28 43 58 / 0.06), transparent);
+  background-color: var(--color-bg-surface);
 }
 
 .planArtImage {
@@ -922,7 +1236,6 @@ button.stepperLink:disabled {
   height: auto;
   aspect-ratio: 1.58;
   object-fit: contain;
-  filter: drop-shadow(0 10px 24px rgb(28 43 58 / 0.25));
 }
 
 .planBenefitsHead {
@@ -933,14 +1246,8 @@ button.stepperLink:disabled {
   margin-bottom: var(--space-4);
 }
 
-.planEyebrow {
-  margin: 0 0 4px;
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-secondary);
-}
+/* The eyebrow above the plan title was a small uppercase label - the one thing
+   the house rules ban. The title stands on its own now. */
 
 .planTitle {
   margin: 0;
@@ -963,9 +1270,63 @@ button.stepperLink:disabled {
 }
 
 /* Section lede under a panel title. */
+/*
+ * Agreement state on the editor: one container split by 1px dividers, the same
+ * strip the reservation queue and the import Job history use. Duplicated a
+ * third time rather than promoted to @afhomes/ui - promoting it now would mean
+ * re-touching two screens already reviewed. Promote on the fourth.
+ */
+.stateSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+  margin: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.stateSummaryCell {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+/* A hairline between every cell, which grid gaps alone do not draw. */
+.stateSummaryCell + .stateSummaryCell {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.stateSummaryCell dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.stateSummaryCell dd {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Only an outstanding balance takes the warning tone; a settled one stays ink. */
+.stateSummaryCell[data-alert='true'] dd {
+  color: var(--color-warning-strong);
+}
+
+/*
+ * A section hint explains the section; it is not a field. At body size in
+ * secondary ink it sat level with the input labels underneath it, so the two
+ * kinds of text competed. Caption size puts the hint above the controls where
+ * it belongs.
+ */
 .panelNote {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-body-s);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-caption);
+  line-height: var(--line-height-body);
   color: var(--color-text-secondary);
 }
 

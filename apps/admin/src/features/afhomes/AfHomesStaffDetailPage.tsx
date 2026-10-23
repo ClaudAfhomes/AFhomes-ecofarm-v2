@@ -30,6 +30,7 @@ import {
 } from './services';
 import { formatDateTime } from '../../lib/format';
 import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
+import { StaffSalesInvolvement } from './StaffSalesInvolvement';
 import styles from './AfHomesStaffDetailPage.module.css';
 
 const statusTone = (status: string): 'success' | 'danger' | 'neutral' =>
@@ -247,6 +248,10 @@ function StaffDetailForm({
         />
       ) : null}
       <div className={styles.cardStack}>
+        {(user?.roleSlug === 'super_admin' ||
+          user?.afHomesPermissions.some((p) => p.moduleKey === 'sales.customers' && p.canView)) && (
+          <StaffSalesInvolvement key={member.id} staffId={member.id} />
+        )}
         <DetailCard>
           <DetailCardTitle>Identity</DetailCardTitle>
           <DetailFieldGrid>

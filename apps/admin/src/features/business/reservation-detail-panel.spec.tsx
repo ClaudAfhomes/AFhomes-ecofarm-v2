@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { SessionUser } from '../../lib/session';
 import { Route, Routes } from 'react-router';
@@ -26,12 +26,6 @@ const calls = {
   finalize: vi.fn(),
   application: vi.fn(async () => null as unknown as null),
   proposal: vi.fn(async () => ({}) as unknown as never),
-  preview: vi.fn(async () => ({
-    kind: 'reservation_agreement' as const,
-    fields: {},
-    errors: [],
-    requiresReview: true as const,
-  })),
   records: [] as string[],
 };
 
@@ -158,8 +152,6 @@ vi.mock('./services', async (importOriginal) => {
     getCustomerApplications: async () => [],
     getCustomerApplication: calls.application,
     getPurchaseTermsProposal: calls.proposal,
-    getOfficialFormTemplate: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
-    previewOfficialFormImport: calls.preview,
     exportReservationAgreement: async () => ({ filename: 'x', mime: 'text/plain', content: '' }),
     createReservationAgreement: calls.createReservationAgreement,
     updateReservationAgreement: async () => current,
@@ -195,12 +187,6 @@ beforeEach(() => {
     saleId: SALE_ID,
     reservationId: RES_ID,
     activationRequired: true,
-  });
-  calls.preview.mockReset().mockResolvedValue({
-    kind: 'reservation_agreement',
-    fields: {},
-    errors: [],
-    requiresReview: true,
   });
   calls.application.mockReset().mockResolvedValue(null);
   calls.proposal.mockReset().mockRejectedValue(new Error('PURCHASE_TERMS_REVIEW_REQUIRED'));
@@ -409,7 +395,7 @@ describe('reservation detail field labels', () => {
     for (const label of [
       'Reservation Date',
       'Agreement Date',
-      'Revision Number',
+      'Reservation Number',
       'Monthly Amortization Start',
       'Monthly Amortization End',
       'Payment Due Day',
@@ -440,70 +426,12 @@ describe('reservation detail field labels', () => {
   });
 });
 
-describe('reservation bulk import control', () => {
-  it('exposes a named file input that accepts workbooks only', async () => {
+describe('reservation import controls', () => {
+  it('does not offer a separate reservation workbook import', async () => {
     renderDetail();
-    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
-    expect(input.tagName).toBe('INPUT');
-    expect(input.type).toBe('file');
-    expect(input.accept).toBe('.xlsx');
-    expect(screen.getByText('No workbook chosen yet.')).toBeTruthy();
-  });
-
-  it('confirms the chosen workbook and reports progress while reading it', async () => {
-    renderDetail();
-    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
-    fireEvent.change(input, {
-      target: { files: [new File(['sheet'], 'ist-batch-07.xlsx', { type: '' })] },
-    });
-    const status = await screen.findByText(/ist-batch-07\.xlsx/);
-    expect(status.textContent).toContain('1 KB');
-    expect(calls.preview).toHaveBeenCalledWith('reservation_agreement', expect.any(String));
-  });
-
-  /**
-   * The tier dropdown is a closed set of options. A workbook cell is not, so an
-   * unknown tier must never reach the state: a value with no matching option
-   * renders blank while the state keeps the bad value, and the browser would
-   * then submit it.
-   */
-  it('never lets a workbook put an unknown tier into the closed dropdown', async () => {
-    calls.preview.mockResolvedValue({
-      kind: 'reservation_agreement',
-      fields: { vip_tier: 'platinum' },
-      errors: [],
-      requiresReview: true,
-    });
-    renderDetail();
-    const select = (await screen.findByLabelText('Imported Tier')) as HTMLSelectElement;
-    // Wait for the agreement to hydrate: the page seeds the dropdown from the
-    // loaded record, and importing before that lands would race it.
-    await waitFor(() => expect(select.value).toBe('BRONZE'));
-    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
-    fireEvent.change(input, {
-      target: { files: [new File(['sheet'], 'ist-bad-tier.xlsx', { type: '' })] },
-    });
-    await screen.findByText(/ist-bad-tier\.xlsx/);
-    await waitFor(() => expect(calls.preview).toHaveBeenCalled());
-    // The loaded agreement's BRONZE stands: the unknown cell is discarded.
-    expect(select.value).toBe('BRONZE');
-  });
-
-  it('applies a recognised tier from the workbook to the dropdown', async () => {
-    calls.preview.mockResolvedValue({
-      kind: 'reservation_agreement',
-      fields: { vip_tier: 'gold' },
-      errors: [],
-      requiresReview: true,
-    });
-    renderDetail();
-    const select = (await screen.findByLabelText('Imported Tier')) as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe('BRONZE'));
-    const input = (await screen.findByLabelText('Import IST XLSX')) as HTMLInputElement;
-    fireEvent.change(input, {
-      target: { files: [new File(['sheet'], 'ist-good-tier.xlsx', { type: '' })] },
-    });
-    // The workbook wrote 'gold'; the stored option value is canonical 'GOLD'.
-    await waitFor(() => expect(select.value).toBe('GOLD'));
+    await screen.findByRole('heading', { name: 'AF-RES-ZZZZZ' });
+    expect(screen.queryByLabelText('Import IST XLSX')).toBeNull();
+    expect(screen.queryByText(/Bulk import/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download import template' })).toBeNull();
   });
 });

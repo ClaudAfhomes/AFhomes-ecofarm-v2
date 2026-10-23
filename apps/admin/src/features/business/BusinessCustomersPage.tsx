@@ -1,14 +1,13 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import {
+import {
   Button,
   ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
-  FilterBar,
-  DateField,
+  FilterBar,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -19,24 +18,22 @@ import {
   TextField,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
-import { customerSellerOptionSchema } from '@afhomes/contracts';
 
-import { requestList } from '../../lib/api/client';
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
-import { SettlementBadge } from './SettlementBadge';
 import { TierBadge } from './TierBadge';
-import {
+import {
   anonymizeCustomer,
   deactivateCustomer,
   deleteCustomer,
   getCustomersPage,
   issueCustomerAccountActivation,
 } from './services';
-import { applicationKeys, businessKeys } from './queryKeys';
+import { businessKeys } from './queryKeys';
+import { CustomerApplicationsPage } from './official-forms-applications';
 
 /**
  * Customer registration and card application.
@@ -53,6 +50,22 @@ export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
   const navigate = useNavigate();
+  // The import/export workspace keeps its OWN module, the same as it does in the
+  // applications view. Hiding the button is UX only - the server re-checks every
+  // call - so this must mirror that page's check exactly, not approximate it.
+  const canSeeImportExport =
+    user?.afHomesPermissions.some(
+      (permission) =>
+        permission.moduleKey === 'governance.customer_import' && permission.canView,
+    ) === true;
+  const [searchParams] = useSearchParams();
+  const { pathname } = useLocation();
+  // The Applications view has its own address so the sidebar can highlight it.
+  // `?view=` still wins, so an operator on a bookmarked `/admin/customers` link
+  // keeps landing on the view they asked for.
+  const applications = searchParams.has('view')
+    ? searchParams.get('view') === 'applications'
+    : pathname.startsWith('/admin/customers/applications');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
   const [page, setPage] = useState(0);
@@ -68,13 +81,16 @@ export function BusinessCustomersPage() {
     setApplied(next);
     setPage(0);
   });
+  // THREE filters, and they are the three answers to "who needs chasing":
+  // what state the account is in, whether money is still owed, and whose book
+  // of business it is. Seller is the only one of the three with no column in
+  // the table below, so without it there is no way to see your own customers.
+  // VIP tier and the registration date range were dropped: tier is printed on
+  // every row, and the table shows no date to filter against.
   const [filters, setFilters] = useState({
     status: '',
-    payment: '',
+    companyStatus: '',
     tier: '',
-    seller: '',
-    from: '',
-    to: '',
   });
   // Every filter change restarts at the first page.
   const patchFilters = (patch: Partial<typeof filters>) => {
@@ -106,10 +122,6 @@ export function BusinessCustomersPage() {
     if (page > pageCount - 1) setPage(pageCount - 1);
   }
   const safePage = Math.min(page, pageCount - 1);
-  const sellers = useQuery({
-    queryKey: applicationKeys.sellerOptions,
-    queryFn: () => requestList('/customers/filter-options', customerSellerOptionSchema),
-  });
   const canIssueActivation =
     user?.roleSlug === 'super_admin' ||
     user?.afHomesPermissions.some(
@@ -191,11 +203,33 @@ export function BusinessCustomersPage() {
       </section>
     );
 
+  if (applications)
+    return (
+      <section className={styles.page}>
+        <CustomerApplicationsPage />
+      </section>
+    );
+
   return (
     <section className={styles.page}>
       <PageHeader
         title="Customers"
         description="Customer directory and membership records."
+        actions={
+          <>
+            {canSeeImportExport ? (
+              <Button
+                variant="secondary"
+                onClick={() => navigate('/admin/customers/applications/import-export')}
+              >
+                Import / Export
+              </Button>
+            ) : null}
+            {/* Creating a customer and building their application are ONE action,
+                so this opens the builder rather than a separate create page. */}
+            <Button onClick={() => navigate('/admin/customers/new')}>New customer</Button>
+          </>
+        }
       />
 
       <FilterBar
@@ -229,13 +263,16 @@ export function BusinessCustomersPage() {
               Payment
               <Select
                 aria-label="Payment status"
-                value={filters.payment}
-                onChange={(e) => patchFilters({ payment: e.target.value })}
+                value={filters.companyStatus}
+                onChange={(e) => patchFilters({ companyStatus: e.target.value })}
                 options={[
                   { value: '', label: 'All payments' },
-                  { value: 'no_payment', label: 'No payment' },
-                  { value: 'partially_paid', label: 'Partial payment' },
-                  { value: 'fully_paid', label: 'Fully paid' },
+                  { value: 'CANCELLED', label: 'Cancelled' },
+                  { value: 'FULLY PAID', label: 'Fully paid' },
+                  { value: 'PARTIAL', label: 'Partial' },
+                  { value: 'INSTALLMENT', label: 'Installment' },
+                  { value: 'RF ONLY', label: 'RF only' },
+                  { value: 'REFUNDED', label: 'Refunded' },
                 ]}
               />
             </label>
@@ -247,38 +284,13 @@ export function BusinessCustomersPage() {
                 onChange={(e) => patchFilters({ tier: e.target.value })}
                 options={[
                   { value: '', label: 'All tiers' },
-                  ...['GOLD', 'SILVER', 'BRONZE'].map((t) => ({ value: t, label: t })),
+                  { value: 'GOLD', label: 'Gold' },
+                  { value: 'SILVER', label: 'Silver' },
+                  { value: 'BRONZE', label: 'Bronze' },
                 ]}
               />
             </label>
-            <label className={styles.filterLabel}>
-              Seller
-              <Select
-                aria-label="Seller"
-                value={filters.seller}
-                onChange={(e) => patchFilters({ seller: e.target.value })}
-                options={[
-                  { value: '', label: 'All sellers' },
-                  ...(sellers.data?.map((s) => ({ value: s.id, label: s.name })) ?? []),
-                ]}
-              />
-            </label>
-            <DateField
-              id="customers-from"
-              name="from"
-              label="From date"
-              optional
-              value={filters.from}
-              onChange={(value) => patchFilters({ from: value })}
-            />
-            <DateField
-              id="customers-to"
-              name="to"
-              label="To date"
-              optional
-              value={filters.to}
-              onChange={(value) => patchFilters({ to: value })}
-            />
+
           </>
         }
       />
@@ -294,6 +306,7 @@ export function BusinessCustomersPage() {
         <div
           role="region"
           aria-label="Scrollable records"
+          aria-busy={customers.isFetching}
           tabIndex={0}
           className={`table-scroll ${styles.tableWrap}`}
         >
@@ -308,7 +321,17 @@ export function BusinessCustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((customer) => (
+              {customers.isFetching && !customers.isPending
+                ? Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`sk-${i}`} aria-hidden="true">
+                      <td><Skeleton style={{ height: 16, width: '60%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '70%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '50%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: '60%' }} /></td>
+                      <td><Skeleton style={{ height: 16, width: 80 }} /></td>
+                    </tr>
+                  ))
+                : rows.map((customer) => (
                 <tr
                   key={customer.id}
                   tabIndex={0}
@@ -330,10 +353,14 @@ export function BusinessCustomersPage() {
                     </span>
                   </td>
                   <td data-label="Payment Status">
-                    <SettlementBadge total={customer.frozenTotal} paid={customer.verifiedPaid} />
+                    {customer.companyStatus ? (
+                      <StatusChip label={customer.companyStatus} />
+                    ) : (
+                      'Not Recorded'
+                    )}
                   </td>
                   <td data-label="VIP Tier">
-                    <TierBadge tier={customer.tier} />
+                    <TierBadge tier={customer.tier ?? customer.statedVipPackage} />
                   </td>
                   <td data-label="Status">
                     <StatusChip label={customer.status} />

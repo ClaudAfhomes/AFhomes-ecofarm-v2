@@ -7,6 +7,11 @@ const staff = (roleSlug: string, mustChangePassword = false): AuthPortals => ({
   ost: null,
 });
 describe('customer entry identity routing', () => {
+  it('routes an OST temporary password to its own password screen', () =>
+    expect(decideCustomerLogin(staff('ost', true))).toEqual({
+      kind: 'navigate',
+      to: '/ost/change-password',
+    }));
   it.each([
     'employee',
     'finance',

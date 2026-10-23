@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20261109000001_afhomes_claim_rpc_authorization_sql", "label": "20261109000001_afhomes_claim_rpc_authorization.sql", "file_type": "code", "source_file": "supabase/migrations/20261109000001_afhomes_claim_rpc_authorization.sql", "source_location": null}], "edges": []}

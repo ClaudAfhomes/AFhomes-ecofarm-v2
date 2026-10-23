@@ -41,6 +41,7 @@ import { useSession } from '../../lib/session';
 import { canViewModule } from '../../app/navigation';
 import { ApiError, errorBlockers, errorFieldEntries } from '../../lib/api/errors';
 import { deleteAfHomesStaff } from '../afhomes/services';
+import { StaffSalesInvolvement } from '../afhomes/StaffSalesInvolvement';
 import { MemberFormDialog, type MemberFormSeed, type MemberFormValues } from './MemberFormDialog';
 import {
   getMember,
@@ -165,11 +166,13 @@ export function MemberDetailDialog({
   onClose,
   onChanged,
   onTransfer,
+  onConvertToIst,
 }: {
   member: Member;
   onClose: () => void;
   onChanged: () => void;
   onTransfer?: (member: Member) => void;
+  onConvertToIst?: (member: Member) => void;
 }) {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -260,12 +263,20 @@ export function MemberDetailDialog({
     onSuccess: async () => {
       await invalidate();
       onChanged();
-      notifySuccess({ title: 'AA number issued', message: 'Accreditation is active.' });
+      notifySuccess({ title: 'AAI number issued', message: 'Employee identity recorded.' });
     },
   });
   const issueFields = errorFieldEntries(issue.error);
 
   const canDelete = user?.roleSlug === 'super_admin' && user.id !== member.id;
+  // A kind transfer is an administrator act (the transfer RPC refuses anyone
+  // else); mirror the role and update-right gates so nobody sees a dead end.
+  const canConvertToIst =
+    member.position === 'ost' &&
+    (user?.roleSlug === 'admin' || user?.roleSlug === 'super_admin') &&
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'network.members' && permission.canUpdate,
+    ) === true;
   const canViewRenewal =
     member.position === 'ost' &&
     canViewModule(user?.afHomesPermissions, 'network.ost_registrations') &&
@@ -291,12 +302,17 @@ export function MemberDetailDialog({
                   navigate(`/admin/ost/members/${member.id}`);
                 }}
               >
-                Validity / renewal
+                Renewal
               </Button>
             ) : null}
             {onTransfer ? (
               <Button variant="secondary" onClick={() => onTransfer(member)}>
-                {member.position === 'ost' ? 'Transfer team' : 'Convert to OST'}
+                {member.position === 'ost' ? 'Transfer team' : 'Transfer to OST'}
+              </Button>
+            ) : null}
+            {onConvertToIst && canConvertToIst ? (
+              <Button variant="secondary" onClick={() => onConvertToIst(member)}>
+                Transfer to IST
               </Button>
             ) : null}
             <Button
@@ -398,7 +414,7 @@ export function MemberDetailDialog({
           </DetailCard>
           {!member.aaNumber && member.position !== 'ost' ? (
             <DetailCard>
-              <DetailCardTitle>Accreditation</DetailCardTitle>
+              <DetailCardTitle>Employee identity</DetailCardTitle>
               <p className={styles.sectionHint}>No number yet. Issue one.</p>
               <div className={styles.formFields}>
                 <label className={styles.fieldLabel}>
@@ -466,6 +482,11 @@ export function MemberDetailDialog({
             </DetailCard>
           ) : null}
         </div>
+        {(user?.roleSlug === 'super_admin' ||
+          (canViewModule(user?.afHomesPermissions, 'organization.staff') &&
+            canViewModule(user?.afHomesPermissions, 'sales.customers'))) && (
+          <StaffSalesInvolvement key={member.id} staffId={member.id} />
+        )}
       </Dialog>
 
       {editing ? (

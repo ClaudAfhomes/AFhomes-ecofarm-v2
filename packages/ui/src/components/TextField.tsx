@@ -15,11 +15,12 @@ export interface TextFieldProps {
   error?: string;
   hint?: string;
   optional?: boolean;
-  type?: 'text' | 'email' | 'tel';
+  type?: 'text' | 'email' | 'tel' | 'password';
   autoComplete?: string;
   inputMode?: 'text' | 'email' | 'tel' | 'numeric' | 'decimal';
   inputRef?: RefObject<HTMLInputElement | null>;
   placeholder?: string;
+  minLength?: number;
   maxLength?: number;
   disabled?: boolean;
   readOnly?: boolean;
@@ -45,6 +46,7 @@ export function TextField({
   inputMode,
   inputRef,
   placeholder,
+  minLength,
   maxLength,
   disabled = false,
   readOnly = false,
@@ -69,6 +71,7 @@ export function TextField({
         autoComplete={autoComplete}
         inputMode={inputMode}
         placeholder={placeholder}
+        minLength={minLength}
         maxLength={maxLength}
         disabled={disabled}
         readOnly={readOnly}

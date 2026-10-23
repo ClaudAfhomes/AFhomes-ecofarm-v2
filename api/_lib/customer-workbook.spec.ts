@@ -43,6 +43,31 @@ function book(data: Record<string, Record<number, Record<string, string>>> = {})
 }
 
 describe('company workbook adapter', () => {
+  it.each(['Filipino', 'filipino', ' Filipino '])(
+    'accepts and canonicalizes the allowed citizenship %s independently of an incomplete TIN',
+    (citizenship) => {
+      const record = parseCustomerWorkbook(
+        companyWorkbook([{ ...validFields(), citizenship, tin: '123456' }]),
+      )!.rows[0]!;
+      expect(record.fields.citizenship).toBe('Filipino');
+      const row = validateImportRow(record.rowNumber, record.fields, context, '2026-10-19');
+      validateWorkbookFields(record.fields, row);
+      expect(row.errors.filter((e) => e.field.includes('citizenship'))).toEqual([]);
+      expect(row.errors.find((e) => e.field === 'tin')?.message).toMatch(
+        /6 digits.*complete 9-digit/,
+      );
+      expect(workbookApplicationPrefill({ ...record.fields, tin: '' }).primary.citizenship).toBe(
+        'Filipino',
+      );
+    },
+  );
+  it.each(['', '123-456-789', '123456789-000'])('accepts an optional or complete TIN %s', (tin) => {
+    const fields = { ...validFields(), citizenship: 'Filipino', tin };
+    const row = validateImportRow(2, fields, context, '2026-10-19');
+    validateWorkbookFields(fields, row);
+    expect(row.errors.filter((e) => e.field === 'tin')).toEqual([]);
+    expect(workbookApplicationPrefill(fields).primary.citizenship).toBe('Filipino');
+  });
   it('ships all ten source sheets without customer data, macros, cached shared strings or author metadata', () => {
     const bytes = companyTemplate();
     const parts = readWorkbookParts(bytes);

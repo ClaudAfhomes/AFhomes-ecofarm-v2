@@ -49,6 +49,8 @@ const RECORD = {
   government_id_type: 'passport',
   government_id_number: 'P1234567',
   government_id_masked: null,
+  tin_number: '123456789',
+  supplementary_tin_number: '987654321',
   status: 'active',
   auth_user_id: null,
   created_by: null,
@@ -94,6 +96,35 @@ async function call(options: { path: string; token?: string }): Promise<State> {
 }
 
 describe('GET /customers/:id', () => {
+  it('returns authoritative open-reservation totals without exposing a membership activation', async () => {
+    install([
+      {
+        record: {
+          ...RECORD,
+          memberships: null,
+          member_status: null,
+          tier: 'GOLD',
+          payment_status: 'partially_paid',
+          verified_paid: '90000.00',
+          frozen_total: '312000.00',
+          open_reservation_total: '312000.00',
+          open_reservation_paid: '90000.00',
+        },
+        total_count: 1,
+      },
+    ]);
+    const state = await call({ path: CUSTOMER.active, token: TOKEN2.salesManager });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      tier: 'GOLD',
+      paymentStatus: 'partially_paid',
+      openReservationTotal: '312000.00',
+      openReservationPaid: '90000.00',
+      membershipStatus: null,
+      hasActiveMembership: false,
+    });
+  });
+
   it('returns the directory row for a viewer of sales.customers', async () => {
     install();
     const state = await call({ path: CUSTOMER.active, token: TOKEN2.salesManager });
@@ -121,6 +152,16 @@ describe('GET /customers/:id', () => {
     const raw = JSON.stringify(state.body);
     expect(raw).not.toContain('P1234567');
     expect((state.body as Record<string, unknown>).governmentIdMasked).toBe('****4567');
+  });
+
+  it('returns the raw TIN on the single-record read so the editor can show it', async () => {
+    install();
+    const state = await call({ path: CUSTOMER.active, token: TOKEN2.salesManager });
+    expect(state.status).toBe(200);
+    const body = state.body as Record<string, unknown>;
+    expect(body.tinNumber).toBe('123456789');
+    expect(body.supplementaryTinNumber).toBe('987654321');
+    expect(body.tinNumberMasked).toBe('*****6789');
   });
 
   it('returns 404 when the directory has no such row', async () => {

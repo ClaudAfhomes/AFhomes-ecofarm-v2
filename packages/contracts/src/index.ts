@@ -20,6 +20,7 @@ export {
   afHomesRoleSchema,
   afHomesDepartmentSchema,
   afHomesStaffSchema,
+  staffSaleInvolvementSchema,
   afHomesSessionSchema,
   staffTestPurgeResponseSchema,
   staffAccountSetupSchema,
@@ -39,6 +40,7 @@ export type {
   AfHomesRole,
   AfHomesDepartment,
   AfHomesStaff,
+  StaffSaleInvolvement,
   AfHomesSession,
   StaffTestPurgeResponse,
   StaffAccountSetup,
@@ -445,13 +447,14 @@ export {
   acquisitionChannelSchema,
   applicationHolderSchema,
   storedApplicationHolderSchema,
+  holderBirthDateSchema,
+  OLDEST_HOLDER_AGE,
   SUFFIX_OPTIONS,
   SEX_OPTIONS,
   CITIZENSHIP_OPTIONS,
   CIVIL_STATUS_OPTIONS,
   suffixOptionSchema,
   sexOptionSchema,
-  citizenshipOptionSchema,
   civilStatusOptionSchema,
   tinNumberSchema,
   reservationHolderSchema,
@@ -744,6 +747,8 @@ export * from './schemas/point-approvals.js';
 
 export * from './schemas/service-refunds.js';
 export * from './schemas/customer-workbook.js';
+export * from './schemas/customer-workflow.js';
+export * from './schemas/customer-import-continuation.js';
 
 export { servicePolicyManagementResultSchema } from './schemas/points.js';
 export * from './schemas/member-workbook.js';

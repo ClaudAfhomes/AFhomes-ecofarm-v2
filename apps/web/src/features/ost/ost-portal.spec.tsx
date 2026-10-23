@@ -15,6 +15,11 @@ import { CustomerLoginForm } from '../customer/CustomerLoginForm';
 import { Navigate, Route, Routes } from 'react-router';
 import { OstGuard } from '../../app/OstGuard';
 
+vi.mock('../../lib/PortalRedirect', () => ({
+  PortalRedirect: ({ to }: { to: string }) =>
+    to.startsWith('/admin') ? <p>Opening password setup: {to}</p> : <Navigate to={to} replace />,
+}));
+
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: (...args: unknown[]) =>
@@ -134,18 +139,79 @@ const render = (route: string, sessionUser: { authUserId: string; email: string 
   renderWithProviders(<App />, { route, sessionUser });
 
 describe('OST login', () => {
-  it('renders the OST entry with a register link and no admin link', async () => {
+  it('routes temporary-password OST login to the existing password setup', async () => {
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    const user = userEvent.setup();
+    render('/ost/login');
+    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(screen.getByLabelText('Password'), 'Temporary123!');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+    expect(
+      await screen.findByRole('heading', { name: 'Create your own password' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Ollie Seller')).not.toBeInTheDocument();
+  });
+
+  it('blocks a direct dashboard visit until password setup completes', async () => {
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    render('/ost/dashboard', { authUserId: 'u', email: 'ost@afhomes.test' });
+    expect(
+      await screen.findByRole('heading', { name: 'Create your own password' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Ollie Seller')).not.toBeInTheDocument();
+  });
+
+  it('explains temporary-password sign-in without a registration link', async () => {
     render('/ost/login');
     expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /register as ost/i })).toHaveAttribute(
-      'href',
-      '/ost/register',
-    );
+    expect(screen.queryByRole('link', { name: /register as ost/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/temporary password provided/i)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/administration/i);
     expect(document.querySelector('meta[name="robots"]')).toHaveAttribute(
       'content',
       'noindex, nofollow',
     );
+  });
+
+  it('requires a new password before entering with a temporary password', async () => {
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    const user = userEvent.setup();
+    render('/ost/login');
+    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(screen.getByLabelText('Password'), 'TempPass123');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+    expect(
+      await screen.findByRole('heading', { name: 'Create your own password' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('OST-000007')).not.toBeInTheDocument();
+    await user.type(await screen.findByLabelText('Temporary password'), 'TempPass123');
+    await user.type(screen.getByLabelText('New password'), 'OwnPassword123');
+    await user.type(screen.getByLabelText('Confirm new password'), 'WrongPassword123');
+    await user.click(screen.getByRole('button', { name: 'Save password' }));
+    expect(await screen.findByText('The passwords do not match.')).toBeInTheDocument();
+    routes.set('/admin/afhomes/session/password', ok({ changed: true }));
+    authMock.signOut.mockResolvedValue({ error: null });
+    await user.clear(screen.getByLabelText('Confirm new password'));
+    await user.type(screen.getByLabelText('Confirm new password'), 'OwnPassword123');
+    await user.click(screen.getByRole('button', { name: 'Save password' }));
+    expect(await screen.findByText(/Sign in with your new password/)).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/admin/afhomes/session/password'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ currentPassword: 'TempPass123', newPassword: 'OwnPassword123' }),
+      }),
+    );
+    expect(authMock.updateUser).not.toHaveBeenCalled();
   });
 
   it('signs an approved OST in and lands on the dashboard', async () => {
@@ -194,6 +260,18 @@ describe('OST login', () => {
 });
 
 describe('OST dashboard guard', () => {
+  it('blocks direct dashboard access until the temporary password is changed', async () => {
+    signedIn = true;
+    portalsBody.current = {
+      ...OST_PORTALS,
+      staff: { roleSlug: 'ost', roleName: 'OST', status: 'active', mustChangePassword: true },
+    };
+    render('/ost/dashboard', { authUserId: 'u', email: 'ost@afhomes.test' });
+    expect(
+      await screen.findByRole('heading', { name: 'Create your own password' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('OST-000007')).not.toBeInTheDocument();
+  });
   it('sends visitors without a session to OST login', async () => {
     render('/ost/dashboard');
     expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
@@ -226,6 +304,19 @@ describe('OST dashboard guard', () => {
 });
 
 describe('OST recovery targets', () => {
+  it('preserves email recovery without requiring a temporary password', async () => {
+    signedIn = true;
+    authMock.updateUser.mockResolvedValue({ error: null });
+    authMock.signOut.mockResolvedValue({ error: null });
+    render('/ost/reset-password');
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('New password'), 'RecoveredPass123');
+    expect(screen.queryByLabelText('Temporary password')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Confirm new password'), 'RecoveredPass123');
+    await user.click(screen.getByRole('button', { name: 'Update password' }));
+    expect(await screen.findByText(/Sign in with your new password/)).toBeInTheDocument();
+    expect(authMock.updateUser).toHaveBeenCalledWith({ password: 'RecoveredPass123' });
+  });
   it('requests recovery for the OST reset page', async () => {
     const user = userEvent.setup();
     render('/ost/forgot-password');

@@ -196,7 +196,7 @@ export function GeographicAddressFields({
 function Unverified() {
   return (
     <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0 }}>
-      Stored value, not linked to an official code yet - pick it from the list to verify.
+      Stored value unverified. Pick from list.
     </p>
   );
 }

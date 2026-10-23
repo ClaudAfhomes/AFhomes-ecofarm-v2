@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_supabase_migrations_20261011000001_afhomes_phase17_function_search_path_hardening_sql", "label": "20261011000001_afhomes_phase17_function_search_path_hardening.sql", "file_type": "code", "source_file": "supabase/migrations/20261011000001_afhomes_phase17_function_search_path_hardening.sql", "source_location": null}], "edges": []}

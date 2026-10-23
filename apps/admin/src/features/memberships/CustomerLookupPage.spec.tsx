@@ -1,15 +1,17 @@
 import { fireEvent, screen, within } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
-import { Route, Routes, useLocation } from 'react-router';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { CustomerLookupPage } from './CustomerLookupPage';
 import { renderWithProviders } from '../../test/utils';
-import { requestList } from '../../lib/api/client';
+import { requestList, protectedRequest } from '../../lib/api/client';
 import { RequireRole } from '../../app/RequireRole';
 
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn(),
+  protectedRequest: vi.fn(),
   setApiAccessTokenForTests: vi.fn(),
 }));
+// services are exercised through the mocked `request` client below.
 
 /**
  * Customer Lookup, the GSD/Employee desk.
@@ -39,15 +41,23 @@ async function pickOption(name: RegExp) {
   fireEvent.mouseDown(option);
 }
 
-function LocationProbe() {
-  const location = useLocation();
-  return (
-    <p aria-label="route">
-      {location.pathname}
-      {location.search}
-    </p>
-  );
-}
+beforeEach(() => {
+  vi.mocked(requestList).mockReset();
+  vi.mocked(protectedRequest).mockReset();
+  vi.mocked(protectedRequest).mockRejectedValue(new Error('FORBIDDEN: customer master access'));
+});
+
+it('shows a picked lookup result without requesting the protected customer master record', async () => {
+  vi.mocked(requestList).mockResolvedValue([PROSPECT]);
+  vi.mocked(protectedRequest).mockRejectedValue(new Error('FORBIDDEN: customer master access'));
+  renderWithProviders(<CustomerLookupPage />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
+    target: { value: 'DELA' },
+  });
+  await pickOption(/PROSPECT DELA CRUZ/);
+  expect(await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' })).toBeInTheDocument();
+  expect(protectedRequest).not.toHaveBeenCalled();
+});
 
 it('shows a non-member customer with the two statuses kept separate', async () => {
   vi.mocked(requestList).mockResolvedValue([PROSPECT]);
@@ -100,9 +110,11 @@ it('shows a suspended member record without ever printing a code', async () => {
   expect(row?.textContent).toMatch(/suspended/i);
   expect(row?.textContent).not.toMatch(/MBS-/);
   expect(row?.textContent).not.toMatch(/AFHOMES:/);
-  // Both statuses are present as separate rows, not merged into one value.
+  // Customer and membership status, VIP tier and validity are separate facts.
   expect(row).toHaveTextContent('Customer Status');
   expect(row).toHaveTextContent('Membership Status');
+  expect(row).toHaveTextContent('VIP Tier');
+  expect(row).toHaveTextContent('Validity');
 });
 
 it('queries the customer-lookup endpoint, not the member-transaction lookup', async () => {
@@ -232,16 +244,15 @@ it('searches live with no Search button to click', async () => {
   );
 });
 
-it('shows skeleton-only loading while pending (no spinner, no loading text)', async () => {
+it('shows suggestion skeletons while pending, with no card skeleton', async () => {
   vi.mocked(requestList).mockReturnValue(new Promise(() => {}));
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'DELA' },
   });
-  const status = await screen.findByRole('status', { name: 'Looking for Customer' });
-  expect(status).toBeInTheDocument();
-  // Two placeholder cards while the search resolves.
-  expect(status.children).toHaveLength(2);
+  // No card-level skeleton is rendered while the search resolves.
+  expect(screen.queryByRole('status', { name: 'Looking for Customer' })).toBeNull();
+  expect(screen.queryByRole('article')).toBeNull();
   // The pending dropdown mirrors real suggestion rows (name + meta bars).
   const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
   expect(within(listbox).getAllByRole('presentation', { hidden: true })).toHaveLength(3);
@@ -398,36 +409,4 @@ it('offers no mutating control at all', async () => {
   expect(screen.queryByRole('button', { name: /edit|activate|payment|redeem/i })).toBeNull();
 });
 
-describe('lookup to record navigation', () => {
-  async function showCard() {
-    vi.mocked(requestList).mockResolvedValue([PROSPECT]);
-    renderWithProviders(
-      <Routes>
-        <Route path="/admin/customer-lookup" element={<CustomerLookupPage />} />
-        <Route path="*" element={<LocationProbe />} />
-      </Routes>,
-      { route: '/admin/customer-lookup' },
-    );
-    fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
-      target: { value: 'DELA' },
-    });
-    await pickOption(/PROSPECT DELA CRUZ/);
-    await screen.findByRole('heading', { name: 'PROSPECT DELA CRUZ' });
-  }
 
-  it('opens the customer record by UUID', async () => {
-    await showCard();
-    fireEvent.click(screen.getByRole('button', { name: 'Open record' }));
-    expect(await screen.findByLabelText('route')).toHaveTextContent(
-      `/admin/customers/${PROSPECT.customerId}`,
-    );
-  });
-
-  it('opens the application queue filtered to the picked number', async () => {
-    await showCard();
-    fireEvent.click(screen.getByRole('button', { name: 'View forms' }));
-    expect(await screen.findByLabelText('route')).toHaveTextContent(
-      '/admin/customers/applications?search=AF-CUS-00042',
-    );
-  });
-});

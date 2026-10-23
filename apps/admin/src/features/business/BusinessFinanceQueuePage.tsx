@@ -1,4 +1,5 @@
 import styles from './BusinessFinanceQueuePage.module.css';
+import { ImportPaymentClaimsPanel } from './ImportPaymentClaimsPanel';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import { useSingleFlight } from '../../lib/useSingleFlight';
@@ -1233,6 +1234,7 @@ function ReservationDetails({
           </div>
         </dl>
       </section>
+      <ImportPaymentClaimsPanel reservationId={item.reservationId} />
       <section className={styles.detailSection} aria-label="Payment ledger">
         <h2 className={styles.detailTitle}>Payment ledger</h2>
         {payments.isPending ? (

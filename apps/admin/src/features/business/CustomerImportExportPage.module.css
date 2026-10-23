@@ -250,6 +250,208 @@
   color: var(--color-text-secondary);
 }
 
+/* ==========================================================================
+   Job history.
+
+   The tab answers one question - did this import land, and what is still
+   broken - so it is a stack of job cards, not a table. The five row counts are
+   a decomposition of Total rather than five independent columns, and an
+   eleventh Actions column that is blank on every finished job said nothing.
+   Nothing here scrolls sideways at any width.
+   ========================================================================== */
+
+/* Three figures in one container split by 1px dividers, never three tiles. */
+.jobSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--space-4) 0 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.jobSummaryCell {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  min-width: 0;
+}
+
+.jobSummaryCell + .jobSummaryCell {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.jobSummaryCell dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.jobSummaryCell dd {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The only figure on the panel that can take colour, and only when it is not
+   zero: a red zero is a false alarm, and every other number here is ink. */
+.jobSummaryCell[data-alert='true'] dd {
+  color: var(--color-danger);
+}
+
+/* Peer objects, so a grid: two across while there is room, one below it.
+   `min()` matters: a bare `minmax(420px, 1fr)` does NOT collapse on a narrow
+   viewport - the track stays 420px wide and the whole card overflows the page
+   sideways instead of becoming one column. */
+.jobList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.jobCard {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+/* Status, the file it came from, and when - the three things you recognise a
+   job by, on one line. */
+.jobHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.jobName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  /* The file name is the identity here and can be long; clip it rather than
+     let it push the date off the row. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobWhen {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* Type and job number as two items on a gap. No separator character: a middot
+   between every pair of metadata is the template tell, not the design. */
+.jobMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-secondary);
+}
+
+.jobRef {
+  font-family: var(--font-mono);
+}
+
+@media (min-width: 640px) {
+  /* An odd last job would otherwise sit alone in one track beside an empty one.
+     Same rule the shared DetailGrid uses, for the same reason. */
+  .jobList > .jobCard:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The row breakdown: one unit, five figures, shared baseline and tabular
+   digits so the columns of digits line up down the list of cards. */
+.jobCounts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+}
+
+.jobCount {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.jobCount:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.jobCount dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.jobCount dd {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.jobCount[data-alert='true'] dd {
+  color: var(--color-danger);
+}
+
+/* Actions only exist on a job that can still be acted on, so the control sits
+   on the card rather than in a column that is blank on every finished job. */
+.jobActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+@media (max-width: 479px) {
+  .jobSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jobSummaryCell + .jobSummaryCell {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .jobHead {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .jobWhen {
+    grid-column: 1 / -1;
+  }
+
+  /* Five figures will not sit on a phone's width without going to three rows. */
+  .jobCounts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-1);
+  }
+
+  .jobCount:nth-child(4) {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
 /* Export filter labels match the shared Customers-page pattern. */
 .filterLabel {
   display: grid;

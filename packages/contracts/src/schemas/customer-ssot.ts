@@ -19,7 +19,8 @@
  *   parts.
  * - AGE is reference-only: derived from the birthday at display time, never
  *   stored, warned and ignored on import.
- * - TIN columns are write-only: masked on every read, never in audits.
+ * - TIN columns are write-only on import and list reads; the single-record
+ *   detail read returns the raw value for authorized staff, never for audits.
  * - Stated package/payment figures are verbatim; they never feed totals.
  * - Dropdown values come only from the application form's pick-lists and the
  *   import validator's vocabularies. Nothing here invents a value set.

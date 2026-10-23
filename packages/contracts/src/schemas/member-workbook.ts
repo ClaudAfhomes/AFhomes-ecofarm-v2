@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { createMemberSchema, createOstMemberSchema } from './member.js';
 import { ostAnnualExpiry } from './ost-accreditation.js';
+import { normalizePhilippinePhone, toTitleCase } from './input.js';
+
+/** Presentation only; mixed-case spelling is retained rather than reconstructed. */
+export const memberWorkbookDisplayName = (name: string) =>
+  name === name.toUpperCase() || name === name.toLowerCase() ? toTitleCase(name) : name.trim();
+export const memberWorkbookLocalMobile = (phone: string) => {
+  const canonical = normalizePhilippinePhone(phone);
+  return canonical && /^\+639\d{9}$/.test(canonical) ? '0' + canonical.slice(3) : phone;
+};
 
 export const memberWorkbookKindSchema = z.enum(['IST', 'OST']);
 export type MemberWorkbookKind = z.infer<typeof memberWorkbookKindSchema>;
@@ -12,6 +21,7 @@ export const memberWorkbookUploadSchema = z
   })
   .strict();
 export const memberWorkbookPreviewSchema = z.object({
+  jobId: z.string().uuid().optional(),
   kind: memberWorkbookKindSchema,
   departmentId: z.string().uuid(),
   rows: z
@@ -24,6 +34,32 @@ export const memberWorkbookPreviewSchema = z.object({
     )
     .max(MEMBER_WORKBOOK_ROWS),
 });
+export const memberWorkbookJobRowSchema = z.object({
+  id: z.string().uuid(),
+  rowNumber: z.number().int(),
+  decision: z.enum(['CREATE', 'MATCH', 'SKIP', 'CONFLICT', 'REVIEW']),
+  state: z.enum(['preview', 'creating', 'completed']),
+  errors: z.array(z.string()),
+  memberId: z.string().uuid().nullable(),
+  name: z.string(),
+  email: z.string(),
+  mobile: z.string(),
+  aaNumber: z.string().nullable(),
+  head: z.string().nullable(),
+  position: z.string(),
+  details: z.record(z.string(), z.string()).default({}),
+  lastError: z.enum(['REVIEW_REQUIRED', 'OUTCOME_UNCONFIRMED']).nullable().default(null),
+  attempts: z.number().int().default(0),
+});
+export const memberWorkbookJobSchema = z.object({
+  id: z.string().uuid(),
+  kind: memberWorkbookKindSchema,
+  sourceHash: z.string(),
+  createdAt: z.string(),
+  rows: z.array(memberWorkbookJobRowSchema),
+});
+export const memberWorkbookJobsSchema = z.array(memberWorkbookJobSchema);
+export type MemberWorkbookJob = z.infer<typeof memberWorkbookJobSchema>;
 export type MemberWorkbookPreview = z.infer<typeof memberWorkbookPreviewSchema>;
 export const memberWorkbookFileSchema = z.object({
   filename: z.string(),

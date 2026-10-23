@@ -114,6 +114,7 @@ export default function App() {
       <Route path="/ost/login" element={<OstLoginPage />} />
       <Route path="/ost/forgot-password" element={<OstForgotPasswordPage />} />
       <Route path="/ost/reset-password" element={<OstResetPasswordPage />} />
+      <Route path="/ost/change-password" element={<OstResetPasswordPage firstLogin />} />
       <Route
         path="/ost/dashboard"
         element={

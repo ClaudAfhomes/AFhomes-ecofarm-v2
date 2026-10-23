@@ -7,7 +7,6 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { OstApplicationDetailPage } from './OstApplicationDetailPage';
 import { OstApplicationsPage } from './OstApplicationsPage';
-import { OstMembersPage } from './OstMembersPage';
 import { OstReferralCodesPage } from './OstReferralCodesPage';
 import { OstAccreditationHistoryPage } from './OstAccreditationPages';
 import {
@@ -134,6 +133,19 @@ it('derives the annual renewal end from the management-selected start', async ()
     requestedStart: '2026-02-01',
     requestedEnd: '2027-02-01',
   });
+});
+
+it('sends the OST details page back to the network members list', async () => {
+  mockedGetOstMembers.mockResolvedValueOnce([MEMBER]);
+  renderWithProviders(
+    <Routes>
+      <Route path="/members/:id" element={<OstAccreditationHistoryPage />} />
+      <Route path="/admin/network/members" element={<p>Members hub</p>} />
+    </Routes>,
+    { user: STAFF, route: `/members/${MEMBER.id}` },
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Back to members' }));
+  expect(await screen.findByText('Members hub')).toBeInTheDocument();
 });
 
 const APP: OstApplication = {
@@ -360,10 +372,17 @@ describe('OST application review', () => {
     mockedApprove.mockResolvedValue(MEMBER);
     renderDetail();
     await screen.findByText('Oscar Trainee');
+    expect(screen.getByRole('button', { name: 'Approve as OST' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Temporary password'), {
+      target: { value: 'TempPass123' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm temporary password'), {
+      target: { value: 'TempPass123' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Approve as OST' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByText(/Approved\. OST member OST-000001/)).toBeInTheDocument();
-    expect(mockedApprove).toHaveBeenCalledWith(APP_ID);
+    expect(mockedApprove).toHaveBeenCalledWith(APP_ID, 'TempPass123');
   });
 
   it('requires a reason before rejecting', async () => {
@@ -398,26 +417,6 @@ describe('OST application review', () => {
     renderDetail();
     expect(await screen.findByText(/can no longer be reviewed/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve as OST' })).toBeNull();
-  });
-});
-
-describe('OST members', () => {
-  it('renders members with numbers, sponsors and genealogy links', async () => {
-    mockedGetOstMembers.mockResolvedValue([MEMBER]);
-    renderWithProviders(<OstMembersPage />, { user: STAFF });
-    expect(await screen.findByText('OST-000001')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy ID AAO26100002' })).toBeInTheDocument();
-    expect(screen.getByText('Oscar Trainee')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Genealogy' })).toHaveAttribute(
-      'href',
-      `/admin/genealogy/${MEMBER.id}`,
-    );
-  });
-
-  it('shows an empty state', async () => {
-    mockedGetOstMembers.mockResolvedValue([]);
-    renderWithProviders(<OstMembersPage />, { user: STAFF });
-    expect(await screen.findByText('No OST members')).toBeInTheDocument();
   });
 });
 
@@ -460,17 +459,6 @@ describe('live OST search', () => {
     finish([APP]);
     await waitFor(() => expect(screen.queryByText(APP.applicantName)).not.toBeInTheDocument());
     expect(screen.getByText('No matching records.')).toBeInTheDocument();
-  });
-  it('searches members live and restores defaults when cleared', async () => {
-    mockedGetOstMembers.mockImplementation((search) => Promise.resolve(search ? [] : [MEMBER]));
-    renderWithProviders(<OstMembersPage />, { user: STAFF });
-    await screen.findByText(MEMBER.fullName);
-    const input = screen.getByLabelText('Search OST members');
-    fireEvent.change(input, { target: { value: 'missing' } });
-    await screen.findByText('No matching records.');
-    expect(mockedGetOstMembers).toHaveBeenLastCalledWith('missing');
-    fireEvent.change(input, { target: { value: '' } });
-    await screen.findByText(MEMBER.fullName);
   });
 });
 
@@ -535,15 +523,13 @@ describe('OST applicant information', () => {
     expect(screen.getByText('+639171234567')).toBeInTheDocument();
     expect(screen.getByText('Non-VIP')).toBeInTheDocument();
     expect(screen.getByText('oscar@example.invalid', { exact: false })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Update Information' })).toBeNull();
-    expect(
-      screen.getByText(/Updates require the member-profile update permission/),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update information' })).toBeNull();
+    expect(screen.getByText(/Member-profile update permission required/)).toBeInTheDocument();
   });
 
   it('records a controlled mobile-number change and refreshes the panel', async () => {
     renderPage(ADMIN);
-    fireEvent.click(await screen.findByRole('button', { name: 'Update Information' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update information' }));
     await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText('Mobile number'), { target: { value: '09987654321' } });
     expect(
@@ -561,23 +547,21 @@ describe('OST applicant information', () => {
       reason: '',
       requestId: expect.any(String),
     });
-    expect(await screen.findByText(/recorded in the audit trail/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recorded in the audit trail/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('requires a reason before an identity change is submitted', async () => {
     renderPage(ADMIN);
-    fireEvent.click(await screen.findByRole('button', { name: 'Update Information' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update information' }));
     await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText('Full name'), {
       target: { value: 'Oscar Trainee-Reyes' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(
-      await screen.findByText(/A reason of at least 5 characters is required/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Reason needs five characters/)).toBeInTheDocument();
     expect(mockedUpdateApplicant).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText(/Reason for the change/), {
+    fireEvent.change(screen.getByLabelText(/Change reason/), {
       target: { value: 'Marriage certificate on file.' },
     });
     mockedUpdateApplicant.mockResolvedValue({ id: MEMBER.id });

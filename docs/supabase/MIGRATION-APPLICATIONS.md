@@ -173,3 +173,196 @@ transfer dialog. Authenticated live workflow/persistence remains unverified.
 Ignored sanitized evidence: `.tmp-bin/release-review/migration-11-applied.json`.
 Existing gitignored credentials were loaded only by the approved helper;
 no credentials or customer records are written here.
+
+## Prepared locally only — 2026-10-18 — IST identity and member workbook jobs
+
+**NOT APPLIED. PENDING AUTHORIZATION.** Initial implementation prohibited live
+SQL. The owner subsequently approved read-only preflight only on 2026-10-18:
+TLS-verified target `ikaevepedpqygdlipsei`, transaction read-only ON, 95 history
+entries through migration 11, migrations 12/13 and new import tables absent.
+The 12 inspected prerequisite function overloads match their repository baseline
+bodies after whitespace/comment normalization. No live mutation was authorized.
+
+- `20261208000012_afhomes_ist_employee_identity.sql`: date-free IST employee AAI
+  issuance in the existing identifier registry; retain all legacy records and
+  old dates; OST still requires term dates. Existing management and conversion
+  signatures remain, with IST employment separated from annual accreditation.
+- `20261208000013_afhomes_member_workbook_jobs.sql`: private durable provenance,
+  identity matching, reserved account claims, transactional canonical persistence,
+  safe job history/export, and sealed-import-only legacy OST identifier support.
+- `CURRENT-SCHEMA.sql` regenerated: 108 migration files / 60 public tables.
+  It remains context-only and must never be applied as SQL.
+- Local disposable PostgreSQL: member workbook gate 78/78, including forward
+  upgrade preservation, the OST profile persistence regression and six existing
+  RLS invariant queries returning zero rows; existing OST lifecycle gate 177/177.
+- Review packet, exact hashes, field mappings and remaining acceptance work:
+  `docs/handoffs/2026-10-18-member-company-import.md`.
+
+Real local GoTrue/PostgREST and Chrome acceptance subsequently exercised IST
+hierarchy creation, OST registration/profile persistence, issued identifiers and
+export/re-import matching. A local SMTP capture subsequently proved IST/OST
+one-use recovery, password login and correct portal access with unchanged IDs.
+External email delivery and hosted deployment remain unverified. Exact evidence and the updated
+migration-13 checksum are in the review packet above.
+
+No live apply, live Auth mutation, production import, deployment or remote Git write
+occurred. A separately approved coordinated migration/application window must
+prevent old clients from creating/reading new date-free IST records mid-release.
+Do not replay unrelated older history-missing migrations.
+
+### Local split preparation and OST password fix - 2026-10-18
+
+The former combined draft migrations 12/13 were split locally into active schema
+files 12/13 and function files 14/15; this does NOT record a live application.
+The exact four checksums and local OST password-enforcement fix are recorded in
+`docs/handoffs/2026-10-18-opencode-member-import-continuation-v2.md`.
+Current local gate: 81/81, with schema-only legacy preservation/getter checks,
+then function migrations and canonical import tests. No migration body changed
+during the password fix. CURRENT-SCHEMA.sql remains the existing synchronized
+110-file context index. The old two-migration live wrapper now refuses the
+four-file plan; do not use it or infer authorization from its CLI flags.
+Live pause, a fresh pre-change restore-verified backup, a rehearsed phase-aware
+executor and explicit scoped approval remain required before any live apply.
+
+### Release safeguard rehearsal - 2026-10-18 (NOT a migration application)
+
+Fresh encrypted application/Auth backup was taken through a repeatable-read,
+read-only snapshot of project `ikaevepedpqygdlipsei`. Disposable restore verified
+104 table counts and data digests, all 95 history rows (through version 11),
+and zero unvalidated constraints. The same restored snapshot then rehearsed
+ONLY versions `20261208000012` through `20261208000015`: rollback then commit,
+history 95 -> 99, existing table data preserved. This history delta is LOCAL.
+
+The new four-file runner pins exact bytes and checks schema then function phases
+inside one transaction. Local fault injection after each DDL body/history insert
+passed 35 checks. The database maintenance model passed 132 local checks.
+
+A newly executed privilege regression failed against draft migration 15's
+seven-argument direct OST installer (public execution was allowed). The unapplied
+draft now retains the existing six-argument signature and explicitly restricts
+execution to `service_role`. PostgreSQL workbook gate: 86/86; restored-backup and
+fault-injection rehearsals passed again. Migration 15's new SHA-256 is
+`6d550f2540343b50d0a67254295bcb95dd9c6231a9611fe7c20b332643fe0e9c`.
+`CURRENT-SCHEMA.sql` was regenerated. No applied migration was edited.
+
+The owner authorized a temporary live pause test. The first test installed and
+removed 15 deny triggers and project-level WAF rules, with no migration/history
+change or business-row mutation. Database denial passed. HTTP coverage was NOT
+accepted because Vercel Authentication intercepted most unauthenticated probes.
+Both project firewall rule sets/enabled states and the database guard objects
+were restored. Authenticated HTTP retest results are recorded separately in the
+latest handoff; do not treat temporary-test evidence as an active release pause.
+
+Authenticated follow-up PASS: all 231 deployment/alias URLs and the 88 affected
+route/method combinations proved WAF denial, after explicitly retrying eight
+transport failures. Unrelated route probes remained outside the deny rule.
+Temporary WAF rules/enabled-state changes and database guards were removed;
+the original AA-search rate limit remains intact. One intermediate cleanup
+failure was recovered and verified separately. Final retry cleanup passed.
+Live history remains 95 through `20261208000011`; versions 12-15 are still NOT
+live-applied. See the latest v2 handoff for evidence files and approval boundary.
+
+### APPROVED LIVE APPLY - 2026-10-18: IST/OST company workbook release
+
+The owner explicitly approved only the four migrations below, the reviewed
+46-file feature commit and a normal push to `origin/claud/develop`. Target:
+the existing shared project `ikaevepedpqygdlipsei`. Feature commit: `b63e906`.
+This entry supersedes the earlier unapplied status for these four versions.
+
+| Version / file | SHA-256 |
+| --- | --- |
+| `20261208000012_afhomes_ist_employee_identity_schema.sql` | `873f01c332449de436a4c115bf735fe41bee9f7e7857255aa59d503fada4b9cf` |
+| `20261208000013_afhomes_member_workbook_jobs_schema.sql` | `66bc08a751bb6ca7869457ef99802eb65538a49c533942ed05ae9a662a2eb04e` |
+| `20261208000014_afhomes_ist_employee_identity_functions.sql` | `f35edee08583002832f7a8c0f2264ce08474e8886acc846f1aa1104dcc37d639` |
+| `20261208000015_afhomes_member_workbook_jobs_functions.sql` | `6d550f2540343b50d0a67254295bcb95dd9c6231a9611fe7c20b332643fe0e9c` |
+
+- Both project WAF pauses and 15 database deny guards were active before apply.
+  Current project-wide rule equivalence, fresh authenticated per-project probes
+  and the earlier identical-rule 231-host proof established HTTP coverage;
+  direct database denial was reverified. No other active writers were reported.
+- A new encrypted read-only snapshot was taken AFTER pausing writes:
+  `C:\Users\SSD-CLAUD\afhomes-backups\2026-10-18T12-29-18-483Z-pre-member-import`.
+  Disposable restore verified all 104 included table counts/data digests and
+  migration history 95. Rehearsal on that restore rolled back, then committed
+  ONLY these four migrations. Storage binaries/platform settings are excluded.
+- Fresh live preflight: history 95 through version 11; all 12 prerequisite
+  function bodies matched. The pinned phase-aware executor applied these four
+  file bodies and version records in ONE transaction, checking schema then
+  functions. No unrelated history-missing migration was replayed.
+- Live COMMIT succeeded. Independent post-commit read-only verification:
+  history 99, exact selected four-version delta, restricted private import
+  tables, eight service-only RPCs and 17 active maintenance guards. Existing
+  row counts in all 111 inspected public/private/Auth/Storage tables were
+  unchanged; complete accreditation identity/history digests also matched.
+- Evidence: local ignored `live-four-migrations-applied.json` and the cutover
+  journal under `.tmp-bin/member-acceptance/`. They contain no credential values.
+  The schema context index was regenerated from repository migrations.
+- At this entry's time the new Preview is not yet verified and maintenance is
+  still active. Resume only after the compatible Preview and older-host
+  isolation are verified. No production `main` promotion is authorized.
+
+### Post-apply release and resume verification - 2026-10-18
+
+Feature `b63e906` and cutover evidence `35c49fc` were normally pushed only to
+`origin/claud/develop`. The compatible Preview reached READY for `35c49fc`;
+its branch alias is `afhomes-ecofarm-v2-git-claud-develop-afhomes.vercel.app`.
+Older hosts on both projects retain affected-route isolation, preserving
+unrelated firewall rules. Only the verified deployment and branch alias are
+allowed through those rules.
+
+At `2026-10-18T12:43:26.778Z`, the guarded resume removed exactly 17 temporary
+triggers and their guard function. Independent read-only verification confirmed
+history 99, all four version records, zero maintenance guards, eight restricted
+service-only RPCs and empty import-job tables. Direct probes confirmed new-host
+health 200, invalid application authentication 401 without WAF denial, and an
+old-host member request 403 with WAF denial. Signed-in directory reload and
+IST/OST import-dialog checks passed; no production import/account was created.
+Hosted saved downloads/roster exports and native Excel/Sheets remain unverified.
+Full details and local evidence locations are in the continuation handoff.
+
+### APPROVED LIVE APPLY - 2026-10-19: Customer import continuation
+
+The user separately approved ONLY `20261208000016_afhomes_customer_import_continuation.sql` after feature commit `8082c81` was pushed to `claud/develop`. Target: existing shared project `ikaevepedpqygdlipsei`. No production website promotion, data recovery, account import or payment mutation was included.
+
+- SQL SHA-256: `33773120bceacfd747baac56d861cbbc0893195d592ba5ecc2b3ecffb5714758`.
+- Fresh preflight: 109 history entries, maximum `20261208000015`; target tables and predecessor adapter absent; required functions present and pinned by definition hashes. No historical missing migration was replayed.
+- The first attempt rolled back before commit because the temporary verifier incorrectly expected 15 public signatures instead of the 14 defined in the approved file. Read-only recheck confirmed unchanged history and absent new objects. Only that verifier count was corrected; migration SQL was unchanged.
+- The exact approved SQL and its history row committed atomically at `2026-10-19T11:57:19.923Z`. History is now 110 entries with only version `20261208000016` added. PostgREST schema reload was requested.
+- Before commit: all 113 existing public/private/Auth/Storage table counts were unchanged within the transaction; existing function definitions were unchanged except the intended public import dispatcher replacement. Its exact predecessor was preserved in the private adapter.
+- Post-commit catalog checks: three private tables have RLS and no direct PUBLIC/anon/authenticated/service-role grants; 14 public RPC signatures are service-only; zero private helper execute leaks. An independent connection confirmed the history body matches the local file and successfully ran the read-only continuation list as an existing authorized actor. No business rows were created or repaired by these checks.
+- Local ignored evidence: `.tmp-bin/customer-continuation-applied.json`; preflight and apply scripts are also ignored and contain no credential values.
+- Preview deployment `dpl_54dZLxsqh4JUAP2wTec4CRMAW47B` for feature SHA `8082c819a697f1d5b3b7276db6c2dc21c4fb54e6` reached READY. Unauthenticated endpoint probes redirected to Vercel Authentication; no successful authenticated HTTP workflow is claimed. Native Excel Desktop/Online and signed-in private-receipt/reload acceptance remain unverified.
+
+### APPROVED LIVE APPLY - 2026-10-19: Company Customer IDs and staff sales involvement
+
+The user explicitly approved finishing the changes for commit/push with live migration. Scope: only versions 17 and 18 on the existing shared project `ikaevepedpqygdlipsei`, followed by `claud/develop` Preview. No production website promotion, seed, account import, historical repair or payment mutation was authorized or performed.
+
+- `20261208000017_afhomes_import_company_customer_ids.sql`: SHA-256 `984458aa1c6ecdb2879500e1a505e674810ce87d7c7f39d0309c79720ec1154c`.
+- `20261208000018_afhomes_staff_sales_involvement.sql`: SHA-256 `4bcf19e7478e61c4f2bdf5c9173f6062b3a323009d10efccc2ebe7b0dec27f1b`.
+- Fresh preflight: 110 history entries ending at version 16; both candidates and their objects absent, zero normalized duplicate company IDs. Version 16's recorded body exactly matched its immutable repository file. The dynamic function patch prerequisites matched. Historical missing migrations were not replayed.
+- Both exact files and history rows committed atomically at `2026-10-19T13:59:12.524Z`. History is now 112 entries ending at version 18. PostgREST schema reload was requested.
+- All 116 preexisting public/private/Auth/Storage table counts were unchanged within the repeatable-read transaction. Customer, staff, genealogy, payment, membership and frozen sale hierarchy row digests were unchanged. Existing function definitions were preserved except the three intentionally changed by version 17.
+- The annual counter has RLS and no direct PUBLIC/anon/authenticated/service-role access. All existing official IDs are covered by its high-water marks. The new general-summary RPC is service-only, checks staff/customer permissions, and exposes no private helper execute grants. An independent read-only connection confirmed both recorded file bodies, ACLs and the summary RPC using an existing authorized actor. No live test application or customer was created.
+- Sanitized local evidence: `.tmp-bin/customer-release-applied.json`. The schema index was regenerated. Preview deployment verification is recorded separately in the release handoff.
+
+### APPROVED LIVE APPLY - 2026-10-20: Externally verified customer history
+
+The user authorized commit/push with the previously identified single live migration. Scope: only `20261208000019_afhomes_customer_external_verified_import.sql` on existing shared project `ikaevepedpqygdlipsei`, followed by `claud/develop` Preview. No production website promotion or automatic reconciliation of existing business rows was included.
+
+- SQL SHA-256: `e64eee7c973bc506b12d7e24b5aaaf5fab6be2a2a978881b9512ef0c6d11f0d0`.
+- Fresh preflight: 112 history entries through version 18; versions 16-18 matched immutable local file bodies; the new receipt table was absent and canonical finalizer patch prerequisites matched. Historical missing migrations were not replayed.
+- The exact SQL and its history entry committed atomically at `2026-10-20T11:52:31.679Z`. History is now 113 entries, adding only version 19. PostgREST schema reload was requested.
+- All 117 preexisting public/private/Auth/Storage table counts and all 12 protected business-table digests were unchanged within the transaction. No application, reservation, payment, customer, membership, commission or genealogy history was promoted or rewritten.
+- Independent read-only postcheck confirmed the stored file body, RLS and restricted direct grants on the private receipt table, two service-only public entrypoints, no private helper execute leaks, and the exact preserved normal finalizer predecessor. The three intentionally changed existing functions are the finalizer dispatcher, import continuation projection and historical genealogy-capture guard; all other existing function definitions were unchanged.
+- Sanitized ignored evidence: `.tmp-bin/external-import-preflight.json` and `.tmp-bin/external-import-applied.json`. Schema context regenerated. Local disposable PostgreSQL proved the routing, existing payment reuse, source-change rollback, idempotent reimports, subsequent balance collection, normal finalization and permission gates; new-mode Preview/browser acceptance is separate.
+
+### APPROVED LIVE APPLY - 2026-10-20: Customer summaries and imported holder facts
+
+The user approved only `20261208000020_afhomes_customer_purchase_summary.sql` and `20261210000006_afhomes_preserve_imported_holder_facts.sql` on shared project `ikaevepedpqygdlipsei`, with commit/push to `claud/develop` Preview. No production website promotion.
+
+- SHA-256 respectively: `16c27ad352719bea627d4547dd80f82d85de2203f0c582fedc83952fad88dabe` and `f0d9b9c1821f711f7342a69aa218d463044eb18c4808bf2cbf8421e48c492cb6`.
+- Guarded apply matched 113 history entries through version 19, both installed function hashes and both file hashes. No historical missing migrations were replayed.
+- Both exact SQL files and history entries committed atomically at `2026-10-20T13:41:14.306Z`; history now contains 115 entries. PostgREST reload requested.
+- Counts and complete row digests for all 83 public/private tables were unchanged in the transaction. Only the two intended function definitions/ACLs changed; ownership and all other public/private functions were preserved.
+- Independent read-only postcheck verified stored SQL hashes, official Customer ID lookup, the existing Gold partial reservation totals, service-only directory access and restricted private mirror execution.
+- Ignored evidence: `.tmp-bin/customer-summary-preflight.json` and `.tmp-bin/customer-summary-applied.json`. Canonical schema index regenerated. Browser acceptance is recorded separately.

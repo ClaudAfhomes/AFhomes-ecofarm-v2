@@ -57,6 +57,21 @@ function xml(bytes: Uint8Array): Node {
   return root;
 }
 const children = (node: Node, name: string) => node.children.filter((n) => n.name === name);
+
+export function readWorkbookCustomProperties(parts: Map<string, Uint8Array>): Map<string, string> {
+  const bytes = parts.get('docProps/custom.xml');
+  const properties = new Map<string, string>();
+  if (!bytes) return properties;
+  const root = xml(bytes);
+  if (root.name !== 'Properties') throw new Error('Invalid workbook custom properties');
+  for (const property of children(root, 'property')) {
+    const name = property.attrs.name;
+    if (!name) throw new Error('Workbook property name is required');
+    if (properties.has(name)) throw new Error('Duplicate workbook property: ' + name);
+    properties.set(name, property.children.length === 1 ? property.children[0]!.text.trim() : '');
+  }
+  return properties;
+}
 const descendants = (node: Node, name: string): Node[] =>
   node.children.flatMap((n) => [...(n.name === name ? [n] : []), ...descendants(n, name)]);
 export function readWorkbookParts(bytes: Uint8Array): Map<string, Uint8Array> {
@@ -126,6 +141,14 @@ export function readWorkbook(
   selected?: readonly string[],
   requireSingleSheet = selected === undefined,
   ignoredFormulaColumns: Readonly<Record<string, readonly number[]>> = {},
+  formulaCell?: (
+    sheet: string,
+    column: number,
+    row: number,
+    formula: string,
+    cached: string,
+  ) => string,
+  referenceOnlySheets: readonly string[] = [],
 ): Map<string, string[][]> {
   const parts = bytes instanceof Map ? bytes : readWorkbookParts(bytes);
   const part = (name: string) => {
@@ -152,7 +175,9 @@ export function readWorkbook(
     const name = selectedSheet.attrs.name ?? '';
     if (selected && !selected.includes(name)) continue;
     if (result.has(name)) throw new Error('Duplicate worksheet name');
-    const id = selectedSheet.attrs['r:id'];
+    const id =
+      selectedSheet.attrs['r:id'] ??
+      Object.entries(selectedSheet.attrs).find(([key]) => key.endsWith(':id'))?.[1];
     const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
     if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
       throw new Error('Unsupported worksheet relationship');
@@ -175,6 +200,12 @@ export function readWorkbook(
     const sheet = part(target.startsWith('/xl/') ? target.slice(1) : 'xl/' + target);
     if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
       throw new Error('Unsupported worksheet structure');
+    // Geographic lists can be wide; they are never imported or evaluated.
+    if (referenceOnlySheets.includes(name)) {
+      if (descendants(sheet, 'f').length) throw new Error('Formula on a reference worksheet');
+      result.set(name, []);
+      continue;
+    }
     const rows = children(children(sheet, 'sheetData')[0]!, 'row');
     if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
     let cellCount = 0;
@@ -202,7 +233,15 @@ export function readWorkbook(
         if (children(c, 'f').length) {
           // Derived workbook columns are recomputed by their importer, never evaluated here.
           if (ignoredFormulaColumns[name]?.includes(col)) {
-            cells[col - 1] = '';
+            cells[col - 1] = formulaCell
+              ? formulaCell(
+                  name,
+                  col,
+                  rowIndex + 1,
+                  children(c, 'f')[0]!.text,
+                  children(c, 'v')[0]?.text ?? '',
+                )
+              : '';
             continue;
           }
           // Age is discarded; postal caches are unverified candidate text. Nothing is evaluated.
@@ -221,7 +260,7 @@ export function readWorkbook(
         const value = children(c, 'v')[0]?.text ?? '';
         if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
           throw new Error('Invalid shared-string index');
-        let text =
+        const text =
           c.attrs.t === 's'
             ? strings[Number(value)]
             : c.attrs.t === 'inlineStr'

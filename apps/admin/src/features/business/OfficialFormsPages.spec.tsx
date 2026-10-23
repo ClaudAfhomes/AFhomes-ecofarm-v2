@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
+import type { SessionUser } from '../../lib/session';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import {
   customerSchema,
@@ -33,6 +34,11 @@ import {
   putUploadBytes,
   requestUploadGrant,
 } from '../documents/services';
+import { getImportContinuations, getImportRowIntake } from './import-workflow-services';
+vi.mock('./import-workflow-services', () => ({
+  getImportRowIntake: vi.fn(),
+  getImportContinuations: vi.fn(async () => []),
+}));
 
 vi.mock('./services', () => ({
   createCustomerApplication: vi.fn(),
@@ -112,6 +118,70 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
+it('reopens the canonical imported application after a reload instead of creating another', async () => {
+  vi.mocked(getCardProducts).mockResolvedValue([]);
+  vi.mocked(getCustomersPage).mockResolvedValue({ data: [], total: 0 });
+  vi.mocked(getImportRowIntake).mockResolvedValue({
+    continuation: {
+      rowId: 'row',
+      sourceId: 'source',
+      customerId: 'customer',
+      applicationId: 'existing-imported-app',
+      reservationId: null,
+      saleId: null,
+      stage: 'application',
+      missingRequirements: [],
+      conflicts: [],
+      proposedFields: [],
+      claimCount: 1,
+      expectedSourceHash: 'a'.repeat(64),
+      expectedTargetVersion: 'b'.repeat(64),
+      expectedTeamVersion: 'c'.repeat(64),
+      nextAction: null,
+    },
+    prefill: {
+      primary: {},
+      secondary: null,
+      recommenderName: '',
+      recommenderContact: '',
+      recommenderEmail: '',
+      salesManagerName: '',
+      referrerName: '',
+      missingFields: [],
+    },
+    claims: [],
+    purchaseReference: 'REVIEWED PURCHASE',
+    team: {},
+  });
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/customers/applications/new" element={<CustomerApplicationEditorPage />} />
+      <Route
+        path="/admin/customers/applications/existing-imported-app"
+        element={<h1>Existing imported application</h1>}
+      />
+    </Routes>,
+    {
+      route: '/admin/customers/applications/new?importRowId=row',
+      user: {
+        id: 'user',
+        name: 'Admin',
+        email: 'admin@example.invalid',
+        roleId: 'role',
+        roleSlug: 'super_admin',
+        roleName: 'Admin',
+        status: 'active',
+        afHomesPermissions: [],
+      },
+    },
+  );
+  expect(
+    await screen.findByRole('heading', { name: 'Existing imported application' }),
+  ).toBeInTheDocument();
+  expect(createCustomerApplication).not.toHaveBeenCalled();
+  expect(registerCustomerApplication).not.toHaveBeenCalled();
+});
+
 const application = {
   id: 'app-1',
   applicationNumber: 'APP-000001',
@@ -142,6 +212,16 @@ const agreement = {
 
 describe('CustomerApplicationsPage list states', () => {
   const pageOf = (rows: unknown[], total: number) => ({ data: rows, total }) as never;
+  const superAdmin: SessionUser = {
+    id: 'u-imports',
+    name: 'Import Admin',
+    email: 'imports@example.test',
+    roleId: 'r-imports',
+    roleSlug: 'super_admin',
+    roleName: 'Super Admin',
+    status: 'active',
+    afHomesPermissions: [],
+  };
 
   it('shows loading - never a phantom empty state - on first load', () => {
     vi.mocked(getCustomerApplicationsPage).mockReturnValue(new Promise(() => {}));
@@ -216,6 +296,46 @@ describe('CustomerApplicationsPage list states', () => {
         offset: 10,
       }),
     );
+  });
+
+  it('switches to imported purchases without reloading the applications queue', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    vi.mocked(getImportContinuations).mockResolvedValue([]);
+    renderWithProviders(<CustomerApplicationsPage />, {
+      user: superAdmin,
+      route: '/admin/customers/applications',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Applications' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    const importsTab = screen.getByRole('link', { name: 'Imported purchases' });
+    expect(importsTab).toHaveAttribute('href', '/admin/customers/applications?tab=imports');
+    vi.mocked(getCustomerApplicationsPage).mockClear();
+    await user.click(importsTab);
+    expect(
+      await screen.findByRole('heading', { name: 'Imported purchases' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('No imported purchases')).toBeInTheDocument();
+    expect(getImportContinuations).toHaveBeenCalledWith(undefined, 0);
+    expect(getCustomerApplicationsPage).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Imported purchases' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('falls back to applications when imports are not authorized', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    renderWithProviders(<CustomerApplicationsPage />, {
+      route: '/admin/customers/applications?tab=imports',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(getImportContinuations).not.toHaveBeenCalled();
   });
 });
 
@@ -456,6 +576,71 @@ describe('application private ID intake', () => {
     expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
   });
 
+  it('spins inside the Customer control while the list loads, never a skeleton beside it', async () => {
+    // A skeleton standing in for the control shifted the form on every load and
+    // left an empty box where the dropdown belonged. The control itself stays
+    // put and reports the wait.
+    vi.mocked(getCustomersPage).mockReturnValue(new Promise(() => {}));
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    const customer = screen.getByLabelText('Customer');
+    expect(customer).toHaveAttribute('aria-busy', 'true');
+    expect(customer.closest('div')).toHaveAttribute('data-loading', 'true');
+    // The spinner's own ring, inside the control rather than after it.
+    expect(customer.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(screen.queryByRole('status', { name: 'Searching customers' })).not.toBeInTheDocument();
+  });
+
+  it('clears the Customer spinner once the list arrives', async () => {
+    // Stays on step 1: the Application panel is the only place the picker is
+    // rendered, and the wizard unmounts it once Next is clicked.
+    vi.mocked(getCustomersPage).mockResolvedValue({
+      data: [
+        customerSchema.parse({
+          id: customerId,
+          customerNumber: 'CUS-QA-1',
+          fullName: 'QA Customer',
+          email: 'qa@example.com',
+          phone: '+639171234567',
+          dateOfBirth: '1990-01-01',
+          gender: null,
+          address: null,
+          governmentIdType: null,
+          governmentIdMasked: null,
+          status: 'prospect',
+          createdBy: null,
+          createdAt: '2026-10-01',
+          updatedAt: '2026-10-01',
+        }),
+      ],
+      total: 1,
+    });
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    renderWithProviders(<CustomerApplicationEditorPage />);
+    // The control renders before its options do, so the wait has to end on the
+    // resolved list rather than on the control existing.
+    await screen.findByRole('option', { name: 'QA Customer' });
+    const customer = screen.getByLabelText('Customer');
+    await waitFor(() => expect(customer).not.toHaveAttribute('aria-busy'));
+    expect(customer.closest('div')).not.toHaveAttribute('data-loading');
+    expect(customer.parentElement?.querySelector('[class*="ring"]')).toBeNull();
+  });
+
+  it('labels the ID types with the shared vocabulary, not slug-derived text', async () => {
+    await setup(null);
+    const labels = [...(screen.getByLabelText('ID Type') as HTMLSelectElement).options].map(
+      (option) => option.textContent,
+    );
+    // Same map the member and OST ID-type dropdowns use. Deriving a label from
+    // the slug produced "Philippine Id", "Drivers License" and "Tax Id".
+    expect(labels).toContain('Philippine ID');
+    expect(labels).toContain("Driver's License");
+    expect(labels).toContain('Tax ID');
+    expect(labels).not.toContain('Philippine Id');
+    expect(labels).not.toContain('Drivers License');
+    expect(labels).not.toContain('Tax Id');
+  });
+
   it('shows a clickable thumbnail that opens a full preview modal', async () => {
     URL.createObjectURL = vi.fn(() => 'blob:mock-id');
     URL.revokeObjectURL = vi.fn();
@@ -466,6 +651,36 @@ describe('application private ID intake', () => {
     expect(screen.getByText('Ready to upload on save.')).toBeInTheDocument();
     fireEvent.click(thumbnail);
     expect(await screen.findByAltText('Full ID preview')).toBeInTheDocument();
+  });
+
+  it('puts the operator at the top of the page on every step change', async () => {
+    // jsdom cannot scroll, so record what the wizard asks the window to do.
+    //
+    // This asserts the OUTCOME - the page is back at the top - and not the old
+    // mechanism. The previous version of this test passed while the wizard was
+    // broken in a real browser: it only checked that `scrollIntoView` had been
+    // called on the next step's element, which says nothing about where the
+    // operator ends up once advancing unmounts the panel just left behind.
+    const calls: Array<ScrollToOptions | undefined> = [];
+    const original = window.scrollTo;
+    window.scrollTo = function scrolledTo(options?: ScrollToOptions) {
+      calls.push(options);
+    } as typeof window.scrollTo;
+    try {
+      await setup(document('completed'));
+      // setup() already pressed Next once, landing on Identity.
+      await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      await waitFor(() => expect(calls.length).toBeGreaterThan(1));
+      // Every change asks for the top, and every one of them carries an
+      // explicit target: a bare `scrollTo()` would be an unassertable no-op.
+      expect(calls).toHaveLength(2);
+      for (const call of calls) expect(call).toEqual({ top: 0, left: 0 });
+      // Holders is where the operator must land, not wherever Identity left off.
+      expect(screen.getByText('Primary holder')).toBeInTheDocument();
+    } finally {
+      window.scrollTo = original;
+    }
   });
 
   it('defers upload until Save, keeping pickers enabled meanwhile', async () => {
@@ -518,9 +733,20 @@ describe('application private ID intake', () => {
     expect(within(item).getByText('4')).toBeInTheDocument();
   });
 
-  it('shows the recorded ID type of the current document and prompts when missing', async () => {
-    await setup(document('completed'));
-    expect(await screen.findByText(/ID type: passport/)).toBeInTheDocument();
+  it('shows the recorded ID type by its shared label, never the raw slug', async () => {
+    // The value is the stored slug (`drivers_license`); the shared label map is
+    // the single display vocabulary, the same one the member and OST ID-type
+    // dropdowns render. Deriving a label from the slug is what produced
+    // "Drivers License" and "Tax Id" before.
+    await setup({
+      ...document('completed'),
+      reviewedFields: { idType: 'drivers_license' },
+    } as never);
+    expect(await screen.findByText(/ID type: Driver's License/)).toBeInTheDocument();
+    expect(screen.queryByText(/Drivers License/)).not.toBeInTheDocument();
+    cleanup();
+    await setup({ ...document('completed'), reviewedFields: { idType: 'passport' } } as never);
+    expect(await screen.findByText(/ID type: Passport/)).toBeInTheDocument();
     cleanup();
     await setup({ ...document('completed'), reviewedFields: null } as never);
     expect(
@@ -601,6 +827,9 @@ describe('application private ID intake', () => {
 
     await setup(null, { pickCustomer: false });
     chooseIdTypeAndFile();
+    fireEvent.change(screen.getByLabelText(/Government ID number/), {
+      target: { value: ' P1234567 ' },
+    });
     await screen.findByText('Ready to upload on save.');
 
     // Identity is satisfied by the picked file; forward to Holders and fill
@@ -631,6 +860,8 @@ describe('application private ID intake', () => {
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
     const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
     expect(registration).toMatchObject({ registerNewCustomer: true });
+    // The typed number travels trimmed; it is the only capture path for it.
+    expect(registration).toMatchObject({ governmentIdNumber: 'P1234567' });
     // The register contract omits customerId by type: no linked id may travel.
     expect('customerId' in registration).toBe(false);
     // The create path belongs to a picked customer only.
@@ -670,6 +901,51 @@ describe('IST commercial summary rendering', () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     },
   );
+
+  it('counts the queue and the signature backlog as figures, not a sentence', async () => {
+    // The count used to read as one grey line, so the only number anyone acts
+    // on was the one you had to hunt for. Both figures are now their own cells,
+    // and only a NON-ZERO backlog takes the warning tone.
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [
+        agreement,
+        {
+          ...agreement,
+          id: 'res-2',
+          reservationNumber: 'RES-000002',
+          primarySignatureStatus: 'pending',
+        },
+      ],
+      total: 7,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+
+    const summary = screen.getByLabelText('Reservation queue summary');
+    const figure = (label: string) => screen.getByText(label).closest('div');
+    expect(summary).toBeInTheDocument();
+    expect(figure('Agreements')).toHaveTextContent('7');
+    expect(figure('Awaiting signature')).toHaveTextContent('1');
+    // One pending row out of two, so the exception is the coloured one.
+    expect(figure('Awaiting signature')).toHaveAttribute('data-alert', 'true');
+    // The settled state recedes to plain text so the pending chip stands out.
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.getByText('Pending signature')).toBeInTheDocument();
+  });
+
+  it('shows a clean backlog figure, and no warning tone, when nothing is pending', async () => {
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    const figure = (label: string) => screen.getByText(label).closest('div');
+    expect(figure('Agreement')).toHaveTextContent('1');
+    expect(figure('Awaiting signature')).toHaveTextContent('0');
+    // A warning-coloured zero is a false alarm.
+    expect(figure('Awaiting signature')).not.toHaveAttribute('data-alert');
+  });
 });
 
 it('renders application-origin reservations before a sale exists', async () => {
