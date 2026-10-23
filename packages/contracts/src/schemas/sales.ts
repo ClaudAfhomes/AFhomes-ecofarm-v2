@@ -451,6 +451,7 @@ export const updateCustomerSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
       .nullable()
       .optional(),
+    vipCardNumber: z.string().trim().max(20).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;
@@ -535,6 +536,8 @@ export const customerSchema = z.object({
    * are transaction credentials and stay off this read model.
    */
   tier: z.string().nullable().optional(),
+  /** Official VIP card number (YYMMDDNNNNNVTPMMS), issued server-side. */
+  vipCardNumber: z.string().nullable().optional(),
   /** Membership status when a membership exists, else null. Never a code. */
   membershipStatus: z.string().nullable().optional(),
   membershipExpiresAt: z.string().nullable().optional(),

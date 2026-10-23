@@ -157,6 +157,15 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
           </div>
           <div className={styles.fact}>
             <span className={styles.factIcon} aria-hidden="true">
+              <Icon name="image" size={16} />
+            </span>
+            <div className={styles.factText}>
+              <dt>VIP Card No.</dt>
+              <dd>{customer.vipCardNumber ?? '—'}</dd>
+            </div>
+          </div>
+          <div className={styles.fact}>
+            <span className={styles.factIcon} aria-hidden="true">
               <Icon name="clock" size={16} />
             </span>
             <div className={styles.factText}>
@@ -168,19 +177,33 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
             <div className={styles.fact}>
               <div className={styles.factText}>
                 <dt>Total Points</dt>
-                <dd>{customer.totalAvailablePoints}</dd>
+                <dd>{customer.totalAvailablePoints.toLocaleString('en-US')}</dd>
               </div>
             </div>
             <div className={styles.fact}>
               <div className={styles.factText}>
                 <dt>Weekend Points</dt>
-                <dd>{customer.weekendAvailablePoints}</dd>
+                <dd>{customer.weekendAvailablePoints.toLocaleString('en-US')}</dd>
               </div>
             </div>
             <div className={styles.fact}>
               <div className={styles.factText}>
                 <dt>Weekday Points</dt>
-                <dd>{customer.weekdayAvailablePoints}</dd>
+                <dd>{customer.weekdayAvailablePoints.toLocaleString('en-US')}</dd>
+              </div>
+            </div>
+          </div>
+          <div className={styles.capsGrid} data-tier={tier}>
+            <div className={styles.capCard}>
+              <div className={styles.capLabel}>Annual Cap</div>
+              <div className={styles.capValue}>
+                {(tier === 'GOLD' ? 25000 : tier === 'SILVER' ? 20000 : 10000).toLocaleString('en-US')}
+              </div>
+            </div>
+            <div className={styles.capCard}>
+              <div className={styles.capLabel}>Lifetime Gift</div>
+              <div className={styles.capValue}>
+                {(tier === 'GOLD' ? 500000 : tier === 'SILVER' ? 200000 : 50000).toLocaleString('en-US')}
               </div>
             </div>
           </div>

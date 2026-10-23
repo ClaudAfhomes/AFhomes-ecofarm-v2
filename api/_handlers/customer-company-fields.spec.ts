@@ -152,6 +152,28 @@ describe('customer company-stated fields', () => {
     expect(audits.join('|')).not.toContain('999888777001');
   });
 
+  it('updates dateOfBirth (birth_date column) without 500 — regression for RA No. edit', async () => {
+    const db = install();
+    const id = CUSTOMER.prospectTwo;
+    const res = makeRes();
+    await customers(
+      makeReq({
+        method: 'PATCH',
+        familyPath: id,
+        body: { dateOfBirth: '2000-01-01', raNumber: 'RA-NEW-001' },
+        token: TOKEN.admin,
+      }) as never,
+      res.res as never,
+    );
+    expect(res.state.status).toBe(200);
+    const body = res.state.body as Record<string, unknown>;
+    expect(body.dateOfBirth).toBe('2000-01-01');
+    expect(body.raNumber).toBe('RA-NEW-001');
+    const stored = db.rows('customers').find((r) => r.id === id)!;
+    expect(stored.birth_date).toBe('2000-01-01');
+    expect(stored.ra_number).toBe('RA-NEW-001');
+  });
+
   it('stores stated package/payment facts verbatim via manual create/update', async () => {
     const db = install();
     const { res, state } = makeRes();

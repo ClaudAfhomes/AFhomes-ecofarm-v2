@@ -584,6 +584,7 @@
   gap: var(--space-5);
   align-content: start;
   padding-bottom: 6rem;
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
 }

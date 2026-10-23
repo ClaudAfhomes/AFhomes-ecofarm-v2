@@ -130,6 +130,7 @@ const toCustomer = (
   statedPaymentType: isoOrNull(row.stated_payment_type),
   statedRefNo: isoOrNull(row.stated_ref_no),
   statedPaymentDate: isoOrNull(row.stated_payment_date),
+  vipCardNumber: typeof row.vip_card_number === 'string' ? row.vip_card_number : null,
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
   // Membership facts mirrored from general Customer Lookup. The directory RPC
@@ -466,7 +467,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.suffix !== undefined)
         patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
-      if (p.dateOfBirth !== undefined) patch.date_of_birth = p.dateOfBirth;
+      if (p.dateOfBirth !== undefined) patch.birth_date = p.dateOfBirth;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
       if (p.landline !== undefined) patch.landline = p.landline;
@@ -537,6 +538,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.statedPaymentType !== undefined) patch.stated_payment_type = p.statedPaymentType;
       if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
       if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
+      if (p.vipCardNumber !== undefined) patch.vip_card_number = p.vipCardNumber;
+      // Auto-generate a VIP card number when none exists and none was supplied.
+      if (p.vipCardNumber === undefined) {
+        const { data: existing } = await db.from('customers').select('vip_card_number,tier,stated_vip_package').eq('id', id).single();
+        if (!existing?.vip_card_number) {
+          const tier = (typeof existing?.stated_vip_package === 'string' ? existing.stated_vip_package : (typeof existing?.tier === 'string' ? existing.tier : 'BRONZE')).toUpperCase();
+          const { data: gen } = await db.rpc('generate_vip_card_number', { p_tier: tier });
+          if (typeof gen === 'string') patch.vip_card_number = gen;
+        }
+      }
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 
