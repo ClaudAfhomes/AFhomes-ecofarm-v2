@@ -219,7 +219,7 @@ it('opens and closes a larger photo and groups the name with the AA number', asy
   const identity = within(await screen.findByRole('group', { name: 'Seller identity' }));
   expect(identity.getByRole('heading', { name: record.maskedName })).toBeInTheDocument();
   expect(identity.getByText(record.aaNumber)).toBeInTheDocument();
-  expect(screen.getByText('Registration Status')).toBeInTheDocument();
+  expect(screen.getByText('Verification Status')).toBeInTheDocument();
   expect(screen.getByText('Accredited')).toBeInTheDocument();
   expect(screen.queryByText('2027-10-21')).not.toBeInTheDocument();
   // Photo click opens dialog

@@ -395,7 +395,7 @@ function SettingsForm({
 
       {writable ? (
         <Button type="submit" disabled={save.isPending} loading={save.isPending}>
-          Save settings
+          Save Changes
         </Button>
       ) : (
         <p className={styles.readOnly}>You have read-only access to these settings.</p>

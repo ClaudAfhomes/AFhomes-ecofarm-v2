@@ -327,7 +327,7 @@ describe('Members page', () => {
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'ost' } });
     await waitFor(() => expect(screen.queryByLabelText('OST Referrer')).toBeNull());
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'vice_director' } });
-    expect(await screen.findByText('Vice Directors have no head.')).toBeInTheDocument();
+    expect(await screen.findByText('SVDs have no head.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Head')).toBeNull();
   });
 

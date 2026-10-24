@@ -325,7 +325,7 @@ it('opens and closes the responsive sidebar while navigating to team sales', asy
   renderWithProviders(<App />, { user: istUser, route: '/sales' });
   await screen.findByRole('heading', { name: 'IST Dashboard' });
   await userEvent.click(screen.getAllByRole('button', { name: 'Open navigation' })[0]!);
-  const drawer = screen.getByRole('dialog', { name: 'AFHomes administration' });
+  const drawer = screen.getByRole('dialog', { name: 'AFhomes administration' });
   await userEvent.click(within(drawer).getByRole('button', { name: 'Sales' }));
   await userEvent.click(within(drawer).getByRole('link', { name: 'Team Sales' }));
   expect(await screen.findByRole('heading', { name: 'Team Sales' })).toBeInTheDocument();

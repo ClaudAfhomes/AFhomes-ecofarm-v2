@@ -141,7 +141,7 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
   return (
     <main>
       <AuthLayout
-        eyebrow="AFHomes Ecofarm"
+        eyebrow="AFhomes Ecofarm"
         title={isAdmin ? 'Admin Login' : 'Staff Login'}
         lead={
           isAdmin

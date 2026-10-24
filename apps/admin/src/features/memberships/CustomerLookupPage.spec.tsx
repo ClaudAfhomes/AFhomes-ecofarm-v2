@@ -14,7 +14,7 @@ vi.mock('../../lib/api/client', () => ({
 
 const JUAN = {
   firstName: 'Juan',
-  maskedLastName: 'D***',
+  lastName: 'Dela Cruz',
   raNumber: 'RA-2026-0001',
   vipTier: 'GOLD' as const,
   validUntil: '2033-10-21',
@@ -26,7 +26,7 @@ const JUAN = {
 
 const MARIA = {
   firstName: 'Maria',
-  maskedLastName: 'S***',
+  lastName: 'Santos',
   raNumber: 'RA-2026-0002',
   vipTier: 'SILVER' as const,
   validUntil: '2031-10-11',
@@ -47,15 +47,18 @@ beforeEach(() => {
   vi.mocked(protectedRequest).mockReset();
 });
 
-it('shows an active VIP customer with only the four approved fields', async () => {
+it('shows an active VIP customer with the approved staff display fields', async () => {
   vi.mocked(requestList).mockResolvedValue([JUAN]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'JUA' },
   });
-  await pickOption(/Juan D\*\*\*/);
-  const card = (await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).closest('article');
-  expect(card).toHaveTextContent('Juan D***');
+  await pickOption(/Juan Dela Cruz/);
+  const card = (await screen.findByRole('heading', { name: /Juan Dela Cruz/ })).closest('article');
+  expect(card).toHaveTextContent('Juan Dela Cruz');
+  expect(card).not.toHaveTextContent('RA No.');
+  expect(card).not.toHaveTextContent('Annual Cap');
+  expect(card).not.toHaveTextContent('Lifetime Gift');
   expect(card).toHaveTextContent('GOLD');
   expect(card).toHaveTextContent('2033-10-21');
   // No identifiers or private fields anywhere on the card.
@@ -192,8 +195,8 @@ it('searches live with no Search button to click', async () => {
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'JUA' },
   });
-  await pickOption(/Juan D\*\*\*/);
-  expect(await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).toBeInTheDocument();
+  await pickOption(/Juan Dela Cruz/);
+  expect(await screen.findByRole('heading', { name: /Juan Dela Cruz/ })).toBeInTheDocument();
   expect(vi.mocked(requestList).mock.calls[0]?.[0]).toContain(
     '/memberships/customer-lookup?search=JUA',
   );
@@ -211,9 +214,9 @@ it('shows suggestion skeletons while pending, with no card skeleton', async () =
 });
 
 it.each([
-  ['GOLD', 'Gold VIP membership card'],
-  ['SILVER', 'Silver VIP membership card'],
-  ['BRONZE', 'Bronze VIP membership card'],
+  ['GOLD', 'Gold VIP Privilege Card'],
+  ['SILVER', 'Silver VIP Privilege Card'],
+  ['BRONZE', 'Bronze VIP Privilege Card'],
 ] as const)('shows the %s card artwork on a %s member card', async (tier, alt) => {
   const row = { ...JUAN, vipTier: tier as 'GOLD' | 'SILVER' | 'BRONZE' };
   vi.mocked(requestList).mockResolvedValue([row]);
@@ -221,13 +224,13 @@ it.each([
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'JUA' },
   });
-  await pickOption(/Juan D\*\*\*/);
+  await pickOption(/Juan Dela Cruz/);
   expect(await screen.findByAltText(alt)).toBeInTheDocument();
-  const card = (await screen.findByRole('heading', { name: /Juan D\*\*\*/ })).closest('article');
+  const card = (await screen.findByRole('heading', { name: /Juan Dela Cruz/ })).closest('article');
   expect(card).toHaveAttribute('data-tier', tier);
 });
 
-it('shows suggestion rows with masked names only', async () => {
+it('shows full names in authorized staff suggestions', async () => {
   vi.mocked(requestList).mockResolvedValue([JUAN, MARIA]);
   renderWithProviders(<CustomerLookupPage />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
@@ -238,7 +241,7 @@ it('shows suggestion rows with masked names only', async () => {
     target: { value: 'MA' },
   });
   const listbox = await screen.findByRole('listbox', { name: 'Name suggestions' });
-  await screen.findByRole('option', { name: /Maria S\*\*\*/ });
+  await screen.findByRole('option', { name: /Maria Santos/ });
   expect(listbox.textContent).not.toMatch(/AF-CUS-/);
   expect(listbox.textContent).not.toMatch(/AF-CC-/);
   expect(listbox.textContent).not.toMatch(/MBS-/);
@@ -250,8 +253,8 @@ describe('name suggestions', () => {
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'MA' } });
-    expect(await screen.findByRole('option', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Juan D\*\*\*/ })).toBeNull();
+    expect(await screen.findByRole('option', { name: /Maria Santos/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Juan Dela Cruz/ })).toBeNull();
   });
 
   it('shows the picked suggestion card on Enter', async () => {
@@ -259,11 +262,11 @@ describe('name suggestions', () => {
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'MA' } });
-    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
+    await screen.findByRole('option', { name: /Maria Santos/ });
     fireEvent.keyDown(box, { key: 'ArrowDown' });
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(box).toHaveValue('Maria S***');
-    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
+    expect(box).toHaveValue('Maria Santos');
+    expect(await screen.findByRole('heading', { name: /Maria Santos/ })).toBeInTheDocument();
   });
 
   it('picks the top suggestion on Enter with nothing highlighted', async () => {
@@ -271,10 +274,10 @@ describe('name suggestions', () => {
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'MA' } });
-    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
+    await screen.findByRole('option', { name: /Maria Santos/ });
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(box).toHaveValue('Maria S***');
-    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
+    expect(box).toHaveValue('Maria Santos');
+    expect(await screen.findByRole('heading', { name: /Maria Santos/ })).toBeInTheDocument();
   });
 
   it('closes the suggestions on Escape with no card shown', async () => {
@@ -282,10 +285,10 @@ describe('name suggestions', () => {
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'MA' } });
-    await screen.findByRole('option', { name: /Maria S\*\*\*/ });
+    await screen.findByRole('option', { name: /Maria Santos/ });
     fireEvent.keyDown(box, { key: 'Escape' });
     expect(screen.queryByRole('listbox', { name: 'Name suggestions' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: /Maria S\*\*\*/ })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Maria Santos/ })).toBeNull();
   });
 
   it('clears the shown card as soon as typing resumes', async () => {
@@ -293,10 +296,10 @@ describe('name suggestions', () => {
     renderWithProviders(<CustomerLookupPage />);
     const box = screen.getByRole('combobox', { name: 'Find customer' });
     fireEvent.change(box, { target: { value: 'MA' } });
-    await pickOption(/Maria S\*\*\*/);
-    expect(await screen.findByRole('heading', { name: /Maria S\*\*\*/ })).toBeInTheDocument();
+    await pickOption(/Maria Santos/);
+    expect(await screen.findByRole('heading', { name: /Maria Santos/ })).toBeInTheDocument();
     fireEvent.change(box, { target: { value: 'MAR' } });
-    expect(screen.queryByRole('heading', { name: /Maria S\*\*\*/ })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Maria Santos/ })).toBeNull();
   });
 });
 
@@ -306,7 +309,7 @@ it('offers no mutating control at all', async () => {
   fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
     target: { value: 'JUA' },
   });
-  await pickOption(/Juan D\*\*\*/);
-  await screen.findByRole('heading', { name: /Juan D\*\*\*/ });
+  await pickOption(/Juan Dela Cruz/);
+  await screen.findByRole('heading', { name: /Juan Dela Cruz/ });
   expect(screen.queryByRole('button', { name: /edit|activate|payment|redeem/i })).toBeNull();
 });

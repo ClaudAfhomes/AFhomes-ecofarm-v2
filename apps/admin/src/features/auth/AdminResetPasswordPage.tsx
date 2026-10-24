@@ -123,7 +123,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Choose a new password"
       brandTitle="Grow with the farm you own a card in."
       brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."

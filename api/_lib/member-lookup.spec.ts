@@ -14,9 +14,9 @@ it('shows the persisted allowances after spending instead of splitting the remai
 it('does not invent allowances when an old read model has no bucket balances', async () => {
   expect(await gsdActiveVipLookupFromDirectory({ ...member, weekday_available_points: undefined })).toMatchObject({ weekdayAvailablePoints: null, totalAvailablePoints: 7000 });
 });
-it('masks a Unicode surname without revealing its spelling or length', async () => {
+it('returns the full Unicode surname for the authorized staff lookup', async () => {
   const result = await gsdActiveVipLookupFromDirectory({ ...member, last_name: 'N\u0303ANDU' });
-  expect(result?.maskedLastName).toBe('N\u0303***');
-  expect(result).not.toHaveProperty('lastName');
-  expect(JSON.stringify(result)).not.toContain('ANDU');
+  expect(result?.lastName).toBe('N\u0303ANDU');
+  expect(result).not.toHaveProperty('maskedLastName');
+  expect(JSON.stringify(result)).toContain('ANDU');
 });

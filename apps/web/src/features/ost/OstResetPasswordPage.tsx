@@ -121,7 +121,7 @@ export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: bool
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title={firstLogin ? 'Create your own password' : 'Choose a new password'}
       brandTitle="Sell the farm you believe in."
       brandLead="Your pipeline, your referral code, and your network."

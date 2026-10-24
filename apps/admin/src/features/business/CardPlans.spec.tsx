@@ -320,7 +320,7 @@ describe('Card Plans states', () => {
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     renderWithProviders(<BusinessProductsPage />);
     expect(await screen.findByRole('heading', { name: 'Gold' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Gold VIP membership card' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: 'Gold VIP Privilege Card' })).toHaveAttribute(
       'src',
       expect.stringContaining('gold-card'),
     );
@@ -360,7 +360,7 @@ describe('Card Plans states', () => {
 
     // Identity: tier code, artwork, category and status.
     expect(within(dialog).getByText('GOLD')).toBeInTheDocument();
-    expect(within(dialog).getByRole('img', { name: 'Gold VIP membership card' })).toBeTruthy();
+    expect(within(dialog).getByRole('img', { name: 'Gold VIP Privilege Card' })).toBeTruthy();
     expect(within(dialog).getByText(/Membership Cards/)).toBeInTheDocument();
     expect(within(dialog).getAllByText('Active').length).toBeGreaterThan(0);
 

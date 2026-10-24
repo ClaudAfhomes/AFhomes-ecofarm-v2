@@ -127,7 +127,7 @@ export function CustomerDashboardPage() {
             title="Card unavailable"
             message={
               isForbidden(membership.error)
-                ? 'Your account is not active, so your card is not available. Contact AFHomes Ecofarm to restore access.'
+                ? 'Your account is not active, so your card is not available. Contact AFhomes Ecofarm to restore access.'
                 : isNotFound(membership.error)
                   ? 'You do not have an active membership yet.'
                   : 'We could not load your card. Please try again in a moment.'
@@ -137,7 +137,7 @@ export function CustomerDashboardPage() {
         {membership.data && (
           <FieldList>
             <Field label="Membership number" value={membership.data.membershipNumber} />
-            <Field label="Product" value={membership.data.productName ?? 'AFHomes card'} />
+            <Field label="Product" value={membership.data.productName ?? 'AFhomes VIP Privilege Card'} />
             <Field label="Payment scheme" value={paymentSchemeLabel(membership.data.paymentScheme)} />
             <Field
               label="Status"

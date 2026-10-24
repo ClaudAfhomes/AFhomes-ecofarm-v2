@@ -79,7 +79,7 @@ export function CustomerForgotPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Reset your password"
       lead="Enter the email you signed up with and we will send you a link to choose a new password."
       brandTitle="Your farm membership, in your pocket."

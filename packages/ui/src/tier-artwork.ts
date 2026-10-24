@@ -14,9 +14,9 @@ import silverCard from './assets/silver-card.webp';
 export type VipTier = 'GOLD' | 'SILVER' | 'BRONZE';
 
 const ARTWORK: Record<VipTier, { src: string; alt: string }> = {
-  GOLD: { src: goldCard, alt: 'Gold VIP membership card' },
-  SILVER: { src: silverCard, alt: 'Silver VIP membership card' },
-  BRONZE: { src: bronzeCard, alt: 'Bronze VIP membership card' },
+  GOLD: { src: goldCard, alt: 'Gold VIP Privilege Card' },
+  SILVER: { src: silverCard, alt: 'Silver VIP Privilege Card' },
+  BRONZE: { src: bronzeCard, alt: 'Bronze VIP Privilege Card' },
 };
 
 export function tierArtwork(productCode: string | null | undefined): { src: string; alt: string } {
@@ -32,7 +32,7 @@ export function tierLabel(
   if (productName && productName.trim()) return productName.trim();
   const tier = (productCode ?? '').trim().toUpperCase();
   if (tier === 'GOLD' || tier === 'SILVER' || tier === 'BRONZE') {
-    return `${tier.charAt(0)}${tier.slice(1).toLowerCase()} VIP`;
+    return `${tier.charAt(0)}${tier.slice(1).toLowerCase()} VIP Privilege Card`;
   }
-  return 'AFHomes VIP';
+  return 'AFhomes VIP Privilege Card';
 }

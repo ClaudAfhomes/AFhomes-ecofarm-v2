@@ -375,7 +375,7 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
                 <DateField id={`check-in-${purchase.id}`} name="checkInDate" label="Check-in date" value={checkInDate} onChange={setCheckInDate} />
                 <DateField id={`check-out-${purchase.id}`} name="checkOutDate" label="Check-out date" value={checkOutDate} onChange={setCheckOutDate} />
               </> : <DateField id={`service-date-${purchase.id}`} name="serviceDate" label="Service date" value={serviceDate} onChange={setServiceDate} />}
-              <p>Monday?Friday uses weekday points; Saturday?Sunday uses weekend points. Overnight points are divided across each night's date. Check-out is excluded.</p>
+              <p>Monday–Friday uses weekday points; Saturday–Sunday uses weekend points. Overnight points are divided across each night's date. Check-out is excluded.</p>
             </fieldset>}
 
             {ask.isError && (

@@ -75,7 +75,7 @@ function OstShell() {
     <div className={styles.shell}>
       <aside className={styles.sidebar} aria-label="OST portal navigation">
         <div className={styles.sidebarBrand}>
-          <p className={styles.eyebrow}>AFHomes Ecofarm</p>
+          <p className={styles.eyebrow}>AFhomes Ecofarm</p>
           <p className={styles.ostNumber}>{ost.ostNumber}</p>
         </div>
 
@@ -109,7 +109,7 @@ function OstShell() {
 
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>AFHomes Ecofarm</p>
+            <p className={styles.eyebrow}>AFhomes Ecofarm</p>
             <h1 className={styles.pageTitle}>{ost.ostNumber}</h1>
           </div>
         </header>

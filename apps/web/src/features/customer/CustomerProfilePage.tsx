@@ -103,7 +103,7 @@ export function CustomerProfilePage() {
           />
         </FieldList>
         <p className={styles.notice}>
-          To correct any of these, contact AFHomes Ecofarm. Your account details are maintained by
+          To correct any of these, contact AFhomes Ecofarm. Your account details are maintained by
           the branch that registered you.
         </p>
       </Card>

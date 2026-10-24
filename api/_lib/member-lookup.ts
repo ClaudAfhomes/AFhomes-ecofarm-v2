@@ -55,10 +55,9 @@ export function customerLookupFromDirectory(r: Record<string, unknown>) {
 /**
  * Strict GSD Customer Lookup projection (active VIP only).
  *
- * Returns the four approved display fields and nothing else. Returns `null` when
+ * Returns the authorized staff display fields. Returns `null` when
  * any required value is missing/invalid so the caller can drop the row (fail
- * closed) rather than render a placeholder. The surname mask is the first
- * Unicode grapheme of the surname + a fixed `***` (no length preservation).
+ * closed) rather than render a placeholder. Full surnames are staff-only.
  * `validUntil` is the authoritative `expires_at` formatted in Asia/Manila.
  */
 export async function gsdActiveVipLookupFromDirectory(
@@ -127,10 +126,9 @@ export async function gsdActiveVipLookupFromDirectory(
     }
   }
 
-  const [surnameInitial] = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(lastName);
   return gsdActiveVipLookupSchema.parse({
     firstName,
-    maskedLastName: `${surnameInitial!.segment}***`,
+    lastName,
     raNumber,
     vipCardNumber,
     vipTier: tier as 'BRONZE' | 'SILVER' | 'GOLD',

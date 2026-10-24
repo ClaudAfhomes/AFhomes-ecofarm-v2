@@ -125,9 +125,9 @@ export const PLACEHOLDER = {
   ),
 
   /* Official VIP membership card artwork (real brand assets, via the shared tier map) */
-  "vip-card-gold": spec(tierArtwork("GOLD").src, "Gold VIP membership card"),
-  "vip-card-silver": spec(tierArtwork("SILVER").src, "Silver VIP membership card"),
-  "vip-card-bronze": spec(tierArtwork("BRONZE").src, "Bronze VIP membership card"),
+  "vip-card-gold": spec(tierArtwork("GOLD").src, "Gold VIP Privilege Card"),
+  "vip-card-silver": spec(tierArtwork("SILVER").src, "Silver VIP Privilege Card"),
+  "vip-card-bronze": spec(tierArtwork("BRONZE").src, "Bronze VIP Privilege Card"),
 } as const;
 
 export type PlaceholderKey = keyof typeof PLACEHOLDER;
