@@ -8,6 +8,7 @@ import {
   Button,
   QrCode,
   Dialog,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -288,6 +289,10 @@ export function UseVipPointsPage() {
 function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
   const [open, setOpen] = useState(false);
   const [points, setPoints] = useState('');
+  const [overnight, setOvernight] = useState(false);
+  const [serviceDate, setServiceDate] = useState('');
+  const [checkInDate, setCheckInDate] = useState('');
+  const [checkOutDate, setCheckOutDate] = useState('');
   const [quote, setQuote] = useState<{
     quoteId: string;
     pesoValue: string;
@@ -302,7 +307,7 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
   });
 
   const ask = useBusinessMutation({
-    mutationFn: () => quotePointDiscount(purchase.id, Number(points)),
+    mutationFn: () => quotePointDiscount(purchase.id, Number(points), overnight ? { checkInDate, checkOutDate } : { serviceDate }),
     // The typed amount is PRESERVED on failure, so a member who was interrupted
     // does not have to retype it.
     onSuccess: (result) =>
@@ -334,7 +339,7 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
                   onClick={() => ask.mutate()}
                   loading={ask.isPending}
                   loadingLabel="Pricing…"
-                  disabled={busy || !points || Number(points) <= 0}
+                  disabled={busy || !points || Number(points) <= 0 || (overnight ? !checkInDate || checkOutDate <= checkInDate : !serviceDate)}
                 >
                   Request customer approval
                 </Button>
@@ -362,6 +367,16 @@ function DiscountButton({ purchase }: { purchase: PurchaseRow }) {
               }}
               disabled={busy}
             />
+
+            {!quote && <fieldset disabled={busy}>
+              <legend>Actual stay/service dates (Philippine time)</legend>
+              <label><input type="checkbox" checked={overnight} onChange={event => setOvernight(event.target.checked)} />Overnight accommodation</label>
+              {overnight ? <>
+                <DateField id={`check-in-${purchase.id}`} name="checkInDate" label="Check-in date" value={checkInDate} onChange={setCheckInDate} />
+                <DateField id={`check-out-${purchase.id}`} name="checkOutDate" label="Check-out date" value={checkOutDate} onChange={setCheckOutDate} />
+              </> : <DateField id={`service-date-${purchase.id}`} name="serviceDate" label="Service date" value={serviceDate} onChange={setServiceDate} />}
+              <p>Monday?Friday uses weekday points; Saturday?Sunday uses weekend points. Overnight points are divided across each night's date. Check-out is excluded.</p>
+            </fieldset>}
 
             {ask.isError && (
               <ErrorState title="Cannot use points here" message={messageOf(ask.error)} />

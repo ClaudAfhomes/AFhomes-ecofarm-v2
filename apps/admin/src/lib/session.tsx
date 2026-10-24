@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -92,14 +93,25 @@ export function SessionProvider({
   const [status, setStatus] = useState<SessionStatus>('loading');
   const [user, setUser] = useState<SessionUser | null>(null);
   const [sessionError, setSessionError] = useState(false);
+  const resolvedUserId = useRef<string | null>(null);
+  const resolution = useRef(0);
 
   const resolve = useCallback(async () => {
+    const currentResolution = ++resolution.current;
     if (!client) {
       setUser(null);
       setStatus('unauthenticated');
       return;
     }
     const { data } = await client.auth.getSession();
+    if (currentResolution !== resolution.current) return;
+    if (resolvedUserId.current && resolvedUserId.current !== data.session?.user.id) {
+      // Local portals share a cookie; a different tab can replace the account.
+      queryClient.clear();
+      resolvedUserId.current = null;
+      setUser(null);
+      setStatus('loading');
+    }
     if (!data.session) {
       setUser(null);
       setStatus('unauthenticated');
@@ -108,6 +120,9 @@ export function SessionProvider({
     }
     try {
       const parsed = await protectedRequest('/admin/afhomes/session', afHomesSessionSchema);
+      if (currentResolution !== resolution.current) return;
+      if (resolvedUserId.current && resolvedUserId.current !== parsed.id) queryClient.clear();
+      resolvedUserId.current = parsed.id;
       setUser({
         id: parsed.id,
         name: parsed.fullName,
@@ -124,6 +139,7 @@ export function SessionProvider({
       setStatus('authenticated');
       setSessionError(false);
     } catch (error) {
+      if (currentResolution !== resolution.current) return;
       setUser(null);
       setStatus('unauthenticated');
       setSessionError(!(error instanceof ApiError && error.status === 401));
@@ -133,9 +149,20 @@ export function SessionProvider({
   useEffect(() => {
     const initialResolve = window.setTimeout(() => void resolve(), 0);
     const subscription = client?.auth.onAuthStateChange(() => void resolve()).data.subscription;
+    const onFocus = () => void resolve();
+    window.addEventListener('focus', onFocus);
+    const cookies = import.meta.env.DEV ? window.cookieStore : undefined;
+    const onCookieChange = (event: CookieChangeEvent) => {
+      if ([...event.changed, ...event.deleted].some(cookie =>
+        cookie.name?.startsWith('sb-') && cookie.name.endsWith('-auth-token'),
+      )) void resolve();
+    };
+    cookies?.addEventListener('change', onCookieChange);
     return () => {
       window.clearTimeout(initialResolve);
       subscription?.unsubscribe();
+      window.removeEventListener('focus', onFocus);
+      cookies?.removeEventListener('change', onCookieChange);
     };
   }, [client, resolve]);
 
@@ -148,6 +175,8 @@ export function SessionProvider({
     try {
       await client?.auth.signOut();
     } finally {
+      resolution.current++;
+      resolvedUserId.current = null;
       // Drop every cached row with the session: the next login must never see
       // the previous user's customers, redemptions or reports, and polling
       // queries must not keep firing against a signed-out client.

@@ -4,6 +4,7 @@ import { profilePhotoInputSchema } from '@afhomes/contracts';
 import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
 import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
+import { importedAccountSales, mergeAccountSales } from '../_lib/account-sales.js';
 /**
  * AFHomes Phase 8 - OST registration and approval (SM -> OST).
  *
@@ -1064,14 +1065,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('card_sales')
         .select('id, sale_number, status, created_at, cash_price_snapshot')
         .eq('origin', 'normal')
-        .eq('seller_ost_id', userId)
+        .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
         .order('created_at', { ascending: false });
       if (salesError) throw salesError;
-      const qualifyingSales = (sales ?? []).filter((s: { status: string }) => s.status === 'active');
+      const accountSales = mergeAccountSales(sales ?? [], await importedAccountSales(db, userId));
+      const qualifyingSales = accountSales.filter(s => s.status === 'active');
       const periodSales = qualifyingSales.length; // For now, all qualifying sales
 
       const salesInfo = {
-        totalSales: qualifyingSales.length,
+        totalSales: accountSales.length,
         periodSales,
         qualifyingSaleStatus: 'active',
       };
@@ -1091,7 +1093,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           created_at,
           card_sales!inner(sale_number)
         `)
-        .eq('beneficiary_ost_id', userId)
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
         .order('created_at', { ascending: false });
       if (commError) throw commError;
 
@@ -1192,21 +1195,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
       const { status, search, limit, offset } = parsed.data;
 
-      let query = db
+      const query = db
         .from('card_sales')
-        .select('id, sale_number, status, created_at, cash_price_snapshot, customer_id', { count: 'exact' })
+        .select('id, sale_number, status, created_at, cash_price_snapshot, customer_id')
         .eq('origin', 'normal')
-        .eq('seller_ost_id', userId)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      if (status) query = query.eq('status', status);
-      if (search) {
-        query = query.or(`sale_number.ilike.%${search}%,customer_id.ilike.%${search}%`);
-      }
-
-      const { data: sales, error: salesError, count } = await query;
-      if (salesError) throw salesError;
+        .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
+        .order('created_at', { ascending: false }).order('id');
+      const accountSales = mergeAccountSales(await readSearchRows(query), await importedAccountSales(db, userId));
+      const matchingSales = accountSales.filter(s => (!status || s.status === status)
+        && matchesSearch(search, [s.sale_number, s.customer_id]));
+      matchingSales.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(a.id).localeCompare(String(b.id)));
+      const sales = matchingSales.slice(offset, offset + limit);
 
       // Fetch customer names for the sales
       const customerIds = [...new Set((sales ?? []).map((s: Record<string, unknown>) => s.customer_id).filter(Boolean))];
@@ -1239,7 +1238,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const validated = ostSalesListSchema.safeParse({
         data: salesRecords,
-        meta: { total: count ?? 0, limit, offset },
+        meta: { total: matchingSales.length, limit, offset },
+        summary: { qualifyingSales: matchingSales.filter(s => s.status === 'active').length },
       });
       if (!validated.success) return fail(res, 'INTERNAL', 'Sales list validation failed', 500);
       return res.status(200).json(validated.data);
@@ -1291,7 +1291,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'id, commission_number, sale_id, amount, status, qualified_at, earned_at, paid_at, created_at, card_sales!inner(sale_number)',
           { count: 'exact' },
         )
-        .eq('beneficiary_ost_id', userId)
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 

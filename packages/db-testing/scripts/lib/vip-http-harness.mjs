@@ -130,6 +130,7 @@ export async function startVipHttpHarness(db, identities) {
       let query = fake.from(name).select(url.searchParams.get('select') ?? '*');
       for (const [key, value] of url.searchParams) {
         if (['select', 'order', 'limit', 'offset'].includes(key)) continue;
+        if (key === 'or') { query = query.or(value.slice(1,-1)); continue; }
         const dot = value.indexOf('.');
         const op = value.slice(0, dot);
         const raw = value.slice(dot + 1);
@@ -137,6 +138,7 @@ export async function startVipHttpHarness(db, identities) {
           query = query[op](key, raw === 'true' ? true : raw === 'false' ? false : raw);
         else if (op === 'in') query = query.in(key, raw.slice(1, -1).split(','));
         else if (op === 'is') query = query.is(key, raw === 'null' ? null : raw === 'true');
+        else if (op === 'not' && raw === 'is.true') query = query.not(key, 'is', true);
         else throw new Error('Unsupported fixture filter ' + op);
       }
       for (const order of (url.searchParams.get('order') ?? '').split(',').filter(Boolean)) {

@@ -3,7 +3,7 @@ import {
   LEGACY_WORKFLOW_COLUMNS as WORKFLOW_COLUMNS,
   type WorkflowSheet,
 } from '@afhomes/contracts';
-import { WORKFLOW_COLUMNS as SIMPLE_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
+import { WORKFLOW_COLUMNS as CURRENT_COLUMNS, WORKFLOW_V3_COLUMNS as SIMPLE_COLUMNS, WORKFLOW_V4_COLUMNS, WORKFLOW_V5_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
 import { validateImportRow } from './customer-import.js';
 import { zipStored } from './report-export.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
@@ -32,7 +32,7 @@ function book(
         ? WORKFLOW_COLUMNS[s]
         : mapping === '2'
           ? PREVIOUS_WORKFLOW_COLUMNS[s]
-          : SIMPLE_COLUMNS[s];
+          : mapping === '3' ? SIMPLE_COLUMNS[s] : mapping === '4' ? WORKFLOW_V4_COLUMNS[s] : mapping === '5' ? WORKFLOW_V5_COLUMNS[s] : CURRENT_COLUMNS[s];
     const table = [Object.fromEntries(columns.map((c) => [c.key, c.header])), ...(rows[s] ?? [])];
     parts[`xl/worksheets/s${i}.xml`] = `<worksheet><sheetData>${table
       .map(
@@ -81,6 +81,47 @@ const payment = (key = 'Person 1', claim = 'Receipt 1') => ({
 });
 
 describe('workflow workbook v2', () => {
+  it('rejects an unknown VIP ID suffix in the previous historical workbook mapping', () => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{
+      ...customer(), existing_vip_control_number: '26101400003G1C01X',
+    }] }, {}, '4'))).toThrow('official 17-character');
+  });
+  it.each(['1','2','3','4','5'])('retains immutable mapping %s without requiring new columns', mapping => {
+    expect(parseCustomerWorkbookV2(book({Customers:[mapping === '5' ? { ...customer(), purchase_reference: '' } : customer()]},{},mapping))!.rows).toHaveLength(1);
+  });
+  it.each(['S', 'N'])('preserves contract classification suffix %s in current VIP references', suffix => {
+    const vip = `26101400003G1C01${suffix}`;
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: vip, contract_classification: suffix === 'N' ? 'Non-Standard' : 'Standard' }] }, {}, '6'))!.rows[0]!;
+    expect(parsed.fields.existing_vip_control_number).toBe(vip);
+    expect(parsed.purchaseReference).toBe(vip);
+  });
+  it('refuses a supplied VIP ID whose classification contradicts its suffix', () => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: '26101400003G1C01N', contract_classification: 'Standard' }] }, {}, '6'))).toThrow('classification must match');
+  });
+  it('uses the official VIP card ID as purchase reference independently of Customer ID', () => {
+    const vip = '26101400003G1C01S';
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), customer_id: 'CUS2026000001', purchase_reference: vip }] }, {}, '5'))!.rows[0]!;
+    expect(parsed.purchaseReference).toBe(vip);
+    expect(parsed.customerId).toBe('CUS2026000001');
+    expect(parsed.fields.existing_vip_control_number).toBe(vip);
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [customer()] }, {}, '5'))).toThrow('official 17-character');
+  });
+  it('keeps a stable internal source key for blank VIP IDs until confirmation', () => {
+    const input = { ...customer(), purchase_reference: '' };
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [input] }, {}, '5'))!.rows[0]!;
+    expect(parsed.purchaseReference).toMatch(/^AUTO-VIP-[a-f0-9]{64}$/);
+    expect(parseCustomerWorkbookV2(book({ Customers: [{ ...input, existing_stay_points_total: '0' }] }, {}, '5'))!.rows[0]!.purchaseReference).toBe(parsed.purchaseReference);
+    expect(parsed.fields.existing_vip_control_number).toBe('');
+  });
+  it.each(['1.5', '12abc', '0', '37'])('rejects invalid VIP term %s without truncation', (months) => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: '26101400003G1C01S', payment_term_months: months }] }, {}, '5'))).toThrow('integer');
+  });
+  it('links Sales Team and Payments by email while a blank VIP ID awaits generation', () => {
+    const input = { ...customer(), purchase_reference: '' };
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [input], 'Sales Team': [{ customer_key: input.email, referrer_name: 'Registered Seller' }], Payments: [payment(input.email)] }, {}, '5'))!.rows[0]!;
+    expect(parsed.fields.referrer_name).toBe('Registered Seller');
+    expect(parsed.payments[0]!.customerKey).toBe(parsed.customerKey);
+  });
   it('preserves supplied Customer ID for existing-identity matching instead of dropping it', () => {
     const id = 'AF-CUS-2026-000001';
     const record = parseCustomerWorkbookV2(

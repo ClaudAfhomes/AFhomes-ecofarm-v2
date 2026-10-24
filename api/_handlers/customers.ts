@@ -459,6 +459,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
 
       const p = parsed.data;
+      if (p.vipCardNumber !== undefined && p.vipCardNumber !== (before.vip_card_number ?? null))
+        return fail(res, 'CONFLICT', 'VIP card numbers are server-issued and cannot be edited. Use certified import to preserve an existing historical number.', 409);
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (p.firstName !== undefined) patch.first_name = p.firstName;
       if (p.middleName !== undefined)

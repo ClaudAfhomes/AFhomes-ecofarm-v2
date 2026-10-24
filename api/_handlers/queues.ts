@@ -111,21 +111,15 @@ async function buildQueue(
   search?: string,
   options?: { loadAll?: boolean },
 ) {
-  // Push the search predicate to the database so a search no longer loads the
-  // entire status population into memory. The in-memory `matchesSearch` below
-  // stays as the authoritative filter and safety net.
+  // Search joined display names before pagination; a root PostgREST OR cannot
+  // filter columns across these embedded relations.
   const term = (search ?? '').trim();
-  const safeTerm = term.replace(/[%_,()]/g, '');
   const loadAll = options?.loadAll === true;
   let query = db
     .from('card_sales')
     .select(SELECT_QUEUE, { count: 'exact' })
     .in('status', statuses);
-  if (safeTerm) {
-    query = query.or(
-      `sale_number.ilike.%${safeTerm}%,status.ilike.%${safeTerm}%,customers.first_name.ilike.%${safeTerm}%,customers.middle_name.ilike.%${safeTerm}%,customers.last_name.ilike.%${safeTerm}%,customers.suffix.ilike.%${safeTerm}%,card_plans.name.ilike.%${safeTerm}%,card_plans.code.ilike.%${safeTerm}%`,
-    );
-  }
+
   // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
   // bounded window contains the rows that sort first in the merged queue.
   // Nulls first matches the merge sort, which treats a missing payment as ''.
@@ -134,11 +128,11 @@ async function buildQueue(
     .order('id');
   // When not loading all (finance merge path), bound the read to `limit` rows
   // instead of paging through the entire population. `limit` is expected to be
-  // the window size (page size + offset) in that mode. When searching, the DB
-  // filter above already narrows the set, so loading all matches is cheap.
+  // the window size (page size + offset) in that mode. Searches exhaust the
+  // authorized status set so joined-name matches cannot disappear before paging.
   let all: Record<string, unknown>[];
   let boundedCount: number | null = null;
-  if (loadAll || safeTerm) {
+  if (loadAll || term) {
     all = await readSearchRows(query);
   } else {
     const bounded = await readBoundedRows(query, limit);
@@ -162,7 +156,7 @@ async function buildQueue(
   // When the read was bounded (no search), the true total comes from the DB
   // count captured during the bounded read, not from the (window-sized) slice.
   const count =
-    loadAll || safeTerm ? filtered.length : boundedCount ?? filtered.length;
+    loadAll || term ? filtered.length : boundedCount ?? filtered.length;
   const data = filtered.slice(offset, offset + limit);
 
   const saleIds = (data ?? []).map((row) => String(row.id));
@@ -232,12 +226,8 @@ async function buildQueue(
  * but unverified ₱10,000 reads as verified 0.00 with the FULL total remaining.
  */
 async function buildReservationQueue(db: Db, limit: number, offset: number, search?: string) {
-  // Push the search predicate to the database so a search no longer loads the
-  // entire executed-reservation population into memory. The in-memory
-  // `matchesSearch` below stays as the authoritative filter (it covers the
-  // joined text the PostgREST `or` may miss) and as a safety net.
+  // Match joined names before paging; PostgREST root OR cannot span relations.
   const term = (search ?? '').trim();
-  const safeTerm = term.replace(/[%_,()]/g, '');
   let query = db
     .from('reservation_agreements')
     .select(
@@ -247,22 +237,17 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
     .eq('origin', 'application')
     .eq('status', 'executed')
     .is('sale_id', null);
-  if (safeTerm) {
-    query = query.or(
-      `reservation_number.ilike.%${safeTerm}%,customer_applications.application_number.ilike.%${safeTerm}%,customer_applications.status.ilike.%${safeTerm}%,customers.first_name.ilike.%${safeTerm}%,customers.middle_name.ilike.%${safeTerm}%,customers.last_name.ilike.%${safeTerm}%,customers.suffix.ilike.%${safeTerm}%`,
-    );
-  }
+
   // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
   // bounded window contains the rows that sort first in the merged queue.
   query = query
     .order('spot_cash_started_at', { ascending: true, nullsFirst: true })
     .order('id');
-  // When searching, the DB filter above already narrows the set, so loading all
-  // matches is cheap. When not searching, bound the read to `limit` rows (the
-  // finance window) instead of paging through every executed reservation.
+  // Searches exhaust the authorized status set. Other reads stay bounded to
+  // the finance window instead of paging through every executed reservation.
   let rows: Record<string, unknown>[];
   let reservationTotal: number | null = null;
-  if (safeTerm || limit <= 0) {
+  if (term || limit <= 0) {
     rows = await readSearchRows(query);
   } else {
     const bounded = await readBoundedRows(query, limit);

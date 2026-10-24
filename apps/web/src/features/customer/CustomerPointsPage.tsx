@@ -143,6 +143,8 @@ export function CustomerPointsPage() {
                   earnings, not money: a member who has reached their annual limit sees
                   0 here while their spendable balance stays healthy. */}
               <Field label="Points on your card" value={position.balance.toLocaleString('en-PH')} />
+                <Field label="Weekday points (Monday?Friday)" value={position.weekdaySpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
+                <Field label="Weekend points (Saturday?Sunday)" value={position.weekendSpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
               <Field
                 label="Can still earn this year"
                 value={position.remainingEarningCapacity.toLocaleString('en-PH')}

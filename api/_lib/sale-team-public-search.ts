@@ -44,11 +44,11 @@ export async function handlePublicSaleTeamSearch(
   path: string,
 ): Promise<void> {
   let config = searchConfiguration();
-  if (!config.localPreview) {
-    const saved = await db.rpc('get_public_verification_settings');
-    const parsed = saved.error ? null : publicVerificationSettingsSchema.safeParse(saved.data);
-    if (parsed?.success) config = searchConfiguration(parsed.data);
-  }
+  const saved = await db.rpc('get_public_verification_settings');
+  const parsedSettings = saved.error
+    ? null
+    : publicVerificationSettingsSchema.safeParse(saved.data);
+  if (parsedSettings?.success) config = searchConfiguration(parsedSettings.data);
   res.setHeader('Cache-Control', 'no-store');
   if (path === 'search/config' && method(req) === 'GET') {
     res.status(200).json(config.public);

@@ -243,10 +243,10 @@ describe('OST login', () => {
     await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-    expect(await screen.findByText('OST-000007')).toBeInTheDocument();
+    expect((await screen.findAllByText('OST-000007')).length).toBeGreaterThan(0);
     expect(await screen.findByText('AA-J6P3N8V5C2S0')).toBeInTheDocument();
     expect(screen.getByText('2027-09-01')).toBeInTheDocument();
-    expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
+    expect(await screen.findByText('Ollie Seller')).toBeInTheDocument();
   });
 
   it('lands on dashboard after login prompted by a protected feature route', async () => {
@@ -263,8 +263,8 @@ describe('OST login', () => {
     await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-    expect(await screen.findByText('OST-000007')).toBeInTheDocument();
-    expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
+    expect((await screen.findAllByText('OST-000007')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Ollie Seller')).toBeInTheDocument();
   });
 
   it('explains a non-approved record instead of entering', async () => {

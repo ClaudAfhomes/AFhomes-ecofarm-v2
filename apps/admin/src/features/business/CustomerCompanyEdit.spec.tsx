@@ -139,6 +139,7 @@ describe('Customer company edit', () => {
     expect(supplementaryGender.selectedOptions[0]?.textContent).toBe('Male');
     // Stated section present, verbatim, no money math.
     expect(screen.getByLabelText('VIP Package')).toBeInTheDocument();
+    expect(screen.getByLabelText('VIP Card Number')).toHaveAttribute('readonly');
     expect(screen.getByLabelText('Ref No')).toBeInTheDocument();
     // SSOT address parts and related names stay editable.
     for (const label of [

@@ -1,17 +1,40 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { IstPortalPage } from './IstPortalPage';
+import { getTeamSalesAnalytics } from '../genealogy/services';
 import { istDateRange } from './services';
 import { istNavItemsForPermissions } from '../../app/navigation';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), imported: vi.fn() }));
 vi.mock('./services', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services')>()),
   getIstReport: mocks.get,
+  getImportedSales: mocks.imported,
+}));
+vi.mock('../genealogy/services', () => ({
+  getTeamSalesAnalytics: vi.fn().mockResolvedValue({
+    window: { from: '2026-10-01T00:00:00Z', to: '2026-11-01T00:00:00Z' },
+    kpis: {
+      totalTeamSales: 2,
+      membersWithSales: 1,
+      membersNoSales: 0,
+      topSellerCount: 2,
+      participationRate: 100,
+    },
+    members: [
+      {
+        staffId: 'seller',
+        fullName: 'Mariel Soriano',
+        role: 'ost',
+        salesCount: 2,
+        salesActivity: 'Top Seller',
+      },
+    ],
+  }),
 }));
 vi.mock('../afhomes/SaleTeamAccreditationCard', () => ({
   SaleTeamAccreditationCard: () => <div>Accreditation details</div>,
@@ -94,7 +117,33 @@ const report = {
   pageSize: 25,
 };
 beforeEach(() => {
+  mocks.imported
+    .mockReset()
+    .mockResolvedValue({ data: [], meta: { page: 1, pageSize: 25, total: 0 } });
   mocks.get.mockReset().mockResolvedValue(report);
+});
+
+it('shows finalized imported purchases in normal My Sales history', async () => {
+  mocks.get.mockResolvedValue({
+    ...report,
+    sales: [
+      {
+        id: 'source-1',
+        saleNumber: '26011500841G1C01S',
+        customerName: 'Patricia Delos Reyes',
+        tier: 'Gold',
+        amount: '312000.00',
+        status: 'active',
+        createdAt: '2026-10-23T00:00:00Z',
+      },
+    ],
+    total: 1,
+  });
+  renderWithProviders(<IstPortalPage view="my-sales" />);
+  expect(await screen.findByText('26011500841G1C01S')).toBeInTheDocument();
+  expect(screen.getByText('Patricia Delos Reyes')).toBeInTheDocument();
+  expect(screen.queryByText('Imported customer records')).not.toBeInTheDocument();
+  expect(mocks.imported).not.toHaveBeenCalled();
 });
 
 it('keeps personal and OST performance visibly separate', async () => {
@@ -303,4 +352,60 @@ it('renders personal sales with named mobile fields and an accessible table capt
   const table = await screen.findByRole('table', { name: 'My Sales history' });
   expect(within(table).getByText('ANA REYES')).toHaveAttribute('data-label', 'Customer');
   expect(within(table).getByText('Gold')).toHaveAttribute('data-label', 'VIP tier');
+});
+it.each(['vice_director', 'senior_sales_manager', 'sales_manager'])(
+  'shows Team Sales Activity in Team Sales for %s without a separate imported-record section',
+  async (roleSlug) => {
+    renderWithProviders(<IstPortalPage view="team-sales" />, { user: { ...istUser, roleSlug } });
+    expect(await screen.findByRole('heading', { name: 'Team Sales Activity' })).toBeInTheDocument();
+    expect(await screen.findByText('Mariel Soriano')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Imported customer records' }),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it('retains the original independent activity presets and custom date filters in Team Sales', async () => {
+  const user = userEvent.setup();
+  vi.mocked(getTeamSalesAnalytics).mockClear();
+  renderWithProviders(<IstPortalPage view="team-sales" />, { user: istUser });
+  await screen.findByText('Mariel Soriano');
+  expect(getTeamSalesAnalytics).toHaveBeenCalledWith(istUser.id, 'month', '', '');
+  const activity = within(screen.getByRole('region', { name: 'Team sales activity' }));
+  const start = activity.getByLabelText(/Start Date/);
+  const end = activity.getByLabelText(/End Date/);
+  for (const [label, days] of [
+    ['Today', 0],
+    ['Past 7 Days', 7],
+    ['Past 28 Days', 28],
+    ['Past 6 Months', 180],
+  ] as const) {
+    await user.click(activity.getByRole('button', { name: label }));
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - days);
+    await waitFor(() =>
+      expect(getTeamSalesAnalytics).toHaveBeenLastCalledWith(
+        istUser.id,
+        'month',
+        from.toISOString().slice(0, 10),
+        to.toISOString().slice(0, 10),
+      ),
+    );
+    expect(start).toHaveValue(from.toISOString().slice(0, 10));
+    expect(end).toHaveValue(to.toISOString().slice(0, 10));
+  }
+  fireEvent.change(start, { target: { value: '2026-01-02' } });
+  fireEvent.change(end, { target: { value: '2026-01-10' } });
+  await waitFor(() =>
+    expect(getTeamSalesAnalytics).toHaveBeenLastCalledWith(
+      istUser.id,
+      'month',
+      '2026-01-02',
+      '2026-01-10',
+    ),
+  );
+  expect(activity.getByText('Custom range: 2026-01-02 to 2026-01-10 (UTC)')).toBeInTheDocument();
+  expect(activity.getByText('Top Seller', { selector: 'dt' })).toBeInTheDocument();
+  expect(activity.getByRole('columnheader', { name: 'Sales' })).toBeInTheDocument();
 });

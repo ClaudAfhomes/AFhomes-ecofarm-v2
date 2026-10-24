@@ -12,6 +12,12 @@ import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.
 import { deny, fail, type Db } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { serviceClient } from '../_lib/rest.js';
+import {
+  importedAccountSales,
+  mergeAccountSales,
+  attributedSellers,
+} from '../_lib/account-sales.js';
+import { getSalesDownlineContext } from '../_lib/genealogy-visibility.js';
 
 type Row = Record<string, unknown>;
 type ScopeKind = 'global' | 'finance' | 'organization' | 'team' | 'self' | 'redemption';
@@ -110,11 +116,11 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       .eq('origin', 'normal')
       .or(`seller_staff_id.eq.${principal.userId},seller_ost_id.eq.${principal.userId}`);
     if (result.error) throw result.error;
-    return {
-      sales: (result.data ?? []) as Row[],
-      attributed: (result.data ?? []).length,
-      legacy: [] as Row[],
-    };
+    const sales = mergeAccountSales(
+      (result.data ?? []) as Row[],
+      await importedAccountSales(db, principal.userId),
+    );
+    return { sales, attributed: sales.length, legacy: [] as Row[] };
   }
   if (kind !== 'team') return { sales: [] as Row[], attributed: 0, legacy: [] as Row[] };
 
@@ -154,6 +160,7 @@ async function scopedSales(db: Db, principal: AfHomesPrincipal, kind: ScopeKind)
       !snapshotted.has(String(sale.id)) &&
       directRelationshipIds.has(String(sale.referral_relationship_id)),
   );
+  sales = mergeAccountSales(sales, await importedAccountSales(db, principal.userId, true));
   return { sales, attributed: sales.length, legacy };
 }
 
@@ -251,17 +258,11 @@ async function currentNetworkContext(db: Db, principal: AfHomesPrincipal, kind: 
 /* Team Sales Activity Analytics                                      */
 /* ------------------------------------------------------------------ */
 
-async function getDescendantSellers(
-  db: Db,
-  principal: AfHomesPrincipal,
-): Promise<string[]> {
+async function getDescendantSellers(db: Db, principal: AfHomesPrincipal): Promise<string[]> {
   return getDescendantSellersForUser(db, principal.userId);
 }
 
-async function getDescendantSellersForUser(
-  db: Db,
-  userId: string,
-): Promise<string[]> {
+async function getDescendantSellersForUser(db: Db, userId: string): Promise<string[]> {
   const [relationships, staff, assignments, roles] = await Promise.all([
     rows(db, 'referral_relationships', 'subject_staff_id,upline_staff_id,is_active'),
     rows(db, 'staff_users', 'id,full_name,status'),
@@ -303,8 +304,11 @@ async function teamSalesAnalytics(
 ) {
   const { from, to } = dateRange;
   const effectiveUserId = targetUserId ?? principal.userId;
-  const scoped = await scopedSales(db, principal, kind);
-  const descendantIds = await getDescendantSellersForUser(db, effectiveUserId);
+  const scoped = await scopedSales(db, { ...principal, userId: effectiveUserId }, kind);
+  const descendantIds =
+    targetUserId && targetUserId !== principal.userId
+      ? await getDescendantSellersForUser(db, effectiveUserId)
+      : (await getSalesDownlineContext(db, effectiveUserId, principal.roleSlug)).ids;
 
   const [staff, assignments, roles] = await Promise.all([
     rows(db, 'staff_users', 'id,full_name,status'),
@@ -324,14 +328,16 @@ async function teamSalesAnalytics(
 
   // Filter period qualifying sales
   const periodSales = scoped.sales.filter(
-    (s) => s.status === QUALIFYING_SALE_STATUS && inWindow(s.created_at, from, to)
+    (s) =>
+      s.status === QUALIFYING_SALE_STATUS &&
+      inWindow(s.created_at, from, to) &&
+      attributedSellers(s).some((id) => descendantIds.includes(id)),
   );
 
   // Count sales per seller (seller_staff_id or seller_ost_id)
   const salesBySeller = new Map<string, number>();
   for (const sale of periodSales) {
-    const sellerId = String(sale.seller_staff_id ?? sale.seller_ost_id ?? '');
-    if (sellerId) {
+    for (const sellerId of attributedSellers(sale).filter((id) => descendantIds.includes(id))) {
       salesBySeller.set(sellerId, (salesBySeller.get(sellerId) ?? 0) + 1);
     }
   }
@@ -352,16 +358,18 @@ async function teamSalesAnalytics(
         salesActivity: activity,
       };
     }) as {
-      staffId: string;
-      fullName: string;
-      role: string;
-      status: string;
-      salesCount: number;
-      salesActivity: 'Top Seller' | 'With Sales' | 'Low Sales' | 'No Sales';
-    }[];
+    staffId: string;
+    fullName: string;
+    role: string;
+    status: string;
+    salesCount: number;
+    salesActivity: 'Top Seller' | 'With Sales' | 'Low Sales' | 'No Sales';
+  }[];
 
   // Determine Top Seller and Low Sales
-  const withSales = members.filter((m) => m.salesCount > 0).sort((a, b) => b.salesCount - a.salesCount);
+  const withSales = members
+    .filter((m) => m.salesCount > 0)
+    .sort((a, b) => b.salesCount - a.salesCount);
   const topCount = withSales[0]?.salesCount ?? 0;
   for (const m of members) {
     if (m.salesCount === topCount && topCount > 0) m.salesActivity = 'Top Seller';
@@ -424,7 +432,7 @@ async function teamSalesOverview(
   }
 
   const periodSales = scoped.sales.filter(
-    (s) => s.status === QUALIFYING_SALE_STATUS && inWindow(s.created_at, from, to)
+    (s) => s.status === QUALIFYING_SALE_STATUS && inWindow(s.created_at, from, to),
   );
 
   const salesBySeller = new Map<string, number>();
@@ -605,7 +613,7 @@ function getDateRange(
   period: AnalyticsPeriod,
   fromParam: unknown,
   toParam: unknown,
-  now = new Date()
+  now = new Date(),
 ): { from: Date; to: Date } {
   const from = parseOptionalDate(fromParam);
   const to = parseOptionalDate(toParam);
@@ -664,7 +672,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? await db.from('roles').select('slug').eq('id', targetAssignment.role_id).maybeSingle()
         : { data: null, error: null };
       const targetRole = targetRoleResult.data;
-      if (!targetRole || !['vice_director', 'senior_sales_manager', 'sales_manager'].includes(targetRole.slug)) {
+      if (
+        !targetRole ||
+        !['vice_director', 'senior_sales_manager', 'sales_manager'].includes(targetRole.slug)
+      ) {
         return fail(res, 'FORBIDDEN', 'Target must be a genealogy root (VD/SSM/SM)', 403);
       }
       effectiveKind = 'team';
@@ -678,9 +689,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         dateRange = getDateRange(parsed.data, req.query.from, req.query.to);
       } catch (e) {
-        return fail(res, 'VALIDATION_ERROR', e instanceof Error ? e.message : 'Invalid date range', 400);
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          e instanceof Error ? e.message : 'Invalid date range',
+          400,
+        );
       }
-      const result = await teamSalesAnalytics(db, principal, parsed.data, effectiveKind, dateRange, targetUserId);
+      const result = await teamSalesAnalytics(
+        db,
+        principal,
+        parsed.data,
+        effectiveKind,
+        dateRange,
+        targetUserId,
+      );
       return res.status(200).json(result);
     } catch (error) {
       console.error('[api] analytics team-sales:', error instanceof Error ? error.message : error);
@@ -703,12 +726,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         dateRange = getDateRange(parsed.data, req.query.from, req.query.to);
       } catch (e) {
-        return fail(res, 'VALIDATION_ERROR', e instanceof Error ? e.message : 'Invalid date range', 400);
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          e instanceof Error ? e.message : 'Invalid date range',
+          400,
+        );
       }
       const result = await teamSalesOverview(db, principal, parsed.data, dateRange);
       return res.status(200).json(result);
     } catch (error) {
-      console.error('[api] analytics team-sales/overview:', error instanceof Error ? error.message : error);
+      console.error(
+        '[api] analytics team-sales/overview:',
+        error instanceof Error ? error.message : error,
+      );
       return fail(res, 'INTERNAL', 'Internal server error', 500);
     }
   }
@@ -788,12 +819,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })()
           : [],
       canFinancial && (kind === 'global' || kind === 'finance')
-        ? rows(db, 'commissions', 'id,sale_id,status')
+        ? rows(db, 'commissions', 'id,sale_id,status,settled_before_system')
         : canFinancial && saleIds.length
           ? (async () => {
               const q = await db
                 .from('commissions')
-                .select('id,sale_id,status')
+                .select('id,sale_id,status,settled_before_system')
                 .in('sale_id', saleIds);
               if (q.error) throw q.error;
               return (q.data ?? []) as Row[];
@@ -827,8 +858,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       operationalSaleIds.has(String(row.sale_id)),
     );
     const memberships = membershipsAll as Row[];
-    const commissions = (commissionsAll as Row[]).filter((row) =>
-      operationalSaleIds.has(String(row.sale_id)),
+    const commissions = (commissionsAll as Row[]).filter(
+      (row) => operationalSaleIds.has(String(row.sale_id)) && row.settled_before_system !== true,
     );
     const redemptions = (redemptionsAll as Row[]).filter((row) => row.status === 'completed');
     const verified = payments.filter((row) => row.status === 'verified');

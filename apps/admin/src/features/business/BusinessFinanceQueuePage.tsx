@@ -92,7 +92,8 @@ function progressPercent(verified: string, total: string): number {
 
 /** Formats a raw numeric money string with thousands separators while typing. */
 function formatMoneyInput(raw: string): string {
-  const cleaned = raw.replace(/[^0-9.]/g, '');
+  if (!/^[0-9,.]*$/.test(raw)) return raw;
+  const cleaned = raw.replace(/,/g, '');
   if (!cleaned) return '';
   const [intPart, decPart] = cleaned.split('.');
   const formattedInt = (intPart ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -978,7 +979,7 @@ export function RecordPaymentDialog({
                   inputMode="decimal"
                   value={formatMoneyInput(amount)}
                   onChange={(value) => {
-                    setAmount(value.replace(/[^0-9.]/g, ''));
+                    setAmount(value.replace(/,/g, ''));
                     setAmountDirty(true);
                   }}
                   error={

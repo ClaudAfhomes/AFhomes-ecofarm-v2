@@ -22,7 +22,7 @@ function install() {
     ost_applications: [],
     final_qualifications: [],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }], tables, tokens: phase2WorldTokens() });
   return holder.db as FakeSupabase;
 }
 
@@ -195,7 +195,7 @@ describe('GET /analytics/sales-trend (AFHomes Sales Overview pattern)', () => {
   });
 
   it('does not leak database internals on failure', async () => {
-    holder.db = new FakeSupabase({
+    holder.db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }],
       tables: phase2World({ card_sale_hierarchy_snapshots: [], redemptions: [] }),
       tokens: phase2WorldTokens(),
       errors: { card_sales: { message: 'secret database detail' } },

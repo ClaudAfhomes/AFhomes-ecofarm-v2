@@ -20,6 +20,7 @@
     "seed": "tsx supabase/seed.ts",
     "seed:demo": "tsx supabase/seed-demo.ts",
     "db:migrate": "tsx supabase/apply-migrations.ts",
+    "db:prepare:local": "node packages/db-testing/scripts/prepare-local-supabase-migrations.mjs",
     "bootstrap:superadmin": "tsx supabase/invite-superadmin.ts",
     "test:db": "tsx supabase/db-integration.ts",
     "test:db:search": "node packages/db-testing/scripts/test-sale-team-search.mjs",

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
+import { localMigrationManifest } from './prepare-local-supabase-migrations.mjs';
+const files = readdirSync(new URL('../../../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql'));
+const selected = localMigrationManifest(files);
+assert.equal(new Set(selected.map(f => f.split('_')[0])).size, selected.length);
+assert.equal(files.length - selected.length, 3);
+assert(selected.includes('20261130000003_afhomes_reconcile_membership_sale_team.sql'));
+assert(selected.includes('20261206000006_afhomes_reconcile_workbook_network_version.sql'));
+assert.throws(() => localMigrationManifest([...files, '20261223000001_afhomes_unknown.sql']), /Unreconciled duplicate/);
+assert.throws(() => localMigrationManifest(files.filter(f => !f.startsWith('20261130000003_'))), /Missing forward repair/);
+console.log('PASS: unique-version CLI manifest retains both forward repairs and refuses unknown collisions or missing repairs');

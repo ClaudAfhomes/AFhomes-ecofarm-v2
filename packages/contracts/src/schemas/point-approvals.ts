@@ -18,6 +18,10 @@ export const pointApprovalSchema = z.object({
   grossAmount: exactDecimalStringSchema,
   tierDiscountAmount: exactDecimalStringSchema,
   finalAmountPayable: exactDecimalStringSchema,
+  serviceDates: z.object({ serviceDate: z.string().nullable().optional(), checkInDate: z.string().nullable().optional(), checkOutDate: z.string().nullable().optional() }).optional(),
+  allowanceType: z.enum(['weekday', 'weekend', 'mixed']).nullable().optional(),
+  weekdayPoints: z.number().int().nonnegative().nullable().optional(),
+  weekendPoints: z.number().int().nonnegative().nullable().optional(),
   expiresAt: z.string(),
   status: z.enum(['pending', 'approved', 'rejected', 'expired', 'completed']),
 });

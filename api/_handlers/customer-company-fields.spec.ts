@@ -77,6 +77,15 @@ function install(overrides: Partial<FakeTables> = {}) {
 }
 
 describe('customer company-stated fields', () => {
+  it.each([null, '26101400003G1C01S'])('refuses manually assigning or replacing an issued VIP number (%s)', async (issued) => {
+    const db = install();
+    const id = CUSTOMER.prospectTwo;
+    db.rows('customers').find(row => row.id === id)!.vip_card_number = issued;
+    const { res, state } = makeRes();
+    await customers(makeReq({ method: 'PATCH', familyPath: id, token: TOKEN.admin, body: { vipCardNumber: '26101400004G1C01S' } }), res);
+    expect(state.status).toBe(409);
+    expect(db.rows('customers').find(row => row.id === id)!.vip_card_number).toBe(issued);
+  });
   it('stores company fields verbatim while masking TIN on read', async () => {
     const db = install();
     const { res, state } = makeRes();

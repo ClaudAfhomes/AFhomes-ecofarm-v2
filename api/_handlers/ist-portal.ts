@@ -15,6 +15,12 @@ import { sumMoney } from '../_lib/report-scope.js';
 import { getSalesDownlineContext } from '../_lib/genealogy-visibility.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { importedSales } from './_imported-sales.js';
+import {
+  importedAccountSales,
+  mergeAccountSales,
+  attributedSellers,
+} from '../_lib/account-sales.js';
 
 type Row = Record<string, unknown>;
 const SALE_COLUMNS =
@@ -58,12 +64,22 @@ function earnings(rows: Row[], allowed: boolean) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (method(req) !== 'GET')
     return fail(res, 'METHOD_NOT_ALLOWED', 'This portal is read-only.', 405);
-  if (subPath(req)) return fail(res, 'NOT_FOUND', 'Route not found.', 404);
+  if (subPath(req) && subPath(req) !== 'imported-sales')
+    return fail(res, 'NOT_FOUND', 'Route not found.', 404);
   const principal = await authorizeAfHomes(req, 'dashboard.view');
   if ('error' in principal) return deny(res, principal);
   const leader = isIstRole(principal.roleSlug);
   if (!leader && principal.roleSlug !== 'ost')
     return fail(res, 'FORBIDDEN', 'Sales account required.', 403);
+  if (subPath(req) === 'imported-sales') {
+    const db = serviceClient() as Db;
+    if (!db) return fail(res, 'INTERNAL', 'Service unavailable.', 503);
+    try {
+      return await importedSales(req, res, principal, db);
+    } catch {
+      return fail(res, 'INTERNAL', 'Unable to load imported sales. Try again.', 500);
+    }
+  }
   const parsed = istPortalQuerySchema.safeParse(req.query);
   if (!parsed.success)
     return fail(res, 'VALIDATION_ERROR', 'Choose a valid reporting period.', 400);
@@ -172,8 +188,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .order('sale_id'),
           )
         : [];
-    const snapshotIds = [...new Set(snapshots.map((r) => String(r.sale_id)))];
-    const ownSales = canSales
+    const importedCommissionSales =
+      leader && canCommissions
+        ? await db.rpc('imported_commission_sale_ids_for_account', { p_actor_id: principal.userId })
+        : { data: [], error: null };
+    if (importedCommissionSales.error) throw importedCommissionSales.error;
+    const snapshotIds = [
+      ...new Set([
+        ...snapshots.map((r) => String(r.sale_id)),
+        ...((importedCommissionSales.data ?? []) as string[]),
+      ]),
+    ];
+    let ownSales = canSales
       ? await readSearchRows(
           period(
             db
@@ -202,15 +228,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
     }
-    const ostSales = teamSales.filter((s) =>
-      ostSet.has(String(s.seller_staff_id ?? s.seller_ost_id)),
-    );
+    if (canSales) {
+      ownSales = mergeAccountSales(
+        ownSales,
+        await importedAccountSales(db, principal.userId, false, from, to),
+      );
+      if (leader)
+        teamSales.push(...(await importedAccountSales(db, principal.userId, true, from, to)));
+    }
+    const unifiedTeamSales = mergeAccountSales(teamSales);
+    teamSales.splice(0, teamSales.length, ...unifiedTeamSales);
+    const ostSales = teamSales.filter((s) => attributedSellers(s).some((id) => ostSet.has(id)));
     const ownCommissions = canCommissions
       ? await readSearchRows(
           period(
             db
               .from('commissions')
               .select(COMMISSION_COLUMNS)
+              .not('settled_before_system', 'is', true)
               .or(
                 `beneficiary_staff_id.eq.${principal.userId},beneficiary_ost_id.eq.${principal.userId}`,
               ),
@@ -225,6 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             db
               .from('commissions')
               .select(COMMISSION_COLUMNS)
+              .not('settled_before_system', 'is', true)
               .in('sale_id', snapshotIds.slice(i, i + 100)),
           ),
         );
@@ -247,8 +283,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       salesAmount: canSales ? sumMoney(sales.map((s) => s.cash_price_snapshot)) : null,
       ...earnings(commissions, canCommissions),
     });
-    const sellers = (sales: Row[]) =>
-      new Set(sales.map((s) => String(s.seller_staff_id ?? s.seller_ost_id))).size;
+    const sellers = (sales: Row[], allowed: string[]) =>
+      new Set(sales.flatMap(attributedSellers).filter((id) => allowed.includes(id))).size;
     const sales = view === 'my-sales' ? ownSales : view === 'team-sales' ? teamSales : [];
     let commissions =
       view === 'my-commissions'
@@ -323,8 +359,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         personal: summary(ownSales, ownCommissions),
         ost: {
           ...summary(ostSales, ostCommissions),
-          withSales: canSales ? sellers(ostSales) : null,
-          withoutSales: canSales ? ostIds.length - sellers(ostSales) : null,
+          withSales: canSales ? sellers(ostSales, ostIds) : null,
+          withoutSales: canSales ? ostIds.length - sellers(ostSales, ostIds) : null,
         },
         teamCommissionOverview: teamView
           ? {
@@ -357,9 +393,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           total: ids.length,
           active: people.filter((p) => p.id !== principal.userId && p.status === 'active').length,
           salesCount: canSales ? teamSales.length : null,
+          qualifyingSales: canSales ? teamSales.filter((s) => s.status === 'active').length : null,
           salesAmount: canSales ? sumMoney(teamSales.map((s) => s.cash_price_snapshot)) : null,
-          withSales: canSales ? sellers(teamSales) : null,
-          withoutSales: canSales ? ids.length - sellers(teamSales) : null,
+          withSales: canSales ? sellers(teamSales, ids) : null,
+          withoutSales: canSales ? ids.length - sellers(teamSales, ids) : null,
         },
         sales: salesPage.map((s) => ({
           id: s.id,

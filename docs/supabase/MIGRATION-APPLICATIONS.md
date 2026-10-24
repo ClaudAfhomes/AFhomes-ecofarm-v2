@@ -411,3 +411,73 @@ The user approved applying and pushing the previously prepared single migration 
 - Concurrent shared changes were detected and not reverted: the unrelated `purge_customer(uuid)` definition hash changed from `38d0c180cc50f911e3cdf17d6b628841` to `015ec60cdf749dc3e66f08a8993c62ee`; customer and payment counts each changed from 1 to 0, audit count from 33 to 34. A `CUSTOMER_DELETED` audit event is recorded at `2026-10-22T03:25:11.771Z`. The approved migration contains no change to that function and no customer/payment deletion. These differences prevent a global claim that all business rows/function definitions were unchanged during the verification window.
 - Removed only `AFHOMES_SEARCH_PRIVACY_APPROVED` and `AFHOMES_SEARCH_CLEANUP_READY` from ignored local `.env.local`; other values were preserved. The current localhost config returns HTTP 200 and `available: true`. Local proof previously completed for this exact body: 24 focused API tests, six admin UI tests, 115 real PostgreSQL search/settings checks, typecheck, targeted lint and env isolation. The schema index was regenerated with 133 repository migrations.
 - Sanitized ignored evidence: `.tmp-bin/search-readiness-release-before.json` and `.tmp-bin/search-readiness-release-applied.json`, verified at `2026-10-22T03:26:09.728Z`. Authenticated administrator save/reload is not verified because the browser requires sign-in; no settings update was submitted during verification. Earlier full-suite failures remain unresolved and are recorded in the separate localhost audit.
+
+## 2026-10-24 — approved customer import, points allowances and commission cutover
+
+The user approved the five previously listed migrations and requested an updated current schema. Target was independently verified as shared AF Homes production project `ikaevepedpqygdlipsei`. The Supabase connector was linked to a different project and was not used for this operation. The guarded repository database runner verified the intended project using the existing local connection, without exposing credentials.
+
+### Exact applied scope
+
+The source was commit `792e511ad344110ee19768b86abeeeee66ea719c` on `claud/clean-develop`. Applied, in this order, using `supabase/apply-migrations.ts --approve-production --only=20261215000002,20261223000001,20261223000002,20261223000003,20261223000004`:
+
+| Migration | SHA-256 of applied source |
+|---|---|
+| `20261215000002_afhomes_reconcile_customer_id_search_path.sql` | `aa7ec1efee880b5fb07ce373572378d7195ff2d1af87bf0929f35c459b18e86a` |
+| `20261223000001_afhomes_customer_historical_import.sql` | `903b1a0c62330b82e189eb825abc4921ded990a1a1abff414a50a6fb76c8f597` |
+| `20261223000002_afhomes_stay_date_point_allowances.sql` | `ef18d83ab16ecc00c0477dcab107902c9887deb962629567f141e5a4c71cb0f8` |
+| `20261223000003_afhomes_vip_contract_classification.sql` | `c1869a5fdb69cace1bab050c785ad1aa89505b15b260ea7387c20f423d0e58f5` |
+| `20261223000004_afhomes_import_sales_commission_cutover.sql` | `8cf4e4e2704b9454eaf1c3f3d0854d9fba43ddf373989b9dd42fd4647b05ea2b` |
+### Preflight and rehearsal
+
+- Read-only preflight found 120 migration history entries; all five selected versions were absent. Twenty additional local versions also lacked history entries, while two live versions have no corresponding local file (`20261012075439`, `20261203000002`). Their status was not silently repaired.
+- The actual required live functions and tables existed despite the older history gaps. Exported only the public/private schema definitions, never customer rows, and rehearsed all five exact SQL bodies successfully against those definitions in a disposable local database. The restore supplied the platform shim and `pg_trgm`; this was schema compatibility proof, not a copy of live business data.
+- Existing VIP identifiers satisfied the new constraint and uniqueness requirements. Saved aggregate fingerprints of customer identifiers, points totals/reversal debt, and commission amounts/statuses without exporting individual business rows.
+- The raw RLS audit had two pre-existing platform cron policies (`cron_job_policy`, `cron_job_run_details_policy`); all application findings were zero. The platform policies were preserved.
+
+### Verified after application
+
+- Successful post-check: 2026-10-24T01:09:29.905Z (09:09 Asia/Singapore).
+- History changed **120 -> 125**. The newly recorded set is exactly `20261215000002`, `20261223000001`, `20261223000002`, `20261223000003`, `20261223000004`; no extra versions were applied.
+- Catalog contains **60 public and 30 private application tables**, matching the regenerated repository inventory. The local manifest has **146 files**; file count and history count are different concepts.
+- Customer count **2**, points-account count **2**, commission count **2**, unchanged. Aggregate fingerprints confirm existing customer/VIP identifiers, points balances/reversal debt, and commission amounts/statuses are unchanged.
+- Every points account has separate allowance values whose sum equals its existing net balance; zero mismatches. All issued customer VIP IDs are represented by their owning customer in the private issuance registry; zero mismatches.
+- The two imported-sales reporting RPCs and dated redemption preparation RPC are executable by `service_role`, denied to both browser roles. The old undated redemption preparation function remains fail-closed with `STAY_SERVICE_DATES_REQUIRED`.
+- Read-only allocation checks returned weekday-only for Monday 2026-10-26 and weekend-only for Saturday 2026-10-24. No redemption, payment, import, activation, refund, seed or account mutation was submitted as a live test.
+- Repeated the complete RLS invariant audit: zero application violations; only the same two platform cron policies remain.
+- Updated `scripts/update-schema-index.mjs` and regenerated `CURRENT-SCHEMA.sql`. It remains a context-only repository manifest, not a complete live schema dump. The 20 older unrecorded versions remain explicitly unrecorded; some corresponding objects exist, so history absence alone does not establish object absence.
+
+### Limits
+
+The four documented full-suite purchase/reservation failures remain unresolved. Earlier successful ten-customer browser evidence was isolated local proof; hosted browser import, activation, redemption and refund acceptance was not performed by this migration operation. No deployment or unrelated migration was executed. This record does not claim full function-by-function equality with every repository migration.
+
+Sanitized ignored evidence: `.tmp-bin/shared-import-preflight.json`, `.tmp-bin/shared-import-compatibility.json`, `.tmp-bin/live-schema-rehearsal.log`, `.tmp-bin/shared-import-data-before.json`, `.tmp-bin/shared-import-postcheck.json`. Schema-only export and generated credentials remain outside version control.
+## 2026-10-24 ? approved unified sales reporting and public verification settings
+
+- Verified target: `ikaevepedpqygdlipsei`. User explicitly approved correcting pending migrations, applying our changes, then committing/pushing to `claud/clean-develop`.
+- Consolidated two never-applied settings drafts into unique version `20261225000001`. Retained the existing applied readiness migration unchanged. Removed nested transaction wrappers so the guarded runner records DDL/history atomically.
+- Applied with `supabase/apply-migrations.ts --approve-production --only=20261224000001,20261225000001`.
+- Live history: **125 ? 127**; exactly these two versions added, no other entries removed or changed. The 20 older history gaps were left untouched.
+
+| Migration | SHA-256 |
+| --- | --- |
+| `20261224000001_afhomes_unified_sales_reporting.sql` | `1c8625c92ec6161164bc0983d2be5ff4a9e86ce1f6246630fa984a8afa6e6b7d` |
+| `20261225000001_afhomes_public_verification_settings.sql` | `fdcf83690bb73bc209eade34b8e3c8eae41aac79f4e0671a24327de944a358d6` |
+
+### Verification
+
+- Real PostgreSQL public-search/settings suite: 139 checks passed, including all eleven edited fields, stale revisions, persistence and access boundaries.
+- Rehearsed the exact live getter/updater definitions locally, applied the consolidated migration twice, and verified original settings/idempotency/ACLs. Rehearsal rolled back locally.
+- Ten-customer import/reporting suite passed, including finalized vs pending routing, 70/30 points, role scopes, no duplicate team totals, and settled historical commission suppression.
+- Live read-only post-check: all pre-existing settings (including revision, privacy approval, cleanup readiness and notice version) unchanged. Eleven new support/payment fields returned; updater definition handles all eleven columns.
+- Existing customer/VIP identifier, points balance and commission amount/status aggregate fingerprints unchanged.
+- `account_imported_sales`, settings getter and settings updater are executable by service_role only, denied to anon/authenticated.
+- Zero application RLS invariant violations; the same two platform cron policies remain. PostgREST schema reload notified.
+- Schema index regenerated. It remains context-only and must never be executed as SQL.
+
+### Limits
+
+No live settings edit, import, payment, activation, redemption, seed or account mutation was submitted as a post-apply test. The four existing complete-DB-suite purchase/reservation fixture failures remain documented. Full browser lookup was blocked by the local Cloudflare test widget; no bypass was added. Hosted deployment/authenticated acceptance was not performed.
+
+Sanitized verification summaries and definition snapshots remain ignored under `.tmp-bin/verification-live-*`; no credentials or customer rows were exported into Markdown.
+
+Release checks after consolidation: complete API 2705 passed, contracts 313 passed, focused Admin 30 passed, focused Web 9 passed; all seven workspace typechecks, both app builds and lint passed. Full disposable DB suite: 1453 passed / the same 4 documented purchase/reservation fixture failures.

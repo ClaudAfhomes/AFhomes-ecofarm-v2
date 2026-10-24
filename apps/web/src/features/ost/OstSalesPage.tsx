@@ -38,7 +38,7 @@ export function OstSalesPage() {
           />
           <MetricCard
             label="Qualifying Sales"
-            value={formatCountOrDash(allSales.filter((s) => s.status === 'active').length)}
+            value={formatCountOrDash(salesData?.pages[0]?.summary?.qualifyingSales ?? allSales.filter((s) => s.status === 'active').length)}
             icon="check"
           />
         </div>

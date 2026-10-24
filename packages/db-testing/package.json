@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Local PostgreSQL integration test harness. Owns embedded-postgres so the deployed runtime never installs it.",
   "scripts": {
+    "test:db:customer-workbook": "node --import tsx scripts/test-ten-customer-workbook.mjs",
     "test:db:external-import": "node --import tsx scripts/test-external-customer-import.mjs",
     "test:db:local": "node scripts/test-db-local.mjs",
     "test:db:harness": "node scripts/test-db-harness.mjs"

@@ -19,6 +19,17 @@ const initial = {
   revision: 1,
   noticeVersion: 'v1',
   updatedAt: '2026-10-22T00:00:00.000Z',
+  supportHeading: 'Customer Support & Payment Inquiries',
+  supportEmail: 'info@afhomes.com.ph',
+  supportPhone: '+63 960 431 6867',
+  bankHolder: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+  bank1Name: 'SECURITY BANK',
+  bank1Account: '0000082595577',
+  bank2Name: 'CHINABANK',
+  bank2Account: '150700006468',
+  checkPayee: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+  bankReminder: 'Please double-check the provided company bank account details before sending any payment. Thank you!',
+  agentReminder: 'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.',
 };
 const user = {
   id: 'admin',
@@ -75,7 +86,7 @@ it('keeps the form read-only when configuration update is denied', async () => {
     {...user.afHomesPermissions[0]!,canUpdate:false},
   ]} });
   expect(await screen.findByLabelText('Enable public IST/OST search')).toBeDisabled();
-  expect(screen.getByLabelText('Privacy notice')).toBeDisabled();
+  expect(screen.getByLabelText('Privacy notice (edit mode)')).toBeDisabled();
   expect(screen.getByLabelText('Privacy notice approved')).toBeDisabled();
   expect(screen.getByLabelText('Limit each IP address to 3 successful searches in 24 hours')).toBeDisabled();
   expect(screen.queryByRole('button',{name:'Save settings'})).not.toBeInTheDocument();
@@ -87,7 +98,7 @@ it('shows save errors and keeps the edited values available', async () => {
   renderWithProviders(<PublicVerificationSettingsPage />, { user });
   await screen.findByLabelText('Contact retention (days)');
   fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
-  expect(await screen.findByText('Settings changed. Reload before saving again.')).toBeVisible();
+  expect(await screen.findByText(/Settings changed. Reload before saving again/i)).toBeVisible();
   expect(screen.getByLabelText('Contact retention (days)')).toHaveValue('30');
 });
 it('saves revoked privacy approval and displays it after reopening', async () => {

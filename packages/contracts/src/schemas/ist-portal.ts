@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { commissionStatusSchema, saleStatusSchema } from './lifecycle.js';
+import { commissionStatusSchema, saleStatusSchema, membershipStatusSchema } from './lifecycle.js';
 import { exactDecimalStringSchema } from './money.js';
 import { memberPositionSchema } from './member.js';
 
@@ -59,6 +59,7 @@ export const istPortalReportSchema = z.object({
     total: z.number(),
     active: z.number(),
     salesCount: z.number().nullable(),
+    qualifyingSales: z.number().int().nonnegative().nullable().optional(),
     salesAmount: exactDecimalStringSchema.nullable(),
     withSales: z.number().nullable(),
     withoutSales: z.number().nullable(),
@@ -86,7 +87,7 @@ export const istPortalReportSchema = z.object({
       customerName: z.string().nullable(),
       tier: z.string().nullable(),
       amount: exactDecimalStringSchema,
-      status: saleStatusSchema,
+      status: z.union([saleStatusSchema, membershipStatusSchema]),
     }),
   ),
   commissions: z.array(

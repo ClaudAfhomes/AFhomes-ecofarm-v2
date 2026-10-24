@@ -101,6 +101,15 @@ export function customerWorkflowTemplate(
     .replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${rows}</sheetData>`)
     .replace(/<autoFilter\b[^>]*\/>/g, '')
     .replace('</sheetData>', `</sheetData><autoFilter ref="F1:M${table.length}"/>`);
+  const emailColumn = column(WORKFLOW_COLUMNS.Customers.findIndex(c => c.key === 'email') + 1);
+  const links = Array.from({ length: 101 }, (_, i) => i === 0
+    ? '<c r="P1" t="inlineStr"><is><t>Customer link: VIP ID / Customer ID / email</t></is></c>'
+    : `<c r="P${i+1}"><f>${escape(`IF('Customers'!B${i+1}<>"",'Customers'!B${i+1},IF('Customers'!A${i+1}<>"",'Customers'!A${i+1},IF('Customers'!${emailColumn}${i+1}<>"",'Customers'!${emailColumn}${i+1},"")))`)}</f></c>`);
+  for (const [i, cell] of links.entries()) {
+    const row = new RegExp(`<row r="${i+1}">([\\s\\S]*?)</row>`);
+    refs = row.test(refs) ? refs.replace(row, `<row r="${i+1}">$1${cell}</row>`)
+      : refs.replace('</sheetData>', `<row r="${i+1}">${cell}</row></sheetData>`);
+  }
   parts.set('xl/worksheets/sheet6.xml', encode(refs));
   let book = decoder.decode(parts.get('xl/workbook.xml')!);
   const addresses = workflowAddressLists();
@@ -114,7 +123,10 @@ export function customerWorkflowTemplate(
     addresses.definedNames
       .map((d) => `<definedName name="${d.name}">${escape(d.formula)}</definedName>`)
       .join('') +
-    `<definedName name="AFHomesPurchases">'Customers'!$B$2:$B$101</definedName>`;
+    `<definedName name="AFHomesPurchases">'Reference Lists'!$P$2:$P$101</definedName>`;
+  const generatedNames = new Set(['AFHomesPurchases', ...roles.map((_, i) => `AFHomesStaff${i}`), ...addresses.definedNames.map(d => d.name)]);
+  book = book.replace(/<definedName\b[^>]*name="([^"]+)"[^>]*>[\s\S]*?<\/definedName>/g, (value, name) => generatedNames.has(name) ? '' : value);
+  book = book.replace(/<definedNames\b[^>]*\/>/g, '');
   book = book.includes('</definedNames>')
     ? book.replace('</definedNames>', defined + '</definedNames>')
     : book.replace('</workbook>', `<definedNames>${defined}</definedNames></workbook>`);
@@ -176,6 +188,21 @@ export function customerWorkflowTemplate(
           'barangay',
           `INDIRECT(IFERROR(VLOOKUP(${province}&"|"&${city},'Address Lists'!$A$${addresses.localityStart}:$B$${addresses.rows.length},2,FALSE),"AFHomesEmpty"))`,
         );
+      }
+    }
+    // New VIP control / historical fields validations (Customers sheet only)
+    if (name === 'Customers') {
+      if (columns.some((c) => c.key === 'contract_classification')) {
+        add('contract_classification', '"Standard,Non-Standard"');
+      }
+      if (columns.some((c) => c.key === 'payment_term_months')) {
+        // Integer 1-36 validation
+        validations.push(
+          `<dataValidation type="whole" allowBlank="1" showErrorMessage="1" sqref="${at('payment_term_months')}2:${at('payment_term_months')}101"><formula1>1</formula1><formula2>36</formula2></dataValidation>`,
+        );
+      }
+      if (columns.some((c) => c.key === 'existing_card_activation_status')) {
+        add('existing_card_activation_status', '"Active,Inactive,Expired,Suspended,Cancelled,Pending Activation"');
       }
     }
     if (validations.length) {

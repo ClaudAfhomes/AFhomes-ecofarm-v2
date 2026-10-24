@@ -54,6 +54,8 @@ export const pointsBalanceSummarySchema = z.object({
   remainingEarningCapacity: pointsAmountSchema,
   /** greatest(0, balance - reversalDebt). Zero while debt is outstanding. */
   spendable: pointsAmountSchema,
+  weekdaySpendable: pointsAmountSchema.optional(),
+  weekendSpendable: pointsAmountSchema.optional(),
   /** Non-monetary. No automatic expiry, no waiver. */
   reversalDebt: pointsAmountSchema,
   periodStart: z.string(),
@@ -747,9 +749,15 @@ export const adjustedPointsSchema = z.object({
  * compute from the matched promotion and the eligible line total. `.strict()` so a
  * forged figure is a loud error rather than a silent strip.
  */
+export const redemptionServiceDatesSchema = z.union([
+  z.object({ serviceDate: z.iso.date() }).strict(),
+  z.object({ checkInDate: z.iso.date(), checkOutDate: z.iso.date() }).strict().refine(v => v.checkOutDate > v.checkInDate && (Date.parse(v.checkOutDate)-Date.parse(v.checkInDate))/86400000 <= 366, { message: 'Check-out must follow check-in, within 366 nights' }),
+]);
+export type RedemptionServiceDates = z.infer<typeof redemptionServiceDatesSchema>;
 export const quotePointDiscountSchema = z
   .object({
     pointsRequested: z.number().int().positive().max(1_000_000_000),
+    serviceDates: redemptionServiceDatesSchema,
   })
   .strict();
 

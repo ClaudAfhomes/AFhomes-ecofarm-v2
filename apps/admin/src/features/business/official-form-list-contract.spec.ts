@@ -82,6 +82,8 @@ describe('real summary response contract regression', () => {
         submittedAt: null,
         status: 'draft',
         paymentStatus: null,
+        verifiedTotal: null,
+        fullyPaid: false,
       },
     ]);
   });

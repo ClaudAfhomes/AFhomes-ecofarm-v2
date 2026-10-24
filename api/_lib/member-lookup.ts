@@ -94,8 +94,10 @@ export async function gsdActiveVipLookupFromDirectory(
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) return null;
   const totalAvailablePoints = Number(r.available_points ?? 0);
-  const weekendAvailablePoints = Math.round(totalAvailablePoints * 0.3);
-  const weekdayAvailablePoints = totalAvailablePoints - weekendAvailablePoints;
+  const weekday = r.weekday_available_points == null ? NaN : Number(r.weekday_available_points);
+  const weekend = r.weekend_available_points == null ? NaN : Number(r.weekend_available_points);
+  const weekdayAvailablePoints = Number.isSafeInteger(weekday) && weekday >= 0 ? weekday : null;
+  const weekendAvailablePoints = Number.isSafeInteger(weekend) && weekend >= 0 ? weekend : null;
   const raNumber = typeof r.ra_number === 'string' ? r.ra_number : null;
   const vipCardNumber = typeof r.vip_card_number === 'string' ? r.vip_card_number : null;
 
@@ -125,9 +127,10 @@ export async function gsdActiveVipLookupFromDirectory(
     }
   }
 
+  const [surnameInitial] = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(lastName);
   return gsdActiveVipLookupSchema.parse({
     firstName,
-    lastName,
+    maskedLastName: `${surnameInitial!.segment}***`,
     raNumber,
     vipCardNumber,
     vipTier: tier as 'BRONZE' | 'SILVER' | 'GOLD',

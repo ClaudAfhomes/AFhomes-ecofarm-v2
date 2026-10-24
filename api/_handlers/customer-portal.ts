@@ -332,7 +332,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Keyless callers use the wrapper, which resolves the same membership
       // from auth.uid() and returns the identical position shape.
       if (keyless) {
-        const wrapped = await db.rpc('preview_customer_position');
+        const wrapped = await db.rpc('preview_customer_position_with_allowances');
         if (wrapped.error) {
           if (String(wrapped.error.message ?? '').includes('MEMBERSHIP_NOT_FOUND'))
             return fail(res, 'NOT_FOUND', 'No active membership found', 404);
@@ -347,7 +347,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const membership = await activeMembershipOf(db, principal.customerId);
       if (!membership) return fail(res, 'NOT_FOUND', 'No active membership found', 404);
 
-      const { data, error } = await db.rpc('customer_points_position', {
+      const { data, error } = await db.rpc('customer_points_position_with_allowances', {
         p_membership_id: membership.id,
       });
       if (error) {

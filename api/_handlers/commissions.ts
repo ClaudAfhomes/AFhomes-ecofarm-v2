@@ -90,6 +90,7 @@ function commissionInScope(
   row: Record<string, unknown>,
 ): boolean {
   if (scope.canSeeAll) return true;
+  if (row.settled_before_system === true) return false;
   if ('error' in scope.view) return false;
   const userId = scope.view.userId;
   return row.beneficiary_staff_id === userId || row.beneficiary_ost_id === userId;
@@ -297,9 +298,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let query = db.from('commissions').select(SELECT_COMMISSION, { count: 'exact' });
       if (status) query = query.eq('status', status);
       if (!scope.canSeeAll) {
-        query = query.or(
-          `beneficiary_staff_id.eq.${scope.view.userId},beneficiary_ost_id.eq.${scope.view.userId}`,
-        );
+        query = query
+          .not('settled_before_system', 'is', true)
+          .or(
+            `beneficiary_staff_id.eq.${scope.view.userId},beneficiary_ost_id.eq.${scope.view.userId}`,
+          );
       } else if (seller) {
         query = query.or(`beneficiary_staff_id.eq.${seller},beneficiary_ost_id.eq.${seller}`);
       }
@@ -314,7 +317,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) => toCommission(row));
         const filtered = shaped.filter((c) =>
-          matchesSearch(search, [c.commissionNumber, c.saleNumber, c.beneficiaryName, c.status, c.id]),
+          matchesSearch(search, [
+            c.commissionNumber,
+            c.saleNumber,
+            c.beneficiaryName,
+            c.status,
+            c.id,
+          ]),
         );
         return res.status(200).json({
           data: filtered.slice(offset, offset + limit),
@@ -349,7 +358,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // display fields. Scope is checked against the ids, never the names.
       const { data: raw, error: rawError } = await db
         .from('commissions')
-        .select('id, beneficiary_staff_id, beneficiary_ost_id')
+        .select('id, beneficiary_staff_id, beneficiary_ost_id, settled_before_system')
         .eq('id', detail[1]!)
         .maybeSingle();
       if (rawError) throw rawError;
@@ -375,6 +384,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Commission not found', 404);
+
+      if (before.settled_before_system === true)
+        return fail(
+          res,
+          'CONFLICT',
+          'This commission was settled before the system and cannot be qualified again.',
+          409,
+        );
 
       // Only a commission awaiting qualification can be qualified. Nothing else
       // can be promoted straight to `earned`.
@@ -438,6 +455,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Commission not found', 404);
+
+      if (before.settled_before_system === true)
+        return fail(
+          res,
+          'CONFLICT',
+          'This commission was settled before the system and cannot be paid again.',
+          409,
+        );
 
       // Idempotent: a retry of an already-paid commission returns the current
       // row without a second payout mutation or a second audit event.

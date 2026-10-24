@@ -137,7 +137,7 @@ describe('preview caller branches without a service role', () => {
     });
     const { res, state } = makeRes();
     await points(
-      makeReq({ method: 'POST', familyPath: `purchases/${PURCHASE_ID}/quote`, body: { pointsRequested: 100 }, token: 'staff-token' }) as never,
+      makeReq({ method: 'POST', familyPath: `purchases/${PURCHASE_ID}/quote`, body: { pointsRequested: 100, serviceDates: { serviceDate: '2026-10-24' } }, token: 'staff-token' }) as never,
       res as never,
     );
     expect(state.status).toBe(200);
@@ -235,7 +235,7 @@ describe('preview caller branches without a service role', () => {
   it('customer position calls preview_customer_position with no arguments', async () => {
     installUser(
       {
-        preview_customer_position: [{ membership_id: CUSTOMER_ID, balance: 100, annual_cap: 60000, remaining_earning_capacity: 59900, spendable: 100, reversal_debt: 0, period_start: '2026-01-01', period_end: '2026-12-31', tier: 'GOLD', earned_this_period: 100, redeemed_this_period: 0 }],
+        preview_customer_position_with_allowances: [{ membership_id: CUSTOMER_ID, balance: 100, annual_cap: 60000, remaining_earning_capacity: 59900, spendable: 100, reversal_debt: 0, period_start: '2026-01-01', period_end: '2026-12-31', tier: 'GOLD', earned_this_period: 100, redeemed_this_period: 0 }],
       },
       {
         customers: [{ id: CUSTOMER_ID, customer_number: 'CUS-1', email: 'ana@example.invalid', status: 'active', auth_user_id: CUSTOMER_AUTH_ID }],
@@ -248,7 +248,7 @@ describe('preview caller branches without a service role', () => {
       res as never,
     );
     expect(state.status).toBe(200);
-    expect(rpcArg('preview_customer_position')).toEqual({});
+    expect(rpcArg('preview_customer_position_with_allowances')).toEqual({});
   });
 
   it('member resolution calls preview_staff_resolve_member', async () => {

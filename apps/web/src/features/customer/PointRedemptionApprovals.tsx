@@ -53,6 +53,10 @@ export function PointRedemptionApprovals() {
             ))}
           </ul>
           <dl>
+            <dt>Actual service / stay dates</dt>
+            <dd>{approval.serviceDates?.serviceDate ?? (approval.serviceDates?.checkInDate && approval.serviceDates?.checkOutDate ? `${approval.serviceDates.checkInDate} to ${approval.serviceDates.checkOutDate} (check-out excluded)` : 'Missing dates ? ask staff to prepare a dated request')}</dd>
+            <dt>Allowance</dt>
+            <dd>{approval.allowanceType ?? 'Date update required'} ? Weekday: {approval.weekdayPoints ?? 'Unavailable'} ? Weekend: {approval.weekendPoints ?? 'Unavailable'}</dd>
             <dt>Gross amount</dt>
             <dd>{formatMoney(approval.grossAmount)}</dd>
             <dt>VIP tier discount</dt>
@@ -83,7 +87,7 @@ export function PointRedemptionApprovals() {
           {approval.status === 'pending' && (
             <>
               <Button
-                disabled={decision.isPending || confirmationOpen}
+                disabled={decision.isPending || confirmationOpen || !approval.allowanceType}
                 loading={
                   decision.isPending &&
                   decision.variables?.quoteId === approval.quoteId &&

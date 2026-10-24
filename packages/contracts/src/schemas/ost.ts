@@ -316,7 +316,9 @@ export const paginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =
   });
 
 /** OST personal sales list response */
-export const ostSalesListSchema = paginatedResponseSchema(ostSalesRecordSchema);
+export const ostSalesListSchema = paginatedResponseSchema(ostSalesRecordSchema).extend({
+  summary: z.object({ qualifyingSales: z.number().int().nonnegative() }).optional(),
+});
 export type OstSalesList = z.infer<typeof ostSalesListSchema>;
 
 /** OST personal commissions list response */

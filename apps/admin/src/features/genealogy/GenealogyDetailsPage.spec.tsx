@@ -91,3 +91,10 @@ it('shows top-level only after a successful empty upperline response', async () 
   renderDetails();
   expect(await screen.findByText('Top-level seller')).toBeInTheDocument();
 });
+it('keeps genealogy details free of team sales activity and sales requests', async () => {
+  vi.mocked(getTeamSalesAnalytics).mockClear();
+  renderDetails();
+  await screen.findByText('Top-level seller');
+  expect(screen.queryByRole('heading', { name: 'Team Sales Activity' })).not.toBeInTheDocument();
+  expect(getTeamSalesAnalytics).not.toHaveBeenCalled();
+});

@@ -271,8 +271,8 @@ export const getSettlement = (purchaseId: string) =>
  * failure so staff do not retype it. The peso value is the server's, from the
  * staycation default or the matched promotion - never computed here.
  */
-export const quotePointDiscount = (purchaseId: string, pointsRequested: number) =>
-  post(`/earning/purchases/${purchaseId}/quote`, pointDiscountQuoteSchema, { pointsRequested });
+export const quotePointDiscount = (purchaseId: string, pointsRequested: number, serviceDates: import('@afhomes/contracts').RedemptionServiceDates) =>
+  post(`/earning/purchases/${purchaseId}/quote`, pointDiscountQuoteSchema, { pointsRequested, serviceDates });
 
 /**
  * Spend the quoted points.

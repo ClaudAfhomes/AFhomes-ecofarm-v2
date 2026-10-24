@@ -81,6 +81,14 @@ const baseFields = (overrides: Record<string, string> = {}): Record<string, stri
 });
 
 describe('canonical import birth dates and secondary contacts', () => {
+  it('validates existing VIP IDs against the official allocator format', () => {
+    const invalid = validateImportRow(2, baseFields({ existing_vip_control_number: '26101400003G1C01X' }), ctx(), TODAY);
+    expect(invalid.errors).toContainEqual(expect.objectContaining({ field: 'existing_vip_control_number' }));
+    for (const suffix of ['S', 'N']) {
+      const valid = validateImportRow(2, baseFields({ existing_vip_control_number: `26101400003G1C01${suffix}` }), ctx(), TODAY);
+      expect(valid.errors.some(error => error.field === 'existing_vip_control_number')).toBe(false);
+    }
+  });
   it('holds conflicting registered identity and retains verified spelling on matching updates', () => {
     const identity = {
       first_name: 'JUAN',

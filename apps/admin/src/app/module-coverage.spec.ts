@@ -38,7 +38,7 @@ describe('module catalog covers every console page', () => {
     const byPrefix = new Map(EXTRA_GATED_ROUTES.map((entry) => [entry.pathPrefix, entry.module]));
     expect(byPrefix.get('/admin/member-lookup')).toBe('operations.redemption');
     expect(byPrefix.get('/admin/customer-lookup')).toBe('operations.customer_lookup');
-    expect(byPrefix.get('/admin/documents')).toBe('sales.id_documents');
+    expect(byPrefix.has('/admin/documents')).toBe(false);
     expect(byPrefix.get('/admin/customers/applications/import-export')).toBe(
       'governance.customer_import',
     );
