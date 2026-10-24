@@ -111,7 +111,7 @@ export function CustomerResetPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Choose a new password"
       brandTitle="Your farm membership, in your pocket."
       brandLead="Track points, view your digital membership card, and follow your payments."

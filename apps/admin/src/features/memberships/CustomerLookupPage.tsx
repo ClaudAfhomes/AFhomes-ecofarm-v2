@@ -62,7 +62,7 @@ const MAX_SUGGESTIONS = 6;
  * stay on the result cards below.
  */
 function displayName(row: GsdActiveVipLookup): string {
-  return `${row.firstName} ${row.maskedLastName}`;
+  return `${row.firstName} ${row.lastName}`;
 }
 
 function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVipLookup[] {
@@ -73,7 +73,7 @@ function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVip
   const seen = new Set<string>();
   for (const row of rows) {
     const name = displayName(row);
-    const key = `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+    const key = `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
     if (seen.has(key)) continue;
     const matches = name.toLowerCase().includes(needle) || row.vipTier.toLowerCase().includes(needle);
     if (!matches) continue;
@@ -151,15 +151,6 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
               <Icon name="image" size={16} />
             </span>
             <div className={styles.factText}>
-              <dt>RA No.</dt>
-              <dd>{customer.raNumber ?? '—'}</dd>
-            </div>
-          </div>
-          <div className={styles.fact}>
-            <span className={styles.factIcon} aria-hidden="true">
-              <Icon name="image" size={16} />
-            </span>
-            <div className={styles.factText}>
               <dt>VIP Card No.</dt>
               <dd>{customer.vipCardNumber ?? '—'}</dd>
             </div>
@@ -190,20 +181,6 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
               <div className={styles.factText}>
                 <dt>Weekday Points</dt>
                 <dd>{customer.weekdayAvailablePoints?.toLocaleString('en-US') ?? 'Unavailable'}</dd>
-              </div>
-            </div>
-          </div>
-          <div className={styles.capsGrid} data-tier={tier}>
-            <div className={styles.capCard}>
-              <div className={styles.capLabel}>Annual Cap</div>
-              <div className={styles.capValue}>
-                {(tier === 'GOLD' ? 25000 : tier === 'SILVER' ? 20000 : 10000).toLocaleString('en-US')}
-              </div>
-            </div>
-            <div className={styles.capCard}>
-              <div className={styles.capLabel}>Lifetime Gift</div>
-              <div className={styles.capValue}>
-                {(tier === 'GOLD' ? 500000 : tier === 'SILVER' ? 200000 : 50000).toLocaleString('en-US')}
               </div>
             </div>
           </div>
@@ -267,7 +244,7 @@ export function CustomerLookupPage() {
   // second, permission-gated fetch: everything the card needs is already in the
   // authorized lookup row.
   const rowKey = (row: GsdActiveVipLookup) =>
-    `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
+    `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedLookup =
     (customers.data ?? []).find((row) => rowKey(row) === selectedKey) ?? null;
@@ -441,7 +418,7 @@ export function CustomerLookupPage() {
  */
 function describeCustomerLookupError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
+    return 'Check your connection and try again. If this continues, contact AFhomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

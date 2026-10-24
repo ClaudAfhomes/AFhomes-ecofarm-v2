@@ -412,7 +412,7 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
  */
 function describeApplicationLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
+    return 'Check your connection and try again. If this continues, contact AFhomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

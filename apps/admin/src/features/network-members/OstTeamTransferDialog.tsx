@@ -114,7 +114,7 @@ export function OstTeamTransferDialog({
               />
             </label>
             <p className={styles.sectionHint}>
-              The OST joins the selected SM’s existing SSM and VD team. No IST conversion or renewal
+              The OST joins the selected SM’s existing SSM and SVD team. No IST conversion or renewal
               is performed.
             </p>
             {sponsors.isError ? (

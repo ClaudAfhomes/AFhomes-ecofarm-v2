@@ -197,7 +197,7 @@ export function MemberWorkbookDialog({
             setError('');
           }}
           options={[
-            { value: 'IST', label: 'IST — VD / SSM / SM' },
+            { value: 'IST', label: 'IST — SVD / SSM / SM' },
             { value: 'OST', label: 'OST — sponsored by an active SM' },
           ]}
         />
@@ -234,7 +234,7 @@ export function MemberWorkbookDialog({
         </div>
         <p>
           Read the README. Keep matching rows across Identity, Team and Details; OST also uses
-          Accreditation. IST can include VD → SSM → SM in one workbook. OST requires an existing
+          Accreditation. IST can include SVD → SSM → SM in one workbook. OST requires an existing
           active SM team.
         </p>
         <label htmlFor="member-workbook-file">Excel workbook (.xlsx)</label>

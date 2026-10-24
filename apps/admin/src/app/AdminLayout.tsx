@@ -55,9 +55,9 @@ export function AdminLayout() {
       <AppShell
         brand={
           <div className={styles.brandBlock}>
-            <img src={logo} alt="AFHomes logo" />
+            <img src={logo} alt="AFhomes logo" />
             <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>AFHomes</span>
+              <span className={styles.brandName}>AFhomes</span>
               <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
             </div>
           </div>
@@ -75,7 +75,7 @@ export function AdminLayout() {
                 ),
               }))
         }
-        navLabel="AFHomes administration"
+        navLabel="AFhomes administration"
         menuLabel="Open navigation"
         menuPosition="right"
         sidebarFooter={
@@ -141,7 +141,7 @@ export function AdminLayout() {
           void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
-        message="Sign out of AFHomes administration?"
+        message="Sign out of AFhomes administration?"
         confirmLabel="Sign out"
         cancelLabel="Cancel"
       />

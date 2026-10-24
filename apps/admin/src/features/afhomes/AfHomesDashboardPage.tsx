@@ -346,7 +346,7 @@ export function AfHomesDashboardPage() {
           </div>
         ) : (
           <div className={styles.heroText}>
-            <p className={styles.eyebrow}>AFHomes · Staff console</p>
+            <p className={styles.eyebrow}>AFhomes · Staff console</p>
             <PageHeader title="Operations Overview" />
           </div>
         )}

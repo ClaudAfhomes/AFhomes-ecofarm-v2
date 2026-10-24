@@ -129,7 +129,7 @@ export function CustomerPointsPage() {
             title="Points unavailable"
             message={
               isForbidden(summary.error)
-                ? 'Your account is not active, so points are not available. Contact AFHomes Ecofarm to restore access.'
+                ? 'Your account is not active, so points are not available. Contact AFhomes Ecofarm to restore access.'
                 : 'We could not load your points. You can still review and claim a purchase code below — your balance will appear here once it loads.'
             }
             onRetry={summary.refetch}
@@ -143,8 +143,8 @@ export function CustomerPointsPage() {
                   earnings, not money: a member who has reached their annual limit sees
                   0 here while their spendable balance stays healthy. */}
               <Field label="Points on your card" value={position.balance.toLocaleString('en-PH')} />
-                <Field label="Weekday points (Monday?Friday)" value={position.weekdaySpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
-                <Field label="Weekend points (Saturday?Sunday)" value={position.weekendSpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
+                <Field label="Weekday points (Monday–Friday)" value={position.weekdaySpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
+                <Field label="Weekend points (Saturday–Sunday)" value={position.weekendSpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
               <Field
                 label="Can still earn this year"
                 value={position.remainingEarningCapacity.toLocaleString('en-PH')}
@@ -180,7 +180,7 @@ export function CustomerPointsPage() {
 
       <Card title="Claim points from a purchase">
         <p className={styles.notice}>
-          When AFHomes Ecofarm records a purchase for you, you get a claim code. Enter it here or
+          When AFhomes Ecofarm records a purchase for you, you get a claim code. Enter it here or
           scan its QR, review the purchase, then confirm to add the points to your card.
         </p>
         <label>
@@ -227,7 +227,7 @@ export function CustomerPointsPage() {
           </>
         )}
         {scanStatus === 'scanning' && (
-          <p role="status">Camera ready. Point it at the claim QR shown by AFHomes.</p>
+          <p role="status">Camera ready. Point it at the claim QR shown by AFhomes.</p>
         )}
         {scanMessage && <p role="status">{scanMessage}</p>}
         <label className={styles.fieldLabel} htmlFor="claim-credential">

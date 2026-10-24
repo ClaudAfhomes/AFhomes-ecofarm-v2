@@ -703,15 +703,14 @@ export type CustomerLookup = z.infer<typeof customerLookupSchema>;
  * Strict GSD Customer Lookup projection.
  *
  * Only active customers with an active, unexpired VIP membership (BRONZE/SILVER/GOLD)
- * may be represented. The response carries the four display-only fields and nothing
- * else: no identifiers, no statuses, no financial/company/private data. The mask is
- * a visual surname mask (`D***`), not a cryptographic hash.
+ * may be represented. This permission-gated staff lookup returns names and card
+ * details; public search responses retain their separate privacy restrictions.
  */
 export const gsdActiveVipLookupSchema = z.object({
   /** Customer's given/first name. */
   firstName: z.string().min(1),
-  /** First surname grapheme followed by a fixed mask. */
-  maskedLastName: z.string().min(4),
+  /** Full surname for the authorized staff lookup. */
+  lastName: z.string().min(1),
   /** Customer's RA number (company customer ID). */
   raNumber: z.string().nullable().optional(),
   /** Official VIP card number (YYMMDDNNNNNVTPMMS). */

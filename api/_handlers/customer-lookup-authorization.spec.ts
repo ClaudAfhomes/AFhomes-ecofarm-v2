@@ -13,8 +13,8 @@ const memberships = (await import('./memberships.js')).default;
  * 1. It is READ-ONLY (view-only permission, no mutating branch on this path).
  * 2. It returns ONLY active VIPs (customer active + active unexpired membership
  *    on a BRONZE/SILVER/GOLD plan), enforced server-side before paging.
- * 3. It NEVER returns a Membership Code, credential, identifier, status, or any
- *    field beyond the four approved display fields.
+ * 3. It never returns Membership Codes, credentials, or fields outside the
+ *    authorized staff display projection.
  * 4. It is its own module (`operations.customer_lookup`), so the till key does
  *    not open it.
  */
@@ -97,15 +97,15 @@ describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () =
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
       firstName: 'Juan',
-      maskedLastName: 'D***',
+      lastName: 'Dela Cruz',
       vipTier: 'GOLD',
       validUntil: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
-    expect(body.data[0]).not.toHaveProperty('lastName');
-    expect(JSON.stringify(body.data[0])).not.toContain('Dela Cruz');
+    expect(body.data[0]).not.toHaveProperty('maskedLastName');
+    expect(JSON.stringify(body.data[0])).toContain('Dela Cruz');
     expect(Object.keys(body.data[0]!)).toEqual([
       'firstName',
-      'maskedLastName',
+      'lastName',
       'raNumber',
       'vipCardNumber',
       'vipTier',

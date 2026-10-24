@@ -40,7 +40,7 @@ function BankAccount({ name, account }: { name: string; account: string }) {
         {logo ? <img src={`/images/banks/${logo}.svg`} alt={name} /> : <strong>{name}</strong>}
       </div>
       <div className={styles.account}>
-        <span>Account No.:</span>
+        <span>Account Number:</span>
         <strong>{account}</strong>
       </div>
     </div>
@@ -85,7 +85,7 @@ export function VerificationResultCard({
         </div>
         <dl className={styles.status} data-testid="accreditation-details">
           <div>
-            <dt>Registration Status</dt>
+            <dt>Verification Status</dt>
             <dd>Accredited</dd>
           </div>
         </dl>

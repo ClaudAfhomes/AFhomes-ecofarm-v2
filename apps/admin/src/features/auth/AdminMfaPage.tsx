@@ -45,9 +45,9 @@ export function AdminMfaPage() {
   const qr = enrollment.data?.totp.qr_code;
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Authenticator verification"
-      brandTitle="Secure access to AFHomes."
+      brandTitle="Secure access to AFhomes."
       lead="Admin and Super Admin verification uses Supabase TOTP."
     >
       {factors.isPending && (

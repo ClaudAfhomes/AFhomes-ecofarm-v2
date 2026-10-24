@@ -60,7 +60,7 @@ it('saves the controls including a disabled daily limit and displays them after 
   fireEvent.click(await screen.findByLabelText('Enable public IST/OST search'));
   fireEvent.click(screen.getByLabelText('Limit each IP address to 3 successful searches in 24 hours'));
   fireEvent.change(screen.getByLabelText('Contact retention (days)'), { target: { value: '90' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
   await waitFor(() =>
     expect(savePublicVerificationSettings).toHaveBeenCalledWith(
       expect.objectContaining({ enabled: true, dailyLimitEnabled: false, retentionDays: 90, expectedRevision: 1 }),
@@ -89,7 +89,7 @@ it('keeps the form read-only when configuration update is denied', async () => {
   expect(screen.getByLabelText('Privacy notice (edit mode)')).toBeDisabled();
   expect(screen.getByLabelText('Privacy notice approved')).toBeDisabled();
   expect(screen.getByLabelText('Limit each IP address to 3 successful searches in 24 hours')).toBeDisabled();
-  expect(screen.queryByRole('button',{name:'Save settings'})).not.toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'Save Changes'})).not.toBeInTheDocument();
 });
 it('shows save errors and keeps the edited values available', async () => {
   vi.mocked(savePublicVerificationSettings).mockRejectedValue(
@@ -97,7 +97,7 @@ it('shows save errors and keeps the edited values available', async () => {
   );
   renderWithProviders(<PublicVerificationSettingsPage />, { user });
   await screen.findByLabelText('Contact retention (days)');
-  fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
   expect(await screen.findByText(/Settings changed. Reload before saving again/i)).toBeVisible();
   expect(screen.getByLabelText('Contact retention (days)')).toHaveValue('30');
 });
@@ -106,7 +106,7 @@ it('saves revoked privacy approval and displays it after reopening', async () =>
   vi.mocked(savePublicVerificationSettings).mockResolvedValue(saved);
   renderWithProviders(<PublicVerificationSettingsPage />, { user });
   fireEvent.click(await screen.findByLabelText('Privacy notice approved'));
-  fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
   await waitFor(() => expect(savePublicVerificationSettings).toHaveBeenCalledWith(
     expect.objectContaining({privacyApproved:false}), expect.anything(),
   ));

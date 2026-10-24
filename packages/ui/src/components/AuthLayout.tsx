@@ -65,7 +65,7 @@ export function AuthLayout({
         <aside className={styles.brandPanel} aria-hidden="true">
           <div className={styles.scrim} />
           <div className={styles.brandContent}>
-            <p className={styles.brandWordmark}>AFHomes Ecofarm</p>
+            <p className={styles.brandWordmark}>AFhomes Ecofarm</p>
             <p className={styles.brandEyebrow}>{eyebrow}</p>
             <p className={styles.brandTitle}>{brandTitle}</p>
             {brandLead ? <p className={styles.brandLead}>{brandLead}</p> : null}

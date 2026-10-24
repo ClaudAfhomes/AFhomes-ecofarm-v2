@@ -243,9 +243,9 @@ describe('Printable card', () => {
       },
     );
     const proof = await screen.findByRole('img', {
-      name: 'AFHomes membership card for Pedro Reyes',
+      name: 'AFhomes VIP Privilege Card for Pedro Reyes',
     });
-    expect(proof).toHaveTextContent('AFHomes Ecofarm');
+    expect(proof).toHaveTextContent('AFhomes Ecofarm');
     expect(proof).toHaveTextContent('MBS-000001');
     expect(proof).toHaveTextContent('Membership Cards');
     expect(

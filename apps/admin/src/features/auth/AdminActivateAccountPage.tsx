@@ -191,7 +191,7 @@ export function AdminActivateAccountPage() {
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Set Up Your Staff Account"
       lead="Your invitation has been verified. Create a password to finish setting up your account."
       brandTitle="Grow with the farm you own a card in."

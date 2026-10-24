@@ -90,7 +90,7 @@ export function OstLoginPage() {
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="OST Login"
       lead="Sign in with your OST email and password."
       brandTitle="Sell the farm you believe in."

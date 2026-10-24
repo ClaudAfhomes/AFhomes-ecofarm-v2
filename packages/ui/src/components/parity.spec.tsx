@@ -21,19 +21,19 @@ const renderWithRouter = (ui: ReactElement) => render(<MemoryRouter>{ui}</Memory
 describe('AuthLayout (AFHomes auth shell)', () => {
   it('renders the mobile masthead, brand panel, and a single h1', () => {
     render(
-      <AuthLayout eyebrow="AFHomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFhomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
     expect(screen.getByRole('heading', { level: 1, name: 'Staff sign in' })).toBeInTheDocument();
     // Mobile masthead + desktop brand panel + form eyebrow share the eyebrow text.
-    expect(screen.getAllByText('AFHomes Ecofarm').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('AFhomes Ecofarm').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Grow.')).toBeInTheDocument();
   });
 
   it('marks every auth screen noindex, nofollow', () => {
     render(
-      <AuthLayout eyebrow="AFHomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFhomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
@@ -46,7 +46,7 @@ describe('AuthLayout (AFHomes auth shell)', () => {
   it('supports the wide form panel and lead text', () => {
     const { container } = render(
       <AuthLayout
-        eyebrow="AFHomes Ecofarm"
+        eyebrow="AFhomes Ecofarm"
         title="Activate your account"
         lead="Use your code."
         brandTitle="Brand."
@@ -62,7 +62,7 @@ describe('AuthLayout (AFHomes auth shell)', () => {
   it('renders the breadcrumb slot at the very top of the form card', () => {
     render(
       <AuthLayout
-        eyebrow="AFHomes Ecofarm"
+        eyebrow="AFhomes Ecofarm"
         title="Staff sign in"
         brandTitle="Grow."
         breadcrumb={

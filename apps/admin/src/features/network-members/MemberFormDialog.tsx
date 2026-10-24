@@ -772,7 +772,7 @@ export function MemberFormDialog({
           </fieldset>
         ) : (
           <Alert variant="info" title="No head">
-            Vice Directors have no head.
+            SVDs have no head.
           </Alert>
         )}
 
