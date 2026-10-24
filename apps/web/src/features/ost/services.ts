@@ -16,11 +16,15 @@ import {
   ostDashboardSchema,
   type OstDashboard,
   ostSalesListSchema,
+  importedSalesListSchema,
   ostCommissionsListSchema,
   type OstSalesList,
   type OstCommissionsList,
 } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
+
+export const getImportedSales = (page: number, signal?: AbortSignal) =>
+  request(`/ist-portal/imported-sales?page=${page}`, importedSalesListSchema, { signal });
 
 export const resolveOstReferral = (code: string): Promise<OstReferralResolution> =>
   request(`/ost/referrals/${encodeURIComponent(code)}`, ostReferralResolutionSchema);

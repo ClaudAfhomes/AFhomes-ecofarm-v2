@@ -85,16 +85,45 @@ beforeEach(() => {
   vi.unstubAllEnvs();
 });
 
-async function call(token?: string) {
+async function call(token?: string, path = 'me') {
   const { res, state } = makeRes();
   await ost(
-    makeReq({ method: 'GET', familyPath: 'me', ...(token ? { token } : {}) }) as never,
+    makeReq({ method: 'GET', familyPath: path, ...(token ? { token } : {}) }) as never,
     res as never,
   );
   return state as { status: number; body: unknown };
 }
 
 describe('GET /ost/me', () => {
+  it('shows staff-backed OST commissions but excludes pre-system settlement history', async () => {
+    install();
+    const db = holder.db as FakeSupabase;
+    db.rows('card_sales').push({
+      id: '44444444-4444-4444-8444-444444444444',
+      sale_number: 'AF-SALE-261023-001',
+    });
+    db.rows('commissions').push(
+      ...[false, true].map((settled, i) => ({
+        id: `66666666-6666-4666-8666-66666666666${i}`,
+        sale_id: '44444444-4444-4444-8444-444444444444',
+        beneficiary_staff_id: OST_ID,
+        beneficiary_ost_id: null,
+        amount: '2880.00',
+        status: 'payment_verified',
+        created_at: '2026-10-23T00:00:00Z',
+        qualified_at: null,
+        earned_at: null,
+        paid_at: null,
+        settled_before_system: settled,
+      })),
+    );
+    const result = await call('tok-ost', 'me/commissions');
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      data: [{ amount: '2880.00', status: 'payment_verified' }],
+      meta: { total: 1 },
+    });
+  });
   it('refuses an OST whose staff activation is incomplete', async () => {
     install();
     const staff = (holder.db as FakeSupabase).rows('staff_users').find((row) => row.id === OST_ID)!;

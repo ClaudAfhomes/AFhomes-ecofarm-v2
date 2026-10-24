@@ -6,7 +6,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 139. Public table inventory: 60. Private table inventory: 27.
+-- Migration count: 146. Public table inventory: 60. Private table inventory: 30.
 -- Read-only live verification 2026-10-23: shared production ikaevepedpqygdlipsei has 120 history entries.
 -- Its 60 public and 27 private application table names match this inventory; no SQL was applied.
 -- Thirteen local migration versions remain absent from live history; two live versions lack local files.
@@ -50,6 +50,8 @@
 -- Only a wholly absent accreditation feature is installed; partial schemas stop for review.
 -- Two immutable files also share 20261206000003 (company workbook and network links).
 -- 20261206000006 reconciles either skipped feature without replacing complete workbook RPCs.
+-- Two immutable files share 20261215000001 (company customer IDs and search-path hardening).
+-- 20261215000002 reconciles either skipped feature while preserving later allocator improvements.
 -- This reconciliation is not claimed live-applied; inspect target history before any authorized apply.
 -- Manifest (sorted):
 --   20260926023325_afhomes_phase1_foundation.sql
@@ -189,8 +191,15 @@
 --   20261214000001_afhomes_auto_reservation_on_approval.sql
 --   20261215000001_afhomes_company_customer_id_format.sql
 --   20261215000001_afhomes_search_path_canonical.sql
+--   20261215000002_afhomes_reconcile_customer_id_search_path.sql
 --   20261216000001_afhomes_remove_reservation_signatures.sql
 --   20261217000001_afhomes_remove_schedule_remarks.sql
+--   20261218000001_afhomes_vip_card_number.sql
+--   20261218000002_afhomes_vip_card_number_allocator.sql
+--   20261223000001_afhomes_customer_historical_import.sql
+--   20261223000002_afhomes_stay_date_point_allowances.sql
+--   20261223000003_afhomes_vip_contract_classification.sql
+--   20261223000004_afhomes_import_sales_commission_cutover.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories
@@ -257,7 +266,9 @@
 --   private.commission_rule_archive
 --   private.company_customer_id_counters
 --   private.customer_external_import_receipts
+--   private.customer_import_commission_policies
 --   private.customer_import_payment_claims
+--   private.customer_import_points_baselines
 --   private.customer_import_purchase_sources
 --   private.customer_import_source_rows
 --   private.member_workbook_jobs
@@ -280,3 +291,4 @@
 --   private.sale_team_search_contacts
 --   private.sale_team_search_disclosures
 --   private.staff_security_policy
+--   private.vip_card_number_issuances

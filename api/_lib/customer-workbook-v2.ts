@@ -1,5 +1,8 @@
 import {
   WORKFLOW_COLUMNS,
+  WORKFLOW_V3_COLUMNS,
+  WORKFLOW_V4_COLUMNS,
+  WORKFLOW_V5_COLUMNS,
   LEGACY_WORKFLOW_COLUMNS,
   PREVIOUS_WORKFLOW_COLUMNS,
   WORKFLOW_TEMPLATE_VERSION,
@@ -76,7 +79,9 @@ export function parseCustomerWorkbookV2(
       ? LEGACY_WORKFLOW_COLUMNS
       : mappingVersion === '2'
         ? PREVIOUS_WORKFLOW_COLUMNS
-        : WORKFLOW_COLUMNS;
+        : mappingVersion === '3'
+          ? WORKFLOW_V3_COLUMNS
+          : mappingVersion === '4' ? WORKFLOW_V4_COLUMNS : mappingVersion === '5' ? WORKFLOW_V5_COLUMNS : WORKFLOW_COLUMNS;
   // Read workbook to get sheet names first
   const workbook = decoder.decode(parts.get('xl/workbook.xml')!);
   const names = [...workbook.matchAll(/<(?:\w+:)?sheet\b[^>]*\bname=["']([^"']+)["']/g)].map(
@@ -95,7 +100,7 @@ export function parseCustomerWorkbookV2(
           : `Unsupported workbook template version: ${templateVersion}; download the current template`,
       );
     }
-    if (!['1', '2', WORKFLOW_MAPPING_VERSION].includes(mappingVersion))
+    if (!['1', '2', '3', '4', '5', WORKFLOW_MAPPING_VERSION].includes(mappingVersion))
       throw new Error('Unsupported workbook mapping version; download the current template');
   } else if (templateVersion === '') {
     // Not a v2 workbook - return null so legacy parser can handle it
@@ -104,7 +109,7 @@ export function parseCustomerWorkbookV2(
     throw new Error(
       `Unsupported workbook template version: ${templateVersion}; download the current template`,
     );
-  } else if (!['1', '2', WORKFLOW_MAPPING_VERSION].includes(mappingVersion)) {
+  } else if (!['1', '2', '3', '4', '5', WORKFLOW_MAPPING_VERSION].includes(mappingVersion)) {
     throw new Error('Unsupported workbook mapping version; download the current template');
   }
   for (const [path, content] of parts) {
@@ -141,6 +146,7 @@ export function parseCustomerWorkbookV2(
       ),
     ]),
   );
+  ignored['Reference Lists'] = [16];
   const matrices = readWorkbook(
     parts,
     names,
@@ -194,6 +200,13 @@ export function parseCustomerWorkbookV2(
         throw new Error(`${sheet} row ${index + 2}: unmapped column contains data`);
       const fields = Object.fromEntries(columns.map((c, i) => [c.key, (values[i] ?? '').trim()]));
       if (!columns.some((c) => c.disposition !== 'calculated' && fields[c.key])) continue;
+      if (['5', '6'].includes(mappingVersion) && sheet === 'Customers') {
+        const vip = fields.purchase_reference?.toUpperCase() ?? '';
+        if (vip && !/^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/.test(vip))
+          throw new Error('VIP card ID / Purchase reference: use the official 17-character VIP card ID or leave blank to generate');
+        fields.existing_vip_control_number = vip;
+        fields.purchase_reference = vip || 'AUTO-VIP-' + createHash('sha256').update(JSON.stringify(['email','first_name','last_name','contract_date','vip_tier','stated_payment_scheme'].map(k => key(k === 'contract_date' && fields[k] ? workbookDate(fields[k]!, date1904) : fields[k] ?? '')))).digest('hex');
+      }
       if (mappingVersion !== '1' && sheet === 'Customers')
         fields.customer_key = fields.purchase_reference ?? '';
       if (!fields.customer_key)
@@ -208,6 +221,7 @@ export function parseCustomerWorkbookV2(
   const purchases = new Set<string>();
   for (const fields of rowsBySheet.get('Customers')!) {
     const customerKey = fields.customer_key!;
+    if (fields.existing_vip_control_number && /^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/.test(fields.purchase_reference ?? '') && fields.existing_vip_control_number.toUpperCase() !== fields.purchase_reference) throw new Error('Purchase reference must equal the VIP card ID');
     fields.ra_number = fields.customer_id ?? '';
     if (fields.ra_number.startsWith('AF-CUS-')) fields.customer_number = fields.ra_number;
     if (result.has(key(customerKey))) throw new Error(`Duplicate customer key: ${customerKey}`);
@@ -247,6 +261,56 @@ export function parseCustomerWorkbookV2(
       if (fields.stated_rf && compareMoney(fields.stated_rf, fields.stated_total) > 0)
         throw new Error('Included reservation fee cannot exceed contract total');
     } else fields.stated_total = '';
+    // New VIP control / historical fields (mapping version 4)
+    if (fields.existing_vip_control_number) {
+      const vip = fields.existing_vip_control_number.trim().toUpperCase();
+      if (!/^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/.test(vip))
+        throw new Error('Existing VIP control/card number: use the official 17-character VIP card ID, for example 26101400003G1C01S');
+      fields.existing_vip_control_number = vip;
+    }
+    if (fields.existing_card_activation_status) {
+      const status = fields.existing_card_activation_status.trim();
+      const allowed = ['Active', 'Inactive', 'Expired', 'Suspended', 'Cancelled', 'Pending Activation'];
+      if (!allowed.includes(status))
+        throw new Error('Existing card activation status: choose Active, Inactive, Expired, Suspended, Cancelled, or Pending Activation');
+      fields.existing_card_activation_status = status;
+    }
+    if (fields.existing_stay_points_total) {
+      const pts = fields.existing_stay_points_total.trim();
+      if (!/^(0|[1-9]\d*)$/.test(pts) || Number(pts) > 1_000_000_000)
+        throw new Error('Existing Stay Points total: must be a whole non-negative number');
+      fields.existing_stay_points_total = pts;
+    }
+    if (fields.existing_card_activation_date) {
+      fields.existing_card_activation_date = workbookDate(fields.existing_card_activation_date, date1904);
+      if (fields.existing_card_activation_date === 'INVALID DATE')
+        throw new Error('Existing card activation date: use a real date');
+    }
+    if (fields.existing_card_valid_until) {
+      fields.existing_card_valid_until = workbookDate(fields.existing_card_valid_until, date1904);
+      if (fields.existing_card_valid_until === 'INVALID DATE')
+        throw new Error('Existing card valid until: use a real date');
+    }
+    if (fields.vip_purchase_date) {
+      fields.vip_purchase_date = workbookDate(fields.vip_purchase_date, date1904);
+      if (fields.vip_purchase_date === 'INVALID DATE')
+        throw new Error('VIP purchase date: use a real date');
+    }
+    if (fields.contract_classification) {
+      const cls = fields.contract_classification.trim();
+      if (!['Standard', 'Non-Standard'].includes(cls))
+        throw new Error('Contract classification: choose Standard or Non-Standard');
+      fields.contract_classification = cls;
+      if (fields.existing_vip_control_number && fields.existing_vip_control_number.endsWith('N') !== (cls === 'Non-Standard'))
+        throw new Error('Contract classification must match the VIP card ID suffix: S = Standard, N = Non-Standard');
+    }
+    if (fields.payment_term_months) {
+      const rawMonths = fields.payment_term_months.trim();
+      const months = Number(rawMonths);
+      if (!/^\d+$/.test(rawMonths) || !Number.isInteger(months) || months < 1 || months > 36)
+        throw new Error('Payment term months for VIP ID: must be an integer between 1 and 36');
+      fields.payment_term_months = String(months);
+    }
     fields.workbook_format = WORKFLOW_TEMPLATE_VERSION;
     fields.source_status = 'Pending';
     result.set(key(customerKey), {
@@ -257,11 +321,21 @@ export function parseCustomerWorkbookV2(
       payments: [],
     });
   }
+  const aliases = new Map<string, WorkbookCustomerV2 | null>();
+  if (['5', '6'].includes(mappingVersion)) for (const customer of result.values()) {
+    for (const value of [customer.customerId, customer.fields.email]) {
+      if (!value) continue;
+      const alias = key(value);
+      aliases.set(alias, aliases.has(alias) ? null : customer);
+    }
+  }
   for (const sheet of ['Supplementary Holders', 'Sales Team', 'Payments'] as const) {
     const seen = new Set<string>();
     for (const fields of rowsBySheet.get(sheet)!) {
-      const id = key(fields.customer_key!);
-      const customer = result.get(id);
+      const suppliedKey = key(fields.customer_key!);
+      if (aliases.has(suppliedKey) && aliases.get(suppliedKey) === null && !result.has(suppliedKey)) throw new Error(`${sheet}: ambiguous customer link; supply the VIP card ID`);
+      const customer = result.get(suppliedKey) ?? aliases.get(suppliedKey);
+      const id = customer ? key(customer.customerKey) : suppliedKey;
       if (!customer) throw new Error(`${sheet}: Unknown customer key ${fields.customer_key}`);
       if (sheet === 'Payments') {
         dateInput(fields, 'date', 'payment', date1904);

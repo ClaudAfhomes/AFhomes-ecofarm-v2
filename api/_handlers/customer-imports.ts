@@ -896,9 +896,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 row.normalized.continuationPreview = customerImportContinuationSchema.parse(result);
                 if (
                   row.normalized.externalVerified &&
-                  row.normalized.continuationPreview.conflicts.length
+                  (row.normalized.continuationPreview.conflicts.length || row.normalized.continuationPreview.stage === 'review')
                 ) {
-                  row.errors.push(...row.normalized.continuationPreview.conflicts);
+                  row.errors.push(...row.normalized.continuationPreview.conflicts, ...row.normalized.continuationPreview.missingRequirements.map(message => ({ field: 'external_history', message })));
                   row.validation = 'error';
                   row.action = 'CONFLICT';
                   const blocked = await db

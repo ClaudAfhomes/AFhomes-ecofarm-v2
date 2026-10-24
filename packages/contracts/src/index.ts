@@ -142,6 +142,7 @@ export {
   serviceCatalogPatchSchema,
   servicePhotoInputSchema,
   quotePointDiscountSchema,
+  redemptionServiceDatesSchema,
   purchaseReceiptInputSchema,
   purchaseReceiptDecisionSchema,
   purchaseReceiptSchema,
@@ -175,6 +176,7 @@ export {
 } from './schemas/points.js';
 export type {
   ClaimEarningPointsRequest,
+  RedemptionServiceDates,
   ClaimEarningPointsResult,
   CreateEarningClaimRequest,
   CreatePurchaseInput,
@@ -785,3 +787,4 @@ export { servicePolicyManagementResultSchema } from './schemas/points.js';
 export * from './schemas/member-workbook.js';
 export * from './schemas/public-verification-settings.js';
 export * from './schemas/ist-portal.js';
+export * from './schemas/imported-sales.js';

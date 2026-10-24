@@ -294,6 +294,15 @@ export type NormalizedImportRow = {
   memberStatus: string;
   requireMember: boolean;
   secondaryNote: string | null;
+  // New VIP control / historical fields (mapping version 4)
+  existingVipControlNumber: string | null;
+  existingCardActivationStatus: string | null;
+  existingStayPointsTotal: string | null;
+  existingCardActivationDate: string | null;
+  existingCardValidUntil: string | null;
+  vipPurchaseDate: string | null;
+  contractClassification: string | null;
+  paymentTermMonths: string | null;
 };
 
 export type ValidatedImportRow = {
@@ -543,6 +552,32 @@ export function validateImportRow(
 
   const balance = parseOpeningBalance(get('current_points_balance'));
   if (balance === null) err('current_points_balance', 'Must be a whole non-negative number');
+
+  // New VIP control / historical fields validation
+  const existingVipControl = get('existing_vip_control_number');
+  if (nonEmpty(existingVipControl) && !/^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/.test(existingVipControl.toUpperCase()))
+    err('existing_vip_control_number', 'Use the official 17-character VIP card ID, for example 26101400003G1C01S');
+  const existingCardStatus = get('existing_card_activation_status');
+  if (nonEmpty(existingCardStatus) && !['Active', 'Inactive', 'Expired', 'Suspended', 'Cancelled', 'Pending Activation'].includes(existingCardStatus))
+    err('existing_card_activation_status', 'Choose Active, Inactive, Expired, Suspended, Cancelled, or Pending Activation');
+  const existingStayPoints = get('existing_stay_points_total');
+  if (nonEmpty(existingStayPoints) && (!/^(0|[1-9]\d*)$/.test(existingStayPoints) || Number(existingStayPoints) > 1_000_000_000))
+    err('existing_stay_points_total', 'Must be a whole non-negative number');
+  if (nonEmpty(get('existing_card_activation_date')) && !isRealDate(get('existing_card_activation_date')))
+    err('existing_card_activation_date', 'Use YYYY-MM-DD');
+  if (nonEmpty(get('existing_card_valid_until')) && !isRealDate(get('existing_card_valid_until')))
+    err('existing_card_valid_until', 'Use YYYY-MM-DD');
+  if (nonEmpty(get('vip_purchase_date')) && !isRealDate(get('vip_purchase_date')))
+    err('vip_purchase_date', 'Use YYYY-MM-DD');
+  const contractClass = get('contract_classification');
+  if (nonEmpty(contractClass) && !['Standard', 'Non-Standard'].includes(contractClass))
+    err('contract_classification', 'Choose Standard or Non-Standard');
+  const paymentTermMonths = get('payment_term_months');
+  if (nonEmpty(paymentTermMonths)) {
+    const months = Number(paymentTermMonths);
+    if (!/^\d+$/.test(paymentTermMonths) || !Number.isInteger(months) || months < 1 || months > 36)
+      err('payment_term_months', 'Must be an integer between 1 and 36');
+  }
 
   const historicalTotal = get('historical_sale_total');
   if (
@@ -800,6 +835,15 @@ export function validateImportRow(
             .filter(Boolean)
             .join(' Â· ') || null
         : null,
+    // New VIP control / historical fields (mapping version 4)
+    existingVipControlNumber: get('existing_vip_control_number') || null,
+    existingCardActivationStatus: get('existing_card_activation_status') || null,
+    existingStayPointsTotal: get('existing_stay_points_total') || null,
+    existingCardActivationDate: get('existing_card_activation_date') || null,
+    existingCardValidUntil: get('existing_card_valid_until') || null,
+    vipPurchaseDate: get('vip_purchase_date') || null,
+    contractClassification: get('contract_classification') || null,
+    paymentTermMonths: get('payment_term_months') || null,
     company: {
       raNumber: get('ra_number') || null,
       // Raw echo of the stated status; lifecycle mapping stays in customerStatus.
@@ -844,6 +888,15 @@ export function validateImportRow(
       statedPaymentType: get('payment_method') || null,
       statedRefNo: get('payment_reference') || null,
       statedPaymentDate: get('payment_date') || null,
+      // New VIP control / historical fields (mapping version 4)
+      existingVipControlNumber: get('existing_vip_control_number') || null,
+      existingCardActivationStatus: get('existing_card_activation_status') || null,
+      existingStayPointsTotal: get('existing_stay_points_total') || null,
+      existingCardActivationDate: get('existing_card_activation_date') || null,
+      existingCardValidUntil: get('existing_card_valid_until') || null,
+      vipPurchaseDate: get('vip_purchase_date') || null,
+      contractClassification: get('contract_classification') || null,
+      paymentTermMonths: get('payment_term_months') || null,
     },
   };
   if (existingIdentity && action === 'UPDATE') {

@@ -493,7 +493,7 @@ export function CustomerDetailPage() {
           ),
         ],
         ['VIP tier', <TierBadge tier={record.tier ?? record.statedVipPackage} />],
-        ['VIP Card Number', record.vipCardNumber ?? 'Not Recorded'],
+        ['VIP card ID / Purchase reference', record.vipCardNumber ?? 'Not recorded'],
         [
           'Valid until',
           record.membershipExpiresAt ? formatDate(record.membershipExpiresAt) : 'Not applicable',

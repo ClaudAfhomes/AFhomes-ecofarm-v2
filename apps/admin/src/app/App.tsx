@@ -243,6 +243,8 @@ export default function App() {
     location.pathname,
   );
   const canonical = staffPortalPath(user?.roleSlug, location.pathname);
+  if (status === 'authenticated' && user?.roleSlug === 'ost' && !publicAuth)
+    return <Navigate replace to="/staff/login" />;
   if (status === 'authenticated' && !publicAuth && canonical !== location.pathname)
     return <Navigate replace to={`${canonical}${location.search}${location.hash}`} />;
   return (

@@ -5,6 +5,7 @@ import { formatMoney, formatCountOrDash } from '@afhomes/shared';
 import { getOstSales } from './services';
 import { formatDate, Card, styles as portalStyles } from '../customer/portal-ui';
 import styles from './OstSalesPage.module.css';
+import { ImportedSalesPanel } from './ImportedSalesPanel';
 
 /**
  * OST personal sales page - self-only list of qualifying sales.
@@ -106,6 +107,7 @@ export function OstSalesPage() {
           </div>
         )}
       </Card>
+      <ImportedSalesPanel />
     </>
   );
 }

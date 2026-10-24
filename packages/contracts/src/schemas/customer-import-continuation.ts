@@ -34,10 +34,14 @@ export const customerImportContinuationSchema = importReviewTokensSchema.extend(
   externallyVerified: z.boolean().optional(),
   externalSummary: z
     .object({
-      stage: z.enum(['application', 'reservation', 'finance', 'activation']),
+      stage: z.enum(['application', 'reservation', 'finance', 'activation', 'active', 'inactive']),
       paid: exactDecimalStringSchema,
       balance: exactDecimalStringSchema,
       total: exactDecimalStringSchema,
+      settlement: z.enum(['receipts', 'certified']).optional(),
+      existingPoints: z.number().int().nonnegative().nullable().optional(),
+      weekdayPoints: z.number().int().nonnegative().nullable().optional(),
+      weekendPoints: z.number().int().nonnegative().nullable().optional(),
     })
     .optional(),
   expectedTeamVersion: revision,
@@ -47,7 +51,7 @@ export const customerImportContinuationSchema = importReviewTokensSchema.extend(
   applicationId: uuid.nullable(),
   reservationId: uuid.nullable(),
   saleId: uuid.nullable(),
-  stage: z.enum(['application', 'reservation', 'finance', 'activation', 'complete', 'review']),
+  stage: z.enum(['application', 'reservation', 'finance', 'activation', 'active', 'inactive', 'complete', 'review']),
   missingRequirements: z.array(z.string()),
   conflicts: z.array(z.object({ field: z.string(), message: z.string() })),
   nextAction: z
@@ -62,6 +66,21 @@ export const customerImportContinuationSchema = importReviewTokensSchema.extend(
       tier: z.string().nullable(),
       total: z.string().nullable(),
       reservationFee: z.string().nullable(),
+    })
+    .optional(),
+  // New VIP control / historical fields preview (mapping version 4)
+  vipControlNumberPreview: z
+    .object({
+      existing: z.string().nullable(),
+      generated: z.string().nullable(),
+      source: z.enum(['provided', 'generated', 'none']).optional(),
+    })
+    .optional(),
+  historicalPointsPreview: z
+    .object({
+      eligible: z.boolean(),
+      stayPointsTotal: z.string().nullable(),
+      reason: z.string().optional(),
     })
     .optional(),
 });

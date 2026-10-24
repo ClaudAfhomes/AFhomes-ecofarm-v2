@@ -101,11 +101,19 @@ describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () =
       vipTier: 'GOLD',
       validUntil: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
+    expect(body.data[0]).not.toHaveProperty('lastName');
+    expect(JSON.stringify(body.data[0])).not.toContain('Dela Cruz');
     expect(Object.keys(body.data[0]!)).toEqual([
       'firstName',
       'maskedLastName',
+      'raNumber',
+      'vipCardNumber',
       'vipTier',
       'validUntil',
+      'totalAvailablePoints',
+      'weekendAvailablePoints',
+      'weekdayAvailablePoints',
+      'governmentIdImageUrl',
     ]);
   });
 

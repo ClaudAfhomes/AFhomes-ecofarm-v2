@@ -1091,7 +1091,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           created_at,
           card_sales!inner(sale_number)
         `)
-        .eq('beneficiary_ost_id', userId)
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
         .order('created_at', { ascending: false });
       if (commError) throw commError;
 
@@ -1291,7 +1292,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'id, commission_number, sale_id, amount, status, qualified_at, earned_at, paid_at, created_at, card_sales!inner(sale_number)',
           { count: 'exact' },
         )
-        .eq('beneficiary_ost_id', userId)
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 

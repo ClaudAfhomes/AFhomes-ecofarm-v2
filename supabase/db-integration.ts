@@ -2436,6 +2436,14 @@ async function main(): Promise<void> {
 
     /* ---------------------------------------------------------------- */
     section('22. customer portal RLS - a member sees only themselves');
+    // Fixture funding is one transaction, matching the real ledger/account write boundary.
+    await db.query(`create or replace function pg_temp.fund_fixture_points(p_account uuid,p_points bigint,p_reason text)
+      returns void language plpgsql as $$begin
+        insert into public.points_ledger(account_id,entry_type,amount,balance_before,balance_after,reason)
+        values(p_account,'adjustment',p_points,0,p_points,p_reason);
+        update public.points_accounts set balance=p_points where id=p_account;
+      end $$`);
+
     /* ---------------------------------------------------------------- */
     const asA = <T>(fn: (c: Client) => Promise<T>) =>
       asBrowserRole(target.url, 'authenticated', custA.authUserId, fn);
@@ -2515,16 +2523,7 @@ async function main(): Promise<void> {
           [membershipId],
         )
       ).id;
-      await db.query(
-        `insert into public.points_ledger
-           (account_id, entry_type, amount, balance_before, balance_after, reason)
-         values ($1, 'adjustment', $2, 0, $2, 'test fixture: portal member funded')`,
-        [accountId, points],
-      );
-      await db.query('update public.points_accounts set balance = $2 where id = $1', [
-        accountId,
-        points,
-      ]);
+      await db.query('select pg_temp.fund_fixture_points($1,$2,$3)', [accountId, points, 'test fixture: portal member funded']);
       await db.query('update public.memberships set points_balance = $2 where id = $1', [
         membershipId,
         points,
@@ -3402,17 +3401,7 @@ async function main(): Promise<void> {
             [membership.membership_id],
           )
         ).id;
-        await db.query(
-          `insert into public.points_ledger
-             (account_id, entry_type, amount, balance_before, balance_after, reason)
-           values ($1, 'adjustment', $2, 0, $2,
-                   'test fixture: seeded balance for redemption coverage')`,
-          [accountId, points],
-        );
-        await db.query('update public.points_accounts set balance = $2 where id = $1', [
-          accountId,
-          points,
-        ]);
+        await db.query('select pg_temp.fund_fixture_points($1,$2,$3)', [accountId, points, 'test fixture: seeded balance for redemption coverage']);
         await db.query('update public.memberships set points_balance = $2 where id = $1', [
           membership.membership_id,
           points,
@@ -3514,6 +3503,20 @@ async function main(): Promise<void> {
     check('  the CHECK rejects it', /points_cost|cost/i.test(negCost), negCost.split('\n')[0]);
 
     /* ---------------------------------------------------------------- */
+    const datedSpending = (await one<{ installed: boolean }>(
+      "select to_regprocedure('public.prepare_customer_point_redemption(uuid,bigint,uuid,jsonb)') is not null as installed",
+    )).installed;
+    if (datedSpending) {
+      section('26. retired catalog redemption cannot bypass service dates');
+      const member = await mkFundedMember('retired-date-check', 9000);
+      const before = await balanceOf(member.membershipId);
+      const error = await throws('dateless catalog spending is refused', () =>
+        redeem(member.membershipId, teppanyaki, 1, `${RUN}-retired`, staff['finance']),
+      );
+      check('the required service-date guard is preserved', /STAY_SERVICE_DATES_REQUIRED/.test(error));
+      eq('refused retired spending leaves the balance unchanged', await balanceOf(member.membershipId), before);
+      console.log('  Historical catalog success cases 27-36 are inapplicable: this write API is retired. Active dated settlement/refund/concurrency coverage runs in test:db:external-import.');
+    } else {
     section('26. successful redemption - exact, atomic, one ledger row');
     /* ---------------------------------------------------------------- */
     const memberA = await mkFundedMember('a', 60000);
@@ -4485,6 +4488,8 @@ async function main(): Promise<void> {
       afterRows.rows.at(-1)!.entry_type === 'redemption' &&
         afterRows.rows[0]!.entry_type === 'adjustment',
     );
+
+    }
 
     // The only injection point, and it sits at the end of the last section that
     // builds fixtures, so a run with the flag set has already created everything
@@ -5824,16 +5829,7 @@ async function main(): Promise<void> {
             [membershipId],
           )
         ).id;
-        await db.query(
-          `insert into public.points_ledger
-             (account_id, entry_type, amount, balance_before, balance_after, reason)
-           values ($1, 'adjustment', $2, 0, $2, 'e2e fixture: customer funded')`,
-          [acct, gold.yearly_points],
-        );
-        await db.query('update public.points_accounts set balance = $2 where id = $1', [
-          acct,
-          gold.yearly_points,
-        ]);
+        await db.query('select pg_temp.fund_fixture_points($1,$2,$3)', [acct, gold.yearly_points, 'e2e fixture: customer funded']);
         await db.query('update public.memberships set points_balance = $2 where id = $1', [
           membershipId,
           gold.yearly_points,
@@ -6064,6 +6060,12 @@ async function main(): Promise<void> {
         ['0'.repeat(64)],
       );
       eq('an unknown identifier resolves to nothing', resolveMiss, undefined);
+      if (datedSpending) {
+        const error = await throws('the retired catalog cannot spend without service dates', () =>
+          db.query('select * from public.redeem_membership_points($1,$2,1,$3,$4)', [membershipId,itemId,`${RUN}-E2E-RETIRED`,emp]),
+        );
+        check('retired E2E spending preserves the date requirement', /STAY_SERVICE_DATES_REQUIRED/.test(error));
+      } else {
       const receipt = camel<Record<string, string | number>>(
         (
           await db.query('select * from public.redeem_membership_points($1,$2,$3,$4,$5)', [
@@ -6176,6 +6178,8 @@ async function main(): Promise<void> {
         ),
         Number(gold.yearly_points) - 2000,
       );
+
+      }
 
       // -- Flow H: commission to earned, then paid, with guards.
       const payTooEarly = await db.query(
@@ -6339,7 +6343,7 @@ async function main(): Promise<void> {
             [membershipId],
           )
         ).n,
-        2,
+        datedSpending ? 1 : 2,
       );
 
       // -- Flow L: audit presence for every step, with no secrets anywhere.
@@ -6355,7 +6359,7 @@ async function main(): Promise<void> {
         'MEMBERSHIP_CARD_PRINTED',
         'MEMBERSHIP_CARD_REPRINTED',
         'CUSTOMER_CREDENTIALS_REISSUED',
-        'REDEMPTION_COMPLETED',
+        ...(!datedSpending ? ['REDEMPTION_COMPLETED'] : []),
         'COMMISSION_QUALIFIED',
         'COMMISSION_PAID',
         'UPLINE_CORRECTED',
@@ -6523,7 +6527,7 @@ async function main(): Promise<void> {
             )
           ).b,
         ),
-        Number(gold.yearly_points) - 2000,
+        Number(gold.yearly_points) - (datedSpending ? 0 : 2000),
       );
       eq(
         'frozen sale price still 312000.00',
@@ -8111,19 +8115,7 @@ async function main(): Promise<void> {
         eq('explicit legacy origin', sale.origin, 'legacy_import');
         eq('sale links job', sale.import_job_id, job);
         eq('sale links exact row', sale.import_row_id, id);
-        // STALE ASSERTIONS, CORRECTED. These two used to assert `seller_staff_id` is
-        // NULL and that no hierarchy snapshot is written. Both are now impossible: the
-        // Phase 14 trigger on `card_sales` refuses a sale with no seller
-        // (SALE_SELLER_REQUIRED, SQLSTATE 23514), so a legacy import row must carry a
-        // seller credential in `raw_data` or it cannot create a sale at all. The rule
-        // is legitimate; these expectations were written before it.
-        //
-        // The fixture now supplies the Sales Manager's live referral code, so the sale
-        // IS attributed and the referral hierarchy IS snapshotted - which is the
-        // real-world behaviour once an import carries seller attribution. The
-        // genuine defect this exposed (an import that omits seller attribution dies on
-        // a raw trigger instead of a clear validation error) is filed separately as a
-        // forward-only migration and is NOT papered over here.
+        // Seller evidence is preserved, but historical genealogy is not reconstructed.
         eq('seller is attributed from raw_data', sale.seller_staff_id, staff['sm'] ?? null);
         eq(
           'historical frozen total differs from current plan',
@@ -8131,14 +8123,14 @@ async function main(): Promise<void> {
           '12000.00',
         );
         eq(
-          'attributed historical import records its referral hierarchy',
+          'historical import does not invent a sale-time referral hierarchy',
           (
             await one<{ n: number }>(
               'select count(*)::int as n from card_sale_hierarchy_snapshots where sale_id=$1',
               [member.saleId],
             )
-          ).n > 0,
-          true,
+          ).n,
+          0,
         );
         eq(
           'historical import creates no commission',
@@ -8561,13 +8553,14 @@ async function main(): Promise<void> {
           // Supabase provides service_role table access. Model only these SELECTs
           // in this disposable transaction; the corrective migration changes no tables.
           await db.query(
-            'grant select on public.customers,public.memberships,public.points_accounts,public.card_sales,public.card_plans,public.staff_users,public.payments to service_role',
+            'grant select on public.customers,public.memberships,public.points_accounts,public.card_sales,public.card_plans,public.staff_users,public.payments,public.reservation_agreements,public.customer_applications to service_role',
           );
           await db.query(
             "update memberships set fallback_code_hash=private.hash_token('A1B2C3D4') where id=$1",
             [active.membership_id],
           );
           const query = async (filters: Record<string, unknown>) => {
+            await db!.query('savepoint directory_probe');
             await db!.query('set local role service_role');
             try {
               return await db!.query<{ record: Record<string, unknown>; total_count: string }>(
@@ -8575,7 +8568,8 @@ async function main(): Promise<void> {
                 [JSON.stringify(filters)],
               );
             } finally {
-              await db!.query('reset role');
+              await db!.query('rollback to savepoint directory_probe');
+              await db!.query('release savepoint directory_probe');
             }
           };
           for (const [label, filters] of [
@@ -8759,6 +8753,7 @@ async function main(): Promise<void> {
         check,
       });
       section('58. Purchase terms: server offer, stale hash, versions and reviewed capture');
+      try {
       await runPurchaseTermsChecks({
         db,
         run: RUN,
@@ -8767,6 +8762,9 @@ async function main(): Promise<void> {
         createdCustomers: createdCustomerIds,
         createdStaffIds,
       });
+      } catch (error) {
+        check('purchase-terms section completes including cleanup', false, error instanceof Error ? error.message : String(error));
+      }
       section('59. Application-origin reservation: AF-RES with no card sale');
       await runReservationPurchaseChecks({
         db,
@@ -14934,7 +14932,7 @@ async function main(): Promise<void> {
         const create72 = async (ref: string) => mkPurchase70(room72, 1, ref + '-' + s70, false);
         const noRule72 = await create72('NO-RATE');
         await throwsIsolated('an accommodation has no implicit one-peso conversion', () =>
-          db.query('select * from public.prepare_customer_point_redemption($1,100,$2)', [
+          db.query("select * from public.prepare_customer_point_redemption($1,100,$2,'{\"serviceDate\":\"2026-10-26\"}'::jsonb)", [
             noRule72,
             gsd70,
           ]),
@@ -14946,7 +14944,7 @@ async function main(): Promise<void> {
         );
         const prepare72 = async (purchase: string, points: number) =>
           await one<{ quote_id: string; peso_value: string }>(
-            'select quote_id,peso_value from public.prepare_customer_point_redemption($1,$2,$3)',
+            "select quote_id,peso_value from public.prepare_customer_point_redemption($1,$2,$3,'{\"serviceDate\":\"2026-10-26\"}'::jsonb)",
             [purchase, points, gsd70],
           );
         const approve72 = async (quote: string, approve = true) =>
@@ -14973,7 +14971,7 @@ async function main(): Promise<void> {
         );
         const expiryDefinition72 = (
           await one<{ definition: string }>(
-            "select pg_get_functiondef('public.prepare_customer_point_redemption(uuid,bigint,uuid)'::regprocedure) definition",
+            "select pg_get_functiondef('public.prepare_customer_point_redemption(uuid,bigint,uuid,jsonb)'::regprocedure) definition",
           )
         ).definition;
         const expiryProbe72 = expiryDefinition72
@@ -14988,7 +14986,7 @@ async function main(): Promise<void> {
         try {
           await db.query(expiryProbe72);
           const boundaryOffer72 = await one<{ quote_id: string; expires_at: Date }>(
-            'select quote_id,expires_at from public.prepare_customer_point_redemption_clock_probe($1,100,$2)',
+            "select quote_id,expires_at from public.prepare_customer_point_redemption_clock_probe($1,100,$2,'{\"serviceDate\":\"2026-10-26\"}'::jsonb)",
             [expiryPurchase72, gsd70],
           );
           const storedExpiry72 = await one<{ expires_at: Date }>(
@@ -15002,7 +15000,7 @@ async function main(): Promise<void> {
           );
         } finally {
           await db.query(
-            'drop function if exists public.prepare_customer_point_redemption_clock_probe(uuid,bigint,uuid)',
+            'drop function if exists public.prepare_customer_point_redemption_clock_probe(uuid,bigint,uuid,jsonb)',
           );
           await db.query('update public.point_redemption_rules set effective_end=$1 where id=$2', [
             future,

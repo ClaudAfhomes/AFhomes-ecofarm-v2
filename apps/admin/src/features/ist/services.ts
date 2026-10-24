@@ -1,9 +1,24 @@
 import {
   istPortalReportSchema,
+  importedSalesListSchema,
   type IstPortalView,
   type IstTeamCommissionFilters,
 } from '@afhomes/contracts';
 import { protectedRequest } from '../../lib/api/client';
+
+export const getImportedSales = (
+  params: { view: 'my-sales' | 'team-sales'; from?: string; to?: string; page: number },
+  signal?: AbortSignal,
+) =>
+  protectedRequest(
+    `/ist-portal/imported-sales?${new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    )}`,
+    importedSalesListSchema,
+    { signal },
+  );
 
 export function istDateRange(preset: string, now = new Date()) {
   const from = new Date(now);

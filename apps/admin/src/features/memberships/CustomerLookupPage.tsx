@@ -62,7 +62,7 @@ const MAX_SUGGESTIONS = 6;
  * stay on the result cards below.
  */
 function displayName(row: GsdActiveVipLookup): string {
-  return `${row.firstName} ${row.lastName}`;
+  return `${row.firstName} ${row.maskedLastName}`;
 }
 
 function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVipLookup[] {
@@ -73,7 +73,7 @@ function rankSuggestions(rows: GsdActiveVipLookup[], term: string): GsdActiveVip
   const seen = new Set<string>();
   for (const row of rows) {
     const name = displayName(row);
-    const key = `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
+    const key = `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
     if (seen.has(key)) continue;
     const matches = name.toLowerCase().includes(needle) || row.vipTier.toLowerCase().includes(needle);
     if (!matches) continue;
@@ -183,13 +183,13 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
             <div className={styles.fact}>
               <div className={styles.factText}>
                 <dt>Weekend Points</dt>
-                <dd>{customer.weekendAvailablePoints.toLocaleString('en-US')}</dd>
+                <dd>{customer.weekendAvailablePoints?.toLocaleString('en-US') ?? 'Unavailable'}</dd>
               </div>
             </div>
             <div className={styles.fact}>
               <div className={styles.factText}>
                 <dt>Weekday Points</dt>
-                <dd>{customer.weekdayAvailablePoints.toLocaleString('en-US')}</dd>
+                <dd>{customer.weekdayAvailablePoints?.toLocaleString('en-US') ?? 'Unavailable'}</dd>
               </div>
             </div>
           </div>
@@ -267,7 +267,7 @@ export function CustomerLookupPage() {
   // second, permission-gated fetch: everything the card needs is already in the
   // authorized lookup row.
   const rowKey = (row: GsdActiveVipLookup) =>
-    `${row.firstName}|${row.lastName}|${row.vipTier}|${row.validUntil}`;
+    `${row.firstName}|${row.maskedLastName}|${row.vipTier}|${row.validUntil}`;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedLookup =
     (customers.data ?? []).find((row) => rowKey(row) === selectedKey) ?? null;

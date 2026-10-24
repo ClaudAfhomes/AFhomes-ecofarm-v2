@@ -359,7 +359,6 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
         statedPaymentType: orNull(form.statedPaymentType),
         statedRefNo: orNull(form.statedRefNo),
         statedPaymentDate: orNull(form.statedPaymentDate),
-        vipCardNumber: orNull(form.vipCardNumber),
       });
     },
     onSuccess: async () => {
@@ -964,6 +963,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
           name="vipCardNumber"
           label="VIP Card Number"
           value={form.vipCardNumber}
+          readOnly
           onChange={set('vipCardNumber')}
         />
             </div>

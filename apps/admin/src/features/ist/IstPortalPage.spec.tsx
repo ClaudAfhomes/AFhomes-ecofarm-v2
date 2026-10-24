@@ -8,10 +8,11 @@ import { istNavItemsForPermissions } from '../../app/navigation';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), imported: vi.fn() }));
 vi.mock('./services', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./services')>()),
   getIstReport: mocks.get,
+  getImportedSales: mocks.imported,
 }));
 vi.mock('../afhomes/SaleTeamAccreditationCard', () => ({
   SaleTeamAccreditationCard: () => <div>Accreditation details</div>,
@@ -94,7 +95,44 @@ const report = {
   pageSize: 25,
 };
 beforeEach(() => {
+  mocks.imported
+    .mockReset()
+    .mockResolvedValue({ data: [], meta: { page: 1, pageSize: 25, total: 0 } });
   mocks.get.mockReset().mockResolvedValue(report);
+});
+
+it('shows imported purchases and their settlement treatment on My Sales', async () => {
+  mocks.imported.mockResolvedValue({
+    data: [
+      {
+        id: 'source-1',
+        reference: '26011500841G1C01S',
+        customerName: 'Patricia Delos Reyes',
+        customerNumber: '2025-0786',
+        tier: 'GOLD',
+        status: 'active',
+        roles: ['Referrer'],
+        amount: '312000.00',
+        commissionPolicy: 'settled_before_system',
+      },
+      {
+        id: 'source-2',
+        reference: '26102300003B1T04S',
+        customerName: 'Rafael Bautista',
+        customerNumber: '2026-0002',
+        tier: 'BRONZE',
+        status: 'executed',
+        roles: ['Referrer'],
+        amount: '72000.00',
+        commissionPolicy: 'normal_qualification',
+      },
+    ],
+    meta: { page: 1, pageSize: 25, total: 2 },
+  });
+  renderWithProviders(<IstPortalPage view="my-sales" />);
+  expect(await screen.findByText('Settled before system')).toBeInTheDocument();
+  expect(screen.getByText('Subject to normal qualification')).toBeInTheDocument();
+  expect(screen.getByText('26011500841G1C01S')).toBeInTheDocument();
 });
 
 it('keeps personal and OST performance visibly separate', async () => {

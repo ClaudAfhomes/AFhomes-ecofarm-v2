@@ -15,6 +15,7 @@ import { sumMoney } from '../_lib/report-scope.js';
 import { getSalesDownlineContext } from '../_lib/genealogy-visibility.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { importedSales } from './_imported-sales.js';
 
 type Row = Record<string, unknown>;
 const SALE_COLUMNS =
@@ -58,12 +59,22 @@ function earnings(rows: Row[], allowed: boolean) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (method(req) !== 'GET')
     return fail(res, 'METHOD_NOT_ALLOWED', 'This portal is read-only.', 405);
-  if (subPath(req)) return fail(res, 'NOT_FOUND', 'Route not found.', 404);
+  if (subPath(req) && subPath(req) !== 'imported-sales')
+    return fail(res, 'NOT_FOUND', 'Route not found.', 404);
   const principal = await authorizeAfHomes(req, 'dashboard.view');
   if ('error' in principal) return deny(res, principal);
   const leader = isIstRole(principal.roleSlug);
   if (!leader && principal.roleSlug !== 'ost')
     return fail(res, 'FORBIDDEN', 'Sales account required.', 403);
+  if (subPath(req) === 'imported-sales') {
+    const db = serviceClient() as Db;
+    if (!db) return fail(res, 'INTERNAL', 'Service unavailable.', 503);
+    try {
+      return await importedSales(req, res, principal, db);
+    } catch {
+      return fail(res, 'INTERNAL', 'Unable to load imported sales. Try again.', 500);
+    }
+  }
   const parsed = istPortalQuerySchema.safeParse(req.query);
   if (!parsed.success)
     return fail(res, 'VALIDATION_ERROR', 'Choose a valid reporting period.', 400);
@@ -172,7 +183,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .order('sale_id'),
           )
         : [];
-    const snapshotIds = [...new Set(snapshots.map((r) => String(r.sale_id)))];
+    const importedCommissionSales =
+      leader && canCommissions
+        ? await db.rpc('imported_commission_sale_ids_for_account', { p_actor_id: principal.userId })
+        : { data: [], error: null };
+    if (importedCommissionSales.error) throw importedCommissionSales.error;
+    const snapshotIds = [
+      ...new Set([
+        ...snapshots.map((r) => String(r.sale_id)),
+        ...((importedCommissionSales.data ?? []) as string[]),
+      ]),
+    ];
     const ownSales = canSales
       ? await readSearchRows(
           period(
@@ -211,6 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             db
               .from('commissions')
               .select(COMMISSION_COLUMNS)
+              .not('settled_before_system', 'is', true)
               .or(
                 `beneficiary_staff_id.eq.${principal.userId},beneficiary_ost_id.eq.${principal.userId}`,
               ),
@@ -225,6 +247,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             db
               .from('commissions')
               .select(COMMISSION_COLUMNS)
+              .not('settled_before_system', 'is', true)
               .in('sale_id', snapshotIds.slice(i, i + 100)),
           ),
         );

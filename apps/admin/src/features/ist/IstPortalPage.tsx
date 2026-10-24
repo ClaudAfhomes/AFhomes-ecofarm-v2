@@ -39,6 +39,7 @@ import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard'
 import { getIstReport, istDateRange } from './services';
 import styles from './IstPortalPage.module.css';
 import { TeamCommissionSummary } from './TeamCommissionSummary';
+import { ImportedSalesPanel } from './ImportedSalesPanel';
 
 const TITLES: Record<IstPortalView, string> = {
   dashboard: 'IST Dashboard',
@@ -474,6 +475,14 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
               ) : (
                 <EmptyState title="No sales in this period" />
               )}
+              {view === 'my-sales' || view === 'team-sales' ? (
+                <ImportedSalesPanel
+                  key={`${view}:${from}:${to}`}
+                  team={view === 'team-sales'}
+                  from={from}
+                  to={to}
+                />
+              ) : null}
               {data.total > data.pageSize ? (
                 <Pagination
                   page={page}

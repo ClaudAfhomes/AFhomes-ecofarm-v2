@@ -73,6 +73,8 @@ writeFileSync(
     '-- Only a wholly absent accreditation feature is installed; partial schemas stop for review.',
     '-- Two immutable files also share 20261206000003 (company workbook and network links).',
     '-- 20261206000006 reconciles either skipped feature without replacing complete workbook RPCs.',
+    '-- Two immutable files share 20261215000001 (company customer IDs and search-path hardening).',
+    '-- 20261215000002 reconciles either skipped feature while preserving later allocator improvements.',
     '-- This reconciliation is not claimed live-applied; inspect target history before any authorized apply.',
     '-- Manifest (sorted):',
     ...files.map((file) => '--   ' + file),

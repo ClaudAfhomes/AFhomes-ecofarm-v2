@@ -122,6 +122,112 @@ beforeEach(() => {
     },
   );
   holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  (holder.db as FakeSupabase).rpcs.push({
+    fn: 'imported_commission_sale_ids_for_account',
+    result: [],
+  });
+});
+
+describe('imported sales account endpoint', () => {
+  const empty = { data: [], meta: { page: 1, pageSize: 25, total: 0 } };
+  it('passes the authenticated identity, filters and pagination to the scoped RPC', async () => {
+    const db = holder.db as FakeSupabase;
+    db.rpcs.push({ fn: 'imported_sales_for_account', result: empty });
+    const result = await call(TOKEN2.salesManager, {
+      familyPath: 'imported-sales',
+      view: 'team-sales',
+      page: '2',
+      actorId: STAFF2.hr,
+    });
+    expect(result.status).toBe(200);
+    expect(
+      db.calls.find((c) => c.op === 'rpc' && c.table === 'imported_sales_for_account')?.arg,
+    ).toEqual({
+      p_actor_id: STAFF2.salesManager,
+      p_team: true,
+      p_from: '2026-10-01',
+      p_to: '2026-10-31',
+      p_page: 2,
+    });
+  });
+  it('denies OST team access and invalid dates before reading imports', async () => {
+    expect(
+      (await call(TOKEN2.ost, { familyPath: 'imported-sales', view: 'team-sales' })).status,
+    ).toBe(403);
+    expect(
+      (
+        await call(TOKEN2.salesManager, {
+          familyPath: 'imported-sales',
+          from: '2026-11-01',
+          to: '2026-10-01',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (holder.db as FakeSupabase).calls.filter((c) => c.table === 'imported_sales_for_account'),
+    ).toHaveLength(0);
+  });
+  it('masks customer names when customer access is removed', async () => {
+    const db = holder.db as FakeSupabase;
+    for (const permission of db.rows('role_permissions'))
+      if (
+        permission.role_id === ROLE2.salesManager &&
+        permission.module_id === moduleId('sales.customers')
+      )
+        permission.can_view = false;
+    db.rpcs.push({
+      fn: 'imported_sales_for_account',
+      result: {
+        data: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            reference: '26101400003G1C01S',
+            customerName: 'PATRICIA DELOS REYES',
+            customerNumber: '2025-0786',
+            tier: 'GOLD',
+            status: 'active',
+            roles: ['SM'],
+            amount: '312000.00',
+            commissionPolicy: 'settled_before_system',
+          },
+        ],
+        meta: { page: 1, pageSize: 25, total: 1 },
+      },
+    });
+    const result = await call(TOKEN2.salesManager, {
+      familyPath: 'imported-sales',
+      view: 'team-sales',
+    });
+    expect(result.status).toBe(200);
+    expect(JSON.stringify(result.body)).not.toContain('PATRICIA');
+    expect(result.body).toMatchObject({
+      data: [{ customerName: null, commissionPolicy: 'settled_before_system' }],
+    });
+  });
+  it('excludes previously settled commissions from personal totals and lists', async () => {
+    const db = holder.db as FakeSupabase;
+    for (const row of db.rows('commissions')) row.settled_before_system = true;
+    const result = await call(TOKEN2.salesManager, { view: 'my-commissions' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      personal: { earned: '0.00', paid: '0.00', toEarn: '0.00' },
+      commissions: [],
+    });
+  });
+  it('shows an unpaid import commission only through recorded and currently authorized team scope', async () => {
+    const db = holder.db as FakeSupabase;
+    db.rows('card_sale_hierarchy_snapshots').length = 0;
+    db.rpcs.find((r) => r.fn === 'imported_commission_sale_ids_for_account')!.result = [
+      SALE.submitted,
+    ];
+    const result = await call(TOKEN2.salesManager, { view: 'team-commissions' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      commissions: expect.arrayContaining([
+        expect.objectContaining({ id: 'team', amount: '100.00' }),
+      ]),
+    });
+  });
 });
 
 describe('role-based Team Commissions revision', () => {

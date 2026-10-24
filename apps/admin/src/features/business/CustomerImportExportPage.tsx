@@ -55,9 +55,31 @@ function ImportPreviewExplanation({ value }: { value: unknown }) {
       <p>
         Destination after import: {source.stage}.{' '}
         {source.externalSummary
-          ? `Externally verified payments: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}. Business records will be reconciled on confirmation.`
+          ? `${source.externalSummary.settlement === 'certified' ? 'Certified historical settlement' : 'Externally verified payments'}: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}. Business records will be reconciled on confirmation.`
           : `${source.claimCount} payment claims awaiting Finance review; no verified payment is created by import.`}
       </p>
+      {source.vipControlNumberPreview && (
+        <div style={{ marginTop: 8, padding: 8, background: 'var(--color-surface-alt)', borderRadius: 4 }}>
+          <strong>VIP Control Number Preview:</strong>
+          <p style={{ margin: '4px 0 0' }}>
+            {source.vipControlNumberPreview.source === 'provided' && source.vipControlNumberPreview.existing
+              ? `Existing number preserved: ${source.vipControlNumberPreview.existing}`
+              : source.vipControlNumberPreview.source === 'generated'
+              ? 'Generated on confirmation; this VIP card ID will also be the purchase reference.'
+              : 'No VIP card ID supplied'}
+          </p>
+        </div>
+      )}
+      {source.historicalPointsPreview && (
+        <div style={{ marginTop: 8, padding: 8, background: 'var(--color-surface-alt)', borderRadius: 4 }}>
+          <strong>Historical Stay Points Preview:</strong>
+          <p style={{ margin: '4px 0 0' }}>
+            {source.historicalPointsPreview.eligible
+              ? `Eligible for import: ${source.historicalPointsPreview.stayPointsTotal} points (70% weekdays / 30% weekends)`
+              : `Not eligible: ${source.historicalPointsPreview.reason || 'Unknown reason'}`}
+          </p>
+        </div>
+      )}
       {source.missingRequirements.map((item) => (
         <p key={item}>{item}</p>
       ))}
@@ -356,6 +378,9 @@ export function CustomerImportExportPage() {
       void client.invalidateQueries({ queryKey: businessKeys.sales });
       void client.invalidateQueries({ queryKey: applicationKeys.reservationsScope });
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: businessKeys.customerScope });
+      void client.invalidateQueries({ queryKey: ['customer-lookup'] });
       void client.invalidateQueries({ queryKey: sharedScopes.memberships });
       void client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
       void client.invalidateQueries({ queryKey: sharedScopes.analytics });

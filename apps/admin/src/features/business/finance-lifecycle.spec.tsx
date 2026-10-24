@@ -750,8 +750,7 @@ describe('payment exact-decimal input UX', () => {
       await openRecordDialog(user);
       await user.type(screen.getByLabelText('Amount'), amount);
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
-      await user.clear(screen.getByLabelText('Method(Optional)'));
-      expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
+      expect(screen.getByRole('combobox', { name: 'Method' })).toHaveValue('bank_transfer');
     },
   );
 });

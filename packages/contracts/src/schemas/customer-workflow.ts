@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { exactDecimalStringSchema } from './money.js';
 
 export const WORKFLOW_TEMPLATE_VERSION = 'company_v2';
-export const WORKFLOW_MAPPING_VERSION = '3';
+export const WORKFLOW_MAPPING_VERSION = '6';
 export type WorkflowColumn = {
   key: string;
   header: string;
@@ -123,7 +123,7 @@ export const LEGACY_WORKFLOW_COLUMNS = {
       'Existing reservation reference',
       'source.reservationCandidate',
     ),
-    input('stated_status', 'Application stage (claimed)', 'company.companyStatus'),
+    input('stated_status', 'Existing document status (optional)', 'company.companyStatus'),
     ...holderColumns(false),
     input('vip_tier', 'VIP plan', 'company.statedVipPackage', 'application.tier'),
     input(
@@ -139,6 +139,7 @@ export const LEGACY_WORKFLOW_COLUMNS = {
     input('stated_rf', 'Included reservation fee', 'company.statedRf'),
     calculated('claimed_payment_total', 'Payments stated (calculated)'),
     calculated('claimed_balance', 'Remaining balance (calculated)'),
+
   ],
   'Supplementary Holders': [customerKey(), ...holderColumns(true)],
   'Sales Team': [
@@ -220,7 +221,7 @@ export const PREVIOUS_WORKFLOW_COLUMNS = Object.fromEntries(
       })),
   ]),
 ) as typeof LEGACY_WORKFLOW_COLUMNS;
-export const WORKFLOW_COLUMNS = {
+export const WORKFLOW_V3_COLUMNS = {
   ...PREVIOUS_WORKFLOW_COLUMNS,
   'Supplementary Holders': PREVIOUS_WORKFLOW_COLUMNS['Supplementary Holders'].map((column) =>
     column.key === 'customer_key'
@@ -238,6 +239,41 @@ export const WORKFLOW_COLUMNS = {
         'recommender_sm',
       ].includes(column.key),
   ),
+};
+export const WORKFLOW_V4_COLUMNS = {
+  ...WORKFLOW_V3_COLUMNS,
+  Customers: [...WORKFLOW_V3_COLUMNS.Customers,
+    input(
+      'existing_vip_control_number',
+      'Existing VIP control/card number (optional; generate on import if blank)',
+      'company.existingVipControlNumber',
+      'sale.vipControlNumber',
+    ),
+    input('existing_card_activation_status', 'Existing card activation status', 'company.existingCardActivationStatus'),
+    input('existing_stay_points_total', 'Existing Stay Points total', 'company.existingStayPointsTotal'),
+    input('existing_card_activation_date', 'Existing card activation date', 'company.existingCardActivationDate'),
+    input('existing_card_valid_until', 'Existing card valid until', 'company.existingCardValidUntil'),
+    input('vip_purchase_date', 'VIP purchase date (if known)', 'source.vipPurchaseDate'),
+    input(
+      'contract_classification',
+      'Contract classification (Standard / Non-Standard)',
+      'company.contractClassification',
+    ),
+    input(
+      'payment_term_months',
+      'Payment term months for VIP ID (1-36; optional)',
+      'company.paymentTermMonths',
+    ),
+  ],
+};
+export const WORKFLOW_V5_COLUMNS = {
+  ...WORKFLOW_V4_COLUMNS,
+  Customers: WORKFLOW_V4_COLUMNS.Customers.filter(c => !['existing_vip_control_number', 'contract_classification'].includes(c.key)).map(c =>
+    c.key === 'purchase_reference' ? { ...c, header: 'VIP card ID / Purchase reference (blank generates)' } : c),
+};
+export const WORKFLOW_COLUMNS = {
+  ...WORKFLOW_V5_COLUMNS,
+  Customers: [...WORKFLOW_V5_COLUMNS.Customers, { ...WORKFLOW_V4_COLUMNS.Customers.find(c => c.key === 'contract_classification')!, header: 'Contract type (new IDs: Standard)' }],
 };
 export type WorkflowSheet = keyof typeof WORKFLOW_COLUMNS;
 
