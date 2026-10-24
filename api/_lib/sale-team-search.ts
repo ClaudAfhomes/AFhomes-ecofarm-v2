@@ -152,7 +152,7 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
     ? 'Current verification permits three successful disclosures per IP address in a rolling 24 hours.'
     : 'The daily successful-verification limit is currently disabled. Anti-bot checks and short-term request limits still apply.';
   const privacyNotice = (
-    localPreview ? DRAFT_SEARCH_NOTICE : (settings?.privacyNotice ?? '')
+    settings?.privacyNotice ?? (localPreview ? DRAFT_SEARCH_NOTICE : '')
   ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays))
     .replaceAll('{{SEARCH_LIMIT_NOTICE}}', searchLimitNotice)
     .replaceAll('Current verification permits three successful disclosures per IP address in a rolling 24 hours.', searchLimitNotice);
@@ -196,6 +196,17 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
       privacyNotice: available ? privacyNotice : '',
       verificationPhone: available ? verificationPhone : '',
       siteKey: available ? siteKey : '',
+      supportHeading: available ? (settings?.supportHeading ?? 'Customer Support & Payment Inquiries') : '',
+      supportEmail: available ? (settings?.supportEmail ?? 'info@afhomes.com.ph') : '',
+      supportPhone: available ? (settings?.supportPhone ?? '+63 960 431 6867') : '',
+      bankHolder: available ? (settings?.bankHolder ?? 'AFhomes Hotspring & Ecofarm Resort Corp.') : '',
+      bank1Name: available ? (settings?.bank1Name ?? 'SECURITY BANK') : '',
+      bank1Account: available ? (settings?.bank1Account ?? '0000082595577') : '',
+      bank2Name: available ? (settings?.bank2Name ?? 'CHINABANK') : '',
+      bank2Account: available ? (settings?.bank2Account ?? '150700006468') : '',
+      checkPayee: available ? (settings?.checkPayee ?? 'AFhomes Hotspring & Ecofarm Resort Corp.') : '',
+      bankReminder: available ? (settings?.bankReminder ?? 'Please double-check the provided company bank account details before sending any payment. Thank you!') : '',
+      agentReminder: available ? (settings?.agentReminder ?? 'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.') : '',
     },
   };
 }

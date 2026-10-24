@@ -325,6 +325,23 @@ try {
     0,
     'Settled imports must not create zero-value or payable commissions',
   );
+  const unified = async (actor, team = false) =>
+    (await db.query('select public.account_imported_sales($1,$2,null,null) result', [actor, team]))
+      .rows[0].result;
+  for (const actor of [staff.referrer, staff.recommender]) {
+    const sales = await unified(actor);
+    assert.equal(sales.length, 6, 'Only finalized purchases belong in sales');
+    assert.equal(new Set(sales.map((sale) => sale.id)).size, 6);
+    assert.equal(sales.filter((sale) => sale.status === 'active').length, 2);
+    for (const status of ['expired', 'suspended', 'cancelled'])
+      assert.equal(sales.filter((sale) => sale.status === status).length, 1);
+  }
+  for (const actor of [staff.vd, staff.ssm, staff.sm])
+    assert.equal((await unified(actor, true)).length, 6);
+  assert.equal((await unified(staff.sm)).length, 0);
+  console.log(
+    'PASS: unified finalized sales, active qualification, deduplication and role scopes.',
+  );
   const portal = async (actor, team = false, page = 1) =>
     (
       await db.query('select public.imported_sales_for_account($1,$2,null,null,$3) result', [
@@ -447,6 +464,26 @@ try {
       const list = await http.request('/ist-portal/imported-sales?view=team-sales', actor);
       assert.equal(list.meta.total, 10);
     }
+    for (const actor of [staff.referrer, staff.recommender]) {
+      const sales = await http.request('/ost/me/sales', actor);
+      assert.equal(sales.meta.total, 7);
+      assert.equal(sales.summary.qualifyingSales, 2);
+    }
+    for (const actor of [staff.vd, staff.ssm, staff.sm]) {
+      const sales = await http.request(
+        '/ist-portal?view=team-sales&from=2026-01-01&to=2026-12-31',
+        actor,
+      );
+      assert.equal(sales.team.salesCount, 7);
+      assert.equal(sales.team.qualifyingSales, 2);
+      assert.equal(sales.sales.length, 7);
+      const activity = await http.request(
+        '/analytics/team-sales?period=year&from=2026-01-01&to=2026-12-31',
+        actor,
+      );
+      assert.equal(activity.kpis.totalTeamSales, 2);
+      assert.equal(activity.kpis.membersWithSales, actor === staff.sm ? 1 : 2);
+    }
     const monitor = await http.request(
       '/ist-portal?view=team-commissions&from=2026-01-01&to=2026-12-31',
       staff.sm,
@@ -505,6 +542,7 @@ try {
     'PASS: IST/OST recorded involvement, settled suppression, normal unpaid commission finalization, pagination and unrelated/moved-team denials.',
   );
   for (const fn of [
+    'public.account_imported_sales(uuid,boolean,date,date)',
     'public.imported_sales_for_account(uuid,boolean,date,date,integer)',
     'public.imported_commission_sale_ids_for_account(uuid)',
   ]) {

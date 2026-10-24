@@ -103,11 +103,15 @@ try {
   await db.query(repair);
   await db.query(repair);
   check(
-    Number((await db.query(`select count(*) from pg_proc p
+    Number(
+      (
+        await db.query(`select count(*) from pg_proc p
       join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
       and p.proname in ('begin_sale_team_search','reveal_sale_team_search',
       'save_sale_team_search_contact','sale_team_search_contact_exists',
-      'cleanup_sale_team_search')`)).rows[0].count),
+      'cleanup_sale_team_search')`)
+      ).rows[0].count,
+    ),
     6,
     'Forward repair restores missing search functions and is safe to replay',
   );
@@ -120,11 +124,95 @@ try {
     [{ public: false, file_size_limit: 500000, allowed_mime_types: ['image/jpeg'] }],
     'Private profile-photo bucket cap and MIME',
   );
-  await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
+  await db.query(
+    fs.readFileSync(
+      'supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql',
+      'utf8',
+    ),
+  );
   checks += await testSearch(db, connect);
-  await db.query(fs.readFileSync('supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql', 'utf8'));
-  await db.query(fs.readFileSync('supabase/migrations/20261212000005_afhomes_public_search_readiness.sql', 'utf8'));
+  await db.query(
+    fs.readFileSync(
+      'supabase/migrations/20261212000004_afhomes_public_search_daily_limit.sql',
+      'utf8',
+    ),
+  );
+  await db.query(
+    fs.readFileSync(
+      'supabase/migrations/20261212000005_afhomes_public_search_readiness.sql',
+      'utf8',
+    ),
+  );
   checks += await testSearchSettings(db, connect);
+  // Legacy readiness replay above intentionally replaces the getter; restore the latest settings projection.
+  await db.query(
+    fs.readFileSync(
+      'supabase/migrations/20261225000001_afhomes_public_verification_settings.sql',
+      'utf8',
+    ),
+  );
+  const settingsActor = randomUUID();
+  await db.query('insert into auth.users(id,email) values($1,$2)', [
+    settingsActor,
+    `${settingsActor}@example.invalid`,
+  ]);
+  await db.query(
+    "insert into public.staff_users(id,email,full_name,status) values($1,$2,'Settings Verification Owner','active')",
+    [settingsActor, `${settingsActor}@example.invalid`],
+  );
+  await db.query(
+    "insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='super_admin'",
+    [settingsActor],
+  );
+  const previous = (await db.query('select public.get_public_verification_settings() s')).rows[0].s;
+  const edited = {
+    ...previous,
+    supportHeading: 'Member Payment Assistance',
+    supportEmail: 'support@example.invalid',
+    supportPhone: '+639171234568',
+    bankHolder: 'Updated Company Holder',
+    bank1Name: 'Updated Bank',
+    bank1Account: '00112233',
+    bank2Name: 'Second Bank',
+    bank2Account: '00445566',
+    checkPayee: 'Updated Check Payee',
+    bankReminder: 'Confirm the account before paying.',
+    agentReminder: 'Please pay the company directly.',
+  };
+  const saved = (
+    await db.query('select public.update_public_verification_settings($1,$2,$3) s', [
+      settingsActor,
+      edited,
+      previous.revision,
+    ])
+  ).rows[0].s;
+  const reread = (await db.query('select public.get_public_verification_settings() s')).rows[0].s;
+  for (const key of [
+    'supportHeading',
+    'supportEmail',
+    'supportPhone',
+    'bankHolder',
+    'bank1Name',
+    'bank1Account',
+    'bank2Name',
+    'bank2Account',
+    'checkPayee',
+    'bankReminder',
+    'agentReminder',
+  ]) {
+    check(saved[key], edited[key], `Saved ${key}`);
+    check(reread[key], edited[key], `Persisted ${key}`);
+  }
+  check(saved.revision, previous.revision + 1);
+  await assert.rejects(
+    db.query('select public.update_public_verification_settings($1,$2,$3)', [
+      settingsActor,
+      edited,
+      previous.revision,
+    ]),
+    /SETTINGS_CHANGED/,
+  );
+  checks++;
 } finally {
   await Promise.all(clients.map((db) => db.end().catch(() => {})));
   if (started) {

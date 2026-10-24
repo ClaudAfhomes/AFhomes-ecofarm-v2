@@ -16,6 +16,11 @@ import { getSalesDownlineContext } from '../_lib/genealogy-visibility.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { importedSales } from './_imported-sales.js';
+import {
+  importedAccountSales,
+  mergeAccountSales,
+  attributedSellers,
+} from '../_lib/account-sales.js';
 
 type Row = Record<string, unknown>;
 const SALE_COLUMNS =
@@ -194,7 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...((importedCommissionSales.data ?? []) as string[]),
       ]),
     ];
-    const ownSales = canSales
+    let ownSales = canSales
       ? await readSearchRows(
           period(
             db
@@ -223,9 +228,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       }
     }
-    const ostSales = teamSales.filter((s) =>
-      ostSet.has(String(s.seller_staff_id ?? s.seller_ost_id)),
-    );
+    if (canSales) {
+      ownSales = mergeAccountSales(
+        ownSales,
+        await importedAccountSales(db, principal.userId, false, from, to),
+      );
+      if (leader)
+        teamSales.push(...(await importedAccountSales(db, principal.userId, true, from, to)));
+    }
+    const unifiedTeamSales = mergeAccountSales(teamSales);
+    teamSales.splice(0, teamSales.length, ...unifiedTeamSales);
+    const ostSales = teamSales.filter((s) => attributedSellers(s).some((id) => ostSet.has(id)));
     const ownCommissions = canCommissions
       ? await readSearchRows(
           period(
@@ -270,8 +283,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       salesAmount: canSales ? sumMoney(sales.map((s) => s.cash_price_snapshot)) : null,
       ...earnings(commissions, canCommissions),
     });
-    const sellers = (sales: Row[]) =>
-      new Set(sales.map((s) => String(s.seller_staff_id ?? s.seller_ost_id))).size;
+    const sellers = (sales: Row[], allowed: string[]) =>
+      new Set(sales.flatMap(attributedSellers).filter((id) => allowed.includes(id))).size;
     const sales = view === 'my-sales' ? ownSales : view === 'team-sales' ? teamSales : [];
     let commissions =
       view === 'my-commissions'
@@ -346,8 +359,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         personal: summary(ownSales, ownCommissions),
         ost: {
           ...summary(ostSales, ostCommissions),
-          withSales: canSales ? sellers(ostSales) : null,
-          withoutSales: canSales ? ostIds.length - sellers(ostSales) : null,
+          withSales: canSales ? sellers(ostSales, ostIds) : null,
+          withoutSales: canSales ? ostIds.length - sellers(ostSales, ostIds) : null,
         },
         teamCommissionOverview: teamView
           ? {
@@ -380,9 +393,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           total: ids.length,
           active: people.filter((p) => p.id !== principal.userId && p.status === 'active').length,
           salesCount: canSales ? teamSales.length : null,
+          qualifyingSales: canSales ? teamSales.filter((s) => s.status === 'active').length : null,
           salesAmount: canSales ? sumMoney(teamSales.map((s) => s.cash_price_snapshot)) : null,
-          withSales: canSales ? sellers(teamSales) : null,
-          withoutSales: canSales ? ids.length - sellers(teamSales) : null,
+          withSales: canSales ? sellers(teamSales, ids) : null,
+          withoutSales: canSales ? ids.length - sellers(teamSales, ids) : null,
         },
         sales: salesPage.map((s) => ({
           id: s.id,

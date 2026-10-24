@@ -121,11 +121,53 @@ beforeEach(() => {
       created_at: '2026-10-06T12:00:00Z',
     },
   );
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({
+    tables,
+    tokens: phase2WorldTokens(),
+    rpcs: [{ fn: 'account_imported_sales', result: [] }],
+  });
   (holder.db as FakeSupabase).rpcs.push({
     fn: 'imported_commission_sale_ids_for_account',
     result: [],
   });
+});
+
+it.each([TOKEN2.viceDirector, TOKEN2.seniorSalesManager, TOKEN2.salesManager])(
+  'includes finalized imports once in authorized team performance, without qualifying inactive memberships (%s)',
+  async (token) => {
+    const db = holder.db as FakeSupabase;
+    const active = {
+      id: 'import-active',
+      sale_number: '26011500841G1C01S',
+      seller_staff_id: STAFF2.ost,
+      cash_price_snapshot: '312000.00',
+      status: 'active',
+      created_at: '2026-10-08T00:00:00Z',
+      attributed_staff_ids: [STAFF2.ost],
+    };
+    const expired = {
+      ...active,
+      id: 'import-expired',
+      status: 'expired',
+      cash_price_snapshot: '192000.00',
+    };
+    db.rpcs.find((r) => r.fn === 'account_imported_sales')!.result = (
+      args: Record<string, unknown>,
+    ) => (args.p_team ? [active, expired, active] : []);
+    const result = await call(token, { view: 'team-sales' });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      team: { salesCount: 3, salesAmount: '534000.00' },
+      ost: { qualifyingSales: 1 },
+    });
+    expect((result.body as { sales: unknown[] }).sales).toHaveLength(3);
+  },
+);
+it('does not silently show zero imports when the reporting migration is unavailable', async () => {
+  (holder.db as FakeSupabase).rpcErrors.account_imported_sales = {
+    message: 'function unavailable',
+  };
+  expect((await call(TOKEN2.salesManager, { view: 'team-sales' })).status).toBe(500);
 });
 
 describe('imported sales account endpoint', () => {

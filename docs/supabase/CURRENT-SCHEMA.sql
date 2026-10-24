@@ -6,13 +6,25 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 146. Public table inventory: 60. Private table inventory: 30.
--- Read-only live verification 2026-10-23: shared production ikaevepedpqygdlipsei has 120 history entries.
--- Its 60 public and 27 private application table names match this inventory; no SQL was applied.
--- Thirteen local migration versions remain absent from live history; two live versions lack local files.
+-- Migration count: 148. Public table inventory: 60. Private table inventory: 30.
+-- Confirmed scoped live apply 2026-10-24: shared production ikaevepedpqygdlipsei has 127 history entries.
+-- Its 60 public and 30 private application table names match this inventory.
+-- Applied exactly 20261215000002 and 20261223000001 through 20261223000004; history increased 120 -> 125.
+-- Twenty other local versions remain absent from live history; two live versions lack local files.
+-- Those older history gaps were not repaired or applied by this scoped operation.
+-- Existing customer/VIP IDs, total points balances and commission amounts/statuses were preserved.
+-- All application RLS invariant checks passed; only two pre-existing platform cron policies remain.
+-- See MIGRATION-APPLICATIONS.md for exact hashes, live-schema rehearsal and post-apply evidence.
+-- Applied exactly 20261224000001 reporting and 20261225000001 consolidated settings; history increased 125 -> 127.
+-- Existing settings, privacy controls, customer IDs, points and commission history remained unchanged.
 -- The manifest below includes pending SQL and MUST NOT be interpreted as an applied-schema dump.
 -- Full function/column definition equality is not established by matching table names.
--- See ../DEVELOPMENT-FINALIZATION-2026-10-23.md for exact pending versions and verification limits.
+-- The 2026-10-23 historical baseline is in ../DEVELOPMENT-FINALIZATION-2026-10-23.md.
+-- Current unrecorded versions: 20261206000006, 20261209000001, 20261209000002,
+-- 20261210000001, 20261210000002, 20261210000003, 20261210000004, 20261210000005,
+-- 20261211000001, 20261211000002, 20261211000003, 20261211000004, 20261211000005,
+-- 20261213000001, 20261214000001, 20261215000001, 20261216000001, 20261217000001,
+-- 20261218000001, 20261218000002. This is a history observation, not a claim that their objects are absent.
 -- Customer continuation 20261208000016 was approved and applied to the shared project on 2026-10-19.
 -- See MIGRATION-APPLICATIONS.md for exact file hash, scope and post-commit verification.
 -- Company Customer ID import correction 20261208000017 was approved and live-applied on 2026-10-19.
@@ -200,6 +212,8 @@
 --   20261223000002_afhomes_stay_date_point_allowances.sql
 --   20261223000003_afhomes_vip_contract_classification.sql
 --   20261223000004_afhomes_import_sales_commission_cutover.sql
+--   20261224000001_afhomes_unified_sales_reporting.sql
+--   20261225000001_afhomes_public_verification_settings.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

@@ -39,7 +39,7 @@ import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard'
 import { getIstReport, istDateRange } from './services';
 import styles from './IstPortalPage.module.css';
 import { TeamCommissionSummary } from './TeamCommissionSummary';
-import { ImportedSalesPanel } from './ImportedSalesPanel';
+import { TeamSalesActivity } from './TeamSalesActivity';
 
 const TITLES: Record<IstPortalView, string> = {
   dashboard: 'IST Dashboard',
@@ -375,6 +375,32 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
                   </form>
                 </section>
               ) : null}
+              {!isCommissions ? (
+                <section className={styles.section} aria-label="Sales Summary">
+                  <div className={styles.metrics}>
+                    <MetricCard
+                      label="Total Sales"
+                      value={count(
+                        view === 'team-sales' ? data.team.salesCount : data.personal.salesCount,
+                      )}
+                    />
+                    <MetricCard
+                      label="Qualifying Sales"
+                      value={count(
+                        view === 'team-sales'
+                          ? (data.team.qualifyingSales ?? null)
+                          : data.personal.qualifyingSales,
+                      )}
+                    />
+                    <MetricCard
+                      label="Sales Amount"
+                      value={amount(
+                        view === 'team-sales' ? data.team.salesAmount : data.personal.salesAmount,
+                      )}
+                    />
+                  </div>
+                </section>
+              ) : null}
               {isCommissions ? (
                 data.commissions.length ? (
                   <div className={`${styles.table} ${styles.historyTable}`}>
@@ -475,14 +501,7 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
               ) : (
                 <EmptyState title="No sales in this period" />
               )}
-              {view === 'my-sales' || view === 'team-sales' ? (
-                <ImportedSalesPanel
-                  key={`${view}:${from}:${to}`}
-                  team={view === 'team-sales'}
-                  from={from}
-                  to={to}
-                />
-              ) : null}
+              {view === 'team-sales' ? <TeamSalesActivity /> : null}
               {data.total > data.pageSize ? (
                 <Pagination
                   page={page}

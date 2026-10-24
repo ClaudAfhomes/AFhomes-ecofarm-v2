@@ -28,6 +28,7 @@ type Row = Record<string, unknown>;
 function install() {
   resetIdentifierRateLimit();
   holder.db = new FakeSupabase({
+    rpcs: [{ fn: 'account_imported_sales', result: [] }],
     tables: {
       modules: [],
       roles: [],

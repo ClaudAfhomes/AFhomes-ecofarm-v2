@@ -31,11 +31,25 @@ beforeEach(() => {
     if (path.endsWith('/config'))
       return {
         available: true,
+        dailyLimitEnabled: true,
         localPreview: true,
         noticeVersion: 'v1',
         privacyNotice: 'Synthetic privacy notice.',
         verificationPhone: '+63 960-431-6867',
         siteKey: 'test-key',
+        supportHeading: 'Customer Support & Payment Inquiries',
+        supportEmail: 'info@afhomes.com.ph',
+        supportPhone: '+63 960 431 6867',
+        bankHolder: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+        bank1Name: 'SECURITY BANK',
+        bank1Account: '0000082595577',
+        bank2Name: 'CHINABANK',
+        bank2Account: '150700006468',
+        checkPayee: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+        bankReminder:
+          'Please double-check the provided company bank account details before sending any payment. Thank you!',
+        agentReminder:
+          'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.',
       };
     if (path.endsWith('/start')) return { searchToken: 'synthetic-flow' };
     if (path.endsWith('/reveal')) return { result: record, contactReceipt: 'synthetic-receipt' };
@@ -45,7 +59,8 @@ beforeEach(() => {
 async function begin() {
   await screen.findByText(
     (_, element) =>
-      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'Privacy notice: Data Privacy Act of 2012',
+      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() ===
+      'Privacy notice: Data Privacy Act of 2012',
     { selector: 'summary' },
   );
   const field = screen.getByLabelText('AA number');
@@ -66,7 +81,28 @@ async function enterContact() {
   await userEvent.click(screen.getByRole('button', { name: 'Verify accreditation' }));
 }
 it('shows when the daily search allowance is disabled', async () => {
-  api.request.mockResolvedValueOnce({ available:true, dailyLimitEnabled:false, localPreview:true, noticeVersion:'v1',privacyNotice:'Synthetic privacy notice.',verificationPhone:'+639604316867',siteKey:'test-key' });
+  api.request.mockResolvedValueOnce({
+    available: true,
+    dailyLimitEnabled: false,
+    localPreview: true,
+    noticeVersion: 'v1',
+    privacyNotice: 'Synthetic privacy notice.',
+    verificationPhone: '+639604316867',
+    siteKey: 'test-key',
+    supportHeading: 'Customer Support & Payment Inquiries',
+    supportEmail: 'info@afhomes.com.ph',
+    supportPhone: '+63 960 431 6867',
+    bankHolder: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+    bank1Name: 'SECURITY BANK',
+    bank1Account: '0000082595577',
+    bank2Name: 'CHINABANK',
+    bank2Account: '150700006468',
+    checkPayee: 'AFhomes Hotspring & Ecofarm Resort Corp.',
+    bankReminder:
+      'Please double-check the provided company bank account details before sending any payment. Thank you!',
+    agentReminder:
+      'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.',
+  });
   renderWithProviders(<SaleTeamSearch />);
   expect(await screen.findByText(/The daily search limit is currently disabled/)).toBeVisible();
   expect(screen.queryByText(/Up to 3 successful verifications/)).not.toBeInTheDocument();
@@ -81,8 +117,8 @@ it('requires CAPTCHA, acknowledgment and contact before revealing a masked resul
   expect(screen.getByRole('button', { name: 'Verify accreditation' })).toBeDisabled();
   await enterContact();
   expect(await screen.findByText(record.maskedName)).toBeInTheDocument();
-  expect(screen.getByText('Employee identity')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '+63 960-431-6867' })).toHaveAttribute(
+  expect(screen.getByText('Employee Identity')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Phone: +63 960 431 6867' })).toHaveAttribute(
     'href',
     'tel:+639604316867',
   );
@@ -133,7 +169,8 @@ it('rejects malformed input before starting a lookup', async () => {
   renderWithProviders(<SaleTeamSearch />);
   await screen.findByText(
     (_, element) =>
-      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'Privacy notice: Data Privacy Act of 2012',
+      (element?.textContent ?? '').replace(/\s+/g, ' ').trim() ===
+      'Privacy notice: Data Privacy Act of 2012',
     { selector: 'summary' },
   );
   await userEvent.type(screen.getByLabelText('AA number'), '%');
@@ -164,7 +201,15 @@ it('opens and closes a larger photo and groups the name with the AA number', asy
   const defaults = api.request.getMockImplementation()!;
   api.request.mockImplementation((path: string, ...args) =>
     path.endsWith('/reveal')
-      ? Promise.resolve({ result: { ...record, kind: 'OST', expiresOn: '2027-10-21', photoUrl: 'https://example.invalid/photo.jpg' }, contactReceipt: 'receipt' })
+      ? Promise.resolve({
+          result: {
+            ...record,
+            kind: 'OST',
+            expiresOn: '2027-10-21',
+            photoUrl: 'https://example.invalid/photo.jpg',
+          },
+          contactReceipt: 'receipt',
+        })
       : defaults(path, ...args),
   );
   renderWithProviders(<SaleTeamSearch />);
@@ -174,12 +219,61 @@ it('opens and closes a larger photo and groups the name with the AA number', asy
   const identity = within(await screen.findByRole('group', { name: 'Seller identity' }));
   expect(identity.getByRole('heading', { name: record.maskedName })).toBeInTheDocument();
   expect(identity.getByText(record.aaNumber)).toBeInTheDocument();
-  const dl = screen.getByTestId('accreditation-details');
-  expect(within(dl).getByText('Registration Status')).toBeInTheDocument();
-  expect(within(dl).getByText('Accredited')).toBeInTheDocument();
+  expect(screen.getByText('Registration Status')).toBeInTheDocument();
+  expect(screen.getByText('Accredited')).toBeInTheDocument();
   expect(screen.queryByText('2027-10-21')).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: 'Enlarge profile photo' }));
+  // Photo click opens dialog
+  const photoButton = screen.getByRole('button', { name: 'Enlarge profile photo' });
+  await userEvent.click(photoButton);
   expect(screen.getByRole('dialog', { name: 'Profile photo' })).toBeInTheDocument();
   await userEvent.keyboard('{Escape}');
   expect(screen.queryByRole('dialog', { name: 'Profile photo' })).not.toBeInTheDocument();
+});
+
+it('uses edited public support and bank settings in the approved result layout', async () => {
+  const defaults = api.request.getMockImplementation()!;
+  api.request.mockImplementation(async (path: string, ...args) => {
+    const data = await defaults(path, ...args);
+    return path.endsWith('/config')
+      ? {
+          ...data,
+          supportHeading: 'Member Payment Assistance',
+          supportEmail: 'support@example.invalid',
+          supportPhone: '+639171234568',
+          bankHolder: 'Updated Company Holder',
+          bank1Name: 'Updated Bank',
+          bank1Account: '00112233',
+          bank2Account: '00445566',
+          checkPayee: 'Updated Check Payee',
+          bankReminder: 'Confirm the account before paying.',
+          agentReminder: 'Please pay the company directly.',
+        }
+      : data;
+  });
+  renderWithProviders(<SaleTeamSearch />);
+  await begin();
+  await acknowledge();
+  await enterContact();
+  const result = within(await screen.findByRole('article', { name: 'Verified sales team member' }));
+  expect(result.getByRole('heading', { name: 'Member Payment Assistance' })).toBeInTheDocument();
+  expect(result.getByRole('link', { name: 'Email: support@example.invalid' })).toHaveAttribute(
+    'href',
+    'mailto:support@example.invalid',
+  );
+  expect(result.getByRole('link', { name: 'Phone: +639171234568' })).toHaveAttribute(
+    'href',
+    'tel:+639171234568',
+  );
+  for (const text of [
+    'Updated Company Holder',
+    'Updated Bank',
+    '00112233',
+    '00445566',
+    'Updated Check Payee',
+    'Confirm the account before paying.',
+    'Please pay the company directly.',
+  ])
+    expect(result.getByText(text)).toBeInTheDocument();
+  expect(result.queryByRole('img', { name: 'SECURITY BANK' })).not.toBeInTheDocument();
+  expect(result.getByRole('button', { name: `Copy ID ${record.aaNumber}` })).toBeInTheDocument();
 });

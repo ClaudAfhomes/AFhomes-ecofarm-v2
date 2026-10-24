@@ -9,12 +9,13 @@ import {
   type PublicSaleTeamSearchResult,
   type SaleTeamSearchContact,
 } from '@afhomes/contracts';
-import { AccreditationId, Alert, Button, Dialog, Icon, TextField, TurnstileChallenge } from '@afhomes/ui';
+import { Alert, Button, Dialog, Icon, TextField, TurnstileChallenge } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
 import { ApiError } from '../../lib/api/errors';
 import { Container } from '../components/ui/Container';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Seo } from '../lib/seo';
+import { VerificationResultCard } from '../components/VerificationResultCard';
 
 const SESSION_KEY = 'afhomes.saleTeamSearch.session';
 type SearchSession = { sessionId: string; receipt?: string; expiresAt?: number };
@@ -191,7 +192,7 @@ export default function SaleTeamSearch() {
         title="Verify a sales team member"
         lede="Enter an AA number to confirm a seller's current accreditation."
       />
-      <Container size="narrow" className="py-12 sm:py-16">
+      <Container size="site" className="py-12 sm:py-16">
         {config?.localPreview ? (
           <Alert variant="info">
             Local preview — draft privacy notice. Use synthetic contact details only.
@@ -264,81 +265,9 @@ export default function SaleTeamSearch() {
         </section>
         <div aria-live="polite" className="mt-8">
           {phase === 'idle' || phase === 'result' ? dialogError : null}
-          {phase === 'result' && result ? (
-            <article
-              aria-label="Verified sales team member"
-              className="rounded-[var(--radius-panel)] border border-line bg-cream-50 p-6 shadow-soft sm:p-8"
-            >
-              <span className="inline-flex rounded-full bg-leaf-100 px-3 py-1 text-xs font-semibold text-leaf-700">
-                {result.kind === 'IST' ? 'Employee identity' : 'Accredited'}
-              </span>
-              <div className="mt-4 flex items-center gap-4">
-                <button
-                  type="button"
-                  aria-label="Enlarge profile photo"
-                  disabled={!result.photoUrl || failedPhotoUrl === result.photoUrl}
-                  onClick={() => setPhotoOpen(true)}
-                  className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-leaf-100 text-xl font-semibold text-leaf-700 focus-visible:outline-2 focus-visible:outline-offset-4 disabled:cursor-default"
-                >
-                  <span aria-hidden="true">{result.maskedName.charAt(0)}</span>
-                  {result.photoUrl ? (
-                    <img
-                      src={result.photoUrl}
-                      alt={result.maskedName}
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.hidden = true;
-                        setFailedPhotoUrl(result.photoUrl);
-                      }}
-                    />
-                  ) : null}
-                </button>
-                <div
-                  role="group"
-                  aria-label="Seller identity"
-                  className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-navy-900"
-                >
-                  <h2 className="font-display text-2xl font-medium">{result.maskedName}</h2>
-                  <div className="text-base" aria-label={`AA number ${result.aaNumber}`}>
-                    <AccreditationId value={result.aaNumber} />
-                  </div>
-                </div>
-              </div>
-              <dl className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2" data-testid="accreditation-details">
-                <div className="rounded-xl border border-line bg-cream-50 p-4">
-                  <dt className="label-caps text-ink-400">Registration Status</dt>
-                  <dd className="mt-2 text-navy-900">Accredited</dd>
-                </div>
-                <div className="rounded-xl border border-line bg-cream-50 p-4 sm:col-span-2">
-                  <dt className="flex items-center gap-2 label-caps text-ink-400">
-                    <Icon name="bell" size={14} /> Company verification contact
-                  </dt>
-                  <dd className="mt-2">
-                    <a
-                      className="font-semibold text-leaf-700 underline"
-                      href={`tel:${config?.verificationPhone.replace(/[^+\d]/g, '')}`}
-                    >
-                      {config?.verificationPhone}
-                    </a>
-                  </dd>
-                </div>
-              </dl>
-              <aside
-                aria-label="Transaction safety notice"
-                className="mt-6 flex gap-3 rounded-xl border border-gold-500 bg-gold-100 p-5 text-ink-900"
-              >
-                <Icon name="alert" size={20} className="mt-0.5 shrink-0 text-gold-700" />
-                <p className="text-body leading-relaxed">
-                  <strong>
-                    For your protection, conduct all transactions only through AFHomes and its
-                    authorized processes.
-                  </strong>{' '}
-                  If anyone asks you to pay or transact outside AFHomes' official channels,{' '}
-                  <strong>do not proceed</strong> and verify by calling the official AFHomes company
-                  verification number shown above.
-                </p>
-              </aside>
-            </article>
+          {phase === 'result' && result && config ? (
+            <VerificationResultCard result={result} config={config} failedPhotoUrl={failedPhotoUrl}
+              onPhotoError={() => setFailedPhotoUrl(result.photoUrl)} onEnlarge={() => setPhotoOpen(true)} />
           ) : null}
           {phase === 'result' && !result ? (
             <p

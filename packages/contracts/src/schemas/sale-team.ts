@@ -137,6 +137,17 @@ export const saleTeamSearchConfigSchema = z
     privacyNotice: z.string(),
     verificationPhone: z.string(),
     siteKey: z.string(),
+    supportHeading: z.string(),
+    supportEmail: z.string(),
+    supportPhone: z.string(),
+    bankHolder: z.string(),
+    bank1Name: z.string(),
+    bank1Account: z.string(),
+    bank2Name: z.string(),
+    bank2Account: z.string(),
+    checkPayee: z.string(),
+    bankReminder: z.string(),
+    agentReminder: z.string(),
   })
   .strict();
 export const saleTeamSearchStartedSchema = z.object({ searchToken: z.string() }).strict();

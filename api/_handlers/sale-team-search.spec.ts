@@ -14,10 +14,16 @@ const record = {
   expiresOn: null,
 };
 const savedSettings = {
-  privacyApproved: true, cleanupReady: true,
-  enabled: true, dailyLimitEnabled: true, verificationPhone: '+639604316867', retentionDays: 30,
+  privacyApproved: true,
+  cleanupReady: true,
+  enabled: true,
+  dailyLimitEnabled: true,
+  verificationPhone: '+639604316867',
+  retentionDays: 30,
   privacyNotice: 'Synthetic approved notice for a configuration test. '.repeat(5),
-  noticeVersion: 'approved-v1', revision: 1, updatedAt: '2026-10-22T00:00:00.000Z',
+  noticeVersion: 'approved-v1',
+  revision: 1,
+  updatedAt: '2026-10-22T00:00:00.000Z',
 };
 beforeEach(() => {
   vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', undefined);
@@ -89,7 +95,7 @@ it('withholds seller data until acknowledgment and validated contact; cached con
     sessionId,
     searchToken,
     acknowledged: true,
-    noticeVersion: 'local-draft-2026-10-21',
+    noticeVersion: 'approved-v1',
     contact: {
       name: 'Synthetic Searcher',
       email: 'searcher@example.invalid',
@@ -121,7 +127,7 @@ it('withholds seller data until acknowledgment and validated contact; cached con
   );
   expect(fetch).toHaveBeenCalledTimes(2);
 });
-it('rejects bad CAPTCHA before any database RPC', async () => {
+it('rejects bad CAPTCHA before any search or contact RPC', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: false }) }),
@@ -130,7 +136,9 @@ it('rejects bad CAPTCHA before any database RPC', async () => {
     (await call('search/start', { aaNumber: record.aaNumber, sessionId, captchaToken: 'bad' }))
       .status,
   ).toBe(400);
-  expect(holder.db?.calls.some((c) => c.op === 'rpc')).toBe(false);
+  expect(holder.db?.calls.filter((c) => c.op === 'rpc').map((c) => c.table)).toEqual([
+    'get_public_verification_settings',
+  ]);
 });
 it('closes the old anonymous GET even when the new feature configuration is incomplete', async () => {
   vi.stubEnv('AFHOMES_SEARCH_SECRET', '');
@@ -150,7 +158,8 @@ it('uses saved controls immediately and ignores old environment control values',
   vi.stubEnv('AFHOMES_SEARCH_ENABLED', 'false');
   vi.stubEnv('AFHOMES_VERIFICATION_PHONE', 'obsolete');
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({
-    available: true, verificationPhone: savedSettings.verificationPhone,
+    available: true,
+    verificationPhone: savedSettings.verificationPhone,
   });
   savedSettings.enabled = false;
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({ available: false });
@@ -161,16 +170,31 @@ it('fails closed when database settings cannot be read even if the old env switc
   holder.db!.rpcErrors.get_public_verification_settings = { message: 'storage unavailable' };
   expect((await call('search/config', undefined, 'GET')).body).toMatchObject({ available: false });
 });
-it.each(['privacyApproved', 'cleanupReady'] as const)('requires saved %s even if obsolete env flags claim readiness', async (field) => {
-  vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-  vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
-  vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
-  savedSettings[field] = false;
-  expect((await call('search/config', undefined, 'GET')).body).toMatchObject({available:false});
-  expect((await call('search/start', {})).status).toBe(503);
-  expect((await call('search/reveal', {})).status).toBe(503);
-  expect(holder.db!.calls.some(c=>c.op==='rpc' && ['begin_sale_team_search','save_sale_team_search_contact','reveal_sale_team_search'].includes(c.table))).toBe(false);
-});
+it.each(['privacyApproved', 'cleanupReady'] as const)(
+  'requires saved %s even if obsolete env flags claim readiness',
+  async (field) => {
+    vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('AFHOMES_SEARCH_PRIVACY_APPROVED', 'true');
+    vi.stubEnv('AFHOMES_SEARCH_CLEANUP_READY', 'true');
+    savedSettings[field] = false;
+    expect((await call('search/config', undefined, 'GET')).body).toMatchObject({
+      available: false,
+    });
+    expect((await call('search/start', {})).status).toBe(503);
+    expect((await call('search/reveal', {})).status).toBe(503);
+    expect(
+      holder.db!.calls.some(
+        (c) =>
+          c.op === 'rpc' &&
+          [
+            'begin_sale_team_search',
+            'save_sale_team_search_contact',
+            'reveal_sale_team_search',
+          ].includes(c.table),
+      ),
+    ).toBe(false);
+  },
+);
 it('refuses Cloudflare test keys on hosted targets even with publication settings approved', async () => {
   vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', '1x0000000000000000000000000000000AA');
   vi.stubEnv('VITE_TURNSTILE_SITE_KEY', '1x00000000000000000000AA');
@@ -190,12 +214,13 @@ it.each(['7', '30', '90'])(
   'renders the configured %s-day contact retention in the public notice',
   async (days) => {
     vi.stubEnv('SUPABASE_URL', 'https://example.supabase.co');
-        vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
+    vi.stubEnv('AFHOMES_SEARCH_NOTICE_VERSION', 'approved-v1');
     vi.stubEnv('AFHOMES_SEARCH_CONTACT_RETENTION_DAYS', days);
     savedSettings.retentionDays = Number(days);
     vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
     vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', 'synthetic-real-secret');
-    savedSettings.privacyNotice = 'Contact retention is {{CONTACT_RETENTION_DAYS}} days. This synthetic notice describes the verification purpose, limited recipients and privacy contact.';
+    savedSettings.privacyNotice =
+      'Contact retention is {{CONTACT_RETENTION_DAYS}} days. This synthetic notice describes the verification purpose, limited recipients and privacy contact.';
     const state = await call('search/config', undefined, 'GET');
     expect(state.body).toMatchObject({
       available: true,
@@ -208,11 +233,19 @@ it('publishes the disabled daily limit and matching privacy wording from saved s
   vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'synthetic-real-site');
   vi.stubEnv('AFHOMES_SEARCH_TURNSTILE_SECRET', 'synthetic-real-secret');
   savedSettings.dailyLimitEnabled = false;
-  savedSettings.privacyNotice = 'Synthetic finalized privacy notice. '.repeat(4) + 'Current verification permits three successful disclosures per IP address in a rolling 24 hours.';
+  savedSettings.privacyNotice =
+    'Synthetic finalized privacy notice. '.repeat(4) +
+    'Current verification permits three successful disclosures per IP address in a rolling 24 hours.';
   const state = await call('search/config', undefined, 'GET');
   expect(state.body).toMatchObject({ available: true, dailyLimitEnabled: false });
-  expect(state.body).toMatchObject({ privacyNotice: expect.stringContaining('daily successful-verification limit is currently disabled') });
-  expect(state.body).not.toMatchObject({ privacyNotice: expect.stringContaining('permits three successful') });
+  expect(state.body).toMatchObject({
+    privacyNotice: expect.stringContaining(
+      'daily successful-verification limit is currently disabled',
+    ),
+  });
+  expect(state.body).not.toMatchObject({
+    privacyNotice: expect.stringContaining('permits three successful'),
+  });
 });
 it('returns 429 without a result when the disclosure allowance is exhausted', async () => {
   const searchToken = await start();
@@ -225,7 +258,7 @@ it('returns 429 without a result when the disclosure allowance is exhausted', as
     sessionId,
     searchToken,
     acknowledged: true,
-    noticeVersion: 'local-draft-2026-10-21',
+    noticeVersion: 'approved-v1',
     contact: {
       name: 'Synthetic Searcher',
       email: 'searcher@example.invalid',
@@ -234,4 +267,25 @@ it('returns 429 without a result when the disclosure allowance is exhausted', as
   });
   expect(state.status).toBe(429);
   expect(state.headers['retry-after']).toBe('120');
+});
+
+it('uses saved support and payment settings in loopback preview too', async () => {
+  holder.db!.rpcs.find((r) => r.fn === 'get_public_verification_settings')!.result = {
+    ...savedSettings,
+    supportHeading: 'Saved Support Desk',
+    supportEmail: 'desk@example.invalid',
+    bank1Name: 'Updated Bank',
+    bank1Account: '00112233',
+    agentReminder: 'Pay the company directly.',
+  };
+  expect((await call('search/config', undefined, 'GET')).body).toMatchObject({
+    available: true,
+    localPreview: true,
+    privacyNotice: savedSettings.privacyNotice.trim(),
+    supportHeading: 'Saved Support Desk',
+    supportEmail: 'desk@example.invalid',
+    bank1Name: 'Updated Bank',
+    bank1Account: '00112233',
+    agentReminder: 'Pay the company directly.',
+  });
 });

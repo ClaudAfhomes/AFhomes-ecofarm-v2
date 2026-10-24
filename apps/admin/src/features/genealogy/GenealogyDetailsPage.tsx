@@ -1,22 +1,14 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-  StatusChip,
-  DateField,
-} from '@afhomes/ui';
+import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
 import type { Member } from '@afhomes/contracts';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
-import { getGenealogyNode, getGenealogySummary, getGenealogyUpline, getTeamSalesAnalytics } from './services';
+import { getGenealogyNode, getGenealogySummary, getGenealogyUpline } from './services';
 import { humanizeCode } from '../business/format';
-import { genealogyKeys, teamSalesKeys } from '../business/queryKeys';
+import { genealogyKeys } from '../business/queryKeys';
 import { useSession } from '../../lib/session';
 import { GenealogyTree } from './GenealogyTree';
 import { MemberDetailDialog } from '../network-members/MemberDetailDialog';
@@ -28,7 +20,10 @@ import styles from './GenealogyDetailsPage.module.css';
  * SSM cannot view VD profile, SM cannot view SSM/VD profiles, OST cannot view any upline.
  * VD can view all upline (none). Admin can view all.
  */
-function canViewUplineProfile(upline: { role: string; staffId: string }, viewer: { roleSlug?: string; id?: string } | null): boolean {
+function canViewUplineProfile(
+  upline: { role: string; staffId: string },
+  viewer: { roleSlug?: string; id?: string } | null,
+): boolean {
   if (!viewer) return false;
   // Admin can view all
   if (viewer.roleSlug === 'admin' || viewer.roleSlug === 'super_admin') return true;
@@ -57,7 +52,7 @@ function canViewUplineProfile(upline: { role: string; staffId: string }, viewer:
 
 /**
  * One seller's network record: identity, upline chain, team summary,
- * interactive downline tree, and team sales activity.
+ * interactive downline tree.
  *
  * Read-only by construction: every figure comes from the authorized genealogy
  * APIs, and nothing here edits attribution. The server remains the security
@@ -67,39 +62,8 @@ export function GenealogyDetailsPage() {
   const { staffId = '' } = useParams();
   const navigate = useNavigate();
   const { user } = useSession();
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
   const [viewingMember, setViewingMember] = useState<Member | null>(null);
   const [memberLoading, setMemberLoading] = useState(false);
-
-  // Quick presets
-  const presets = [
-    { label: 'Today', days: 0 },
-    { label: 'Past 7 Days', days: 7 },
-    { label: 'Past 28 Days', days: 28 },
-    { label: 'Past 6 Months', days: 180 },
-  ] as const;
-
-  // Compute today's date once per render cycle
-  const today = useMemo(() => new Date(), []);
-  const todayStr = today.toISOString().slice(0, 10);
-
-  const applyPreset = useCallback((days: number) => {
-    const to = new Date();
-    const from = new Date();
-    from.setDate(to.getDate() - days);
-    setDateTo(to.toISOString().slice(0, 10));
-    setDateFrom(from.toISOString().slice(0, 10));
-  }, []);
-
-  const isPresetActive = useCallback(
-    (days: number) => {
-      const expectedFrom = new Date();
-      expectedFrom.setDate(today.getDate() - days);
-      return dateFrom === expectedFrom.toISOString().slice(0, 10) && dateTo === todayStr;
-    },
-    [dateFrom, dateTo, today, todayStr]
-  );
 
   const handleMemberClick = async (genealogyNode: import('@afhomes/contracts').GenealogyNode) => {
     setMemberLoading(true);
@@ -128,17 +92,15 @@ export function GenealogyDetailsPage() {
     queryFn: () => getGenealogySummary(staffId),
     placeholderData: keepPreviousData,
   });
-  const salesQuery = useQuery({
-    queryKey: teamSalesKeys.analytics(staffId, 'month', dateFrom, dateTo),
-    queryFn: () => getTeamSalesAnalytics(staffId, 'month', dateFrom, dateTo),
-    placeholderData: keepPreviousData,
-  });
-
   if (node.isPending)
     return (
       <section>
-        <div style={{ display: 'grid', gap: 'var(--space-4)' }} role="status" aria-label="Loading seller">
-          <span className="sr-only">Loading seller…</span>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading seller"
+        >
+          <span className="sr-only">Loading sellerâ€¦</span>
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
             <Skeleton style={{ height: 32, maxWidth: 280 }} />
             <Skeleton style={{ height: 16, maxWidth: 360 }} />
@@ -175,7 +137,7 @@ export function GenealogyDetailsPage() {
     <section className={styles.page}>
       <PageHeader
         title="Seller Record"
-        description={`${node.data.fullName} · ${humanizeCode(node.data.role)}`}
+        description={`${node.data.fullName} Â· ${humanizeCode(node.data.role)}`}
         actions={
           <Button variant="secondary" onClick={() => navigate('/admin/genealogy')}>
             Back
@@ -185,7 +147,7 @@ export function GenealogyDetailsPage() {
 
       <section className={styles.hero} aria-label="Seller identity">
         <span className={styles.heroAvatar} aria-hidden="true">
-          {(node.data.fullName.trim().charAt(0) || '•').toUpperCase()}
+          {(node.data.fullName.trim().charAt(0) || 'â€¢').toUpperCase()}
         </span>
         <div className={styles.heroText}>
           <div className={styles.heroNameRow}>
@@ -215,7 +177,7 @@ export function GenealogyDetailsPage() {
         {chain.isPending ? (
           <p role="status">
             <Skeleton style={{ height: 64 }} />
-            <span className="sr-only">Loading head…</span>
+            <span className="sr-only">Loading headâ€¦</span>
           </p>
         ) : chain.isError ? (
           <ErrorState
@@ -227,7 +189,7 @@ export function GenealogyDetailsPage() {
         ) : chain.data.length ? (
           <article className={styles.headCard} aria-label="Immediate head">
             <span className={styles.headAvatar} aria-hidden="true">
-              {(chain.data[0]!.fullName.trim().charAt(0) || '•').toUpperCase()}
+              {(chain.data[0]!.fullName.trim().charAt(0) || 'â€¢').toUpperCase()}
             </span>
             <div className={styles.headText}>
               {canViewUplineProfile(chain.data[0]!, user) ? (
@@ -235,17 +197,20 @@ export function GenealogyDetailsPage() {
                   {chain.data[0]!.fullName}
                 </Link>
               ) : (
-                <span className={styles.headName} style={{ cursor: 'default', color: 'var(--color-text-primary)' }}>
+                <span
+                  className={styles.headName}
+                  style={{ cursor: 'default', color: 'var(--color-text-primary)' }}
+                >
                   {chain.data[0]!.fullName}
                 </span>
               )}
               <p className={styles.headMeta}>
                 <StatusChip label={humanizeCode(chain.data[0]!.role)} />
                 {chain.data.length > 1 ? (
-                  <span className={styles.panelNote}> · reads through an unavailable head</span>
+                  <span className={styles.panelNote}> Â· reads through an unavailable head</span>
                 ) : null}
                 {chain.data.length > 1 && !canViewUplineProfile(chain.data[1]!, user) && (
-                  <span className={styles.panelNote}> · upline profile restricted</span>
+                  <span className={styles.panelNote}> Â· upline profile restricted</span>
                 )}
               </p>
             </div>
@@ -260,7 +225,7 @@ export function GenealogyDetailsPage() {
         {summary.isPending ? (
           <p role="status">
             <Skeleton style={{ height: 88 }} />
-            <span className="sr-only">Loading summary…</span>
+            <span className="sr-only">Loading summaryâ€¦</span>
           </p>
         ) : summary.isError ? (
           <ErrorState
@@ -313,19 +278,14 @@ export function GenealogyDetailsPage() {
             </div>
             <h3 className={styles.subTitle}>Team mix</h3>
             <ul className={styles.mix}>
-              {(
-                [
-                  'vice_director',
-                  'senior_sales_manager',
-                  'sales_manager',
-                  'ost',
-                ] as const
-              ).map((role) => (
-                <li key={role}>
-                  <span>{humanizeCode(role)}</span>
-                  <strong>{formatCountOrDash(summary.data.roleCounts[role])}</strong>
-                </li>
-              ))}
+              {(['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const).map(
+                (role) => (
+                  <li key={role}>
+                    <span>{humanizeCode(role)}</span>
+                    <strong>{formatCountOrDash(summary.data.roleCounts[role])}</strong>
+                  </li>
+                ),
+              )}
             </ul>
           </>
         )}
@@ -339,151 +299,16 @@ export function GenealogyDetailsPage() {
           viewerId={user?.id ?? ''}
           onMemberClick={handleMemberClick}
         />
-        {memberLoading && <div className={styles.loading}>Loading member details…</div>}
-      </section>
-
-      <section className={styles.panel} aria-label="Team sales activity">
-        <div className={styles.filterSection}>
-          <h2 className={styles.panelTitle}>Team Sales Activity</h2>
-
-          {/* Quick presets */}
-          <div className={styles.presetButtons} role="group" aria-label="Quick date presets">
-            {presets.map((p) => (
-              <Button
-                key={p.label}
-                variant="ghost"
-                size="sm"
-                onClick={() => applyPreset(p.days)}
-                className={isPresetActive(p.days) ? styles.presetActive : ''}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
-
-          {/* Custom date range */}
-          <div className={styles.dateRangeInputs}>
-            <div className={styles.dateInputGroup}>
-              <DateField
-                id="date-from"
-                name="date-from"
-                label="Start Date"
-                value={dateFrom}
-                onChange={setDateFrom}
-                max={dateTo || todayStr}
-                hint="Optional — defaults to period start"
-                optional
-              />
-            </div>
-            <div className={styles.dateInputGroup}>
-              <DateField
-                id="date-to"
-                name="date-to"
-                label="End Date"
-                value={dateTo}
-                onChange={setDateTo}
-                min={dateFrom || undefined}
-                max={todayStr}
-                hint="Optional — defaults to today"
-                optional
-              />
-            </div>
-          </div>
-
-          {/* Validation message */}
-          {dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo) && (
-            <div className={styles.validationError} role="alert">
-              End date must be on or after start date
-            </div>
-          )}
-        </div>
-
-        {salesQuery.isPending ? (
-          <div className={styles.salesLoading}>
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 200 }} />
-          </div>
-        ) : salesQuery.isError ? (
-          <ErrorState error={salesQuery.error} title="Sales activity could not be loaded" onRetry={() => void salesQuery.refetch()} />
-        ) : (
-          <>
-            <div className={styles.kpiGrid}>
-              <article className={styles.kpiCard}>
-                <dt>Total Sales</dt>
-                <dd>{formatCountOrDash(salesQuery.data.kpis.totalTeamSales)}</dd>
-              </article>
-              <article className={styles.kpiCard}>
-                <dt>Members With Sales</dt>
-                <dd>{formatCountOrDash(salesQuery.data.kpis.membersWithSales)}</dd>
-              </article>
-              <article className={styles.kpiCard}>
-                <dt>No Sales</dt>
-                <dd>{formatCountOrDash(salesQuery.data.kpis.membersNoSales)}</dd>
-              </article>
-              <article className={styles.kpiCard}>
-                <dt>Top Seller</dt>
-                <dd>{formatCountOrDash(salesQuery.data.kpis.topSellerCount)}</dd>
-              </article>
-              <article className={styles.kpiCard}>
-                <dt>Participation</dt>
-                <dd>{salesQuery.data.kpis.participationRate.toFixed(1)}%</dd>
-              </article>
-            </div>
-
-            <div className={styles.tableWrap}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Role</th>
-                    <th style={{ textAlign: 'right' }}>Sales</th>
-                    <th>Activity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {salesQuery.data.members
-                    .sort((a, b) => b.salesCount - a.salesCount)
-                    .map((member) => (
-                      <tr key={member.staffId}>
-                        <td>
-                          <span className={styles.memberName}>
-                            {member.fullName}
-                            {member.staffId === user?.id && <span className={styles.youBadge}>(You)</span>}
-                          </span>
-                        </td>
-                        <td><StatusChip label={humanizeCode(member.role)} tone="neutral" /></td>
-                        <td style={{ textAlign: 'right' }}>{formatCountOrDash(member.salesCount)}</td>
-                        <td>
-                          <StatusChip
-                            label={member.salesActivity}
-                            tone={
-                              member.salesActivity === 'Top Seller' ? 'success' :
-                              member.salesActivity === 'With Sales' ? 'info' :
-                              member.salesActivity === 'Low Sales' ? 'warning' : 'neutral'
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-
-            <p className={styles.reportPeriod}>
-              {dateFrom || dateTo
-                ? `Custom range: ${dateFrom || 'start'} to ${dateTo || 'today'} (UTC)`
-                : `Reporting period: ${salesQuery.data.window.from.slice(0, 10)} to ${salesQuery.data.window.to.slice(0, 10)} (UTC)`}
-            </p>
-          </>
-        )}
-
+        {memberLoading && <div className={styles.loading}>Loading member detailsâ€¦</div>}
       </section>
 
       {viewingMember && (
         <MemberDetailDialog
           member={viewingMember}
           onClose={() => setViewingMember(null)}
-          onChanged={() => { /* invalidate queries if needed */ }}
+          onChanged={() => {
+            /* invalidate queries if needed */
+          }}
         />
       )}
     </section>
