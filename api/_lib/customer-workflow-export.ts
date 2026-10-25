@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { readWorkbookParts } from './customer-xlsx.js';
 import { zipStored } from './report-export.js';
 import type { WorkbookStaffMatch } from './customer-workbook.js';
-import { WORKFLOW_COLUMNS, WORKFLOW_MAPPING_VERSION } from '@afhomes/contracts';
+import { WORKFLOW_COLUMNS, WORKFLOW_MAPPING_VERSION, WORKFLOW_TEMPLATE_ROWS } from '@afhomes/contracts';
 import { workflowAddressLists } from './customer-workflow-addresses.js';
 const escape = (s: string) =>
   s
@@ -102,7 +102,7 @@ export function customerWorkflowTemplate(
     .replace(/<autoFilter\b[^>]*\/>/g, '')
     .replace('</sheetData>', `</sheetData><autoFilter ref="F1:M${table.length}"/>`);
   const emailColumn = column(WORKFLOW_COLUMNS.Customers.findIndex(c => c.key === 'email') + 1);
-  const links = Array.from({ length: 101 }, (_, i) => i === 0
+  const links = Array.from({ length: WORKFLOW_TEMPLATE_ROWS + 1 }, (_, i) => i === 0
     ? '<c r="P1" t="inlineStr"><is><t>Customer link: VIP ID / Customer ID / email</t></is></c>'
     : `<c r="P${i+1}"><f>${escape(`IF('Customers'!B${i+1}<>"",'Customers'!B${i+1},IF('Customers'!A${i+1}<>"",'Customers'!A${i+1},IF('Customers'!${emailColumn}${i+1}<>"",'Customers'!${emailColumn}${i+1},"")))`)}</f></c>`);
   for (const [i, cell] of links.entries()) {
@@ -113,6 +113,14 @@ export function customerWorkflowTemplate(
   parts.set('xl/worksheets/sheet6.xml', encode(refs));
   let book = decoder.decode(parts.get('xl/workbook.xml')!);
   const addresses = workflowAddressLists();
+  for (const [sheetNumber, values] of [[7, addresses.rows], [8, addresses.postalRows]] as const) {
+    const path = `xl/worksheets/sheet${sheetNumber}.xml`;
+    const data = values.map((row, i) => `<row r="${i + 1}">${row.map((value, j) => `<c r="${column(j + 1)}${i + 1}" t="inlineStr"><is><t xml:space="preserve">${escape(value)}</t></is></c>`).join('')}</row>`).join('');
+    const width = Math.max(...values.map(row => row.length));
+    parts.set(path, encode(decoder.decode(parts.get(path)!)
+      .replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${data}</sheetData>`)
+      .replace(/<dimension\b[^>]*\/>/, `<dimension ref="A1:${column(width)}${values.length}"/>`)));
+  }
   const defined =
     roles
       .map(
@@ -123,43 +131,27 @@ export function customerWorkflowTemplate(
     addresses.definedNames
       .map((d) => `<definedName name="${d.name}">${escape(d.formula)}</definedName>`)
       .join('') +
-    `<definedName name="AFHomesPurchases">'Reference Lists'!$P$2:$P$101</definedName>`;
+    `<definedName name="AFHomesPurchases">'Reference Lists'!$P$2:$P${WORKFLOW_TEMPLATE_ROWS + 1}</definedName>`;
   const generatedNames = new Set(['AFHomesPurchases', ...roles.map((_, i) => `AFHomesStaff${i}`), ...addresses.definedNames.map(d => d.name)]);
   book = book.replace(/<definedName\b[^>]*name="([^"]+)"[^>]*>[\s\S]*?<\/definedName>/g, (value, name) => generatedNames.has(name) ? '' : value);
   book = book.replace(/<definedNames\b[^>]*\/>/g, '');
   book = book.includes('</definedNames>')
     ? book.replace('</definedNames>', defined + '</definedNames>')
-    : book.replace('</workbook>', `<definedNames>${defined}</definedNames></workbook>`);
+    : book.includes('<calcPr') ? book.replace('<calcPr', `<definedNames>${defined}</definedNames><calcPr`) : book.replace('</workbook>', `<definedNames>${defined}</definedNames></workbook>`);
   parts.set('xl/workbook.xml', encode(book));
   let team = decoder.decode(parts.get('xl/worksheets/sheet4.xml')!);
   const validation = [0, 1, 2, 3, 3]
     .map(
       (list, i) =>
-        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${column(i + 2)}2:${column(i + 2)}101"><formula1>AFHomesStaff${list}</formula1></dataValidation>`,
+        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${column(i + 2)}2:${column(i + 2)}${WORKFLOW_TEMPLATE_ROWS + 1}"><formula1>AFHomesStaff${list}</formula1></dataValidation>`,
     )
     .join('');
   team = team
     .replace(/<dataValidations\b[\s\S]*?<\/dataValidations>/, '')
     .replace(
-      '</sheetData>',
-      `</sheetData><dataValidations count="5">${validation}</dataValidations>`,
+      '<printOptions',
+      `<dataValidations count="5">${validation}</dataValidations><printOptions`,
     );
-  team = team.replace(
-    /<row\b[^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g,
-    (row: string, index: string) => {
-      const r = Number(index);
-      if (r < 2) return row;
-      const contactFormulas = [7, 8]
-        .map(
-          (field, i) =>
-            `<c r="${column(i + 7)}${r}"><f>${escape(`IFERROR(VLOOKUP(F${r},'Reference Lists'!$F$2:$M$${Math.max(2, table.length)},${field},FALSE),"")`)}</f></c>`,
-        )
-        .join('');
-      return row
-        .replace(/<c\b[^>]*r="[G-N]\d+"[^>]*(?:\/>|>[\s\S]*?<\/c>)/g, '')
-        .replace('</row>', contactFormulas + '</row>');
-    },
-  );
   parts.set('xl/worksheets/sheet4.xml', encode(team));
   for (const [index, [name, columns]] of Object.entries(WORKFLOW_COLUMNS).entries()) {
     const path = `xl/worksheets/sheet${index + 2}.xml`;
@@ -168,12 +160,12 @@ export function customerWorkflowTemplate(
     const at = (key: string) => column(columns.findIndex((c) => c.key === key) + 1);
     const add = (key: string, formula: string) =>
       validations.push(
-        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${at(key)}2:${at(key)}101"><formula1>${escape(formula)}</formula1></dataValidation>`,
+        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${at(key)}2:${at(key)}${WORKFLOW_TEMPLATE_ROWS + 1}"><formula1>${escape(formula)}</formula1></dataValidation>`,
       );
     if (name !== 'Customers') add('customer_key', 'AFHomesPurchases');
     if (columns.some((c) => c.key === 'province')) {
       add('province', 'AFHomesProvinces');
-      for (let r = 2; r <= 101; r++) {
+      for (let r = 2; r <= WORKFLOW_TEMPLATE_ROWS + 1; r++) {
         const province = `$${at('province')}${r}`,
           city = `$${at('city')}${r}`;
         const list = (key: string, formula: string) =>
@@ -182,11 +174,11 @@ export function customerWorkflowTemplate(
           );
         list(
           'city',
-          `INDIRECT(IFERROR(VLOOKUP(${province},'Address Lists'!$A$2:$B$${addresses.provinceEnd},2,FALSE),"AFHomesEmpty"))`,
+          `INDIRECT(IFERROR(VLOOKUP(${province},AFHomesProvinceLookup,2,FALSE),"AFHomesEmpty"))`,
         );
         list(
           'barangay',
-          `INDIRECT(IFERROR(VLOOKUP(${province}&"|"&${city},'Address Lists'!$A$${addresses.localityStart}:$B$${addresses.rows.length},2,FALSE),"AFHomesEmpty"))`,
+          `INDIRECT(IFERROR(VLOOKUP(${province}&"|"&${city},AFHomesLocalityLookup,2,FALSE),"AFHomesEmpty"))`,
         );
       }
     }
@@ -198,7 +190,7 @@ export function customerWorkflowTemplate(
       if (columns.some((c) => c.key === 'payment_term_months')) {
         // Integer 1-36 validation
         validations.push(
-          `<dataValidation type="whole" allowBlank="1" showErrorMessage="1" sqref="${at('payment_term_months')}2:${at('payment_term_months')}101"><formula1>1</formula1><formula2>36</formula2></dataValidation>`,
+          `<dataValidation type="whole" allowBlank="1" showErrorMessage="1" sqref="${at('payment_term_months')}2:${at('payment_term_months')}${WORKFLOW_TEMPLATE_ROWS + 1}"><formula1>1</formula1><formula2>36</formula2></dataValidation>`,
         );
       }
       if (columns.some((c) => c.key === 'existing_card_activation_status')) {
@@ -249,5 +241,5 @@ export function customerWorkflowTemplate(
         ),
       ),
     );
-  return zipStored([...parts].map(([name, data]) => ({ name, data })));
+  return zipStored([...parts].map(([name, data]) => ({ name, data })), true);
 }

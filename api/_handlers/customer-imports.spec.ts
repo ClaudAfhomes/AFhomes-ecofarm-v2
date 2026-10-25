@@ -1,7 +1,11 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toXlsx } from '../_lib/report-export.js';
 import { companyWorkbook } from '../_lib/customer-workbook-export.js';
-import { CUSTOMER_IMPORT_COLUMNS } from '@afhomes/contracts';
+import { CUSTOMER_IMPORT_COLUMNS, WORKFLOW_COLUMNS } from '@afhomes/contracts';
+import { parseCustomerWorkbookV2 } from '../_lib/customer-workbook-v2.js';
+import { customerWorkflowTemplate } from '../_lib/customer-workflow-export.js';
+import { readWorkbookParts } from '../_lib/customer-xlsx.js';
+import { zipStored } from '../_lib/report-export.js';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown, proofBytes: new Uint8Array() }));
@@ -1081,4 +1085,26 @@ it('loads every import row across server pages before completing a large job', a
     failed: 0,
     job: { status: 'completed', totalRows: 1500, skippedRows: 1500, validRows: 1500 },
   });
+});
+
+it('collects bad guided values into a downloadable review without creating business records', async()=>{
+ const db=install();const parts=readWorkbookParts(customerWorkflowTemplate());
+ let sheet=new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'));
+ const input={first_name:'Elena',last_name:'Reyes',email:'bad-email',mobile:'09ABC',vip_tier:'Platinum',contract_date:'not-a-date',stated_payment_scheme:'Spot cash'};
+ for(const [key,value] of Object.entries(input)){
+   const n=WORKFLOW_COLUMNS.Customers.findIndex(c=>c.key===key)+1;const col=(n:number):string=>n>26?col(Math.floor((n-1)/26))+String.fromCharCode(65+(n-1)%26):String.fromCharCode(64+n);
+   const ref=col(n)+'2';const regex=new RegExp('<c\\b[^>]*r="'+ref+'"[^>]*?(?:\\/>|>[\\s\\S]*?<\\/c>)');
+   sheet=sheet.replace(regex,'<c r="'+ref+'" t="inlineStr"><is><t>'+value+'</t></is></c>');
+ }
+ parts.set('xl/worksheets/sheet2.xml',new TextEncoder().encode(sheet));
+ const sourceBytes=zipStored([...parts].map(([name,data])=>({name,data})),true);
+ expect(parseCustomerWorkbookV2(sourceBytes,{collectErrors:true})!.rows[0]!.fields.last_name).toBe('Reyes');
+ const res=await call({path:'parse',method:'POST',body:{source:'excel',contentBase64:b64(zipStored([...parts].map(([name,data])=>({name,data})),true))}});
+ expect(res.status).toBe(201);
+ const body=res.body as {job:{invalidRows:number};reviewFile:{content:string};rows:{errors:{field:string}[]}[]};
+ expect(body.job.invalidRows).toBe(1);expect(body.reviewFile.content).toBeTruthy();
+ expect(body.rows[0]!.errors.map(e=>e.field)).toEqual(expect.arrayContaining(['mobile','email','vip_tier','contract_date']));
+ const review=readWorkbookParts(new Uint8Array(Buffer.from(body.reviewFile.content,'base64')));
+ expect(new TextDecoder().decode(review.get('xl/worksheets/sheet2.xml'))).toContain('09ABC');
+ expect(db.rows('customers')).toHaveLength(0);expect(db.rows('card_sales')).toHaveLength(0);
 });

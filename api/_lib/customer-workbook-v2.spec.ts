@@ -3,10 +3,12 @@ import {
   LEGACY_WORKFLOW_COLUMNS as WORKFLOW_COLUMNS,
   type WorkflowSheet,
 } from '@afhomes/contracts';
-import { WORKFLOW_COLUMNS as CURRENT_COLUMNS, WORKFLOW_V3_COLUMNS as SIMPLE_COLUMNS, WORKFLOW_V4_COLUMNS, WORKFLOW_V5_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
+import { WORKFLOW_COLUMNS as CURRENT_COLUMNS, WORKFLOW_V6_COLUMNS, WORKFLOW_V3_COLUMNS as SIMPLE_COLUMNS, WORKFLOW_V4_COLUMNS, WORKFLOW_V5_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
 import { validateImportRow } from './customer-import.js';
 import { zipStored } from './report-export.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
+import { annotateCustomerWorkbook } from './customer-workflow-review.js';
+import { readWorkbookParts } from './customer-xlsx.js';
 
 const escape = (s: string) =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -21,6 +23,7 @@ function book(
 ) {
   const sheets = Object.keys(WORKFLOW_COLUMNS) as WorkflowSheet[];
   const parts: Record<string, string> = {
+    'xl/styles.xml':'<styleSheet><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>',
     'xl/workbook.xml': `<workbook xmlns:r="urn:r"><sheets>${sheets.map((s, i) => `<sheet name="${s}" r:id="r${i}"/>`).join('')}</sheets></workbook>`,
     'xl/_rels/workbook.xml.rels': `<Relationships>${sheets.map((s, i) => `<Relationship Id="r${i}" Type="urn:/worksheet" Target="worksheets/s${i}.xml"/>`).join('')}</Relationships>`,
     'docProps/custom.xml':
@@ -32,7 +35,7 @@ function book(
         ? WORKFLOW_COLUMNS[s]
         : mapping === '2'
           ? PREVIOUS_WORKFLOW_COLUMNS[s]
-          : mapping === '3' ? SIMPLE_COLUMNS[s] : mapping === '4' ? WORKFLOW_V4_COLUMNS[s] : mapping === '5' ? WORKFLOW_V5_COLUMNS[s] : CURRENT_COLUMNS[s];
+          : mapping === '3' ? SIMPLE_COLUMNS[s] : mapping === '4' ? WORKFLOW_V4_COLUMNS[s] : mapping === '5' ? WORKFLOW_V5_COLUMNS[s] : mapping === '6' ? WORKFLOW_V6_COLUMNS[s] : CURRENT_COLUMNS[s];
     const table = [Object.fromEntries(columns.map((c) => [c.key, c.header])), ...(rows[s] ?? [])];
     parts[`xl/worksheets/s${i}.xml`] = `<worksheet><sheetData>${table
       .map(
@@ -683,4 +686,34 @@ describe('workflow workbook v2', () => {
       /incorrect or unmapped required headers|Unknown worksheet/,
     );
   });
+});
+
+it('collects several bad guided values with original source-cell provenance for review',()=>{
+ const input=book({Customers:[{...customer(),purchase_reference:'BAD-ID',vip_tier:'Platinum',contract_date:'not-a-date',existing_stay_points_total:'-3'}]}, {}, '7');
+ const result=parseCustomerWorkbookV2(input,{collectErrors:true})!;
+ expect(result.rows).toHaveLength(1);
+ expect(result.issues.map(i=>i.field)).toEqual(expect.arrayContaining(['purchase_reference','vip_tier','contract_date','existing_stay_points_total']));
+ expect(result.issues.every(i=>i.sheet==='Customers'&&i.row===2)).toBe(true);
+ expect(result.sources[0]![0]!.fields.purchase_reference).toBe('BAD-ID');
+});
+
+it('retains good and bad cells, annotates every source row, and accepts the corrected review workbook',()=>{
+ const bytes=book({Customers:[{...customer(),purchase_reference:'BAD-ID',vip_tier:'Gold',contract_date:'not-a-date',mobile:'09ABC'}, {...customer(),first_name:'Maria',email:'maria@example.invalid',purchase_reference:'',contract_date:'2026-10-14'}]}, {}, '7');
+ const workflow=parseCustomerWorkbookV2(bytes,{collectErrors:true})!;
+ const file=annotateCustomerWorkbook(bytes,workflow,[{errors:[{field:'mobile',message:'Use a valid Philippine mobile number'}],warnings:[]},{errors:[],warnings:[]}]);
+ const again=parseCustomerWorkbookV2(file,{collectErrors:true})!;
+ expect(again.rows).toHaveLength(2);
+ expect(again.sources[0]![0]!.fields.mobile).toBe('09ABC');
+ expect(again.sources[1]![0]!.fields.first_name).toBe('Maria');
+ const text=new TextDecoder().decode(readWorkbookParts(file).get('xl/worksheets/s0.xml'));
+ expect(text).toContain('Needs correction');
+ expect(text).toContain('Use a valid Philippine mobile number');
+ expect(text).toContain('BAD-ID');
+});
+
+it('reports an excessive discount without producing negative derived totals or aborting review',()=>{
+ const bytes=book({Customers:[{...customer(),purchase_reference:'',contract_date:'2026-10-14',stated_regular_price:'10000',stated_discount:'20000'}]}, {}, '7');
+ const result=parseCustomerWorkbookV2(bytes,{collectErrors:true})!;
+ expect(result.issues.map(i=>i.field)).toContain('stated_discount');
+ expect(result.rows[0]!.fields.stated_total).toBe('');
 });
