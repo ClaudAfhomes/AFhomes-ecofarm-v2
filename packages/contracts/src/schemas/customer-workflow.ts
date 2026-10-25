@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { exactDecimalStringSchema } from './money.js';
 
 export const WORKFLOW_TEMPLATE_VERSION = 'company_v2';
-export const WORKFLOW_MAPPING_VERSION = '6';
+export const WORKFLOW_MAPPING_VERSION = '7';
 export type WorkflowColumn = {
   key: string;
   header: string;
@@ -271,9 +271,21 @@ export const WORKFLOW_V5_COLUMNS = {
   Customers: WORKFLOW_V4_COLUMNS.Customers.filter(c => !['existing_vip_control_number', 'contract_classification'].includes(c.key)).map(c =>
     c.key === 'purchase_reference' ? { ...c, header: 'VIP card ID / Purchase reference (blank generates)' } : c),
 };
-export const WORKFLOW_COLUMNS = {
+export const WORKFLOW_V6_COLUMNS = {
   ...WORKFLOW_V5_COLUMNS,
   Customers: [...WORKFLOW_V5_COLUMNS.Customers, { ...WORKFLOW_V4_COLUMNS.Customers.find(c => c.key === 'contract_classification')!, header: 'Contract type (new IDs: Standard)' }],
+};
+export const WORKFLOW_TEMPLATE_ROWS = 500;
+export const WORKFLOW_REVIEW_HEADERS = ['Review status', 'Errors to correct', 'Warnings to review'] as const;
+const reviewColumns = WORKFLOW_REVIEW_HEADERS.map((header, i) => calculated(['review_status','review_errors','review_warnings'][i]!, header));
+const mainOrder = ['customer_id','purchase_reference','first_name','last_name','middle_name','suffix','birth_date','mobile','email','address_line_1','province','city','barangay','vip_tier','stated_payment_scheme','stated_status','contract_date','stated_regular_price','stated_discount','stated_rf','existing_card_activation_status','existing_stay_points_total','existing_card_activation_date','existing_card_valid_until'];
+const simpleHeaders: Record<string,string> = {customer_id:'Customer ID (blank generates)',purchase_reference:'VIP card ID (blank generates)',vip_tier:'VIP tier',stated_payment_scheme:'Payment scheme',stated_status:'Purchase status',contract_date:'Contract date',stated_regular_price:'Agreed contract price',stated_discount:'Approved discount amount',stated_rf:'Included reservation fee',existing_stay_points_total:'Existing usable Loyalty Stay Points',contract_classification:'Contract classification (blank = Standard)',vip_purchase_date:'Purchase date (if different from contract date)',customer_key:'Customer link (select)',vd_name:'SVD (select registered account)',ssm_name:'SSM (select registered account)',sm_name:'SM (select registered account)'};
+const simple = (columns: WorkflowColumn[]) => columns.map(c=>({...c,header:simpleHeaders[c.key]??c.header}));
+export const WORKFLOW_COLUMNS = {
+  Customers: [...simple(WORKFLOW_V6_COLUMNS.Customers.filter(c=>!['age','stated_total','claimed_payment_total','claimed_balance','payment_term_months'].includes(c.key))).sort((a,b)=>(mainOrder.includes(a.key)?mainOrder.indexOf(a.key):100)-(mainOrder.includes(b.key)?mainOrder.indexOf(b.key):100)).flatMap(c=>c.key==='purchase_reference'?[c,calculated('vip_id_preview', 'Proposed VIP ID (editable comparison)')]:[c]),...reviewColumns],
+  'Supplementary Holders': [...simple(WORKFLOW_V6_COLUMNS['Supplementary Holders'].filter(c=>c.key!=='age')),...reviewColumns],
+  'Sales Team': [...simple(WORKFLOW_V6_COLUMNS['Sales Team'].filter(c=>!['recommender_contact','recommender_email'].includes(c.key))),...reviewColumns],
+  Payments: [...simple(WORKFLOW_V6_COLUMNS.Payments),...reviewColumns],
 };
 export type WorkflowSheet = keyof typeof WORKFLOW_COLUMNS;
 

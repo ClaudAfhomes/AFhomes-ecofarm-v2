@@ -67,6 +67,7 @@ import {
 } from '../_lib/customer-workbook.js';
 import { loadWorkbookStaffMatches } from '../_lib/customer-workbook-staff.js';
 import { parseCustomerWorkbookV2 } from '../_lib/customer-workbook-v2.js';
+import { annotateCustomerWorkbook, annotateFlatCustomerImport } from '../_lib/customer-workflow-review.js';
 import {
   buildImportedCustomerFacts,
   loadImportRecoveryContext,
@@ -408,8 +409,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
       let matrix: string[][];
+      let reviewMatrix:string[][]|null=null;
       let workbookRecords: ReturnType<typeof parseCustomerWorkbook> = null;
       let workflowRecords: WorkbookCustomerV2[] | null = null;
+      let workflowReview: {bytes:Uint8Array;workbook:NonNullable<ReturnType<typeof parseCustomerWorkbookV2>>}|null=null;
       let sheetId: string | null = null;
       // Sectioned-template extras surface as per-row warnings below, next to
       // the established unknown-column and dropped-header warnings.
@@ -442,12 +445,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             // merges as the guided template, anything else tries the legacy
             // sectioned merge. A multi-sheet file that matches neither stays
             // rejected rather than silently reading the wrong tab.
-            const workflow = parseCustomerWorkbookV2(bytes);
+            const workflow = parseCustomerWorkbookV2(bytes, {collectErrors:true});
+            if(workflow) workflowReview={bytes,workbook:workflow};
             workflowRecords = workflow?.rows ?? null;
             workbookRecords = workflow
               ? {
                   rows: workflow.rows.map((row, index) => ({
-                    rowNumber: index + 2,
+                    rowNumber: workflow.sources[index]?.[0]?.row ?? index + 2,
                     fields: row.fields,
                   })),
                   unknownHeaders: workflow.unknownHeaders,
@@ -556,6 +560,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             templated = true;
           }
         }
+        if(!workbookRecords) reviewMatrix=matrix.map(row=>[...row]);
         const converted =
           workbookRecords ??
           // Remapped template keys live outside the established template
@@ -678,13 +683,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       const seen = new Map<string, number>();
       const validated: ValidatedImportRow[] = [];
-      for (const r of records) {
+      for (const [recordIndex,r] of records.entries()) {
         const v = validateImportRow(
           r.rowNumber,
           workbookRecords && r.fields.suffix === 'N/A' ? { ...r.fields, suffix: '' } : r.fields,
           ctx,
           today,
         );
+        if(workflowReview) {
+          const sources=workflowReview.workbook.sources[recordIndex]??[];
+          const allSources=workflowReview.workbook.sources.flat();
+          for(const issue of workflowReview.workbook.issues) {
+            const belongs=sources.some(s=>s.sheet===issue.sheet&&s.row===issue.row);
+            const orphan=!allSources.some(s=>s.sheet===issue.sheet&&s.row===issue.row);
+            if(belongs||orphan) v.errors.push({field:issue.field,message:issue.sheet+' row '+issue.row+': '+issue.message});
+          }
+        }
         if (workbookRecords) {
           validateWorkbookFields(r.fields, v);
           resolveWorkbookStaff(r.fields, staffMatches, v);
@@ -952,6 +966,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sourceHash,
       });
       const payload = {
+        ...((workflowReview||reviewMatrix)?{reviewFile:{filename:'customer-import-review.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,content:Buffer.from(workflowReview?annotateCustomerWorkbook(workflowReview.bytes,workflowReview.workbook,validated):annotateFlatCustomerImport(reviewMatrix!,validated)).toString('base64')}}:{}),
         job: shapeJob(job as Record<string, unknown>),
         pageSize: 10,
         rows: validated.slice(0, 10).map((v, i) =>

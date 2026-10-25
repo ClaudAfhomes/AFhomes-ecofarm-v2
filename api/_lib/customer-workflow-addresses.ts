@@ -43,6 +43,7 @@ export function workflowAddressLists() {
     ),
   );
   const provinceEnd = rows.length;
+  definedNames.push({ name: 'AFHomesProvinceLookup', formula: `'Address Lists'!$A$2:$B$${provinceEnd}` });
   const postalRows: string[][] = [['Address', 'Verified postal code']];
   snapshot.localities.forEach((city, i) => {
     append(`${city.province}|${city.name}`, `AFHomesBarangays${i}`, city.barangays);
@@ -58,6 +59,7 @@ export function workflowAddressLists() {
         postalRows.push([`${city.province}|${city.name}|${barangay}`, exact.postalCode]);
     }
   });
+  definedNames.push({ name: 'AFHomesLocalityLookup', formula: `'Address Lists'!$A$${provinceEnd + 1}:$B$${rows.length}` });
   return {
     rows,
     postalRows,

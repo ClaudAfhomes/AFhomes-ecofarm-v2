@@ -607,7 +607,9 @@ export const customerImportRowSchema = z.object({
 });
 export type CustomerImportRow = z.infer<typeof customerImportRowSchema>;
 
+export const customerImportReviewFileSchema = z.object({filename:z.string(),mime:z.literal('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),content:z.string()});
 export const customerImportParseResponseSchema = z.object({
+  reviewFile: customerImportReviewFileSchema.optional(),
   job: customerImportJobSchema,
   rows: z.array(customerImportRowSchema),
   pageSize: z.number().int().positive().optional(),

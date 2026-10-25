@@ -365,3 +365,12 @@ describe('CustomerImportExportPage job history', () => {
     expect(screen.getByText('Failed').closest('div')).not.toHaveAttribute('data-alert');
   });
 });
+
+it('offers the complete annotated review workbook after upload',async()=>{
+ const result={...previewFixture(),reviewFile:{filename:'customer-import-review.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,content:'UEs='}};
+ vi.mocked(parseCustomerImport).mockResolvedValue(result);
+ renderWithProviders(<CustomerImportExportPage/>,{user:IMPORTER});
+ const user=userEvent.setup();await user.upload(screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),new File(['local'],'customers.xlsx'));
+ expect(await screen.findByRole('button',{name:'Download Review Workbook'})).toBeEnabled();
+ expect(screen.getByText(/All original rows and values are retained/)).toBeInTheDocument();
+});

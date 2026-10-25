@@ -663,6 +663,7 @@ export function CustomerImportExportPage() {
                 <h2 id={`${TAB_BASE_ID}-review-heading`} className={styles.panelTitle}>
                   3. Review preview
                 </h2>
+                {preview.reviewFile&&<div><Button variant="secondary" onClick={()=>downloadFile(preview.reviewFile!)}>Download Review Workbook</Button><p>All original rows and values are retained. Red cells need correction; amber cells need review. Correct the source cells and upload again to refresh the notes.</p></div>}
                 <div role="status" className={styles.summaryChips}>
                   <StatusChip
                     label={`Total ${formatCountOrDash(preview.job.totalRows)}`}

@@ -131,13 +131,14 @@ export function matrixToRecords(
   if (new Set(headers.filter(Boolean)).size !== headers.filter(Boolean).length)
     throw new Error('Duplicate spreadsheet column headers are unsupported');
   if (headers.every((h) => h === '')) throw new Error('Spreadsheet header row is empty');
-  const unknownHeaders = headers.filter((h) => h !== '' && !known.has(h));
+  const reviewHeaders=new Set(['review status','errors to correct','warnings to review']);
+  const unknownHeaders = headers.filter((h) => h !== '' && !known.has(h) && !reviewHeaders.has(h));
   const rows: ImportFieldRow[] = [];
   matrix.slice(1).forEach((cells, index) => {
-    if (cells.every((c) => (c ?? '').trim() === '')) return;
+    if (cells.every((c,i) => reviewHeaders.has(headers[i]??'') || (c ?? '').trim() === '')) return;
     const fields: Record<string, string> = {};
     headers.forEach((header, i) => {
-      if (header !== '')
+      if (header !== '' && !reviewHeaders.has(header))
         fields[header] = [
           'mobile',
           'secondary_mobile',

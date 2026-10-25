@@ -46,7 +46,7 @@ describe('workflow template download', () => {
       '/docProps/custom.xml',
     );
     expect(new TextDecoder().decode(parts.get('_rels/.rels'))).toContain('custom-properties');
-    expect(new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'))).toContain('SUMIF');
+    expect(new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'))).toContain('COUNTIF');
     const customers = new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'));
     for (const row of customers.matchAll(/<row\b[^>]*>[\s\S]*?<\/row>/g)) {
       const positions = [...row[0].matchAll(/<c\b[^>]*\br="([A-Z]+)\d+"/g)].map(match =>
@@ -61,10 +61,16 @@ describe('workflow template download', () => {
     const decode = (path: string) => new TextDecoder().decode(parts.get(path));
     const customers = decode('xl/worksheets/sheet2.xml');
     expect(customers).toContain('AFHomesProvinces');
+    const addressSheet = decode('xl/worksheets/sheet7.xml');
+    expect(addressSheet).toContain('Laguna');
+    expect(addressSheet).toContain('Alaminos');
+    expect(addressSheet).toContain('AFHomesCities');
+    expect(addressSheet).toContain('AFHomesBarangays');
+    expect(decode('xl/worksheets/sheet8.xml')).toContain('Verified postal code');
     expect(customers).toContain('INDIRECT');
     expect(customers).toContain('Jr.');
     expect(customers).toContain('type="date"');
-    expect(customers).toContain('DATEDIF');
+    expect(customers).toContain('TEXT(');
     expect(customers).not.toContain('Birth day');
     expect(customers).not.toContain('Birth month');
     expect(customers).not.toContain('Birth year');
@@ -78,10 +84,10 @@ describe('workflow template download', () => {
     expect(WORKFLOW_COLUMNS.Payments.some((c) => c.disposition === 'helper')).toBe(false);
     expect(decode('xl/worksheets/sheet4.xml')).toContain('VIP Recommender');
     expect(decode('xl/worksheets/sheet4.xml')).toContain('Referrer');
-    expect(decode('docProps/custom.xml')).toContain('<vt:lpwstr>6</vt:lpwstr>');
+    expect(decode('docProps/custom.xml')).toContain('<vt:lpwstr>7</vt:lpwstr>');
     expect(decode('xl/worksheets/sheet4.xml')).not.toContain('Referrer VD');
     expect(decode('xl/worksheets/sheet4.xml')).not.toContain('Recommender VD');
     expect(decode('xl/tables/table3.xml')).not.toContain('Referrer VD');
-    expect(WORKFLOW_COLUMNS['Sales Team']).toHaveLength(8);
+    expect(WORKFLOW_COLUMNS['Sales Team'].filter(c=>c.disposition==='input')).toHaveLength(6);
   });
 });
