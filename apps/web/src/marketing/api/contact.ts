@@ -42,7 +42,7 @@ export const contactApi = {
       ok: true,
       reference: value.requestId,
       message:
-        'Your message was prepared in your email app and sent to AFhomes at claudmarsjimenez.afhomes@gmail.com.',
+        'Your message was prepared in your email app and sent to AFhomes at info@afhomes.com.ph.',
     };
   },
 };

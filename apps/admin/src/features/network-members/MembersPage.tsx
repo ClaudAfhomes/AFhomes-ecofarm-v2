@@ -305,14 +305,16 @@ export function MembersPage() {
           void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
         }}
       />
-      <CreateOstDialog
-        open={createOstOpen}
-        onClose={() => setCreateOstOpen(false)}
-        onCreated={() => {
-          setCreateOstOpen(false);
-          void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
-        }}
-      />
+      {createOstOpen ? (
+        <CreateOstDialog
+          open
+          onClose={() => setCreateOstOpen(false)}
+          onCreated={() => {
+            setCreateOstOpen(false);
+            void client.invalidateQueries({ queryKey: networkMemberKeys.scope });
+          }}
+        />
+      ) : null}
       {workbookOpen ? <MemberWorkbookDialog
         onClose={() => setWorkbookOpen(false)}
         onCreated={() => { void client.invalidateQueries({ queryKey: networkMemberKeys.scope }); }}

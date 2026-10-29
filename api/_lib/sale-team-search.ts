@@ -129,11 +129,15 @@ export async function verifySearchCaptcha(
   }
 }
 
-export function searchConfiguration(settings?: PublicVerificationSettings) {
-  const e = process.env;
+export function searchConfiguration(
+  settings?: PublicVerificationSettings,
+  e: NodeJS.ProcessEnv = process.env,
+) {
   let loopback = false;
   try {
-    loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(e.SUPABASE_URL ?? '').hostname);
+    loopback = ['localhost', '127.0.0.1', '[::1]'].includes(
+      new URL(e.MONGODB_URI ?? e.SUPABASE_URL ?? '').hostname,
+    );
   } catch {
     /* unavailable */
   }
@@ -145,22 +149,24 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean);
-  const retentionDays = settings?.retentionDays ??
+  const retentionDays =
+    settings?.retentionDays ??
     (localPreview ? Number(e.AFHOMES_SEARCH_CONTACT_RETENTION_DAYS) : NaN);
   const dailyLimitEnabled = settings?.dailyLimitEnabled ?? true;
   const searchLimitNotice = dailyLimitEnabled
     ? 'Current verification permits three successful disclosures per IP address in a rolling 24 hours.'
     : 'The daily successful-verification limit is currently disabled. Anti-bot checks and short-term request limits still apply.';
-  const privacyNotice = (
-    settings?.privacyNotice ?? (localPreview ? DRAFT_SEARCH_NOTICE : '')
-  ).replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays))
+  const privacyNotice = (settings?.privacyNotice ?? (localPreview ? DRAFT_SEARCH_NOTICE : ''))
+    .replaceAll('{{CONTACT_RETENTION_DAYS}}', String(retentionDays))
     .replaceAll('{{SEARCH_LIMIT_NOTICE}}', searchLimitNotice)
-    .replaceAll('Current verification permits three successful disclosures per IP address in a rolling 24 hours.', searchLimitNotice);
-  const noticeVersion =
-    settings?.noticeVersion ?? (localPreview ? 'local-draft-2026-10-21' : '');
+    .replaceAll(
+      'Current verification permits three successful disclosures per IP address in a rolling 24 hours.',
+      searchLimitNotice,
+    );
+  const noticeVersion = settings?.noticeVersion ?? (localPreview ? 'local-draft-2026-10-21' : '');
   const siteKey = e.VITE_TURNSTILE_SITE_KEY ?? '';
-  const verificationPhone = settings?.verificationPhone ??
-    (localPreview ? e.AFHOMES_VERIFICATION_PHONE ?? '' : '');
+  const verificationPhone =
+    settings?.verificationPhone ?? (localPreview ? (e.AFHOMES_VERIFICATION_PHONE ?? '') : '');
   const finalized =
     settings?.privacyApproved === true &&
     settings.cleanupReady === true &&
@@ -196,17 +202,29 @@ export function searchConfiguration(settings?: PublicVerificationSettings) {
       privacyNotice: available ? privacyNotice : '',
       verificationPhone: available ? verificationPhone : '',
       siteKey: available ? siteKey : '',
-      supportHeading: available ? (settings?.supportHeading ?? 'Customer Support & Payment Inquiries') : '',
+      supportHeading: available
+        ? (settings?.supportHeading ?? 'Customer Support & Payment Inquiries')
+        : '',
       supportEmail: available ? (settings?.supportEmail ?? 'info@afhomes.com.ph') : '',
       supportPhone: available ? (settings?.supportPhone ?? '+63 960 431 6867') : '',
-      bankHolder: available ? (settings?.bankHolder ?? 'AFhomes Hotspring & Ecofarm Resort Corp.') : '',
+      bankHolder: available
+        ? (settings?.bankHolder ?? 'AFhomes Hotspring & Ecofarm Resort Corp.')
+        : '',
       bank1Name: available ? (settings?.bank1Name ?? 'SECURITY BANK') : '',
       bank1Account: available ? (settings?.bank1Account ?? '0000082595577') : '',
       bank2Name: available ? (settings?.bank2Name ?? 'CHINABANK') : '',
       bank2Account: available ? (settings?.bank2Account ?? '150700006468') : '',
-      checkPayee: available ? (settings?.checkPayee ?? 'AFhomes Hotspring & Ecofarm Resort Corp.') : '',
-      bankReminder: available ? (settings?.bankReminder ?? 'Please double-check the provided company bank account details before sending any payment. Thank you!') : '',
-      agentReminder: available ? (settings?.agentReminder ?? 'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.') : '',
+      checkPayee: available
+        ? (settings?.checkPayee ?? 'AFhomes Hotspring & Ecofarm Resort Corp.')
+        : '',
+      bankReminder: available
+        ? (settings?.bankReminder ??
+          'Please double-check the provided company bank account details before sending any payment. Thank you!')
+        : '',
+      agentReminder: available
+        ? (settings?.agentReminder ??
+          'A friendly reminder: All agents are strictly prohibited from directly collecting payments from buyers.')
+        : '',
     },
   };
 }

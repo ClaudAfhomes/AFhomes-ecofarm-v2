@@ -4,6 +4,8 @@ import { validateRecoveryPassword } from '@afhomes/shared';
 import { Alert, AuthLayout, Button, PasswordField, Skeleton } from '@afhomes/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
+import { isMongoAuth, mongoAuth } from '../../lib/cookie-auth';
+import { CookiePasswordResetForm } from '@afhomes/ui';
 import styles from './AdminLoginPage.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
@@ -27,7 +29,7 @@ type Phase = 'checking' | 'ready' | 'invalid' | 'done';
  * The `portal` prop reuses this page for the staff entry: the user returns to
  * the Staff Login, never the Administration Login.
  */
-export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
+function LegacyAdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
   const loginPath = portal === 'staff' ? '/staff/login' : '/admin/login';
   const forgotPath = portal === 'staff' ? '/staff/forgot-password' : '/admin/forgot-password';
   // An explicit `?error=` from Supabase wins over any coincidental session:
@@ -195,6 +197,27 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
         </div>
       )}
     </AuthLayout>
+  );
+}
+
+export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
+  return isMongoAuth ? (
+    <AuthLayout
+      eyebrow="AFhomes Ecofarm"
+      title="Choose a new password"
+      brandTitle="Grow with the farm you own a card in."
+      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+    >
+      <CookiePasswordResetForm
+        loginHref={portal === 'staff' ? '/staff/login' : '/admin/login'}
+        validate={validateRecoveryPassword}
+        reset={async (token, password) => {
+          await mongoAuth.request('/reset-password', { token, newPassword: password });
+        }}
+      />
+    </AuthLayout>
+  ) : (
+    <LegacyAdminResetPasswordPage portal={portal} />
   );
 }
 

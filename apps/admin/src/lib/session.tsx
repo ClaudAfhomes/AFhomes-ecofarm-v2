@@ -14,8 +14,10 @@ import { protectedRequest } from './api/client';
 import { ApiError } from './api/errors';
 import { queryClient } from './query';
 import { getSupabaseClient } from './supabase';
+import { subscribeCookieAuth } from '@afhomes/shared';
+import { mongoAuth, isMongoAuth } from './cookie-auth';
 
-export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
+export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'mfa-pending';
 /**
  * The staff principal as resolved by `GET /admin/afhomes/session`. Access is
  * decided by `afHomesPermissions` (per-module view/create/update/delete), not by
@@ -82,7 +84,7 @@ function TestSessionProvider({
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-export function SessionProvider({
+function LegacySessionProvider({
   initialUser,
   children,
 }: {
@@ -153,9 +155,12 @@ export function SessionProvider({
     window.addEventListener('focus', onFocus);
     const cookies = import.meta.env.DEV ? window.cookieStore : undefined;
     const onCookieChange = (event: CookieChangeEvent) => {
-      if ([...event.changed, ...event.deleted].some(cookie =>
-        cookie.name?.startsWith('sb-') && cookie.name.endsWith('-auth-token'),
-      )) void resolve();
+      if (
+        [...event.changed, ...event.deleted].some(
+          (cookie) => cookie.name?.startsWith('sb-') && cookie.name.endsWith('-auth-token'),
+        )
+      )
+        void resolve();
     };
     cookies?.addEventListener('change', onCookieChange);
     return () => {
@@ -206,4 +211,102 @@ export function SessionProvider({
   if (initialUser !== undefined)
     return <TestSessionProvider user={initialUser}>{children}</TestSessionProvider>;
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+export function SessionProvider(props: { initialUser?: SessionUser | null; children: ReactNode }) {
+  if (props.initialUser !== undefined)
+    return <TestSessionProvider user={props.initialUser}>{props.children}</TestSessionProvider>;
+  return isMongoAuth ? (
+    <MongoSessionProvider>{props.children}</MongoSessionProvider>
+  ) : (
+    <LegacySessionProvider {...props} />
+  );
+}
+function MongoSessionProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<SessionStatus>('loading'),
+    [user, setUser] = useState<SessionUser | null>(null);
+  const [sessionError, setSessionError] = useState(false),
+    identity = useRef<string | null>(null),
+    generation = useRef(0);
+  const resolve = useCallback(async () => {
+    const run = ++generation.current;
+    try {
+      const session = await mongoAuth.read();
+      if (run !== generation.current) return;
+      if (!session) {
+        if (identity.current) queryClient.clear();
+        identity.current = null;
+        setUser(null);
+        setStatus('unauthenticated');
+        setSessionError(false);
+        return;
+      }
+      if (identity.current !== session.user.id) {
+        queryClient.clear();
+        identity.current = null;
+        setUser(null);
+        setStatus('loading');
+      }
+      const view = await protectedRequest('/admin/afhomes/session', afHomesSessionSchema);
+      if (run !== generation.current) return;
+      if (identity.current !== view.id) queryClient.clear();
+      identity.current = view.id;
+      setUser({
+        id: view.id,
+        name: view.fullName,
+        email: view.email,
+        roleId: view.roleId,
+        roleSlug: view.roleSlug,
+        roleName: view.roleName,
+        afHomesPermissions: view.permissions,
+        status: view.status,
+        mustChangePassword: view.mustChangePassword,
+        testPurgeEnabled: view.testPurgeEnabled,
+        mfaRequired: view.mfaRequired,
+      });
+      setStatus('authenticated');
+      setSessionError(false);
+    } catch (error) {
+      if (run !== generation.current) return;
+      queryClient.clear();
+      identity.current = null;
+      setUser(null);
+      setStatus('unauthenticated');
+      setSessionError(!(error instanceof ApiError && error.status === 401));
+    }
+  }, []);
+  useEffect(() => {
+    const initialResolve = window.setTimeout(() => void resolve(), 0);
+    const stop = subscribeCookieAuth(() => void resolve());
+    return () => {
+      window.clearTimeout(initialResolve);
+      generation.current++;
+      stop();
+    };
+  }, [resolve]);
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      await mongoAuth.signIn(email, password);
+      await resolve();
+    },
+    [resolve],
+  );
+  const logout = useCallback(async () => {
+    try {
+      await mongoAuth.signOut();
+    } finally {
+      generation.current++;
+      identity.current = null;
+      queryClient.clear();
+      setUser(null);
+      setStatus('unauthenticated');
+    }
+  }, []);
+  return (
+    <SessionContext.Provider
+      value={{ status, user, sessionError, signIn, revalidate: resolve, logout }}
+    >
+      {children}
+    </SessionContext.Provider>
+  );
 }

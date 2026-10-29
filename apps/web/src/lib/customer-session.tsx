@@ -5,11 +5,14 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
   type ReactNode,
 } from 'react';
 
 import { getSupabaseClient } from './supabase';
 import { queryClient } from './query';
+import { subscribeCookieAuth } from '@afhomes/shared';
+import { mongoAuth, isMongoAuth } from './cookie-auth';
 
 export type CustomerSessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -46,7 +49,7 @@ export function useCustomerSession(): CustomerSessionContextValue {
  * server (`customers.auth_user_id` + RLS). A value cached here can therefore
  * never authorize anything - it only decides which screens are worth rendering.
  */
-export function CustomerSessionProvider({
+function LegacyCustomerSessionProvider({
   initialUser,
   children,
 }: {
@@ -123,5 +126,78 @@ export function CustomerSessionProvider({
 
   return (
     <CustomerSessionContext.Provider value={value}>{children}</CustomerSessionContext.Provider>
+  );
+}
+
+export function CustomerSessionProvider(props: {
+  initialUser?: CustomerSessionUser | null;
+  children: ReactNode;
+}) {
+  return isMongoAuth && props.initialUser === undefined ? (
+    <MongoCustomerSessionProvider>{props.children}</MongoCustomerSessionProvider>
+  ) : (
+    <LegacyCustomerSessionProvider {...props} />
+  );
+}
+function MongoCustomerSessionProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<CustomerSessionStatus>('loading');
+  const [user, setUser] = useState<CustomerSessionUser | null>(null);
+  const [sessionError, setSessionError] = useState(false);
+  const identity = useRef<string | null>(null),
+    generation = useRef(0);
+  const resolve = useCallback(async () => {
+    const run = ++generation.current;
+    try {
+      const session = await mongoAuth.read();
+      if (run !== generation.current) return;
+      if (identity.current !== (session?.user.id ?? null)) queryClient.clear();
+      identity.current = session?.user.id ?? null;
+      setUser(session ? { authUserId: session.user.id, email: session.user.email } : null);
+      setStatus(session ? 'authenticated' : 'unauthenticated');
+      setSessionError(false);
+    } catch {
+      if (run !== generation.current) return;
+      queryClient.clear();
+      identity.current = null;
+      setUser(null);
+      setStatus('unauthenticated');
+      setSessionError(true);
+    }
+  }, []);
+  useEffect(() => {
+    const initialResolve = window.setTimeout(() => void resolve(), 0);
+    const stop = subscribeCookieAuth(() => void resolve());
+    return () => {
+      window.clearTimeout(initialResolve);
+      generation.current++;
+      stop();
+    };
+  }, [resolve]);
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const result = await mongoAuth.signIn(email, password);
+      if (result.twoFactorRedirect)
+        throw new Error('Authenticator verification is required. Use your staff portal.');
+      await resolve();
+    },
+    [resolve],
+  );
+  const signOut = useCallback(async () => {
+    try {
+      await mongoAuth.signOut();
+    } finally {
+      generation.current++;
+      identity.current = null;
+      queryClient.clear();
+      setUser(null);
+      setStatus('unauthenticated');
+    }
+  }, []);
+  return (
+    <CustomerSessionContext.Provider
+      value={{ status, user, sessionError, signIn, signOut, revalidate: resolve }}
+    >
+      {children}
+    </CustomerSessionContext.Provider>
   );
 }

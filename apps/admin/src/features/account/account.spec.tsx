@@ -8,11 +8,9 @@
  *
  * 1. The login restore target excludes `/admin/profile` (unit-pinned in
  *    `lib/portal.spec.ts`), and
- * 2. this page navigates forward to the dashboard once a FORCED change
- *    succeeds (navigating is safe either way: a still-gated session is
- *    parked back here by the guard instead of stranding).
+ * 2. a successful forced change signs out and returns to the correct login.
  */
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLocation } from 'react-router';
@@ -41,6 +39,8 @@ const gatedUser: SessionUser = {
 };
 
 const ungatedUser: SessionUser = { ...gatedUser, mustChangePassword: false };
+const sessionMock = vi.hoisted(()=>({user:null as SessionUser|null,logout:vi.fn(),revalidate:vi.fn()}));
+vi.mock('../../lib/session',async()=>({...await vi.importActual<typeof import('../../lib/session')>('../../lib/session'),useSession:()=>sessionMock}));
 
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
@@ -49,6 +49,9 @@ function LocationProbe() {
 beforeEach(() => {
   vi.clearAllMocks();
   passwordMock.change.mockResolvedValue({ changed: true });
+  sessionMock.user=gatedUser;
+  sessionMock.logout.mockResolvedValue(undefined);
+  sessionMock.revalidate.mockResolvedValue(undefined);
 });
 
 async function changePassword() {
@@ -60,7 +63,7 @@ async function changePassword() {
 }
 
 describe('forced password change exit', () => {
-  it('leaves the change screen for the dashboard after a forced change', async () => {
+  it('returns to staff login after a forced change', async () => {
     renderWithProviders(
       <>
         <MyAccountPage />
@@ -70,10 +73,12 @@ describe('forced password change exit', () => {
     );
     expect(await screen.findByText(/set a new password to continue/i)).toBeInTheDocument();
     await changePassword();
-    expect(await screen.findByTestId('location')).toHaveTextContent('/admin');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/staff/login'));
+    expect(sessionMock.logout).toHaveBeenCalledOnce();
   });
 
   it('stays on the account screen after a voluntary change', async () => {
+    sessionMock.user=ungatedUser;
     renderWithProviders(
       <>
         <MyAccountPage />
@@ -84,5 +89,13 @@ describe('forced password change exit', () => {
     await changePassword();
     await screen.findByTestId('location');
     expect(screen.getByTestId('location')).toHaveTextContent('/admin/profile');
+    expect(sessionMock.logout).not.toHaveBeenCalled();
+  });
+  it('returns administrators to admin login after a forced change',async()=>{
+    sessionMock.user={...gatedUser,roleSlug:'super_admin'};
+    renderWithProviders(<><MyAccountPage/><LocationProbe/></>,{route:'/admin/profile',user:sessionMock.user});
+    await changePassword();
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/admin/login'));
+    expect(sessionMock.logout).toHaveBeenCalledOnce();
   });
 });

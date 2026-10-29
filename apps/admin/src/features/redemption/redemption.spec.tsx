@@ -232,3 +232,9 @@ describe('redemption screens', () => {
     }
   });
 });
+
+// Explicit feature-on fixture preserves coverage for retained, disabled source.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+ const actual = await importOriginal<typeof import('@afhomes/shared')>();
+ return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
+});

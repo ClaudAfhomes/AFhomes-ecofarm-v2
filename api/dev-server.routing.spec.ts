@@ -141,7 +141,8 @@ describe('dev-server HTTP routing', () => {
     handlerReached(await call('/api/v1/points/accounts/abc'));
     handlerReached(await call('/api/v1/ost/applications/abc'));
     handlerReached(await call('/api/v1/documents/abc'));
-    handlerReached(await call('/api/v1/redemptions/resolve?identifier=x'));
+    expect((await call('/api/v1/redemptions/resolve?identifier=x')).status).toBe(404);
+    expect((await call('/api/v1/earning/purchases')).status).toBe(404);
     handlerReached(await call('/api/v1/queues/finance'));
     handlerReached(await call('/api/v1/customer/membership'));
     handlerReached(await call('/api/v1/commissions/abc/qualify', { method: 'POST' }));

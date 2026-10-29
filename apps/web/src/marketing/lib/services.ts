@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { FEATURE_FLAGS } from '@afhomes/shared';
 import { serviceCatalogItemSchema } from '@afhomes/contracts';
 import type { z } from 'zod';
 import { requestList } from '../../lib/api/client';
@@ -8,6 +9,7 @@ import type { Experience } from '../types/experience';
 export const usePublishedServices = () =>
   useQuery({
     queryKey: ['public', 'services'],
+    enabled: FEATURE_FLAGS.services,
     queryFn: () => requestList('/earning/public/services', serviceCatalogItemSchema),
     refetchInterval: 240_000,
   });

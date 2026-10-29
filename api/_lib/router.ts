@@ -12,6 +12,7 @@
  * loaded on first use (cold-start win); shared libs stay imported eagerly.
  */
 import { toErrorEnvelope } from './envelope.js';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 type HandlerFn = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
@@ -199,6 +200,7 @@ export function selectHandler(
   pathname: string,
   query: Record<string, string | string[] | undefined>,
 ): RouteMatch | null {
+  if (!isFeaturePathEnabled(pathname)) return null;
   const afHomesMatch = pathname.match(/^\/api(?:\/v1)?\/admin\/afhomes\/(.+)$/);
   if (afHomesMatch) {
     query.afPath = decodeURIComponent(afHomesMatch[1] ?? '');

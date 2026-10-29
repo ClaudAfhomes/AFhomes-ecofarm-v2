@@ -1,5 +1,11 @@
 # AF Homes Ecofarm
 
+MongoDB conversion work is on local `claud/mongodb-conversion` in this repository.
+See [active workspace and verification](docs/mongodb/WORKSPACE-HANDOFF.md).
+Default runtime still uses Supabase. The controlled `pnpm dev:mongodb:local`
+command uses a fresh disposable local database; the existing administrator and
+shared databases must remain untouched.
+
 TypeScript monorepo for the AF Homes Ecofarm platform — membership-card sales,
 operations, and staff administration. pnpm workspaces + Turborepo.
 

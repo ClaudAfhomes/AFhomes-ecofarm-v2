@@ -12,9 +12,9 @@ export default defineConfig(({ mode }) => ({
   // used, so a developer's real `.env.local` can never leak URLs or keys into
   // assertions that pin schema defaults (e.g. recovery redirect origins).
   envDir:
-    mode === 'test'
+    process.env.AFHOMES_DEV_ENV_DIR ?? (mode === 'test'
       ? fileURLToPath(new URL('./', import.meta.url))
-      : fileURLToPath(new URL('../../', import.meta.url)),
+      : fileURLToPath(new URL('../../', import.meta.url))),
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

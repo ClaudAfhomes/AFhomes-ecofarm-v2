@@ -5,6 +5,8 @@ import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { getMemberships } from './services';
 import { adjustPoints } from './points-services';
 import { TierBadge } from './TierBadge';
+import { splitStayPoints } from '@afhomes/shared';
+import { membershipKeys } from './queryKeys';
 import styles from './RecordPointsDialog.module.css';
 
 type Props = {
@@ -35,8 +37,7 @@ export function RecordPointsDialog({ customer, open, onClose }: Props) {
   const gained = Number(pointsInput.replace(/,/g, '')) || 0;
   const previous = membership?.pointsBalance ?? 0;
   const total = previous + gained;
-  const weekday = Math.round(total * 0.7);
-  const weekend = total - weekday;
+  const { weekday, weekend } = splitStayPoints(Number.isSafeInteger(gained) && gained >= 0 ? gained : 0);
   const overCap = gained > annualCap;
 
   const record = useBusinessMutation({
@@ -47,7 +48,11 @@ export function RecordPointsDialog({ customer, open, onClose }: Props) {
         reason: 'Manual points record',
       }),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['business', 'customer'] });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['business', 'customer'] }),
+        client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope }),
+        client.invalidateQueries({ queryKey: ['record-points', 'memberships', customer.id] }),
+      ]);
       notifySuccess({
         title: 'Points recorded',
         message: `${formatPoints(gained)} points added to ${customer.fullName}.`,
@@ -109,11 +114,11 @@ export function RecordPointsDialog({ customer, open, onClose }: Props) {
               </div>
               <div className={styles.summarySplit}>
                 <div className={styles.splitCell}>
-                  <span className={styles.splitLabel}>Weekday (70%)</span>
+                  <span className={styles.splitLabel}>Weekday points added (70%)</span>
                   <span className={styles.splitValue}>{formatPoints(weekday)}</span>
                 </div>
                 <div className={styles.splitCell}>
-                  <span className={styles.splitLabel}>Weekend (30%)</span>
+                  <span className={styles.splitLabel}>Weekend points added (30%)</span>
                   <span className={styles.splitValue}>{formatPoints(weekend)}</span>
                 </div>
               </div>

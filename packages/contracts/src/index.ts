@@ -53,7 +53,7 @@ export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
 /* ---- Cross-portal identity (portal routing + OST self-service) ----
    `GET /auth/portals` answers which AFHomes identities the bearer's own
    Auth user holds. Login screens route on it; it authorizes nothing. */
-export { authPortalsSchema, ostMeSchema } from './schemas/auth.js';
+export { authPortalsSchema, ostMeSchema, cookieAuthSessionSchema, cookieAuthSignInSchema } from './schemas/auth.js';
 export type { AuthPortals, OstMe } from './schemas/auth.js';
 
 export {
@@ -788,3 +788,5 @@ export * from './schemas/member-workbook.js';
 export * from './schemas/public-verification-settings.js';
 export * from './schemas/ist-portal.js';
 export * from './schemas/imported-sales.js';
+
+export * from './schemas/cms-content.js';

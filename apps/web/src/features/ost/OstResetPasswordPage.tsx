@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { validateRecoveryPassword } from '@afhomes/shared';
 import { Alert, AuthLayout, Button, PasswordField } from '@afhomes/ui';
 import { z } from 'zod';
@@ -8,6 +8,8 @@ import { getSupabaseClient } from '../../lib/supabase';
 import { request } from '../../lib/api/client';
 import { useCustomerSession } from '../../lib/customer-session';
 import styles from '../customer/auth.module.css';
+import { isMongoAuth } from '../../lib/cookie-auth';
+import { getAuthPortals } from '../../lib/portals';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
 
@@ -16,12 +18,13 @@ type Phase = 'checking' | 'ready' | 'invalid' | 'done';
  * the customer reset page; on completion the seller returns to OST Login.
  */
 export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: boolean }) {
+  const navigate = useNavigate();
   const { signOut } = useCustomerSession();
   const linkError =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('error') !== null;
   const [phase, setPhase] = useState<Phase>(() => {
-    if (!getSupabaseClient() || linkError) return 'invalid';
+    if (linkError || (!(isMongoAuth && firstLogin) && !getSupabaseClient())) return 'invalid';
     return 'checking';
   });
   const [password, setPassword] = useState('');
@@ -33,6 +36,12 @@ export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: bool
 
   useEffect(() => {
     let mounted = true;
+    if (isMongoAuth && firstLogin) {
+      getAuthPortals().then(portals=>{
+        if(mounted)setPhase(!linkError && portals.staff?.roleSlug==='ost' && portals.staff.status==='active' && portals.staff.mustChangePassword ? 'ready':'invalid');
+      }).catch(()=>{if(mounted)setPhase('invalid');});
+      return ()=>{mounted=false;};
+    }
     const client = getSupabaseClient();
     if (!client) return;
     client.auth
@@ -62,7 +71,7 @@ export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: bool
       mounted = false;
       subscription.subscription.unsubscribe();
     };
-  }, [linkError]);
+  }, [linkError, firstLogin]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -88,18 +97,14 @@ export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: bool
     setServerError(null);
     setPending(true);
     try {
-      const client = getSupabaseClient();
-      if (!client) {
-        setServerError('Password recovery is not available right now.');
-        setPending(false);
-        return;
-      }
       if (firstLogin) {
         await request('/admin/afhomes/session/password', z.object({ changed: z.literal(true) }), {
           method: 'POST',
           body: JSON.stringify({ currentPassword, newPassword: password }),
         });
       } else {
+        const client = getSupabaseClient();
+        if(!client)throw new Error('Password recovery unavailable');
         const { error } = await client.auth.updateUser({ password });
         if (error) throw error;
       }
@@ -109,6 +114,7 @@ export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: bool
       setConfirm('');
       setPhase('done');
       setPending(false);
+      if (firstLogin) navigate('/ost/login', { replace: true });
     } catch {
       setServerError(
         firstLogin

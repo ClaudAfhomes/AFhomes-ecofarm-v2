@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 import { Button, ErrorState, Spinner } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
@@ -14,7 +15,7 @@ const NAV = [
   { to: '/customer/redemptions', label: 'Redemptions', end: false },
   { to: '/customer/payments', label: 'Payments', end: false },
   { to: '/customer/profile', label: 'Profile', end: false },
-];
+].filter((item) => isFeaturePathEnabled(item.to));
 
 /**
  * The customer portal shell.
