@@ -182,6 +182,27 @@ const openCreate = async () => {
   await screen.findByRole('option', { name: 'Sales' });
 };
 
+it('opens each new OST creation with blank identity, credentials and manual AA fields', async () => {
+  showCreate();
+  fireEvent.click(await screen.findByRole('button', { name: 'Create OST' }));
+  fireEvent.change(await screen.findByLabelText(/^First Name/), { target: { value: 'Previous' } });
+  fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'previous@example.invalid' } });
+  fireEvent.change(screen.getByLabelText(/^Temporary password/), { target: { value: 'SyntheticPrevious123!' } });
+  fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'SyntheticPrevious123!' } });
+  fireEvent.change(screen.getByLabelText(/^AA number mode/), { target: { value: 'manual' } });
+  fireEvent.change(screen.getByLabelText(/^AA number$/), { target: { value: 'AAO26100001' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByLabelText(/^First Name/)).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'Create OST' }));
+  expect(await screen.findByLabelText(/^First Name/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Email/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Temporary password/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Confirm password/)).toHaveValue('');
+  expect(screen.getByLabelText(/^AA number mode/)).toHaveValue('auto');
+  expect(screen.queryByLabelText(/^AA number$/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create and accredit' })).toBeDisabled();
+});
+
 const fillRequired = () => {
   fireEvent.change(screen.getByLabelText('Choose profile photo'), { target: { files: [new File(['photo'], 'profile.jpg', { type: 'image/jpeg' })] } });
   fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New Member' } });

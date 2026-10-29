@@ -10,8 +10,14 @@
   "dependencies": {
     "@afhomes/contracts": "workspace:*",
     "@afhomes/shared": "workspace:*",
+    "@aws-sdk/client-s3": "3.1156.0",
+    "@aws-sdk/s3-request-presigner": "3.1156.0",
+    "@better-auth/mongo-adapter": "1.7.12",
     "@supabase/auth-js": "2.117.2",
     "@supabase/supabase-js": "2.117.2",
+    "better-auth": "1.7.12",
+    "better-call": "1.4.4",
+    "mongodb": "7.7.0",
     "nodemailer": "10.0.10",
     "saxes": "6.0.0",
     "zod": "^4.4.3"

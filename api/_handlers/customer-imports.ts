@@ -1,49 +1,33 @@
+import {
+  shapeImportJob as shapeJob,
+  shapeImportRow as shapeRow,
+} from '../_lib/customer-import-model.js';
+import {
+  readCustomerImportFile,
+  validateCustomerImportFile,
+} from '../_lib/customer-import-file.js';
 import { customerDirectory } from '../_lib/customer-directory.js';
 import { z } from 'zod';
-import { compareMoney } from '@afhomes/shared';
-import { externalImportSummary } from '../_lib/external-customer-import.js';
+
 import {
-  CUSTOMER_EXPORT_COLUMNS,
   CUSTOMER_CATEGORY_LABELS,
   customerCategorySchema,
   customerImportCommitResponseSchema,
-  customerImportJobSchema,
   customerImportParseResponseSchema,
   customerImportContinuationSchema,
   importContinuationRequestSchema,
-  type WorkbookCustomerV2,
   maskGovernmentId,
   type CustomerExportRow,
 } from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
   MAX_IMPORT_BYTES,
-  MAX_IMPORT_ROWS,
   customerExportCsv,
-  fetchGoogleSheetCsv,
-  isCompanyMembershipTemplate,
-  isInterimV2Flat,
-  isLegacyCompanyMembershipTemplate,
-  isV2MembershipTemplate,
-  looksLikeSectionBandRow,
-  matrixToRecords,
   membershipTemplateV2Csv,
-  mergeSectionedTemplateSheets,
-  mergeV2SectionedTemplateSheets,
-  parseCsvMatrix,
-  parseXlsxSheets,
-  remapCompanyTemplateMatrix,
-  remapV2TemplateMatrix,
-  workbookLooksInterimV2,
-  workbookLooksV2,
-  validateImportRow,
   type ImportContext,
   type ValidatedImportRow,
 } from '../_lib/customer-import.js';
-import {
-  COMPANY_IMPORT_EXTRA_COLUMNS,
-  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
-} from '@afhomes/contracts';
+
 import {
   audit,
   deny,
@@ -57,25 +41,17 @@ import {
   type Db,
 } from '../_lib/handler-kit.js';
 import { hashIdentifier } from '../_lib/identifier.js';
-import {
-  parseCustomerWorkbook,
-  validateWorkbookFields,
-  resolveWorkbookGeography,
-  sameWorkbookIdentity,
-  resolveWorkbookStaff,
-  workbookApplicationPrefill,
-} from '../_lib/customer-workbook.js';
+import { resolveWorkbookStaff } from '../_lib/customer-workbook.js';
 import { loadWorkbookStaffMatches } from '../_lib/customer-workbook-staff.js';
-import { parseCustomerWorkbookV2 } from '../_lib/customer-workbook-v2.js';
-import { annotateCustomerWorkbook, annotateFlatCustomerImport } from '../_lib/customer-workflow-review.js';
+
 import {
-  buildImportedCustomerFacts,
-  loadImportRecoveryContext,
-  legacyPaymentClaims,
-} from '../_lib/customer-import-continuation.js';
+  annotateCustomerWorkbook,
+  annotateFlatCustomerImport,
+} from '../_lib/customer-workflow-review.js';
+import { loadImportRecoveryContext } from '../_lib/customer-import-continuation.js';
 import { handleImportWorkflow } from './_customer-import-workflow.js';
-import { addressProvider } from '../_lib/address-source.js';
-import { companyTemplate, companyWorkbook } from '../_lib/customer-workbook-export.js';
+
+import { companyWorkbook } from '../_lib/customer-workbook-export.js';
 import { customerWorkflowTemplate } from '../_lib/customer-workflow-export.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
@@ -111,64 +87,6 @@ const exportQuerySchema = z.object({
 
 const sendFile = (res: VercelResponse, filename: string, mime: string, bytes: Uint8Array) =>
   res.status(200).json({ filename, mime, content: Buffer.from(bytes).toString('base64') });
-
-const shapeJob = (row: Record<string, unknown>) => ({
-  id: row.id,
-  jobNumber: (row.job_number as string | null | undefined) ?? null,
-  sourceType: row.source_type,
-  sourceName: row.source_name,
-  googleSheetId: row.google_sheet_id ?? null,
-  status: row.status,
-  totalRows: Number(row.total_rows ?? 0),
-  validRows: Number(row.valid_rows ?? 0),
-  invalidRows: Number(row.invalid_rows ?? 0),
-  insertedRows: Number(row.inserted_rows ?? 0),
-  updatedRows: Number(row.updated_rows ?? 0),
-  skippedRows: Number(row.skipped_rows ?? 0),
-  createdAt: isoOrNull(row.created_at) ?? '',
-  validatedAt: isoOrNull(row.validated_at),
-  committedAt: isoOrNull(row.committed_at),
-  failedAt: isoOrNull(row.failed_at),
-  cancelledAt: isoOrNull(row.cancelled_at),
-  failedRows: Number(row.failed_rows ?? 0),
-});
-
-function maskImportPrivateValues(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(maskImportPrivateValues);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        [
-          'tin',
-          'tin_number',
-          'secondary_tin',
-          'supplementary_tin_number',
-          'tinNumber',
-          'supplementaryTinNumber',
-          'governmentIdNumber',
-          'government_id_number',
-        ].includes(key)
-          ? typeof item === 'string' && item
-            ? maskGovernmentId(item)
-            : item
-          : maskImportPrivateValues(item),
-      ]),
-    );
-  return value;
-}
-const shapeRow = (row: Record<string, unknown>) => ({
-  id: row.id,
-  rowNumber: row.row_number,
-  fields: maskImportPrivateValues(row.raw_data ?? {}) as Record<string, string>,
-  normalized: maskImportPrivateValues(row.normalized_data ?? {}) as Record<string, unknown>,
-  validation: row.validation_status,
-  errors: (row.validation_errors ?? []) as { field: string; message: string }[],
-  warnings: (row.validation_warnings ?? []) as { field: string; message: string }[],
-  action: row.action,
-  customerId: row.customer_id ?? null,
-  membershipId: row.membership_id ?? null,
-});
 
 async function buildContext(
   db: Db,
@@ -408,202 +326,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if ('error' in permission) return deny(res, permission);
         }
       }
-      let matrix: string[][];
-      let reviewMatrix:string[][]|null=null;
-      let workbookRecords: ReturnType<typeof parseCustomerWorkbook> = null;
-      let workflowRecords: WorkbookCustomerV2[] | null = null;
-      let workflowReview: {bytes:Uint8Array;workbook:NonNullable<ReturnType<typeof parseCustomerWorkbookV2>>}|null=null;
-      let sheetId: string | null = null;
-      // Sectioned-template extras surface as per-row warnings below, next to
-      // the established unknown-column and dropped-header warnings.
-      let sectionedUnknown: string[] = [];
-      // Guided-template part columns (names, the supplementary address) are
-      // joined per row and overlaid onto the parsed fields after parsing.
-      let v2Joins: { rowNumber: number; values: Record<string, string> }[] = [];
-      let sourceHash: string | null = null;
+      let file: Awaited<ReturnType<typeof readCustomerImportFile>>;
       try {
-        if (source === 'google_sheets') {
-          if (!parsed.data.sheetUrl)
-            return fail(res, 'VALIDATION_ERROR', 'A Google Sheets URL is required', 400);
-          const csv = await fetchGoogleSheetCsv(parsed.data.sheetUrl);
-          sourceHash = hashIdentifier(csv);
-          const { parseGoogleSheetUrl: parseUrl } = await import('@afhomes/contracts');
-          sheetId = parseUrl(parsed.data.sheetUrl)?.spreadsheetId ?? null;
-          matrix = parseCsvMatrix(csv);
-        } else {
-          if (!parsed.data.contentBase64)
-            return fail(res, 'VALIDATION_ERROR', 'File content is required', 400);
-          const bytes = new Uint8Array(Buffer.from(parsed.data.contentBase64, 'base64'));
-          sourceHash = hashIdentifier(Buffer.from(bytes).toString('base64'));
-          if (bytes.length === 0 || bytes.length > MAX_IMPORT_BYTES)
-            return fail(res, 'VALIDATION_ERROR', 'File is empty or exceeds the size limit', 400);
-          if (source === 'excel') {
-            // The company workbook (ten source tabs, exact entry-sheet
-            // headers) parses to records directly. A workbook it does not
-            // claim goes through the guided/legacy sectioned merge chain: a
-            // workbook whose non-guide tabs carry the guided vocabulary
-            // merges as the guided template, anything else tries the legacy
-            // sectioned merge. A multi-sheet file that matches neither stays
-            // rejected rather than silently reading the wrong tab.
-            const workflow = parseCustomerWorkbookV2(bytes, {collectErrors:true});
-            if(workflow) workflowReview={bytes,workbook:workflow};
-            workflowRecords = workflow?.rows ?? null;
-            workbookRecords = workflow
-              ? {
-                  rows: workflow.rows.map((row, index) => ({
-                    rowNumber: workflow.sources[index]?.[0]?.row ?? index + 2,
-                    fields: row.fields,
-                  })),
-                  unknownHeaders: workflow.unknownHeaders,
-                }
-              : parseCustomerWorkbook(bytes);
-            if (workbookRecords) {
-              matrix = [];
-            } else {
-              const sheets = parseXlsxSheets(bytes);
-              if (sheets.length === 1) {
-                matrix = sheets[0]!.matrix;
-              } else {
-                // A workbook filled from the superseded interim guided layout
-                // gets a pointed fix message instead of drowning in
-                // unknown-column warnings from the legacy merge.
-                if (workbookLooksInterimV2(sheets))
-                  return fail(
-                    res,
-                    'VALIDATION_ERROR',
-                    'This workbook was filled from an older template. Download the new template and copy the rows over.',
-                    400,
-                  );
-                const looksV2 = workbookLooksV2(sheets);
-                try {
-                  if (looksV2) {
-                    matrix = mergeV2SectionedTemplateSheets(sheets).matrix;
-                  } else {
-                    const merged = mergeSectionedTemplateSheets(sheets);
-                    matrix = merged.matrix;
-                    sectionedUnknown = merged.unknownHeaders;
-                  }
-                } catch (error) {
-                  // Surface the merge's own reason (missing tab, row-count
-                  // mismatch, foreign workbook): it names the exact tab and
-                  // fix, while the generic single-worksheet hint never did.
-                  return fail(
-                    res,
-                    'VALIDATION_ERROR',
-                    error instanceof Error
-                      ? error.message.slice(0, 300)
-                      : 'Import requires exactly one worksheet; for guided entry use the sectioned membership template (README + Primary/Supplementary/Related/Package)',
-                    400,
-                  );
-                }
-              }
-            }
-          } else {
-            matrix = parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-            // The CSV download carries a section band row above the headers
-            // so the columns read as groups; strip it here so a
-            // saved-and-refilled template parses exactly like a plain header
-            // file. A file without the band row (deleted, or an older
-            // template) is unchanged.
-            if (looksLikeSectionBandRow(matrix[0] ?? [])) matrix = matrix.slice(1);
-          }
-        }
+        file = await readCustomerImportFile(parsed.data);
       } catch (error) {
         return fail(
           res,
           'VALIDATION_ERROR',
-          error instanceof Error ? error.message.slice(0, 200) : 'Unparseable file',
+          error instanceof Error ? error.message : 'Unparseable file',
           400,
         );
       }
-      let records: { rowNumber: number; fields: Record<string, string> }[];
-      let unknownHeaders: string[];
-      // A flat file (CSV or single-sheet XLSX) filled from the superseded
-      // interim guided layout gets the pointed fix message before any remap.
-      if (isInterimV2Flat(matrix[0] ?? []))
-        return fail(
-          res,
-          'VALIDATION_ERROR',
-          'This file was filled from an older template. Download the new template and refill it.',
-          400,
-        );
-      // Positional remaps onto import columns: the guided layout first, then
-      // the 44-column company template. Anything else keeps the established
-      // name-based behavior. Dropped reference columns are reported below.
-      let droppedCompanyHeaders: { index: number; header: string }[] = [];
-      let droppedTemplateColumns: { index: number; header: string }[] = [];
-      let templated = false;
-      try {
-        if (!workbookRecords) {
-          if (isV2MembershipTemplate(matrix[0] ?? [])) {
-            const remapped = remapV2TemplateMatrix(matrix);
-            matrix = remapped.matrix;
-            droppedTemplateColumns = remapped.dropped;
-            v2Joins = remapped.joins;
-            templated = true;
-          } else if (isCompanyMembershipTemplate(matrix[0] ?? [])) {
-            const remapped = remapCompanyTemplateMatrix(matrix);
-            matrix = remapped.matrix;
-            droppedCompanyHeaders = remapped.dropped;
-            templated = true;
-          } else if (isLegacyCompanyMembershipTemplate(matrix[0] ?? [])) {
-            // Superseded 45-column download (OST/IST NAME still at position
-            // 28): remap through the legacy positions so its values still land
-            // on the existing customer-record pipeline instead of failing as
-            // 45 unknown headers. Fresh downloads no longer carry the column.
-            const remapped = remapCompanyTemplateMatrix(
-              matrix,
-              LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
-            );
-            matrix = remapped.matrix;
-            droppedCompanyHeaders = remapped.dropped;
-            templated = true;
-          }
-        }
-        if(!workbookRecords) reviewMatrix=matrix.map(row=>[...row]);
-        const converted =
-          workbookRecords ??
-          // Remapped template keys live outside the established template
-          // columns; every other file keeps strict known headers.
-          matrixToRecords(matrix, templated ? [...COMPANY_IMPORT_EXTRA_COLUMNS] : []);
-        records = converted.rows;
-        unknownHeaders = converted.unknownHeaders.filter(
-          (h) => !h.startsWith('__company_ignored_'),
-        );
-        // Part columns land on their join key (never derived from FULL
-        // NAME); blank parts leave the field alone. Keyed by row number so
-        // dropped all-blank rows cannot shift the alignment.
-        if (v2Joins.length > 0) {
-          const byRow = new Map(v2Joins.map((join) => [join.rowNumber, join.values]));
-          for (const record of converted.rows) {
-            const values = byRow.get(record.rowNumber);
-            if (!values) continue;
-            for (const [key, value] of Object.entries(values))
-              if (value.trim() !== '') record.fields[key] = value;
-          }
-        }
-      } catch (error) {
-        return fail(
-          res,
-          'VALIDATION_ERROR',
-          error instanceof Error ? error.message : 'Empty spreadsheet',
-          400,
-        );
-      }
-      if (records.length > MAX_IMPORT_ROWS)
-        return fail(
-          res,
-          'VALIDATION_ERROR',
-          `Import exceeds the ${MAX_IMPORT_ROWS}-row limit`,
-          400,
-        );
-      // Export-shape alias: a re-imported export carries derived_category
-      // instead of source_status. Unknown columns otherwise only warn.
-      for (const record of records) {
-        if (!workbookRecords) delete record.fields.workbook_format;
-        if (!record.fields.source_status && record.fields.derived_category)
-          record.fields.source_status = record.fields.derived_category;
-      }
+      const { sourceHash, sheetId, workbookRecords, workflowReview, reviewMatrix, records } = file;
       const ctx = await buildContext(db, records);
       const raOwners = new Map<string, Set<string>>();
       const staffMatches = workbookRecords ? await loadWorkbookStaffMatches(db, records) : [];
@@ -671,154 +405,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       }
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(
-        new Date(),
-      );
-      if (parsed.data.externalVerificationReason && !workflowRecords)
+      let validated: ValidatedImportRow[];
+      try {
+        validated = await validateCustomerImportFile(
+          file,
+          ctx,
+          staffMatches,
+          raOwners,
+          parsed.data.externalVerificationReason,
+        );
+      } catch (error) {
         return fail(
           res,
           'VALIDATION_ERROR',
-          'Externally verified imports require the guided customer workbook with contract dates and individual payment history.',
+          error instanceof Error ? error.message : 'Invalid import rows',
           400,
         );
-      const seen = new Map<string, number>();
-      const validated: ValidatedImportRow[] = [];
-      for (const [recordIndex,r] of records.entries()) {
-        const v = validateImportRow(
-          r.rowNumber,
-          workbookRecords && r.fields.suffix === 'N/A' ? { ...r.fields, suffix: '' } : r.fields,
-          ctx,
-          today,
-        );
-        if(workflowReview) {
-          const sources=workflowReview.workbook.sources[recordIndex]??[];
-          const allSources=workflowReview.workbook.sources.flat();
-          for(const issue of workflowReview.workbook.issues) {
-            const belongs=sources.some(s=>s.sheet===issue.sheet&&s.row===issue.row);
-            const orphan=!allSources.some(s=>s.sheet===issue.sheet&&s.row===issue.row);
-            if(belongs||orphan) v.errors.push({field:issue.field,message:issue.sheet+' row '+issue.row+': '+issue.message});
-          }
-        }
-        if (workbookRecords) {
-          validateWorkbookFields(r.fields, v);
-          resolveWorkbookStaff(r.fields, staffMatches, v);
-          await resolveWorkbookGeography(r.fields, addressProvider(), v);
-          try {
-            workbookApplicationPrefill(r.fields);
-          } catch (error) {
-            if (!(error instanceof z.ZodError)) throw error;
-            for (const issue of error.issues) {
-              const [holder, property] = issue.path;
-              const workbookKey =
-                property === 'citizenship'
-                  ? 'citizenship'
-                  : property === 'tinNumber'
-                    ? 'tin'
-                    : null;
-              const field =
-                workbookKey && ['primary', 'secondary'].includes(String(holder))
-                  ? (holder === 'secondary' ? 'secondary_' : '') + workbookKey
-                  : issue.path.join('.');
-              if (!v.errors.some((error) => error.field === field))
-                v.errors.push({ field, message: issue.message });
-            }
-          }
-          const owners = raOwners.get(r.fields.ra_number ?? '');
-          if (owners && [...owners].some((email) => email !== r.fields.email?.toLowerCase()))
-            v.errors.push({
-              field: 'ra_number',
-              message:
-                'Reservation agreement reference belongs to an existing record; manual identity review required',
-            });
-          for (const field of r.fields.workbook_format === 'company_v2'
-            ? ['customer_key', 'purchase_reference']
-            : ['email', 'ra_number', 'customer_number']) {
-            const value = r.fields[field]?.trim().toLowerCase();
-            if (!value) continue;
-            const key = field + ':' + value;
-            const previous = seen.get(key);
-            if (previous !== undefined) {
-              v.errors.push({ field, message: `Duplicate identity in Excel row ${previous}` });
-              const first = validated.find((row) => row.rowNumber === previous)!;
-              first.errors.push({
-                field,
-                message: `Duplicate identity in Excel row ${r.rowNumber}`,
-              });
-              first.validation = 'error';
-              first.action = 'CONFLICT';
-              first.normalized = null;
-            } else seen.set(key, r.rowNumber);
-          }
-          // A matched identity is reviewed separately; bulk imports never overwrite it.
-          if (v.customerId && r.fields.workbook_format !== 'company_v2') {
-            const previous = ctx.companySnapshots?.get(v.customerId);
-            const unchanged =
-              previous &&
-              ['first_name', 'last_name', 'middle_name', 'birth_date'].every(
-                (key) => (previous.current[key] ?? '') === (r.fields[key] ?? ''),
-              ) &&
-              previous.current.phone === r.fields.mobile;
-            if (unchanged && sameWorkbookIdentity(r.fields, previous.fields)) v.action = 'SKIP';
-            else
-              v.errors.push({
-                field: 'email',
-                message:
-                  'Existing customer: review identity and supplementary information before changing protected records',
-              });
-          }
-          v.fields = { ...v.fields, ...r.fields };
-          if (v.normalized && !v.errors.length) {
-            v.normalized.customerFacts = buildImportedCustomerFacts(r.fields);
-            v.normalized.paymentClaims =
-              workflowRecords?.find((w) => w.customerKey === r.fields.customer_key)?.payments ??
-              legacyPaymentClaims(r.fields);
-            if (parsed.data.externalVerificationReason) {
-              try {
-                if (!r.fields.referrer_staff_id)
-                  throw new Error(
-                    'Select a registered Referrer before importing verified history.',
-                  );
-                if (r.fields.contract_date! > today)
-                  throw new Error('Contract date cannot be in the future.');
-                if (compareMoney(r.fields.stated_rf || '0.00', '10000.00') !== 0)
-                  throw new Error('The included reservation fee must be 10000.00.');
-                v.normalized.externalSummary = externalImportSummary(
-                  r.fields,
-                  v.normalized.paymentClaims,
-                );
-                v.normalized.externalVerified = true;
-                v.normalized.externalReason = parsed.data.externalVerificationReason;
-              } catch (error) {
-                v.errors.push({
-                  field: 'external_history',
-                  message:
-                    error instanceof Error ? error.message : 'Invalid externally verified history.',
-                });
-              }
-            }
-          }
-          if (v.errors.length) {
-            v.validation = 'error';
-            v.action = 'CONFLICT';
-            v.normalized = null;
-          }
-        }
-        for (const h of unknownHeaders)
-          v.warnings.push({ field: h, message: 'Unknown column: ignored' });
-        for (const h of sectionedUnknown)
-          v.warnings.push({ field: h, message: 'Unknown column: ignored' });
-        for (const dropped of droppedCompanyHeaders)
-          v.warnings.push({
-            field: dropped.header || `column ${dropped.index + 1}`,
-            message: 'Company template column has no v2 import target and was ignored',
-          });
-        for (const dropped of droppedTemplateColumns)
-          v.warnings.push({
-            field: dropped.header || `column ${dropped.index + 1}`,
-            message: 'Reference-only column was ignored',
-          });
-        if (v.errors.length === 0 && v.warnings.length > 0) v.validation = 'warning';
-        validated.push(v);
       }
       let validRows = validated.filter((v) => v.errors.length === 0).length;
       let invalidRows = validated.length - validRows;
@@ -910,9 +512,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 row.normalized.continuationPreview = customerImportContinuationSchema.parse(result);
                 if (
                   row.normalized.externalVerified &&
-                  (row.normalized.continuationPreview.conflicts.length || row.normalized.continuationPreview.stage === 'review')
+                  (row.normalized.continuationPreview.conflicts.length ||
+                    row.normalized.continuationPreview.stage === 'review')
                 ) {
-                  row.errors.push(...row.normalized.continuationPreview.conflicts, ...row.normalized.continuationPreview.missingRequirements.map(message => ({ field: 'external_history', message })));
+                  row.errors.push(
+                    ...row.normalized.continuationPreview.conflicts,
+                    ...row.normalized.continuationPreview.missingRequirements.map((message) => ({
+                      field: 'external_history',
+                      message,
+                    })),
+                  );
                   row.validation = 'error';
                   row.action = 'CONFLICT';
                   const blocked = await db
@@ -966,7 +575,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sourceHash,
       });
       const payload = {
-        ...((workflowReview||reviewMatrix)?{reviewFile:{filename:'customer-import-review.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,content:Buffer.from(workflowReview?annotateCustomerWorkbook(workflowReview.bytes,workflowReview.workbook,validated):annotateFlatCustomerImport(reviewMatrix!,validated)).toString('base64')}}:{}),
+        ...(workflowReview || reviewMatrix
+          ? {
+              reviewFile: {
+                filename: 'customer-import-review.xlsx',
+                mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,
+                content: Buffer.from(
+                  workflowReview
+                    ? annotateCustomerWorkbook(
+                        workflowReview.bytes,
+                        workflowReview.workbook,
+                        validated,
+                      )
+                    : annotateFlatCustomerImport(reviewMatrix!, validated),
+                ).toString('base64'),
+              },
+            }
+          : {}),
         job: shapeJob(job as Record<string, unknown>),
         pageSize: 10,
         rows: validated.slice(0, 10).map((v, i) =>

@@ -1,6 +1,6 @@
 import type { ContactFormValues } from "../types/contact";
 
-export const DEFAULT_SYSTEM_EMAIL = "claudmarsjimenez.afhomes@gmail.com";
+export const DEFAULT_SYSTEM_EMAIL = "info@afhomes.com.ph";
 
 export function buildClientMessageMailto(payload: ContactFormValues): string {
   const name = payload.name.trim();

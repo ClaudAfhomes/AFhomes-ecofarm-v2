@@ -190,7 +190,7 @@ const CODE: OstReferralCodeRecord = {
   codeHint: 'OST-…-3456',
   useCount: 2,
   maxUses: 10,
-  expiresAt: '2026-10-28T00:00:00.000Z',
+  expiresAt: '2099-10-28T00:00:00.000Z',
   isActive: true,
   createdAt: '2026-09-28T00:00:00.000Z',
 };

@@ -435,6 +435,7 @@ function describeApplicationLoadError(error: unknown): string | undefined {
  * server-side rather than merely hidden here.
  */
 function PurchaseWorkflowPanel({ application }: { application: CustomerApplication }) {
+  const navigate = useNavigate();
   const reservations = useQuery({
     queryKey: applicationKeys.reservations(application.id),
     queryFn: () => getReservationAgreements({ application: application.id }),
@@ -469,11 +470,17 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
           detail: 'Review the offer, then decide.',
           to: null,
         }
-      : {
-          label: 'Continue draft',
-          detail: 'Complete the draft and submit.',
-          to: null,
-        }
+      : status === 'approved'
+        ? {
+            label: 'Create Reservation',
+            detail: 'Create the agreement for this approved application.',
+            to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+          }
+        : {
+            label: 'Continue draft',
+            detail: 'Complete the draft and submit.',
+            to: null,
+          }
     : finalized
       ? {
           label: 'Continue Activation',
@@ -528,7 +535,12 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
           <span className={styles.workflowNextEyebrow}>Next step</span>
           <h3 className={styles.workflowNextTitle}>{next.label}</h3>
         </div>
-
+        {reservations.isError ? (
+          <ErrorState error={reservations.error} onRetry={() => void reservations.refetch()} />
+        ) : null}
+        {reservations.isSuccess && next.to ? (
+          <Button onClick={() => navigate(next.to!)}>{next.label}</Button>
+        ) : null}
       </div>
     </section>
   );
@@ -661,7 +673,7 @@ export function CustomerApplicationEditorPage() {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isNew) return;
-    if (import.meta.env.VITEST) return;
+    if (import.meta.env.MODE === 'test') return;
     try {
       const raw = sessionStorage.getItem(DRAFT_KEY);
       if (!raw) return;
@@ -690,7 +702,7 @@ export function CustomerApplicationEditorPage() {
   // Persist the draft on change (new applications only).
   useEffect(() => {
     if (!isNew) return;
-    if (import.meta.env.VITEST) return;
+    if (import.meta.env.MODE === 'test') return;
     try {
       sessionStorage.setItem(
         DRAFT_KEY,
@@ -2013,10 +2025,16 @@ export function CustomerApplicationEditorPage() {
                   onClick={async () => {
                     try {
                       await decide.mutateAsync('approved');
-                      await proposal.refetch();
-                      await review.mutateAsync();
-                    } catch (e) {
-                      setMessage(e instanceof Error ? e.message : 'Approval failed.');
+                      const reservations = await getReservationAgreements({ application: id! }).catch((error: unknown) => {
+                        setMessage(error instanceof Error ? error.message : 'Reservation status could not be loaded.');
+                        throw error;
+                      });
+                      if (!reservations.some((reservation) => reservation.status !== 'cancelled')) {
+                        await proposal.refetch();
+                        await review.mutateAsync();
+                      }
+                    } catch {
+                      // Each mutation reports its own failure; the reservation lookup reports above.
                     }
                   }}
                   disabled={decide.isPending || review.isPending || existing.data?.status !== 'submitted'}

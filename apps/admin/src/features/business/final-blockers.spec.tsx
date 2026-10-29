@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
@@ -354,10 +354,8 @@ it('primary landline refuses letters and blocks save while the number is invalid
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  // Submit lives in the sticky footer only; it shares state with the removed header action.
-  expect(screen.getAllByRole('button', { name: 'Submit' })).toHaveLength(1);
-  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
-    expect(save).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
   expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
@@ -375,25 +373,20 @@ it('supplementary landline gets its own frontend error', async () => {
   expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
-    expect(save).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
-it('recommender contact gets its own frontend error and valid formatting is allowed', async () => {
+it('recommender contact accepts only the offered dropdown values', async () => {
   const { user } = mount(true);
   await goToHolders(user);
   fillPrimaryHolders();
   await user.click(screen.getByRole('button', { name: 'Next' }));
   const input = await screen.findByLabelText('Recommender Contact');
-  await user.type(input, '0917TEST');
-  expect(input).toHaveAttribute('aria-invalid', 'true');
-  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Submit' }))
-    expect(save).toBeDisabled();
-  await user.clear(input);
-  await user.type(input, '0917-123-4567');
-  expect(input).not.toHaveAttribute('aria-invalid');
-  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
+  expect(input.tagName).toBe('SELECT');
+  expect(within(input).queryByRole('option', { name: /0917TEST/ })).not.toBeInTheDocument();
+  fireEvent.change(input, { target: { value: '0917TEST' } });
+  expect(input).toHaveValue('');
+  expect(calls.application).not.toHaveBeenCalled();
 });
 
 it.each(['Silver', 'Bronze', 'Select plan'])(

@@ -1,0 +1,10 @@
+import type { NavItemSchema, ContactLinkSchema, SocialPlatformSchema, SocialLinkSchema, OfficeAddressSchema, SiteBrandSchema, PageSeoSettingsSchema, GlobalSeoSettingsSchema, SiteConfigSchema } from '@afhomes/contracts';
+export type NavItem = (typeof NavItemSchema)['_output'];
+export type ContactLink = (typeof ContactLinkSchema)['_output'];
+export type SocialPlatform = (typeof SocialPlatformSchema)['_output'];
+export type SocialLink = (typeof SocialLinkSchema)['_output'];
+export type OfficeAddress = (typeof OfficeAddressSchema)['_output'];
+export type SiteBrand = (typeof SiteBrandSchema)['_output'];
+export type PageSeoSettings = (typeof PageSeoSettingsSchema)['_output'];
+export type GlobalSeoSettings = (typeof GlobalSeoSettingsSchema)['_output'];
+export type SiteConfig = (typeof SiteConfigSchema)['_output'];

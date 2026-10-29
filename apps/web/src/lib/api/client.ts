@@ -13,6 +13,8 @@ import { withRequestDeadline } from '@afhomes/shared';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';
+import { isMongoAuth } from '../cookie-auth';
+import { notifyCookieAuth } from '@afhomes/shared';
 import { ApiNetworkError, ApiParseError, toApiError } from './errors';
 import {
   clearSession,
@@ -28,7 +30,7 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
     'Content-Type': 'application/json',
     ...(init?.headers as Record<string, string> | undefined),
   };
-  if (isSupabaseConfigured()) {
+  if (!isMongoAuth && isSupabaseConfigured()) {
     const { data } = (await getSupabaseClient()?.auth.getSession()) ?? {
       data: { session: null },
     };
@@ -51,7 +53,8 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
   // always 403, never 401). Heal once via rotation, then retry; if rotation
   // fails the session is dead, so clear it and let the guard redirect.
   init?.signal?.throwIfAborted();
-  if (res.status === 401 && !retried && isSupabaseConfigured()) {
+  if (res.status === 401 && isMongoAuth) notifyCookieAuth();
+  if (res.status === 401 && !retried && !isMongoAuth && isSupabaseConfigured()) {
     const healed = await tryRefreshSession();
     init?.signal?.throwIfAborted();
     if (healed) return rawRequest(path, init, true);

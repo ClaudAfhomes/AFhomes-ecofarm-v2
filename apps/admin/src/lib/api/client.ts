@@ -3,6 +3,8 @@ import { withRequestDeadline } from '@afhomes/shared';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';
+import { isMongoAuth } from '../cookie-auth';
+import { notifyCookieAuth } from '@afhomes/shared';
 import { ApiError, ApiNetworkError, ApiParseError, toApiError } from './errors';
 import {
   clearSession,
@@ -77,11 +79,12 @@ async function rawRequest(
     'Content-Type': 'application/json',
     ...(fetchInit.headers as Record<string, string> | undefined),
   };
-  const token =
-    forcedAccessToken ??
-    (auth === 'required' ? await getFreshAccessToken() : await currentAccessToken());
+  const token = isMongoAuth
+    ? null
+    : (forcedAccessToken ??
+      (auth === 'required' ? await getFreshAccessToken() : await currentAccessToken()));
   init?.signal?.throwIfAborted();
-  if (auth === 'required' && !token) {
+  if (auth === 'required' && !token && !isMongoAuth) {
     throw sessionExpired();
   }
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -101,6 +104,22 @@ async function rawRequest(
   // headers with the newly rotated token; never retry timeouts or 5xx errors.
   init?.signal?.throwIfAborted();
   if (res.status === 401 && auth === 'required') {
+    if (isMongoAuth) {
+      if (path === '/admin/afhomes/session/password') {
+        const body = await res
+          .clone()
+          .json()
+          .catch(() => null);
+        if (
+          body?.error?.details?.reason === 'CURRENT_PASSWORD_INVALID' ||
+          (body?.error?.code === 'UNAUTHORIZED' &&
+            body?.error?.message === 'Current password is incorrect')
+        )
+          return res;
+      }
+      notifyCookieAuth();
+      throw sessionExpired();
+    }
     if (!retried) {
       const refreshedToken = await getFreshAccessToken(true);
       init?.signal?.throwIfAborted();

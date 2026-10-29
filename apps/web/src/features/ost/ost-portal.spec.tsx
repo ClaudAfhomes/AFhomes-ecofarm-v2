@@ -226,7 +226,8 @@ describe('OST login', () => {
     await user.clear(screen.getByLabelText('Confirm new password'));
     await user.type(screen.getByLabelText('Confirm new password'), 'OwnPassword123');
     await user.click(screen.getByRole('button', { name: 'Save password' }));
-    expect(await screen.findByText(/Sign in with your new password/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
+    expect(authMock.signOut).toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/admin/afhomes/session/password'),
       expect.objectContaining({

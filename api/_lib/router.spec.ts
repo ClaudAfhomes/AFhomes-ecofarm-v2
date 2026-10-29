@@ -44,7 +44,7 @@ describe('business family prefixes', () => {
     }
   });
 
-  it('dispatches every points-earning route to the points handler', () => {
+  it('keeps Services earning routes disabled while preserving manual point recording', () => {
     // The bare prefix and each sub-path must all reach points.js. A shadow would
     // show up here as a different routeKey.
     for (const path of [
@@ -54,13 +54,13 @@ describe('business family prefixes', () => {
       '/api/v1/earning/purchases/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/complete',
       '/api/v1/earning/claims',
       '/api/v1/earning/claims/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/reissue',
-      '/api/v1/earning/adjust',
       '/api/v1/earning/services',
       '/api/v1/earning/rules',
     ]) {
       const q: Record<string, string | undefined> = {};
-      expect(selectHandler(path, q)?.routeKey, path).toMatch(/^operations\.redemption\//);
+      expect(selectHandler(path, q), path).toBeNull();
     }
+    expect(selectHandler('/api/v1/earning/adjust', {})?.routeKey).toBe('operations.redemption/adjust');
   });
 
   it('leaves the pre-existing /points family with memberships', () => {
@@ -120,7 +120,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/points/ledger/abc', q)?.routeKey).toBe('memberships/ledger/abc');
   });
 
-  it('routes every Phase 6 CMS endpoint through the literal CMS handler', () => {
+  it('does not route CMS endpoints while its feature flag is disabled', () => {
     const q: Record<string, string | undefined> = {};
     for (const path of [
       'public',
@@ -130,8 +130,7 @@ describe('selectHandler', () => {
       'history',
       'public/pages/about-us',
     ]) {
-      expect(selectHandler(`/api/v1/cms/${path}`, q)?.routeKey).toBe(`cms/${path}`);
-      expect(q.familyPath).toBe(path);
+      expect(selectHandler(`/api/v1/cms/${path}`, q)).toBeNull();
     }
   });
 

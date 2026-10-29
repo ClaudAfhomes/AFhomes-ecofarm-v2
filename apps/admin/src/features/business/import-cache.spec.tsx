@@ -79,6 +79,11 @@ it('successful Confirm Import invalidates actual Memberships/Lookup keys and ref
     });
     return <p>{members.data?.join(',')}</p>;
   }
+  const fetchPortal = vi.fn(async () => committed ? 'IMPORTED PORTAL SALES' : 'OLD PORTAL SALES');
+  function PortalSales() {
+    const report = useQuery({ queryKey: ['ist-portal', 'synthetic'], queryFn: fetchPortal, staleTime: Infinity });
+    return <p>{report.data}</p>;
+  }
   vi.mocked(parseCustomerImport).mockResolvedValue(preview);
   vi.mocked(confirmCustomerImport).mockImplementation(async () => {
     committed = true;
@@ -93,16 +98,19 @@ it('successful Confirm Import invalidates actual Memberships/Lookup keys and ref
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   client.setQueryData(['member-lookup', 'CLAUD'], ['stale']);
+  client.setQueryData(['team-sales', 'synthetic'], ['stale']);
   const invalidate = vi.spyOn(client, 'invalidateQueries');
   const view = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <MembershipList />
+        <PortalSales />
         <CustomerImportExportPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
   expect(await screen.findByText('OLD MEMBERSHIP')).toBeInTheDocument();
+  expect(await screen.findByText('OLD PORTAL SALES')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(/Import Google Sheet/), {
     target: { value: 'https://docs.google.com/spreadsheets/d/DisposableSheet/edit' },
   });
@@ -112,6 +120,9 @@ it('successful Confirm Import invalidates actual Memberships/Lookup keys and ref
   expect(await screen.findByText('IMPORTED MEMBERSHIP')).toBeInTheDocument();
   expect(screen.queryByText('OLD MEMBERSHIP')).not.toBeInTheDocument();
   expect(fetchMembers).toHaveBeenCalledTimes(2);
+  expect(await screen.findByText('IMPORTED PORTAL SALES')).toBeInTheDocument();
+  expect(fetchPortal).toHaveBeenCalledTimes(2);
+  expect(client.getQueryState(['team-sales', 'synthetic'])?.isInvalidated).toBe(true);
   await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['memberships'] }));
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ['member-lookup'] });
   expect(client.getQueryState(['member-lookup', 'CLAUD'])?.isInvalidated).toBe(true);

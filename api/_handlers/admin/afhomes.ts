@@ -1,3 +1,4 @@
+import { projectDashboard } from '../../_lib/dashboard-projection.js';
 import { storedAccreditationNumbers } from '../../_lib/accreditation-numbers.js';
 import {
   afHomesModuleKeySchema,
@@ -217,52 +218,8 @@ async function hasReference(db: Db, table: string, column: string, id: string) {
   return (data ?? []).length > 0;
 }
 
-export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
-  readonly [label: string, table: string, column: string]
-> = [
-  ['sales', 'card_sales', 'seller_staff_id'],
-  ['sales', 'card_sales', 'created_by'],
-  ['commissions', 'commissions', 'beneficiary_staff_id'],
-  ['commissions', 'commissions', 'qualified_by'],
-  ['commissions', 'commissions', 'paid_by'],
-  ['commission rules', 'commission_rules', 'created_by'],
-  ['commission rules', 'commission_rules', 'updated_by'],
-  ['genealogy', 'referral_relationships', 'subject_staff_id'],
-  ['genealogy', 'referral_relationships', 'upline_staff_id'],
-  ['genealogy', 'referral_relationships', 'assigned_by'],
-  ['genealogy', 'card_sale_hierarchy_snapshots', 'ancestor_staff_id'],
-  ['customer referrals', 'customers', 'referred_by_staff_id'],
-  ['customer records', 'customers', 'created_by'],
-  ['OST records', 'ost_members', 'id'],
-  ['OST records', 'referral_codes', 'sponsor_staff_id'],
-  ['OST records', 'referral_codes', 'created_by'],
-  ['OST records', 'ost_applications', 'sponsor_staff_id'],
-  ['OST records', 'ost_applications', 'reviewed_by'],
-  ['OST records', 'ost_members', 'sponsor_staff_id'],
-  ['OST records', 'ost_members', 'approved_by'],
-  ['redemptions', 'redemptions', 'redeemed_by'],
-  ['redemptions', 'redemptions', 'voided_by'],
-  ['documents', 'identity_documents', 'uploaded_by'],
-  ['documents', 'identity_documents', 'reviewed_by'],
-  ['payments', 'payments', 'recorded_by'],
-  ['payments', 'payments', 'verified_by'],
-  ['memberships', 'memberships', 'activated_by'],
-  ['memberships', 'memberships', 'card_issued_by'],
-  ['qualification reviews', 'final_qualifications', 'reviewed_by'],
-  ['points history', 'points_ledger', 'actor_id'],
-  ['customer onboarding', 'customer_onboarding_tokens', 'created_by'],
-  ['CMS history', 'cms_documents', 'created_by'],
-  ['CMS history', 'cms_documents', 'updated_by'],
-  ['CMS history', 'cms_documents', 'published_by'],
-  ['CMS history', 'cms_document_versions', 'created_by'],
-  ['CMS history', 'cms_pages', 'created_by'],
-  ['CMS history', 'cms_pages', 'updated_by'],
-  ['CMS history', 'cms_pages', 'published_by'],
-  ['CMS history', 'cms_page_versions', 'created_by'],
-  ['CMS history', 'cms_media_assets', 'created_by'],
-  ['audit history', 'audit_events', 'actor_id'],
-  ['staff invitations', 'staff_invitations', 'invited_by'],
-];
+export { STAFF_DELETE_BLOCKER_CHECKS } from '../../_lib/staff-history.js';
+import { STAFF_DELETE_BLOCKER_CHECKS } from '../../_lib/staff-history.js';
 
 async function isCommissionRuleTarget(db: Db, id: string): Promise<boolean> {
   const { data, error } = await db
@@ -579,15 +536,6 @@ async function retireDownlineEdges(db: Db, staffId: string): Promise<number> {
   return (data ?? []).length;
 }
 
-function cents(values: unknown[]) {
-  let total = 0n;
-  for (const value of values) {
-    const match = String(value ?? '0').match(/^(\d+)(?:\.(\d{1,2}))?$/);
-    if (match) total += BigInt(match[1]!) * 100n + BigInt((match[2] ?? '').padEnd(2, '0'));
-  }
-  return `${total / 100n}.${String(total % 100n).padStart(2, '0')}`;
-}
-
 async function dashboard(db: Db, range: string) {
   const [
     { data: sales },
@@ -608,123 +556,7 @@ async function dashboard(db: Db, range: string) {
     db.from('ost_applications').select('status'),
     db.from('staff_users').select('status'),
   ]);
-  const verifiedStatuses = new Set([
-    'payment_verified',
-    'final_qualification_pending',
-    'qualified',
-    'activated',
-  ]);
-  const verifiedSales = (sales ?? []).filter((s: { status: string }) =>
-    verifiedStatuses.has(s.status),
-  ).length;
-  const verifiedPayments = (payments ?? []).filter(
-    (p: { status: string }) => p.status === 'verified',
-  );
-  const daysByRange: Record<string, number> = { today: 1, week: 7, month: 31, year: 366 };
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - (daysByRange[range] ?? daysByRange.month!) + 1);
-  cutoff.setUTCHours(0, 0, 0, 0);
-  const trend = new Map<
-    string,
-    {
-      period: string;
-      verifiedSales: number;
-      collections: string;
-      activatedCards: number;
-      pointsRedeemed: number;
-      collectionValues: unknown[];
-    }
-  >();
-  const pointFor = (value: unknown) => {
-    if (!value) return undefined;
-    const date = new Date(String(value));
-    if (Number.isNaN(date.valueOf()) || date < cutoff) return undefined;
-    const period = date.toISOString().slice(0, 10);
-    let point = trend.get(period);
-    if (!point) {
-      point = {
-        period,
-        verifiedSales: 0,
-        collections: '0.00',
-        activatedCards: 0,
-        pointsRedeemed: 0,
-        collectionValues: [],
-      };
-      trend.set(period, point);
-    }
-    return point;
-  };
-  for (const sale of sales ?? []) {
-    if (verifiedStatuses.has(sale.status)) {
-      const point = pointFor(sale.created_at);
-      if (point) point.verifiedSales += 1;
-    }
-  }
-  for (const payment of verifiedPayments) {
-    const point = pointFor(payment.verified_at);
-    if (point) point.collectionValues.push(payment.amount);
-  }
-  for (const membership of memberships ?? []) {
-    if (membership.status === 'active') {
-      const point = pointFor(membership.activated_at);
-      if (point) point.activatedCards += 1;
-    }
-  }
-  const trendPoints = [...trend.values()]
-    .sort((a, b) => a.period.localeCompare(b.period))
-    .map(({ collectionValues, ...point }) => ({ ...point, collections: cents(collectionValues) }));
-  return {
-    totals: {
-      verifiedSales,
-      verifiedCollections: cents(verifiedPayments.map((p: { amount: string }) => p.amount)),
-      activeMemberships: (memberships ?? []).filter(
-        (m: { status: string }) => m.status === 'active',
-      ).length,
-      pendingAccounts: (sales ?? []).filter((s: { status: string }) => s.status === 'pending')
-        .length,
-      downPaymentAccounts: (sales ?? []).filter(
-        (s: { status: string }) => s.status === 'down_payment',
-      ).length,
-      overdueAccounts: (sales ?? []).filter((s: { status: string }) => s.status === 'overdue')
-        .length,
-      pointsIssued: (memberships ?? []).reduce(
-        (sum: number, m: { points_balance: number }) => sum + Number(m.points_balance ?? 0),
-        0,
-      ),
-      pointsRedeemed: 0,
-      pendingQualifications: (qualifications ?? []).filter(
-        (q: { status: string }) => q.status === 'pending',
-      ).length,
-      earnedUnpaidCommissions: cents(
-        (commissions ?? [])
-          .filter((c: { status: string }) => c.status === 'earned')
-          .map((c: { amount: string }) => c.amount),
-      ),
-      activeSellers: (ost ?? []).filter((o: { status: string }) => o.status === 'active').length,
-      inactiveSellers: (ost ?? []).filter((o: { status: string }) => o.status !== 'active').length,
-      activeEmployees: (staff ?? []).filter((s: { status: string }) => s.status === 'active')
-        .length,
-      inactiveEmployees: (staff ?? []).filter((s: { status: string }) => s.status !== 'active')
-        .length,
-    },
-    queues: {
-      paymentVerification: (payments ?? []).filter(
-        (p: { status: string }) => p.status === 'recorded',
-      ).length,
-      cardActivation: (sales ?? []).filter((s: { status: string }) => s.status === 'qualified')
-        .length,
-      finalQualification: (sales ?? []).filter(
-        (s: { status: string }) => s.status === 'final_qualification_pending',
-      ).length,
-      ostRegistrations: (ostApplications ?? []).filter((application: { status: string }) =>
-        ['submitted', 'under_review'].includes(application.status),
-      ).length,
-      commissionPayouts: (commissions ?? []).filter(
-        (c: { status: string }) => c.status === 'earned',
-      ).length,
-    },
-    trend: trendPoints,
-  };
+  return projectDashboard({ sales: sales ?? [], payments: payments ?? [], memberships: memberships ?? [], qualifications: qualifications ?? [], commissions: commissions ?? [], ost: ost ?? [], ostApplications: ostApplications ?? [], staff: staff ?? [] }, range);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

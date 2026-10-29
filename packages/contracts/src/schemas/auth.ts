@@ -12,6 +12,13 @@ import { z } from 'zod';
 
 import { customerStatusSchema } from './lifecycle.js';
 
+/** Browser-safe Better Auth projection; session tokens are deliberately excluded. */
+export const cookieAuthSessionSchema = z.object({
+  user: z.object({ id: z.string().uuid(), email: z.string(), twoFactorEnabled: z.boolean().optional() }),
+  session: z.object({ id: z.string(), expiresAt: z.string() }),
+}).nullable();
+export const cookieAuthSignInSchema = z.object({ twoFactorRedirect: z.boolean().optional() });
+
 export const authPortalsSchema = z.object({
   staff: z
     .object({

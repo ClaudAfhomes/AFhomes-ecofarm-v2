@@ -20,6 +20,7 @@ import {
   SEX_OPTIONS,
   SUFFIX_OPTIONS,
   tinNumberSchema,
+  optionalContactNumberSchema,
 } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
 import { Button, Select } from '@afhomes/ui';
@@ -443,7 +444,7 @@ export function HolderFields({
             onFocus={(event) => event.currentTarget.select()}
           />
           {value.cityMunicipalityCode && !value.postalCode ? (
-            <small>No published code. Leave blank.</small>
+            <small>Postal reference needs review for this location.</small>
           ) : null}
         </label>
         <Field
@@ -719,10 +720,10 @@ export function RecommenderFields({
 
   // Build contact options from selected recommenders
   const contactOptions = contactsQuery.data
-    ? Object.entries(contactsQuery.data).flatMap(([staffId, { phone, email }]) => {
+    ? Object.entries(contactsQuery.data).flatMap(([staffId, { phone }]) => {
         const opts: { value: string; label: string }[] = [];
-        if (phone) opts.push({ value: phone, label: `${phone} (${chainNames[staffId] ?? 'Recommender'})` });
-        if (email) opts.push({ value: email, label: `${email} (${chainNames[staffId] ?? 'Recommender'})` });
+        if (phone && optionalContactNumberSchema.safeParse(phone).success)
+          opts.push({ value: phone, label: `${phone} (${chainNames[staffId] ?? 'Recommender'})` });
         return opts;
       })
     : [];

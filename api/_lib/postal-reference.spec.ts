@@ -5,6 +5,17 @@ import { vi, afterEach } from 'vitest';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('national postal reference', () => {
+  it('matches Nagtipunan to the reference-era Abbag name only within Quirino', () => {
+    expect(resolvePostalCode('Quirino', 'Nagtipunan', 'Anak')).toEqual({
+      status: 'matched',
+      postalCode: '3405',
+    });
+    expect(resolvePostalCode('Quirino', 'Nagtipunan (Abbag)', 'Anak')).toEqual({
+      status: 'matched',
+      postalCode: '3405',
+    });
+    expect(resolvePostalCode('Isabela', 'Nagtipunan', 'Anak').status).toBe('review');
+  });
   it.each([
     ['Laguna', 'Victoria', '4011'],
     ['Laguna', 'Calauan', '4012'],

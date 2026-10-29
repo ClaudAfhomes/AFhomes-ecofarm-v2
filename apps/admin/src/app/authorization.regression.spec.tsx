@@ -92,7 +92,7 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
    * must therefore SEE the sale screen while being denied the two screens that
    * would let them administer pricing or verify their own money.
    */
-  it('shows a GSD the sale screen but hides the verification screen', () => {
+  it('hides disabled Services even when the GSD has effective permissions', () => {
     const gsd: AfHomesPermission[] = [
       view('dashboard.view'),
       { ...view('operations.sales'), canCreate: true },
@@ -115,12 +115,12 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
     const labels = declared.join(' | ');
 
     // Selling is the GSD's job.
-    expect(labels).toContain('New Sale');
+    expect(labels).not.toContain('New Sale');
     // `employee` holds `operations.catalog` VIEW, because it needs the catalog to
     // sell from and redeem against, so the Products & Services screen stays
     // readable: read is enough to explain a sale. It is WITHHELD at the write
     // controls instead, and the server refuses those writes regardless.
-    expect(labels).toContain('Catalog');
+    expect(labels).not.toContain('Catalog');
     // Verification is never the seller's, on its own key the GSD does not hold.
     expect(labels).not.toContain('Sales Records & Verification');
   });

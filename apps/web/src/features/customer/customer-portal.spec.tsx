@@ -1096,3 +1096,9 @@ describe('points history pagination', () => {
     expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
   });
 });
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
+});

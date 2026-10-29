@@ -384,6 +384,8 @@ export function CustomerImportExportPage() {
       void client.invalidateQueries({ queryKey: sharedScopes.memberships });
       void client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
       void client.invalidateQueries({ queryKey: sharedScopes.analytics });
+      void client.invalidateQueries({ queryKey: ['ist-portal'] });
+      void client.invalidateQueries({ queryKey: ['team-sales'] });
       void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
     onError: (error) => {

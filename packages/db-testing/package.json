@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Local PostgreSQL integration test harness. Owns embedded-postgres so the deployed runtime never installs it.",
+  "description": "Local database integration test harness (PostgreSQL for Supabase, MongoDB for MongoDB conversion).",
   "scripts": {
     "test:db:customer-workbook": "node --import tsx scripts/test-ten-customer-workbook.mjs",
     "test:db:external-import": "node --import tsx scripts/test-external-customer-import.mjs",
@@ -11,6 +11,10 @@
     "test:db:harness": "node scripts/test-db-harness.mjs"
   },
   "devDependencies": {
-    "embedded-postgres": "^18.4.0-beta.17"
+    "embedded-postgres": "^18.4.0-beta.17",
+    "mongodb-memory-server": "^11.3.0"
+  },
+  "dependencies": {
+    "mongodb": "7.7.0"
   }
 }

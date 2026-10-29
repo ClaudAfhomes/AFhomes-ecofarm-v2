@@ -71,9 +71,18 @@ const provinceAlias: Record<string, string> = {
   quezon: 'quezon province',
 };
 const provinceKey = (name: string) => provinceAlias[key(name)] ?? key(name);
+// PHLPost lists Nagtipunan; the pinned reference retains its older "(Abbag)" label.
+// https://phlpost.gov.ph/zip-code-locator/ (verified 2026-10-28)
+const localityAlias: Record<string, string> = {
+  'quirino:nagtipunan': 'quirino:nagtipunan abbag',
+};
+const localityKey = (province: string, locality: string) => {
+  const scope = `${provinceKey(province)}:${key(locality)}`;
+  return localityAlias[scope] ?? scope;
+};
 const byLocality = new Map<string, typeof rows>();
 for (const row of rows) {
-  const scopeKey = `${provinceKey(row[0])}:${key(row[1])}`;
+  const scopeKey = localityKey(row[0], row[1]);
   const entries = byLocality.get(scopeKey) ?? [];
   entries.push(row);
   byLocality.set(scopeKey, entries);
@@ -85,11 +94,11 @@ export function resolvePostalCode(
   locality: string,
   barangay = '',
 ): { status: 'matched'; postalCode: string } | { status: 'review'; reason: string } {
-  const scope = byLocality.get(`${provinceKey(province)}:${key(locality)}`) ?? [];
+  const scope = byLocality.get(localityKey(province, locality)) ?? [];
   if (
     barangay &&
     key(barangay) !== key(locality) &&
-    byLocality.has(`${provinceKey(province)}:${key(barangay)}`)
+    byLocality.has(localityKey(province, barangay))
   )
     return { status: 'review', reason: 'Postal district requires an explicit parent-city mapping' };
   const exact = scope.filter(([, , district]) => district && key(district) === key(barangay));

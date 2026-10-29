@@ -27,11 +27,11 @@ export const saveCmsDocument = (
     cmsDocumentSchema,
     json('PATCH', { value, expectedVersion, changeSummary }),
   );
-export const publishCmsDocument = (key: CmsDocumentKey, publish: boolean) =>
+export const publishCmsDocument = (key: CmsDocumentKey, publish: boolean, expectedVersion: number) =>
   request(
     `/cms/documents/${key}/${publish ? 'publish' : 'unpublish'}`,
     cmsDocumentSchema,
-    json('POST'),
+    json('POST', { expectedVersion }),
   );
 
 export const getCmsPages = () => requestList('/cms/pages', cmsPageSchema);
@@ -39,8 +39,8 @@ export const createCmsPage = (body: unknown) =>
   request('/cms/pages', cmsPageSchema, json('POST', body));
 export const updateCmsPage = (id: string, body: unknown) =>
   request(`/cms/pages/${id}`, cmsPageSchema, json('PATCH', body));
-export const publishCmsPage = (id: string, publish: boolean) =>
-  request(`/cms/pages/${id}/${publish ? 'publish' : 'unpublish'}`, cmsPageSchema, json('POST'));
+export const publishCmsPage = (id: string, publish: boolean, expectedVersion: number) =>
+  request(`/cms/pages/${id}/${publish ? 'publish' : 'unpublish'}`, cmsPageSchema, json('POST', { expectedVersion }));
 
 export const getCmsMedia = () => requestList('/cms/media', cmsMediaSchema);
 export const uploadCmsMedia = (body: unknown) =>

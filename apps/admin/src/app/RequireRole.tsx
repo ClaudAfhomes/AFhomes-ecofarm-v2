@@ -6,6 +6,7 @@ import { entryPortal, loginPathFor } from '../lib/portal';
 import { canAccessNavTarget } from './navigation';
 import styles from './RequireRole.module.css';
 import { operationsPath, staffPortalPath } from '@afhomes/contracts';
+import { isMongoAuth } from '../lib/cookie-auth';
 
 function Loading() {
   return (
@@ -24,6 +25,8 @@ export function RequireRole({ children }: { children: ReactNode }) {
   const { status, user, sessionError, revalidate } = useSession();
   const location = useLocation();
   if (status === 'loading') return <Loading />;
+  if (!isMongoAuth && status === 'mfa-pending') return operationsPath(location.pathname) === '/admin/mfa'
+    ? <>{children}</> : <Navigate to="/admin/mfa" replace />;
   if (status !== 'authenticated') {
     // Return to the entry the user came through, so a staff session that
     // expired mid-shift lands on the Staff Login, not the admin entry.
@@ -38,7 +41,7 @@ export function RequireRole({ children }: { children: ReactNode }) {
     return <Navigate to={staffPortalPath(user?.roleSlug, '/admin/profile')} replace />;
   }
   if (
-    user?.mustChangePassword !== true &&
+    !isMongoAuth && user?.mustChangePassword !== true &&
     user?.mfaRequired &&
     operationsPath(location.pathname) !== '/admin/mfa'
   )

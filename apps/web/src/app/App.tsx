@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
 import { NotFound } from '@afhomes/ui';
+import { FEATURE_FLAGS } from '@afhomes/shared';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
 import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
@@ -137,8 +138,8 @@ export default function App() {
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<CustomerDashboardPage />} />
         <Route path="membership" element={<CustomerMembershipPage />} />
-        <Route path="points" element={<CustomerPointsPage />} />
-        <Route path="redemptions" element={<CustomerRedemptionsPage />} />
+        <Route path="points" element={FEATURE_FLAGS.services ? <CustomerPointsPage /> : <NotFound />} />
+        <Route path="redemptions" element={FEATURE_FLAGS.redemption ? <CustomerRedemptionsPage /> : <NotFound />} />
         <Route path="payments" element={<CustomerPaymentsPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
         <Route path="*" element={<NotFound />} />
