@@ -790,3 +790,4 @@ export * from './schemas/ist-portal.js';
 export * from './schemas/imported-sales.js';
 
 export * from './schemas/cms-content.js';
+export * from './schemas/media.js';

@@ -170,6 +170,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     ],
   },
   {
+    to: '/admin/media',
+    label: 'Media Library',
+    icon: 'image',
+    module: 'cms.media',
+  },
+  {
     to: '/admin/cms',
     label: 'Website CMS',
     icon: 'image',
@@ -273,6 +279,7 @@ export const EXTRA_GATED_ROUTES: readonly {
   { pathPrefix: '/admin/ist/team-commissions', module: 'network.commissions' },
   { pathPrefix: '/admin/ist/accreditation', module: 'dashboard.view' },
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
+  { pathPrefix: '/admin/media', module: 'cms.media' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
   // `/admin/documents` list/review route removed; the scan travels with the
   // application. The `sales.id_documents` module still gates the image on the

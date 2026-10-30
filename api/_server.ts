@@ -16,6 +16,7 @@ import { createMongoClient } from './_lib/mongodb.js';
 import { createMongoPhase5Runtime } from './_lib/mongo-runtime.js';
 import { createS3PrivateObjectStore } from './_lib/private-object-store.js';
 import { createMongoSearchMaintenance } from './_lib/search-maintenance.mongo.js';
+import { createLocalPublicMediaStore } from './_lib/public-media-store.js';
 import {
   describeProductionConfig,
   loadProductionConfig,
@@ -29,7 +30,7 @@ import {
 
 function safeFailure(stage: string, error: unknown): string {
   const suffix =
-    stage === 'configuration' && error instanceof Error && error.message
+    ['configuration', 'media'].includes(stage) && error instanceof Error && error.message
       ? ` ${error.message}.`
       : ' Check the environment file and approved database access.';
   return `[api] startup failed during ${stage}.${suffix}`;
@@ -76,6 +77,10 @@ async function main(): Promise<void> {
     // configuration, so a development store can never be selected here.
     const objects = createS3PrivateObjectStore(process.env);
 
+    stage = 'media';
+    const mediaStore = createLocalPublicMediaStore(process.env);
+    if (mediaStore) await mediaStore.totalBytes();
+
     stage = 'runtime';
     const runtime = createMongoPhase5Runtime(
       db,
@@ -83,7 +88,7 @@ async function main(): Promise<void> {
       process.env,
       {},
       objects ?? null,
-      { clientIp: (req) => resolveClientIp(req, config!.trustProxy) },
+      { clientIp: (req) => resolveClientIp(req, config!.trustProxy), mediaStore: mediaStore ?? null },
     );
 
     stage = 'maintenance';

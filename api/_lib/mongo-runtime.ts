@@ -49,10 +49,12 @@ import { createMongoOstHandler } from './ost.mongo.js';
 import { createMongoProfilePhotoHandler, setupMongoProfilePhotos } from './profile-photo.mongo.js';
 import { createS3PrivateObjectStore, type PrivateObjectStore } from './private-object-store.js';
 import { createAddressHandler } from '../_handlers/_address.js';
+import { createMongoOfficialFormsHandler, setupMongoOfficialForms } from './official-forms.mongo.js';
 import {
-  createMongoOfficialFormsHandler,
-  setupMongoOfficialForms,
-} from './official-forms.mongo.js';
+  createLocalPublicMediaStore,
+  type PublicMediaStore,
+} from './public-media-store.js';
+import { createMongoMediaHandlers } from './media.mongo.js';
 import { FEATURE_FLAGS, isFeaturePathEnabled } from '@afhomes/shared';
 import { deny, fail } from './handler-kit.js';
 import type { VercelRequest, VercelResponse } from './http.js';
@@ -84,11 +86,18 @@ export function createMongoPhase5Runtime(
   env: NodeJS.ProcessEnv,
   delivery: AuthDelivery = {},
   objectStore?: PrivateObjectStore | null,
-  runtimeOptions: { clientIp?: (req: IncomingMessage) => string } = {},
+  runtimeOptions: {
+    clientIp?: (req: IncomingMessage) => string;
+    mediaStore?: PublicMediaStore | null;
+  } = {},
 ) {
   const auth = createAfHomesAuth(db, client, env, delivery),
     options = getAuthOptions(env);
   const objects = objectStore === null ? undefined : objectStore ?? createS3PrivateObjectStore(env);
+  const mediaStore =
+    runtimeOptions.mediaStore === null
+      ? undefined
+      : runtimeOptions.mediaStore ?? createLocalPublicMediaStore(env);
   const sessions = createMongoSessionVerifier(db, auth),
     access = createMongoStaffAccess(db, sessions, env);
   const catalog = createMongoCatalogHandlers(db, client, access.authorize);
@@ -130,6 +139,7 @@ export function createMongoPhase5Runtime(
     authorizeStaff: access.authorize,
   });
   const officialForms = createMongoOfficialFormsHandler(db, client, access.authorize);
+  const media = createMongoMediaHandlers(db, client, access.authorize, mediaStore, env, options.trustedOrigins);
   const identity = createAuthNodeHandler(auth.handler, options.baseURL, {
     clientIp: runtimeOptions.clientIp,
   });
@@ -322,6 +332,7 @@ export function createMongoPhase5Runtime(
           ? importContinuation.handler(req, res) : importClaims.handler(req, res);
       },
       address,
+      media: media.handler,
       customer: portal.portal,
       'official-forms': officialForms,
       'ist-portal': istPortal,
@@ -354,6 +365,8 @@ export function createMongoPhase5Runtime(
       const path = new URL(req.url ?? '/', options.baseURL).pathname;
       if (await documents.upload(req,res)) return;
       if (await importClaims.upload(req, res)) return;
+      if (await media.upload(req, res)) return;
+      if (mediaStore?.serve && (await mediaStore.serve(req, res))) return;
       if (objects?.serve && (await objects.serve(req, res))) return;
       if (path.startsWith('/api/v1/auth/identity/')) return await identity(req, res);
       if (!path.startsWith('/api/v1/')) {

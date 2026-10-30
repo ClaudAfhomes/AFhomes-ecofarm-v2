@@ -8,6 +8,7 @@
  * Usage: pnpm --filter api build:artifact && pnpm exec tsx api/scripts/verify-production-artifact.ts
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -15,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTestReplica } from '../_lib/testing/mongo-replica.js';
 import { seedPhase5Fixture } from '../_lib/testing/phase5-fixture.js';
+import type { MongoRow } from '../_lib/customer-activation.mongo.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const built = path.join(root, 'api', 'dist');
@@ -29,6 +31,10 @@ cpSync(built, artifactRoot, { recursive: true });
 const artifact = path.join(artifactRoot, 'server.js');
 const ORIGIN = 'https://portal.afhomes.test';
 const SECRET = `artifact-verification-${'s'.repeat(32)}`;
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64',
+);
 const failures: string[] = [];
 let child: ChildProcess | undefined;
 
@@ -64,9 +70,11 @@ async function waitFor(url: string, timeoutMs = 20_000): Promise<Response | null
 }
 
 const replica = await createTestReplica({ timeoutMS: 20_000 });
+let mediaRoot: string | undefined;
 try {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
+  mediaRoot = mkdtempSync(path.join(os.tmpdir(), 'afhomes-artifact-media-'));
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env))
     if (/^(MONGODB_|BETTER_AUTH_|SUPABASE_|AFHOMES_|DATABASE_URL|VITE_)/.test(key)) delete env[key];
@@ -81,6 +89,8 @@ try {
     AFHOMES_AUTH_TRUSTED_ORIGINS: ORIGIN,
     AFHOMES_WEB_URL: ORIGIN,
     AFHOMES_ENABLE_SEARCH_MAINTENANCE: 'false',
+    AFHOMES_PUBLIC_MEDIA_ROOT: mediaRoot,
+    AFHOMES_PUBLIC_MEDIA_MAX_BYTES: '1048576',
   });
 
   child = spawn(process.execPath, [artifact], {
@@ -132,6 +142,24 @@ try {
   await replica.db
     .collection('staff_users')
     .updateOne({ email: fixture.staff.email }, { $set: { must_change_password: false } });
+  const assignment = await replica.db
+    .collection('staff_role_assignments')
+    .findOne({ staff_id: fixture.staff.id });
+  const mediaModule = randomUUID();
+  await replica.db
+    .collection<MongoRow>('modules')
+    .insertOne({ _id: mediaModule, key: 'cms.media', is_active: true });
+  await replica.db
+    .collection<MongoRow>('role_permissions')
+    .insertOne({
+    _id: randomUUID(),
+    role_id: assignment?.role_id,
+    module_id: mediaModule,
+    can_view: true,
+    can_create: true,
+    can_update: true,
+    can_delete: true,
+  });
 
   const login = await fetch(`${base}/api/v1/auth/identity/sign-in/email`, {
     method: 'POST',
@@ -154,6 +182,77 @@ try {
     authenticated.status === 200,
     String(authenticated.status),
   );
+
+  const anonymousUpload = await fetch(`${base}/api/v1/media?name=anonymous.png`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/png' },
+    body: PNG,
+  });
+  check(
+    'anonymous media upload is rejected',
+    anonymousUpload.status === 401 || anonymousUpload.status === 403,
+    String(anonymousUpload.status),
+  );
+
+  const created = await fetch(
+    `${base}/api/v1/media?name=hero.png&alt=Artifact%20hero&category=website`,
+    {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'image/png' },
+      body: PNG,
+    },
+  );
+  check('authorized image upload succeeds', created.status === 201, String(created.status));
+  const createdBody = created.status === 201 ? await created.json() : {};
+  check(
+    'upload returns a stable public URL',
+    typeof createdBody.publicUrl === 'string' &&
+      createdBody.publicUrl === `${ORIGIN}${new URL(createdBody.publicUrl).pathname}`,
+  );
+  const mediaPath =
+    typeof createdBody.publicUrl === 'string'
+      ? new URL(createdBody.publicUrl).pathname
+      : '/media/not-created.png';
+  const mediaId =
+    typeof createdBody.id === 'string'
+      ? createdBody.id
+      : '00000000-0000-4000-8000-000000000000';
+  const publicFile = await fetch(`${base}${mediaPath}`);
+  check('public media bytes are served', publicFile.status === 200, String(publicFile.status));
+  check(
+    'public media is immutable and sniff-proof',
+    publicFile.headers.get('content-type') === 'image/png' &&
+      publicFile.headers.get('cache-control')?.includes('immutable') === true &&
+      publicFile.headers.get('x-content-type-options') === 'nosniff',
+  );
+
+  const listed = await fetch(`${base}/api/v1/media`, { headers: { Cookie: cookie } });
+  const listedBody = listed.status === 200 ? await listed.json() : {};
+  check(
+    'authorized media listing returns the upload',
+    listedBody.data?.some((item: { id: string }) => item.id === mediaId) === true,
+  );
+
+  const unpublished = await fetch(`${base}/api/v1/media/${mediaId}`, {
+    method: 'PATCH',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'unpublished' }),
+  });
+  check('media can be unpublished', unpublished.status === 200, String(unpublished.status));
+  check(
+    'unpublished media is no longer public',
+    (await fetch(`${base}${mediaPath}`)).status === 404,
+  );
+
+  const deleted = await fetch(`${base}/api/v1/media/${mediaId}?confirm=true`, {
+    method: 'DELETE',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+  });
+  check('media can be deleted with confirmation', deleted.status === 200, String(deleted.status));
+  const afterDelete = await fetch(`${base}/api/v1/media`, { headers: { Cookie: cookie } });
+  const afterDeleteBody = afterDelete.status === 200 ? await afterDelete.json() : {};
+  check('deleted media leaves no metadata', afterDeleteBody.meta?.total === 0);
+
   const signOut = await fetch(`${base}/api/v1/auth/identity/sign-out`, {
     method: 'POST',
     headers: { Origin: ORIGIN, Cookie: cookie },
@@ -286,6 +385,7 @@ try {
   if (child && !child.killed) child.kill();
   await replica.stop();
   rmSync(artifactRoot, { recursive: true, force: true });
+  if (mediaRoot) rmSync(mediaRoot, { recursive: true, force: true });
 }
 
 if (failures.length) {

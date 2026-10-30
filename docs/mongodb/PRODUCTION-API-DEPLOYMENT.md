@@ -163,6 +163,9 @@ Optional:
 | `AFHOMES_SHUTDOWN_GRACE_MS` | default `25000`, range `1000..30000` |
 | `AFHOMES_MAX_REQUEST_BYTES` | default `16777216` (16 MiB), range `65536..67108864` |
 | `AFHOMES_ASSET_ROOT` | absolute path to an external `assets` directory |
+| `AFHOMES_PUBLIC_MEDIA_ROOT` | absolute persistent public media root (see `PUBLIC-MEDIA-LIBRARY.md`) |
+| `AFHOMES_PUBLIC_MEDIA_MAX_BYTES` | per-file public media cap |
+| `AFHOMES_PUBLIC_MEDIA_MAX_TOTAL_BYTES` | total public media cap |
 | `AFHOMES_RELEASE_ID` | short release label shown at startup |
 | `SMTP_*`, `EMAIL_FROM` | onboarding email delivery |
 | `OCR_PROVIDER_URL`, `OCR_PROVIDER_API_KEY` | optional OCR provider |
@@ -238,6 +241,10 @@ Notes:
   `allow 127.0.0.1; deny all;` location if an external monitor needs it.
 
 ## Private file storage
+
+Public website media is separate and documented in `PUBLIC-MEDIA-LIBRARY.md`.
+It uses the persistent local directory `/var/lib/afhomes/media/public` and never
+shares a path or authorization rule with private business files.
 
 `AFHOMES_PRIVATE_STORAGE_PROVIDER=s3` uses the existing S3-compatible private
 bucket implementation. Files are never served from the release directory.
