@@ -4,6 +4,9 @@
 **/*.spec.ts
 **/*.spec.tsx
 api/dev-server.ts
+# Standalone production artifact and operator scripts are not Vercel functions.
+api/dist/
+api/scripts/
 # Test-only harness (Supabase fake + fixtures). Never imported by production
 # code; excluded so it cannot reach a deployment snapshot.
 api/_lib/testing/

@@ -48,7 +48,7 @@ import {
 import { createMongoOstHandler } from './ost.mongo.js';
 import { createMongoProfilePhotoHandler, setupMongoProfilePhotos } from './profile-photo.mongo.js';
 import { createS3PrivateObjectStore, type PrivateObjectStore } from './private-object-store.js';
-import { createAddressHandler } from '../_handlers/address.js';
+import { createAddressHandler } from '../_handlers/_address.js';
 import {
   createMongoOfficialFormsHandler,
   setupMongoOfficialForms,
@@ -83,11 +83,12 @@ export function createMongoPhase5Runtime(
   client: MongoClient,
   env: NodeJS.ProcessEnv,
   delivery: AuthDelivery = {},
-  objectStore?: PrivateObjectStore,
+  objectStore?: PrivateObjectStore | null,
+  runtimeOptions: { clientIp?: (req: IncomingMessage) => string } = {},
 ) {
   const auth = createAfHomesAuth(db, client, env, delivery),
     options = getAuthOptions(env);
-  const objects = objectStore ?? createS3PrivateObjectStore(env);
+  const objects = objectStore === null ? undefined : objectStore ?? createS3PrivateObjectStore(env);
   const sessions = createMongoSessionVerifier(db, auth),
     access = createMongoStaffAccess(db, sessions, env);
   const catalog = createMongoCatalogHandlers(db, client, access.authorize);
@@ -129,7 +130,9 @@ export function createMongoPhase5Runtime(
     authorizeStaff: access.authorize,
   });
   const officialForms = createMongoOfficialFormsHandler(db, client, access.authorize);
-  const identity = createAuthNodeHandler(auth.handler, options.baseURL);
+  const identity = createAuthNodeHandler(auth.handler, options.baseURL, {
+    clientIp: runtimeOptions.clientIp,
+  });
   const col = (name: string) => db.collection<MongoRow>(name);
 
   const business = async (path: string, req: VercelRequest, res: VercelResponse) => {

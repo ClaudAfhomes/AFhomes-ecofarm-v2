@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "cd .. && tsx watch api/dev-server.ts",
+    "build:artifact": "node scripts/build-api.mjs",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -25,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/nodemailer": "8.0.2",
+    "esbuild": "0.28.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }

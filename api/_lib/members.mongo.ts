@@ -14,7 +14,7 @@ import {
   type MemberPosition,
 } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
-import { permissionsAreSubset } from './afhomes-access.js';
+import { permissionsAreSubset } from './afhomes-permissions.js';
 import { transferMongoMemberKind } from './member-kind-transfer.mongo.js';
 import { updateMongoMemberProfile } from './member-profile-update.mongo.js';
 import { transferMongoOstTeam } from './member-team-transfer.mongo.js';

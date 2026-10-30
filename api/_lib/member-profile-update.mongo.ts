@@ -6,7 +6,8 @@ import {
   MEMBER_UPLINE_ROLE,
   type MemberPosition,
 } from '@afhomes/contracts';
-import { permissionsAreSubset, type authorizeAfHomes } from './afhomes-access.js';
+import { permissionsAreSubset } from './afhomes-permissions.js';
+import type { authorizeAfHomes } from './afhomes-access.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
 import { createMongoOstAccess } from './ost-accreditation.mongo.js';
 import { addressProvider } from './address-source.js';

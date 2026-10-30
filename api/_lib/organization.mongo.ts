@@ -12,7 +12,8 @@ import {
   createAfHomesStaffSchema,
   type AfHomesPermission,
 } from '@afhomes/contracts';
-import { permissionsAreSubset, type authorizeAfHomes } from './afhomes-access.js';
+import { permissionsAreSubset } from './afhomes-permissions.js';
+import type { authorizeAfHomes } from './afhomes-access.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
 import { createMongoStaffSalesInvolvementHandler } from './staff-sales-involvement.mongo.js';
 import { STAFF_DELETE_BLOCKER_CHECKS } from './staff-history.js';

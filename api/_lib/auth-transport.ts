@@ -18,11 +18,14 @@ const BODY_LIMIT = 65_536;
 export function createAuthNodeHandler(
   handler: (request: Request) => Promise<Response>,
   baseURL: string,
+  options: { clientIp?: (req: IncomingMessage) => string } = {},
 ) {
   const origin = new URL(baseURL).origin;
   return async (req: IncomingMessage, res: ServerResponse) => {
-    // Only the actual socket peer is trusted here; client IP headers are overwritten.
-    req.headers['x-real-ip'] = req.socket.remoteAddress ?? '127.0.0.1';
+    // Only the actual socket peer is trusted by default; a reverse proxy may
+    // supply an explicit resolver after proving the peer is loopback.
+    req.headers['x-real-ip'] =
+      options.clientIp?.(req) || req.socket.remoteAddress || '127.0.0.1';
     const fail = (status: number, message: string) => {
       req.resume();
       const { error } = toErrorEnvelope(status === 404 ? 'NOT_FOUND' : 'INTERNAL', message, status);

@@ -23,6 +23,7 @@ export async function createTestReplica(options: { timeoutMS?: number } = {}) {
     return {
       client,
       db: client.db('afhomes_dev'),
+      uri: replica.getUri(),
       async stop() {
         await client.close();
         await replica.stop();

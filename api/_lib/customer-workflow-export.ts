@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { readWorkbookParts } from './customer-xlsx.js';
 import { zipStored } from './report-export.js';
 import type { WorkbookStaffMatch } from './customer-workbook.js';
 import { WORKFLOW_COLUMNS, WORKFLOW_MAPPING_VERSION, WORKFLOW_TEMPLATE_ROWS } from '@afhomes/contracts';
 import { workflowAddressLists } from './customer-workflow-addresses.js';
+import { readRuntimeAsset } from './runtime-assets.js';
 const escape = (s: string) =>
   s
     .replaceAll('&', '&amp;')
@@ -20,12 +20,7 @@ export function customerWorkflowTemplate(
   staff: WorkbookStaffMatch[] = [],
   source?: Uint8Array,
 ): Uint8Array {
-  const parts = readWorkbookParts(
-    source ??
-      readFileSync(
-        new URL('../../packages/contracts/assets/customer-workflow-template.xlsx', import.meta.url),
-      ),
-  );
+  const parts = readWorkbookParts(source ?? readRuntimeAsset('customer-workflow-template.xlsx'));
   const encode = (s: string) => new TextEncoder().encode(s);
   const decoder = new TextDecoder();
   for (const name of [...parts.keys()].filter(

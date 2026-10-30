@@ -192,7 +192,7 @@ export const BUSINESS_FAMILIES = [
   {
     prefix: 'address',
     module: 'sales.customers',
-    load: () => import('../_handlers/address.js'),
+    load: () => import('../_handlers/_address-supabase.js'),
   },
 ] as const;
 

@@ -13,6 +13,8 @@
     "dev:mongodb:admin": "tsx api/scripts/dev-mongodb-admin.ts",
     "dev:search:local": "node packages/db-testing/scripts/preview-sale-team-search.mjs",
     "build": "turbo run build",
+    "build:api": "pnpm --filter api build:artifact",
+    "verify:api:artifact": "tsx api/scripts/verify-production-artifact.ts",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck && tsc --noEmit -p supabase",
     "typecheck:deploy": "turbo run typecheck",

@@ -9,8 +9,8 @@ import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest } from './http.js';
 import type { MongoRow } from './customer-activation.mongo.js';
 import type { createMongoSessionVerifier } from './auth-verify.mongo.js';
-import { actionAllowed } from './afhomes-access.js';
-export { actionAllowed } from './afhomes-access.js';
+import { actionAllowed } from './afhomes-permissions.js';
+export { actionAllowed } from './afhomes-permissions.js';
 
 /** Same per-request effective permissions as source, with UUID-string references. */
 export function createMongoStaffAccess(

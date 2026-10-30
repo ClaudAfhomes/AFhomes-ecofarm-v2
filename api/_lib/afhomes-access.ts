@@ -6,6 +6,7 @@ import {
   verifySessionToken,
   verifiedAssuranceLevel,
 } from './auth-verify.js';
+import { actionAllowed } from './afhomes-permissions.js';
 import { toErrorEnvelope } from './envelope.js';
 import type { VercelRequest } from './http.js';
 import { anonClient, serviceClient, userClient } from './rest.js';
@@ -111,29 +112,7 @@ export async function resolveStaffAccountSetup(
   return { userId: user.id, email: staff.email, fullName: staff.full_name };
 }
 
-export function actionAllowed(permission: AfHomesPermission | undefined, action: AfHomesAction) {
-  if (!permission) return false;
-  return action === 'view'
-    ? permission.canView
-    : action === 'create'
-      ? permission.canCreate
-      : action === 'update'
-        ? permission.canUpdate
-        : permission.canDelete;
-}
-
-export function permissionsAreSubset(requested: AfHomesPermission[], held: AfHomesPermission[]) {
-  const byKey = new Map(held.map((permission) => [permission.moduleKey, permission]));
-  return requested.every((permission) => {
-    const own = byKey.get(permission.moduleKey);
-    return (
-      (!permission.canView || own?.canView) &&
-      (!permission.canCreate || own?.canCreate) &&
-      (!permission.canUpdate || own?.canUpdate) &&
-      (!permission.canDelete || own?.canDelete)
-    );
-  });
-}
+export { actionAllowed, permissionsAreSubset } from './afhomes-permissions.js';
 
 export async function resolveAfHomesPrincipal(
   req: VercelRequest,
