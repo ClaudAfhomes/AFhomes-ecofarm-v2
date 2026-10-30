@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Alert, ErrorState, Skeleton, StatusChip } from '@afhomes/ui';
 import type { AfHomesPermission } from '@afhomes/contracts';
-import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash, isFeaturePathEnabled } from '@afhomes/shared';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
 import { getReport } from '../reports/services';
@@ -35,7 +35,8 @@ export function MembershipActivity({
     permissions.some((permission) => permission.moduleKey === key && permission.canView);
   const pointsAllowed = can('finance.points');
   const paymentsAllowed = can('finance.payment_verification');
-  const transactionsAllowed = can('operations.redemption');
+  const transactionsAllowed =
+    isFeaturePathEnabled('/api/v1/reports/redemptions') && can('operations.redemption');
   const membership = useQuery({
     queryKey: membershipKeys.record(id),
     queryFn: () => getMembership(id),
@@ -77,10 +78,10 @@ export function MembershipActivity({
         <details className={styles.group} onToggle={(e) => setPointsOpen(e.currentTarget.open)}>
           <summary className={styles.groupTitle}>Points</summary>
           {account.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 64 }} />
               <span className="sr-only">Loading points…</span>
-            </p>
+            </div>
           ) : account.isError ? (
             <ErrorState
               error={account.error}
@@ -110,10 +111,10 @@ export function MembershipActivity({
           )}
           {account.data ? (
             ledger.isPending ? (
-              <p role="status">
+              <div role="status">
                 <Skeleton style={{ height: 48 }} />
                 <span className="sr-only">Loading points history…</span>
-              </p>
+              </div>
             ) : ledger.isError ? (
               <ErrorState
                 error={ledger.error}
@@ -147,10 +148,10 @@ export function MembershipActivity({
               onRetry={() => void membership.refetch()}
             />
           ) : payments.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 48 }} />
               <span className="sr-only">Loading membership payments…</span>
-            </p>
+            </div>
           ) : payments.isError ? (
             <ErrorState
               error={payments.error}
@@ -183,10 +184,10 @@ export function MembershipActivity({
         >
           <summary className={styles.groupTitle}>Transactions</summary>
           {transactions.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 48 }} />
               <span className="sr-only">Loading service transactions…</span>
-            </p>
+            </div>
           ) : transactions.isError ? (
             <ErrorState
               error={transactions.error}

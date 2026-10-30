@@ -30,9 +30,10 @@ async function port() {
   return value;
 }
 await new Promise<void>((resolve) => api.listen(0, '127.0.0.1', resolve));
-const apiBase = `http://localhost:${(api.address() as { port: number }).port}`;
-const adminBase = `http://localhost:${await port()}`,
-  webBase = `http://localhost:${await port()}`;
+// A separate hostname keeps disposable QA cookies away from the real localhost session.
+const apiBase = `http://127.0.0.1:${(api.address() as { port: number }).port}`;
+const adminBase = `http://127.0.0.1:${await port()}`,
+  webBase = `http://127.0.0.1:${await port()}`;
 const env = {
   NODE_ENV: 'development',
   BETTER_AUTH_SECRET: randomBytes(48).toString('base64url'),
@@ -46,7 +47,7 @@ const env = {
   AFHOMES_SEARCH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA',
   VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
   // Cloudflare's documented dummy keys can return example.com from Siteverify.
-  AFHOMES_SEARCH_TURNSTILE_HOSTNAMES: 'localhost,example.com',
+  AFHOMES_SEARCH_TURNSTILE_HOSTNAMES: '127.0.0.1,example.com',
   AFHOMES_SEARCH_CONTACT_RETENTION_DAYS: '1',
   AFHOMES_VERIFICATION_PHONE: '+639170000000',
 };
@@ -84,7 +85,7 @@ for (const [name, base] of [
   children.push(
     spawn(
       process.execPath,
-      [vite, '--host', 'localhost', '--port', new URL(base!).port, '--strictPort'],
+      [vite, '--host', '127.0.0.1', '--port', new URL(base!).port, '--strictPort'],
       { cwd, env: childEnv, stdio: 'inherit', windowsHide: true },
     ),
   );

@@ -2,6 +2,16 @@
 
 ## Active MongoDB conversion branch
 
+30 October membership follow-up: embedded Transactions and History use the shared
+feature-path guard as well as permissions before rendering/querying Reports APIs.
+Do not enable Reports/Redemption or widen the conversion allowlist to bypass these
+UI errors. Active points/payments/card controls stay permission-gated. See
+docs/mongodb/MEMBERSHIP-DISABLED-PANELS-FIX.md for regression/browser evidence and
+the independently corrected synthetic payment fixture. Fresh API: 3,134 tests/
+198 files pass; membership/UI: 40 tests pass; API/Admin typecheck and scoped lint
+pass. Full browser acceptance
+remains unfinished; preserve the existing administrator and real business data.
+
 30 October checkpoint: root tests are green (5,033 total; fresh API 3,133 and
 Admin 1,017, five unchanged tasks cached). Typecheck/build/lint/env isolation pass.
 Retained CMS tests are scoped on only in their test module; CMS stays disabled.

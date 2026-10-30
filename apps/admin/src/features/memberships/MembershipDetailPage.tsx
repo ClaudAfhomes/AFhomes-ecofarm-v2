@@ -15,7 +15,7 @@ import {
   TextAreaField,
 } from '@afhomes/ui';
 import type { ReissuedMembershipCard } from '@afhomes/contracts';
-import { formatCountOrDash } from '@afhomes/shared';
+import { formatCountOrDash, isFeaturePathEnabled } from '@afhomes/shared';
 
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
@@ -63,6 +63,7 @@ export function MembershipDetailPage() {
       (p) => p.moduleKey === 'finance.card_activation' && p.canUpdate,
     ) === true;
   const canSeeAudit =
+    isFeaturePathEnabled('/api/v1/reports/audit') &&
     user?.afHomesPermissions.some((p) => p.moduleKey === 'governance.audit' && p.canView) === true;
   const history = useQuery({
     queryKey: membershipKeys.history(id),
@@ -318,10 +319,10 @@ export function MembershipDetailPage() {
         <section className={styles.panel} aria-label="Card history">
           <h2 className={styles.panelTitle}>History</h2>
           {history.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 48 }} />
               <span className="sr-only">Loading history…</span>
-            </p>
+            </div>
           ) : history.isError ? (
             <ErrorState
               error={history.error}

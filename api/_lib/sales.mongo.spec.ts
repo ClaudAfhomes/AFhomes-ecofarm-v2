@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, expect, it } from 'vitest';
-import { activationResultSchema, saleSchema, customerSchema } from '@afhomes/contracts';
+import { activationResultSchema, saleSchema, customerSchema, paymentSchema } from '@afhomes/contracts';
 import { createTestReplica } from './testing/mongo-replica.js';
 import { installTestCoreValidators } from './testing/core-validators.js';
 import { seedPhase5Fixture } from './testing/phase5-fixture.js';
@@ -96,6 +96,20 @@ async function request(path: string, body?: unknown, session = cookie, method?: 
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+it('returns contract-valid seeded payment history for the disposable browser membership', async () => {
+  const response = await request(`/sales/${fixture.customer.sale}/payments`);
+  expect(response.status).toBe(200);
+  const { data } = await response.json();
+  expect(data).toHaveLength(1);
+  expect(paymentSchema.safeParse(data[0]).success).toBe(true);
+  expect(data[0]).toMatchObject({
+    amount: '100000.00',
+    paymentType: 'full',
+    status: 'verified',
+    recordedBy: fixture.staff.id,
+    verifiedBy: fixture.staff.id,
+  });
+});
 it('creates frozen commercial terms and pending commission using the actual native customer and catalog routes', async () => {
   const customer = await request('/customers', {
     firstName: 'Sales',

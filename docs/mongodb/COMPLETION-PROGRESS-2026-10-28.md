@@ -1,5 +1,24 @@
 # MongoDB completion progress and reviewed apply scope
 
+30 October membership error repair: embedded transaction/audit panels now respect
+the same shared feature-path flags as their disabled Reports APIs, in addition
+to permissions. No routes or modules were enabled. Forty membership/flag tests,
+Admin typecheck/scoped lint/env isolation and native Chrome absence/Points/card-
+control checks pass. A separate malformed synthetic payment fixture was corrected
+with native HTTP contract proof (11 sales tests); the full serial API suite also
+passed 3,134 tests/198 files. API typecheck/scoped lint pass. The running QA row is
+still old and needs a fresh fixture start. See MEMBERSHIP-DISABLED-PANELS-FIX.md. The
+application wizard reached Certify but was not submitted; full acceptance stays open.
+
+30 October browser continuation: existing Super Admin dashboard, customer lookup,
+nonblank VIP card identifier, 2,000 total / 1,400 weekday / 600 weekend points,
+session retention after full reload/repeated search, and customer overview
+scrolling now have direct Chrome proof. No business/account writes ran. Separate
+fresh disposable browser QA now uses 127.0.0.1 to isolate its cookies from real
+localhost. Synthetic password-change handoff is pending. See
+BROWSER-ACCEPTANCE-2026-10-30.md; full role/workflow/console/network acceptance
+remains open.
+
 30 October: automated quality gate is green: 5,033 tests, fresh API/Admin with
 five unchanged tasks cached; typecheck/build/lint/env isolation pass. CMS remains
 disabled. Strict TLS source metadata refresh succeeded (93 selected tables,
