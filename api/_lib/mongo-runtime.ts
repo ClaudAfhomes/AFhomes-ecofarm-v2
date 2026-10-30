@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db, MongoClient } from 'mongodb';
 import { randomUUID } from 'node:crypto';
-import { hashPassword, verifyPassword } from 'better-auth/crypto';
+import { hashPassword } from 'better-auth/crypto';
 import { getRequest, setResponse } from 'better-call/node';
 import {
   changeAfHomesStaffPasswordSchema,
@@ -199,7 +199,10 @@ export function createMongoPhase5Runtime(
       if (
         !account ||
         typeof account.password !== 'string' ||
-        !(await verifyPassword({ hash: account.password, password: parsed.data.currentPassword }))
+        !(await options.emailAndPassword.password.verify({
+          hash: account.password,
+          password: parsed.data.currentPassword,
+        }))
       )
         return fail(res, 'UNAUTHORIZED', 'Current password is incorrect', 401, {
           reason: 'CURRENT_PASSWORD_INVALID',

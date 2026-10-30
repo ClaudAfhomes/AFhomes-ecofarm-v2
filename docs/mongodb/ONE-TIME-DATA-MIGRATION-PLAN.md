@@ -1,9 +1,22 @@
 # One-time Supabase to MongoDB data migration
 
+30 October schema refresh: strict TLS using the owner-supplied CA succeeded.
+Read-only metadata now covers 93 selected tables, 1,291 columns and 254 foreign
+keys. The older 125 count below includes a broader set of provider platform
+tables. See `SOURCE-MAPPING-REVIEW.md` and its complete schema-only JSON inventory.
+No business records, password hashes or file bytes were exported. Candidate
+mappings are explicitly unreviewed; this does not make the importer apply-ready.
+
+29 October password checkpoint: a default-off tagged bcrypt verifier now has
+disposable HTTP first-change/native-upgrade proof; see
+`PASSWORD-COMPATIBILITY-VERIFICATION.md`. No real credentials were copied or
+environment flag enabled. A full identity importer/manifest, real backup and
+source-to-target dry run remain required.
+
 29 October mapping checkpoint: an unmounted explicit-manifest business mapping
 planner now has synthetic/native disposable proof for protected owner aliases,
 declared references, immutable JSON, conflicts and repeated/interrupted planning.
-See `MIGRATION-MAPPING-DRYRUN.md`. No full source manifest/export, password bridge,
+See `MIGRATION-MAPPING-DRYRUN.md`. No full source manifest/export,
 real-data transformation dry run or target apply has run. The inventory below
 remains the earlier snapshot, not current live counts or a cutover backup.
 
@@ -63,8 +76,9 @@ only EXECUTIVE, SALES, FINANCE, HR and OPERATIONS.
    provenance and retain immutable snapshot/audit payload contents.
 2. **Passwords:** all ten source auth rows use bcrypt. Current Better Auth uses its
    default password verifier. Copying bcrypt values unchanged would not establish
-   usable sign-in. Implement and test a narrowly scoped legacy verifier/upgrade
-   path, or approve an alternative recovery procedure before moving identities.
+   usable sign-in. The default-off tagged verifier/normal password-change upgrade
+   is now tested locally. Review actual source costs, identity mappings and policy
+   compatibility before moving identities or enabling it on a real target.
    Do not export hashes to reports, generate invitations or silently reset users.
    Existing temporary-password flags must remain server-enforced. The target
    owner's current credential is excluded from replacement under either strategy.
@@ -160,6 +174,6 @@ not delete them or silently revert to the source: use a separately reviewed
 forward-reconciliation procedure.
 
 Completed: read-only live inventory, initial mapping/conflict analysis and source
-rule review. NOT RUN: private backup/export, password compatibility bridge, data
+rule review. NOT RUN: private backup/export, real-target password bridge enablement, data
 transformation/import dry run, target apply, storage copy and cutover. No data
 transfer or synchronization has been enabled.

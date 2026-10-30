@@ -9,5 +9,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["_lib/**/*.ts", "_handlers/**/*.ts", "router.ts", "dev-server.ts"]
+  "include": ["_lib/**/*.ts", "_handlers/**/*.ts", "router.ts", "dev-server.ts", "server.ts", "scripts/build-hosted.ts", "scripts/check-mongodb-validators.ts"]
 }

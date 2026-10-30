@@ -64,9 +64,11 @@ semantics, BSON/native date conversion, numeric points ranges, all unique
 constraints, commercial/points reconciliation, private-file ownership or complete
 authorization equivalence. Do not use it as a generic copy-every-table converter.
 
-The existing auth factories still use their native password verifier. The earlier
-source inventory reported bcrypt hashes; password compatibility/upgrade remains
-unimplemented and no credential data was read or exported in this checkpoint.
+The default-off tagged bcrypt bridge now has separate disposable HTTP
+password-change/native-upgrade proof; see `PASSWORD-COMPATIBILITY-VERIFICATION.md`.
+It has not been enabled on Atlas and no source credentials were exported.
+The fresh 30 October schema inventory and per-table review checklist are in
+`SOURCE-MAPPING-REVIEW.md`; full native field adapters remain unreviewed.
 Preserve administrator-set temporary passwords/forced changes, manual VIP
 activation codes/links and the already established MongoDB owner. No invitations,
 MFA restoration or account resets are part of migration preparation.

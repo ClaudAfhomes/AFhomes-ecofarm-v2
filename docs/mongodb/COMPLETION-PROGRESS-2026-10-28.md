@@ -1,5 +1,56 @@
 # MongoDB completion progress and reviewed apply scope
 
+30 October: automated quality gate is green: 5,033 tests, fresh API/Admin with
+five unchanged tasks cached; typecheck/build/lint/env isolation pass. CMS remains
+disabled. Strict TLS source metadata refresh succeeded (93 selected tables,
+1,291 columns, 254 foreign keys); no business/password/file export. Explicit
+production namespace guard preparation and disposable sign-in passed, without
+changing environments or initializing production. Small local read-load and
+10,000-row index proof are recorded. See COMPLETION-CHECKPOINT-2026-10-30.md for
+exact results, cache/measurement limits and the six remaining acceptance gates.
+This supersedes the earlier red automated gate below, not its historical result.
+
+29 October approved validator apply: fresh reviewed preflight still matched
+(18 compatible records). The first collMod failed; the app database user lacks
+the required privilege. Execution stopped and independent options/BSON/index
+checks verified all six collections/18 documents unchanged; zero applied.
+See CORE-VALIDATORS-APPLY-RESULT.md for a separate maintenance-user connection
+handoff. Existing approval stays valid; no app grants/accounts/env files were
+changed. Browser, migration, recovery and deployment gates remain open.
+
+29 October validator preparation: six core schema proposals now have native
+insert/update/rollback proof and strict purchase/sales/activation/legacy and
+certified-import compatibility (69 tests). Read-only live preflight found all
+18 inspected records compatible, with six validators missing. The Atlas complex
+metadata-filter issue was reproduced and resolved using the existing readiness
+query pattern; a regression now covers that shape. See CORE-VALIDATORS-REVIEW.md.
+No Atlas DDL/data changes or shared installer were introduced; explicit approval
+is required before the reviewed six-validator apply. This is not full database
+or platform completion. CMS remains last; other acceptance/migration gates stay open.
+
+29 October password/test preparation: the full API suite passed serially before
+the bridge addition (3,123 tests/195 files). Root tests now serialize workspace
+and file execution to avoid process contention without skipping suites or
+weakening assertions. A default-off tagged source bcrypt verifier is prepared;
+30 focused tests pass, including real disposable HTTP first-change/native-upgrade
+and separate owner preservation. The full API rerun with the bridge also passed
+(3,126 tests/196 files). See PASSWORD-COMPATIBILITY-VERIFICATION.md.
+No source export, Atlas/environment/account changes, deployment or push ran.
+The complete root run finished without worker errors: 5,002 passed and 21
+deferred CMS-related failures. API typecheck, environment isolation and scoped
+API lint pass; root frontend lint passes with 32 existing warnings/cache hits.
+See TEST-GATE-2026-10-29.md. The whole-repository gate remains red; CMS stays last.
+
+29 October native hosting: user chose a DigitalOcean Droplet without Docker and
+retained Atlas. An opt-in hosted Node API, isolated public build, persistent
+private filesystem provider and systemd/Nginx staging templates are prepared.
+92 relevant tests passed; final hosted/storage rerun: 9 passed. Hosted actual
+build/typechecks/prerender/static assembly and built env isolation passed, plus
+targeted lint and fail-closed CLI preflight. See HOSTED-RUNTIME-VERIFICATION.md
+and DIGITALOCEAN-NATIVE-HOSTING.md. No cloud provisioning, deployment, network/DNS
+changes, database/account changes or Git push occurred. Linux/TLS/browser and
+production cutover remain open; current DB/auth scope is still afhomes_dev.
+
 29 October business mapping preparation: an unmounted explicit-manifest planner
 now preserves owner identity/assignments, remaps declared scalar references only,
 retains frozen JSON evidence and exact money, reuses matching references, and

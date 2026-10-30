@@ -2,6 +2,59 @@
 
 ## Active MongoDB conversion branch
 
+30 October checkpoint: root tests are green (5,033 total; fresh API 3,133 and
+Admin 1,017, five unchanged tasks cached). Typecheck/build/lint/env isolation pass.
+Retained CMS tests are scoped on only in their test module; CMS stays disabled.
+Strict-CA read-only source inventory covers 93 selected tables/1,291 columns/
+254 foreign keys, with no business/password/file export. Runtime production scope
+is prepared behind explicit settings, not enabled; setup tools stay development-
+only. No shared DB/env/account/push/deploy changes. See
+docs/mongodb/COMPLETION-CHECKPOINT-2026-10-30.md. Browser acceptance, full migration
+adapters/reconciliation, durable real backups/restore, maintenance-only validator
+apply and production initialization remain open. Preserve the existing owner.
+
+29 October approved validator apply: user authorized the reviewed six validators.
+The first collMod (card_sales) failed; read-only privilege inspection found the
+configured application user has no applicable collMod grant. Independent BSON,
+index and option checks verified all six collections/18 documents unchanged and
+zero validators applied. Approval remains scoped/valid; do not broaden app-user
+permissions, reset accounts or retry blindly. A separate ignored maintenance
+connection is needed; see docs/mongodb/CORE-VALIDATORS-APPLY-RESULT.md. No env,
+account, document, index, push or deployment changes. CMS remains last.
+
+29 October validator preparation: six proposed core validators reuse contract
+money/state rules and safe integer points. Strict disposable sales, purchase,
+activation and historical/legacy import flows pass (69 targeted tests). The
+read-only `pnpm mongodb:validators` preflight inspected 18 live core records,
+found zero incompatible records and six missing validators. No target DDL/data
+write ran. See docs/mongodb/CORE-VALIDATORS-REVIEW.md for exact scope and limits;
+shared installation requires separate explicit approval. The CLI has no apply
+mode. CMS stays last; browser, migration, durable backup and deployment stay open.
+
+29 October password compatibility: the default-off server flag
+AFHOMES_ENABLE_LEGACY_PASSWORDS enables only explicitly tagged source bcrypt
+credentials; new/reset/changed passwords remain native. Thirty focused tests
+pass, including disposable HTTP forced-change/upgrade and separate owner
+preservation. See docs/mongodb/PASSWORD-COMPATIBILITY-VERIFICATION.md. This does
+not export/import identities or enable the bridge on Atlas; preserve the owner.
+The full API serial run with this addition passed 3,126 tests/196 files.
+Root tests now run one workspace/worker at a time to avoid resource contention.
+The full run completed without worker errors: 5,002 passed, 21 deferred CMS-related
+failures (20 CMS screen expectations, one shared dialog scan). API typecheck,
+environment isolation and scoped API lint pass. See
+docs/mongodb/TEST-GATE-2026-10-29.md; the whole-repository gate is not green.
+Keep CMS last.
+
+29 October hosting decision: user chose a native DigitalOcean Droplet without
+Docker, retaining MongoDB Atlas. `api/server.ts` is an opt-in hosted API behind a
+loopback HTTPS proxy; `build:hosted` isolates public builds from runtime secrets.
+Systemd/Nginx staging templates and persistent private filesystem support are in
+deploy/digitalocean and docs/mongodb/DIGITALOCEAN-NATIVE-HOSTING.md. Existing
+localhost behavior, afhomes_dev scope, owner and workflow gates remain intact.
+Do not provision/deploy, change DNS/Atlas access, enable hosted writes/cleanup or
+push these changes without the relevant authorization. Linux/TLS/browser acceptance
+and production cutover are not complete. Keep CMS last and local artifacts local.
+
 29 October mapping preparation: unmounted explicit-manifest business mapping now
 preserves the current owner/assignments, remaps only declared scalar references,
 keeps JSON evidence intact and blocks conflicts/unknown fields/credential import.

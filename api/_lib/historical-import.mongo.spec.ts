@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { purchasePaymentSchema, type WorkbookPaymentClaim } from '@afhomes/contracts';
 import { createTestReplica } from './testing/mongo-replica.js';
+import { installTestCoreValidators } from './testing/core-validators.js';
 import { seedPhase7Fixture } from './testing/phase7-fixture.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { externalImportSummary } from './external-customer-import.js';
@@ -46,6 +47,7 @@ beforeAll(async () => {
     effective_until: null,
     accredited_on_or_after: null,
   });
+  await installTestCoreValidators(replica.db);
   server.on('request', createMongoPhase5Runtime(replica.db, replica.client, env));
   const response = await fetch(base + '/api/v1/auth/identity/sign-in/email', {
     method: 'POST',

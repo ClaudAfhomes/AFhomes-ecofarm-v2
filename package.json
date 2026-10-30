@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "tsx watch api/scripts/dev-mongodb-admin.ts",
+    "start:mongodb": "node --import tsx api/server.ts",
+    "build:hosted": "tsx api/scripts/build-hosted.ts",
     "dev:mongodb:local": "tsx api/scripts/dev-mongodb-local.ts",
     "dev:mongodb:admin": "tsx api/scripts/dev-mongodb-admin.ts",
     "dev:search:local": "node packages/db-testing/scripts/preview-sale-team-search.mjs",
@@ -16,7 +18,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck && tsc --noEmit -p supabase",
     "typecheck:deploy": "turbo run typecheck",
-    "test": "turbo run test --concurrency=2 -- --maxWorkers=2",
+    "test": "turbo run test --concurrency=1 -- --maxWorkers=1",
     "format": "prettier --write .",
     "check:env": "node scripts/check-env-isolation.mjs",
     "seed": "tsx supabase/seed.ts",
@@ -31,6 +33,7 @@
     "test:security:db": "node packages/db-testing/scripts/test-security-remediation.mjs --full",
     "test:mongodb:recovery": "pnpm --filter api exec vitest run _lib/testing/mongo-recovery.spec.ts --maxWorkers=1",
     "mongodb:ping": "tsx scripts/ping-mongodb.ts",
+    "mongodb:validators": "tsx api/scripts/check-mongodb-validators.ts",
     "mongodb:core": "tsx api/scripts/prepare-mongodb-core.ts",
     "mongodb:catalog": "tsx api/scripts/prepare-mongodb-catalog.ts",
     "mongodb:bootstrap-admin": "tsx api/scripts/bootstrap-mongodb-admin.ts"

@@ -183,15 +183,14 @@ export function createDevelopmentPrivateObjectStore(env: NodeJS.ProcessEnv, base
 }
 
 /** Loopback-only private files. The caller owns persistence and disposable fixture cleanup. */
-export class LocalPrivateObjectStore implements PrivateObjectStore {
+class DiskPrivateObjectStore implements PrivateObjectStore {
   private root: string;
   private base: URL;
   private secret: string;
   private now: () => number;
   constructor(input: { root: string; baseURL: string; secret: string; now?: () => number }) {
     this.base = new URL(input.baseURL);
-    if (!loopback(this.base) || this.base.protocol !== 'http:' || input.secret.length < 32)
-      throw new Error('Local objects require an isolated loopback runtime');
+    if (input.secret.length < 32) throw new Error('Private objects require a signing secret');
     this.root = path.resolve(input.root);
     this.secret = input.secret;
     this.now = input.now ?? Date.now;
@@ -307,4 +306,26 @@ export class LocalPrivateObjectStore implements PrivateObjectStore {
       return deny();
     }
   }
+}
+
+/** Existing localhost-only storage contract remains unchanged. */
+export class LocalPrivateObjectStore extends DiskPrivateObjectStore {
+  constructor(input: { root: string; baseURL: string; secret: string; now?: () => number }) {
+    const base = new URL(input.baseURL);
+    if (!loopback(base) || base.protocol !== 'http:') throw new Error('Local objects require an isolated loopback runtime');
+    super(input);
+  }
+}
+
+/** Explicit hosted selection; files stay outside the static site and releases. No localhost fallback. */
+export function createHostedPrivateObjectStore(env: NodeJS.ProcessEnv): PrivateObjectStore {
+  if (env.NODE_ENV !== 'production') throw new Error('Hosted objects require production configuration');
+  if (env.AFHOMES_PRIVATE_STORAGE_PROVIDER === 's3') return createS3PrivateObjectStore(env)!;
+  if (env.AFHOMES_PRIVATE_STORAGE_PROVIDER !== 'filesystem') throw new Error('Select a hosted private storage provider');
+  const base = new URL(env.AFHOMES_PUBLIC_ORIGIN ?? '');
+  const root = env.AFHOMES_PRIVATE_STORAGE_ROOT ?? '';
+  if (base.protocol !== 'https:' || loopback(base) || base.username || base.password || base.pathname !== '/' || base.search || base.hash || !path.isAbsolute(root) || (env.BETTER_AUTH_SECRET?.length ?? 0) < 32)
+    throw new Error('Hosted private storage configuration is invalid');
+  return new DiskPrivateObjectStore({ root, baseURL: base.origin,
+    secret: createHmac('sha256', env.BETTER_AUTH_SECRET!).update('afhomes-hosted-private-files-v1').digest('hex') });
 }

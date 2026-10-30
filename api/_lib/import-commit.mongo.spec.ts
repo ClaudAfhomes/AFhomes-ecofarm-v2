@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { createTestReplica } from './testing/mongo-replica.js';
+import { installTestCoreValidators } from './testing/core-validators.js';
 import { seedPhase7Fixture } from './testing/phase7-fixture.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { companyWorkbook } from './customer-workbook-export.js';
@@ -134,6 +135,7 @@ beforeAll(async () => {
     AFHOMES_AUTH_TRUSTED_ORIGINS: base,
   };
   fixture = await seedPhase7Fixture(replica.db, replica.client, env, 'SyntheticCommit123!');
+  await installTestCoreValidators(replica.db);
   server.on('request', createMongoPhase5Runtime(replica.db, replica.client, env));
   const login = await request(
     'auth/identity/sign-in/email',

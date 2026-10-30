@@ -22,6 +22,7 @@ import {
   customerApplicationListItemSchema,
 } from '@afhomes/contracts';
 import { createTestReplica } from '../_lib/testing/mongo-replica.js';
+import { installTestCoreValidators } from '../_lib/testing/core-validators.js';
 import { seedPhase5Fixture } from '../_lib/testing/phase5-fixture.js';
 import { createMongoPhase5Runtime } from '../_lib/mongo-runtime.js';
 import { createAfHomesAdminAuth } from '../_lib/auth.js';
@@ -182,6 +183,7 @@ beforeAll(async () => {
     effective_until: null,
     accredited_on_or_after: null,
   });
+  await installTestCoreValidators(test.db);
   server.on('request', createMongoPhase5Runtime(test.db, test.client, env));
   const login = await request(
     '/auth/identity/sign-in/email',

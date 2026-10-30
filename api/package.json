@@ -15,6 +15,7 @@
     "@better-auth/mongo-adapter": "1.7.12",
     "@supabase/auth-js": "2.117.2",
     "@supabase/supabase-js": "2.117.2",
+    "bcryptjs": "3.0.3",
     "better-auth": "1.7.12",
     "better-call": "1.4.4",
     "mongodb": "7.7.0",

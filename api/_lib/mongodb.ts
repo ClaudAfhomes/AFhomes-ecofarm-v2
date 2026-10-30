@@ -1,4 +1,5 @@
 import { MongoClient, type Db } from 'mongodb';
+import { mongoRuntimeDatabase } from './mongodb-scope.js';
 
 export function createMongoClient(env: NodeJS.ProcessEnv = process.env) {
   const uri = env.MONGODB_URI?.trim();
@@ -6,8 +7,8 @@ export function createMongoClient(env: NodeJS.ProcessEnv = process.env) {
   if (!uri || !/^mongodb(?:\+srv)?:\/\//.test(uri)) {
     throw new Error('MONGODB_URI must be configured in the server environment.');
   }
-  if (database !== 'afhomes_dev') {
-    throw new Error('MONGODB_DB must be afhomes_dev for Phase 1.');
+  if (database !== mongoRuntimeDatabase(env)) {
+    throw new Error('MONGODB_DB must match the explicitly selected runtime scope.');
   }
   return {
     client: new MongoClient(uri, {
@@ -42,8 +43,8 @@ export async function getMongoClient(env: NodeJS.ProcessEnv = process.env): Prom
   if (!uri || !/^mongodb(?:\+srv)?:\/\//.test(uri)) {
     throw new Error('MONGODB_URI must be configured in the server environment.');
   }
-  if (database !== 'afhomes_dev') {
-    throw new Error('MONGODB_DB must be afhomes_dev for Phase 1.');
+  if (database !== mongoRuntimeDatabase(env)) {
+    throw new Error('MONGODB_DB must match the explicitly selected runtime scope.');
   }
   const key = uri + database;
   if (mongoClientCached && mongoClientKey === key) {

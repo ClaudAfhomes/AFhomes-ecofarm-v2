@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { activationResultSchema, saleSchema, customerSchema } from '@afhomes/contracts';
 import { createTestReplica } from './testing/mongo-replica.js';
+import { installTestCoreValidators } from './testing/core-validators.js';
 import { seedPhase5Fixture } from './testing/phase5-fixture.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { installMongoReferenceCatalog } from './reference-catalog.mongo.js';
@@ -66,6 +67,7 @@ beforeAll(async () => {
       },
     },
   );
+  await installTestCoreValidators(test.db);
   server.on('request', createMongoPhase5Runtime(test.db, test.client, env));
   const login = await request(
     '/auth/identity/sign-in/email',
@@ -411,10 +413,10 @@ it('merges reservation and sale Finance queues with exact verified totals, joine
         validity_months_snapshot: 12,
       })),
     );
-  await test.db.collection('payments').insertMany([
-    { reservation_id: first, amount: '50.02', status: 'verified' },
-    { reservation_id: first, amount: '99999.00', status: 'recorded' },
-    { reservation_id: second, amount: '151.00', status: 'verified' },
+  await test.db.collection<MongoRow>('payments').insertMany([
+    { _id: randomUUID(), reservation_id: first, amount: '50.02', status: 'verified' },
+    { _id: randomUUID(), reservation_id: first, amount: '99999.00', status: 'recorded' },
+    { _id: randomUUID(), reservation_id: second, amount: '151.00', status: 'verified' },
   ]);
   const page = await request('/queues/finance?limit=1&offset=1');
   expect(page.status).toBe(200);
@@ -466,9 +468,21 @@ it('filters active VIP lookup before pagination and returns only the approved st
   await test.db
     .collection<{ _id: string } & Record<string, unknown>>('customers')
     .insertMany([...rows, active]);
+  const lookupSale = randomUUID();
+  const sourceSale = await test.db.collection<MongoRow>('card_sales').findOne({ _id: fixture.customer.sale });
+  const sourcePayment = await test.db.collection<MongoRow>('payments').findOne({ sale_id: fixture.customer.sale });
+  await test.db.collection<MongoRow>('card_sales').insertOne({
+    ...sourceSale!, _id: lookupSale, customer_id: activeId, sale_number: `SYNTHETIC-LOOKUP-${lookupSale}`,
+  });
+  await test.db.collection<MongoRow>('payments').insertOne({
+    ...sourcePayment!, _id: randomUUID(), sale_id: lookupSale, customer_id: activeId,
+    payment_number: `SYNTHETIC-LOOKUP-${lookupSale}`,
+  });
   await test.db.collection<{ _id: string } & Record<string, unknown>>('memberships').insertOne({
     _id: memberId,
     customer_id: activeId,
+    sale_id: lookupSale,
+    points_balance: 0,
     product_id: fixture.plan,
     status: 'active',
     membership_number: 'MBS-12345678-12345678-12345678-12345678',
