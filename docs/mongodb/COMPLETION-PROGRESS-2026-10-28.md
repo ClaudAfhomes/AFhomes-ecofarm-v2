@@ -1,5 +1,30 @@
 # MongoDB completion progress and reviewed apply scope
 
+30 October migration preparation: the pure dry-run mapper preserves bigint IDs,
+range-checks quantities, resolves parent aliases before permission comparisons,
+and supports explicit field renames, timezone-aware millisecond timestamps and
+date-only validation, required-field checks and strict boolean checks. Complete
+access/assignment column/PK/not-null/boolean/UUID/time declarations match the
+recorded source inventory. Canonical UUIDs are checked before/after alias mapping,
+including target reference reuse and protected-owner IDs. No identifiers are
+rewritten. Write-requires-view and nonempty-deny CHECKs now have exhaustive
+boolean-combination proof; other domain CHECKs/types/lifecycle rules stay open.
+Six organization/access definitions now live in migration-access-manifest.ts:
+departments, modules, roles, grants, assignments and restrictions. Source metadata,
+text/int32/code checks, complete single-column FKs and native unique indexes are
+checked in the combined disposable load, including a new assignment and empty
+replay. Reference flags/timestamps must agree; native role-name collisions block
+the plan. This remains a reviewed subset; full staff/identity/business mappings
+and reconciliation are still required.
+Source assignment `assigned_at` maps to native `created_at`.
+Date-only values remain calendar text; no age rule or timezone shift is applied.
+Conflicting grants/denies, unsafe renames, invalid dates and cycles block the plan.
+Nonzero microseconds still require a preservation policy. Source checksums and
+nested history remain intact; owner/profile/assignment protections stay enforced.
+Three disposable mapping loads cover native indexes, types and replay; see
+SOURCE-MAPPING-REVIEW.md for proof and remaining table/state/nullability/reference,
+identity/file/counter work. No real export/import, account change, push or deployment.
+
 30 October membership error repair: embedded transaction/audit panels now respect
 the same shared feature-path flags as their disabled Reports APIs, in addition
 to permissions. No routes or modules were enabled. Forty membership/flag tests,

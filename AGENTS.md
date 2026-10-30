@@ -2,6 +2,27 @@
 
 ## Active MongoDB conversion branch
 
+30 October migration preparation: the pure, unmounted dry-run mapper supports
+exact bigint IDs, safe integer quantities, dependent natural-key matching,
+explicit field renames, UTC millisecond timestamps, dates, required fields and
+strict booleans and canonical UUIDs before/after alias resolution. Reviewed
+access/assignment column/PK/nullability/boolean/UUID/time declarations match the
+recorded inventory. Write-requires-view and nonempty-deny source CHECKs
+are enforced; remaining domain CHECKs/types are not yet covered.
+Reusable definitions for six organization/access tables are in
+api/_lib/migration-access-manifest.ts; full source metadata/FK checks and disposable
+tests use them directly, including actual organization index setup. Text/int32 and
+source code/slug CHECKs are validated; reference flag/history conflicts block reuse.
+Runtime does not mount them; full staff/identity and remaining business mappings
+are still required.
+Different grants/denies, unsafe renames, invalid dates and dependency cycles block
+the plan. Nonzero microseconds remain blocked pending a preservation policy.
+Raw source checksums, historical JSON and the protected owner/profile/assignments
+stay intact. Three disposable mapping loads prove native storage/replay boundaries;
+no real import or routing change ran. Full table/state/reference,
+identity/file/counter mapping and real reconciliation remain open. See
+docs/mongodb/SOURCE-MAPPING-REVIEW.md; preserve the existing administrator.
+
 30 October membership follow-up: embedded Transactions and History use the shared
 feature-path guard as well as permissions before rendering/querying Reports APIs.
 Do not enable Reports/Redemption or widen the conversion allowlist to bypass these
