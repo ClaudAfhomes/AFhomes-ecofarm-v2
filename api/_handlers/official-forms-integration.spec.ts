@@ -22,6 +22,7 @@ import {
   customerApplicationListItemSchema,
 } from '@afhomes/contracts';
 import { createTestReplica } from '../_lib/testing/mongo-replica.js';
+import { installTestCoreValidators } from '../_lib/testing/core-validators.js';
 import { seedPhase5Fixture } from '../_lib/testing/phase5-fixture.js';
 import { createMongoPhase5Runtime } from '../_lib/mongo-runtime.js';
 import { createAfHomesAdminAuth } from '../_lib/auth.js';
@@ -182,6 +183,7 @@ beforeAll(async () => {
     effective_until: null,
     accredited_on_or_after: null,
   });
+  await installTestCoreValidators(test.db);
   server.on('request', createMongoPhase5Runtime(test.db, test.client, env));
   const login = await request(
     '/auth/identity/sign-in/email',
@@ -782,6 +784,12 @@ it('validates all five immutable evidence contracts and renders authorized histo
       { sort: { revision: -1 } },
     );
     expect(evidence).toBeTruthy();
+    if(kind==='membership_activated') {
+      const member=await col('memberships').findOne({_id:membershipId});
+      const agreement=await col('reservation_agreements').findOne({_id:reservationId});
+      const terms=await col('customer_application_purchase_terms').findOne({_id:String(agreement!.purchase_terms_id)});
+      expect(evidence!.fields).toMatchObject({tier:terms!.tier,activatedAt:member!.activated_at});
+    }
     purchaseDocumentEvidenceSchema.parse({
       id: evidence!._id,
       kind,

@@ -13,6 +13,7 @@ import {
 import { mongoCustomerDirectory } from './customer-directory.mongo.js';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import { deny, fail, jsonBody, method, subPath } from './handler-kit.js';
+import { recordMongoVipIssuance } from './vip-issuance.mongo.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 export async function setupMongoCustomers(db: Db) {
@@ -85,7 +86,7 @@ export async function companyId(db: Db, value: unknown, session: ClientSession, 
   }
   return value;
 }
-export async function allocateMongoVipCardNumber(db: Db, tier: string, scheme: 'CASH' | 'INSTALLMENT', months: number, session: ClientSession) {
+export async function allocateMongoVipCardNumber(db: Db, tier: string, scheme: 'CASH' | 'INSTALLMENT', months: number, session: ClientSession, customerId: string) {
   if (!['BRONZE','SILVER','GOLD'].includes(tier) || !Number.isInteger(months) || months < 1 || months > 99 || (scheme === 'CASH' && months !== 1))
     throw new CustomerActivationError(409,'VIP card terms require review');
   for (let attempt=0;attempt<1000;attempt++) {
@@ -94,11 +95,13 @@ export async function allocateMongoVipCardNumber(db: Db, tier: string, scheme: '
     const prefix = manilaDate().replaceAll('-', '').slice(2);
     const tierCode = tier === 'GOLD' ? 'G1' : tier === 'SILVER' ? 'S1' : 'B1';
     const number = `${prefix}${String(seq).padStart(5, '0')}${tierCode}${scheme === 'CASH' ? 'C' : 'T'}${String(months).padStart(2,'0')}S`;
-    if (!(await db.collection<MongoRow>('customers').findOne({vip_card_number:number},{session}))) return number;
+    if (!(await db.collection<MongoRow>('customers').findOne({vip_card_number:number},{session})) && await recordMongoVipIssuance(db, number, customerId, session, 'allocate')) {
+      return number;
+    }
   }
   throw new CustomerActivationError(409,'VIP card number allocation exhausted');
 }
-const vipNumber = (db: Db, tier: unknown, session: ClientSession) => allocateMongoVipCardNumber(db,tier === 'GOLD' ? 'GOLD' : tier === 'SILVER' ? 'SILVER' : 'BRONZE','CASH',1,session);
+const vipNumber = (db: Db, tier: unknown, session: ClientSession, customerId: string) => allocateMongoVipCardNumber(db,tier === 'GOLD' ? 'GOLD' : tier === 'SILVER' ? 'SILVER' : 'BRONZE','CASH',1,session,customerId);
 
 /** Transaction-scoped issuance: keep an issued identity stable across application retries. */
 export async function ensureMongoCustomerVipNumber(db: Db, customerId: string, tier: string, paymentScheme: string, session: ClientSession) {
@@ -109,7 +112,7 @@ export async function ensureMongoCustomerVipNumber(db: Db, customerId: string, t
   if (!['spot_cash','move_a','installment_4_month','move_b1_40_12','move_b2_25_12'].includes(paymentScheme))
     throw new CustomerActivationError(409,'VIP card terms require review');
   const cash = ['spot_cash','move_a'].includes(paymentScheme);
-  const number = await allocateMongoVipCardNumber(db,tier,cash?'CASH':'INSTALLMENT',cash?1:paymentScheme==='installment_4_month'?4:12,session);
+  const number = await allocateMongoVipCardNumber(db,tier,cash?'CASH':'INSTALLMENT',cash?1:paymentScheme==='installment_4_month'?4:12,session,customerId);
   const update = await customers.updateOne({_id:customerId,vip_card_number:customer.vip_card_number??null},{$set:{vip_card_number:number}},{session});
   if (update.matchedCount!==1) throw new CustomerActivationError(409,'Customer identity changed; reload before continuing');
   return number;
@@ -300,8 +303,10 @@ export function createMongoCustomersHandler(
                 db,
                 String(before?.stated_vip_package ?? before?.tier ?? 'BRONZE').toUpperCase(),
                 session,
+                id,
               );
             await collection.updateOne({ _id: id }, { $set: patch }, { session });
+            if (typeof update.vipCardNumber === 'string') await recordMongoVipIssuance(db, update.vipCardNumber, id, session);
             row = { ...before!, ...patch };
           }
           await db.collection<MongoRow>('audit_events').insertOne(

@@ -1,0 +1,40 @@
+[Unit]
+Description=AFHomes native MongoDB API
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=afhomes
+Group=afhomes
+WorkingDirectory=/srv/afhomes/current
+Environment=NODE_ENV=production
+Environment=AFHOMES_SERVER_ENV_FILE=%d/server.env
+LoadCredential=server.env:/etc/afhomes/server.env
+ExecStart=/usr/bin/node --import tsx api/server.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=75
+KillSignal=SIGTERM
+UMask=0077
+StateDirectory=afhomes
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/afhomes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -6,6 +6,12 @@ import { addressHierarchySchema, geographicCodeSchema } from './address.js';
 import { PERSON_NAME_RE, birthDateSchema, phoneSchema } from './input.js';
 
 const date = z.iso.date();
+/** OST accreditation dates follow the Philippine business day. */
+export function ostToday(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
 /** User-approved policy: calendar year, clamping leap day to the next February end. */
 export function ostAnnualExpiry(start: string): string {
   if (!date.safeParse(start).success) return '';
@@ -54,7 +60,7 @@ export const ostOfficialFormSchema = z
   })
   .strict()
   .superRefine((form, ctx) => {
-    if (form.dateApplied > new Date().toISOString().slice(0, 10))
+    if (form.dateApplied > ostToday())
       ctx.addIssue({
         code: 'custom',
         path: ['dateApplied'],
@@ -301,7 +307,7 @@ export const ostImportPreviewSchema = z.object({
 });
 export function officialOstFormDefaults(): Record<string, string> {
   return {
-    dateApplied: new Date().toISOString().slice(0, 10),
+    dateApplied: ostToday(),
     programCategory: '',
     vipCardType: '',
     sex: '',

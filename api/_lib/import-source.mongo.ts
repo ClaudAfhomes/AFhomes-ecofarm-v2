@@ -6,6 +6,7 @@ import { workbookPaymentClaimSchema } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
 import { companyId, allocateMongoVipCardNumber } from './customers.mongo.js';
+import { recordMongoVipIssuance } from './vip-issuance.mongo.js';
 import {
   createMongoImportClaimRecords,
   importNormalKey,
@@ -135,7 +136,9 @@ export function createMongoImportSourceRecords(
       Array.isArray(data.normalized.paymentClaims) ? data.normalized.paymentClaims : []
     )
       .map((c) => {
-        const { customerKey: _customer, paymentKey: _key, ...claim } = record(c);
+        const claim = { ...record(c) };
+        delete claim.customerKey;
+        delete claim.paymentKey;
         return claim;
       })
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -169,6 +172,7 @@ export function createMongoImportSourceRecords(
       if (await col('customers').findOne({ vip_card_number: supplied, _id: { $ne: customer._id } }, { session }))
         refuse(409, 'This VIP card ID belongs to another customer');
       await col('customers').updateOne({ _id: customer._id }, { $set: { vip_card_number: supplied } }, { session });
+      await recordMongoVipIssuance(db, supplied, customer._id, session);
       customer.vip_card_number = supplied;
       return;
     }
@@ -189,6 +193,7 @@ export function createMongoImportSourceRecords(
       ['spot_cash', 'move_a'].includes(scheme) ? 'CASH' : 'INSTALLMENT',
       months,
       session,
+      customer._id,
     );
     await col('customers').updateOne(
       { _id: customer._id },

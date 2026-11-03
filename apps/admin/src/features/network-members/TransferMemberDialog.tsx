@@ -11,6 +11,7 @@ import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react
 import {
   officialOstFormDefaults,
   ostAnnualExpiry,
+  ostToday as today,
   parseOfficialOstFields,
   transferMemberSchema,
   type Member,
@@ -30,10 +31,6 @@ import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { filterHolderNameInput, filterMobileInput } from '../../lib/normalize';
 import { getMember, networkMemberKeys, transferMember } from './services';
 import styles from './MembersPage.module.css';
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /** What the member holds right now, before anything changes. */
 function CurrentState({ member }: { member: Member }) {

@@ -37,7 +37,7 @@ const modules = {
   ost_application: 'network.ost_registrations',
 } as const;
 const fileBacked = (row: MongoRow) =>
-  hasPersistedFile({ storage_path: row.storage_path, sha256: row.sha256 });
+  row.migration_file_transfer_required !== true && hasPersistedFile({ storage_path: row.storage_path, sha256: row.sha256 });
 const subjectId = (row: MongoRow) => String(row.customer_id ?? row.ost_application_id);
 const fieldsOf = (row: MongoRow) =>
   (row.reviewed_data as { fields?: Record<string, string | null> } | null)?.fields ?? {};
@@ -49,6 +49,7 @@ const refuse = (status: number, message: string): never => {
 };
 
 const currentFileFilter: Filter<MongoRow> = {
+  migration_file_transfer_required: { $ne: true },
   storage_path: { $type: 'string', $ne: '' },
   sha256: { $regex: /^[0-9a-f]{64}$/, $ne: PENDING_SHA256 },
   verification_status: { $ne: 'rejected' },
@@ -202,6 +203,7 @@ export function createMongoDocumentHandlers(
           ? await col('identity_documents').findOne({ _id: document }, { session })
           : null;
         if (document && !row) return refuse(404, 'Document not found');
+        if (row?.migration_file_transfer_required) return refuse(409, 'Document file transfer requires verification');
         const auth = await authorized(req, type, id, row ?? undefined, session);
         if ('error' in auth) return refuse(auth.error.status, auth.error.error.message);
         return work(auth, row, session);
@@ -211,6 +213,7 @@ export function createMongoDocumentHandlers(
     }
   }
   async function persisted(row: MongoRow) {
+    if (row.migration_file_transfer_required) return refuse(409, 'Document file transfer requires verification');
     if (!objects) return refuse(503, 'Private document storage is unavailable');
     if (!row.storage_path) return refuse(409, 'The file has not been uploaded yet');
     const object = await objects.read(String(row.storage_path), DOCUMENT_MAX_BYTES);
@@ -364,6 +367,8 @@ export function createMongoDocumentHandlers(
         id = subjectId(row);
       const scoped = await authorized(req, type, id, row);
       if ('error' in scoped) return deny(res, scoped);
+      if (row.migration_file_transfer_required && match[2])
+        return fail(res, 'CONFLICT', 'Document file transfer requires verification', 409);
       if (!match[2]) return res.status(200).json(await view(row, scoped));
       if (match[2] === 'access-url') {
         if (!fileBacked(row))

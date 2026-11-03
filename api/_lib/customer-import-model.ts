@@ -19,6 +19,9 @@ export const shapeImportJob = (row: Record<string, unknown>) => ({
   failedAt: isoOrNull(row.failed_at),
   cancelledAt: isoOrNull(row.cancelled_at),
   failedRows: Number(row.failed_rows ?? 0),
+  migrationRevalidationRequired: row.migration_revalidation_required === true,
+  revalidatedJobId: row.migration_revalidated_job_id ?? null,
+  revalidationOfJobId: row.migration_revalidation_of_job_id ?? null,
 });
 
 function maskImportPrivateValues(value: unknown): unknown {

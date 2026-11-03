@@ -153,3 +153,24 @@ it('enforces authentication, permission, input, active membership, balance floor
   });
   expect((await request(adjustment(10))).status).toBe(403);
 });
+
+it('retains every ledger change and allowance total under sixteen simultaneous corrections', async () => {
+  const module = await col('modules').findOne({ key: 'operations.redemption' });
+  const restriction = { staff_id: fixture.admin.id, module_id: module!._id };
+  await col('staff_permission_restrictions').updateOne(restriction, { $set: { deny_update: false } });
+  try {
+    const before = await col('points_accounts').findOne({ membership_id: fixture.customer.membership });
+    const ledgerCount = await col('points_ledger').countDocuments({ account_id: before!._id });
+    const payments = await col('payments').find().toArray();
+    const start = performance.now();
+    const responses = await Promise.all(Array.from({ length: 16 }, (_, index) => request({ ...adjustment(10), reason: `Synthetic concurrent correction ${index}` })));
+    await Promise.all(responses.map(response => response.json()));
+    expect(responses.map(response => response.status)).toEqual(Array(16).fill(200));
+    const after = await col('points_accounts').findOne({ _id: before!._id });
+    expect(after).toMatchObject({ balance: Number(before!.balance) + 160, weekday_balance: Number(before!.weekday_balance) + 112, weekend_balance: Number(before!.weekend_balance) + 48, lifetime_allocated: before!.lifetime_allocated });
+    expect(await col('points_ledger').countDocuments({ account_id: before!._id })).toBe(ledgerCount + 16);
+    expect(await col('memberships').findOne({ _id: fixture.customer.membership })).toMatchObject({ points_balance: after!.balance });
+    expect(await col('payments').find().toArray()).toEqual(payments);
+    process.stdout.write('Disposable points contention: ' + JSON.stringify({ requests: 16, successes: 16, ledgerEntriesAdded: 16, totalDelta: 160, weekdayDelta: 112, weekendDelta: 48, durationMs: +(performance.now() - start).toFixed(2), sharedDatabase: false }) + '\n');
+  } finally { await col('staff_permission_restrictions').updateOne(restriction, { $set: { deny_update: true } }); }
+}, 30_000);

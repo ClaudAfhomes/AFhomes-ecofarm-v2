@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { beforeAll, afterAll, expect, it } from 'vitest';
+import { beforeAll, afterAll, expect, it, vi } from 'vitest';
+import * as legacyClients from './rest.js';
 import {
   customerSchema,
   customerProfileSchema,
@@ -16,9 +17,12 @@ let base = '',
   staffCookie = '',
   customerCookie = '';
 let recoveryUrl = '';
+const supabaseClientGuards = ['serviceClient', 'anonClient', 'userClient', 'requireService'] as const;
 const newPassword = `Npw${randomUUID().slice(0, 8)}9`,
   customerPassword = `Customer${randomUUID()}9`;
 beforeAll(async () => {
+  for (const name of supabaseClientGuards)
+    vi.spyOn(legacyClients, name).mockImplementation(() => { throw new Error('Native runtime must not acquire a Supabase client'); });
   test = await createTestReplica({ timeoutMS: 15_000 });
   server = http.createServer();
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -44,6 +48,7 @@ afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   await test?.stop();
+  vi.restoreAllMocks();
 });
 const cookie = (res: Response) =>
   res.headers
@@ -192,4 +197,8 @@ it('follows the real recovery callback and consumes the token once while revokin
     (await request('/auth/identity/sign-in/email', { email: fixture.customer.email, password }, ''))
       .status,
   ).toBe(200);
+});
+
+it('uses no Supabase database, Auth or Storage client throughout the native HTTP flows', () => {
+  for (const name of supabaseClientGuards) expect(legacyClients[name]).not.toHaveBeenCalled();
 });

@@ -120,6 +120,8 @@ export function createMongoImportContinuationHandlers(
       { session },
     );
     if (!job) refuse(404, 'Import job not found');
+    if (job!.migration_revalidation_required)
+      refuse(409, 'Revalidate the migrated workbook in MongoDB before continuing');
     if (
       job!.created_by !== actor &&
       !(await canUpdate(req, 'sales.customers')) &&

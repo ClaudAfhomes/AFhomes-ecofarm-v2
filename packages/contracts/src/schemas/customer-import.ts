@@ -571,6 +571,9 @@ export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[]
 /* ------------------------------------------------------------------ */
 
 export const customerImportJobSchema = z.object({
+  migrationRevalidationRequired: z.boolean().optional(),
+  revalidatedJobId: z.uuid().nullable().optional(),
+  revalidationOfJobId: z.uuid().nullable().optional(),
   id: z.string().uuid(),
   /** Public import job ID (AF-IMP-XXXXX). Nullish only pre-migration. */
   jobNumber: z.string().nullish(),

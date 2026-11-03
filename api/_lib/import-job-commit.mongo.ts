@@ -30,6 +30,8 @@ export function createMongoImportJobCommitHandler(
       return fail(res, 'VALIDATION_ERROR', 'Invalid import job', 400);
     const job = await col('customer_import_jobs').findOne({ _id: id });
     if (!job) return fail(res, 'NOT_FOUND', 'Import job not found', 404);
+    if (job.migration_revalidation_required)
+      return fail(res, 'CONFLICT', 'Revalidate the migrated workbook in MongoDB before confirming', 409);
     if (
       !['ready', 'validated', 'committing', 'completed', 'completed_with_errors'].includes(
         String(job.status),
@@ -93,7 +95,7 @@ export function createMongoImportJobCommitHandler(
           throw new CustomerActivationError(fresh.error.status, 'Import update is not permitted');
         const current = await col('customer_import_jobs').findOne({ _id: id }, { session });
         if (
-          !current ||
+          !current || current.migration_revalidation_required ||
           !['ready', 'validated', 'committing', 'completed', 'completed_with_errors'].includes(
             String(current.status),
           )
@@ -146,6 +148,9 @@ export function createMongoImportJobCommitHandler(
               await db
                 .collection<{ _id: string; seq: number }>('counters')
                 .updateOne({ _id: key }, { $inc: { seq: 1 } }, { upsert: true, session });
+            const currentJob = await col('customer_import_jobs').findOne({ _id: id }, { session });
+            if (!currentJob || currentJob.migration_revalidation_required)
+              throw new CustomerActivationError(409, 'Revalidate the migrated workbook in MongoDB before confirming');
             const current = await col('customer_import_rows').findOne(
               { _id: entry._id },
               { session },

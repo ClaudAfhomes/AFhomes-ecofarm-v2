@@ -6,6 +6,13 @@ Default runtime still uses Supabase. The controlled `pnpm dev:mongodb:local`
 command uses a fresh disposable local database; the existing administrator and
 shared databases must remain untouched.
 
+Native DigitalOcean hosting preparation (no Docker) keeps MongoDB on Atlas.
+See [the staging runbook](docs/mongodb/DIGITALOCEAN-NATIVE-HOSTING.md) for the
+Node/systemd entry point, Nginx HTTPS/static routing, private filesystem storage
+and isolated public build. `pnpm build:hosted` and `pnpm start:mongodb` require
+explicit hosted configuration; they do not provision infrastructure or replace
+the existing localhost setup. Deployment and production cutover remain unapproved.
+
 TypeScript monorepo for the AF Homes Ecofarm platform — membership-card sales,
 operations, and staff administration. pnpm workspaces + Turborepo.
 

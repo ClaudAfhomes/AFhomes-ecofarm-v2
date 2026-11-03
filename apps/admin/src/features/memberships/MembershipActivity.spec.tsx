@@ -5,6 +5,7 @@ import { renderWithProviders } from '../../test/utils';
 import { MembershipActivity } from './MembershipActivity';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
+import { getReport } from '../reports/services';
 vi.mock('./services', () => ({
   getMembership: vi.fn(),
   getMembershipPoints: vi.fn(),
@@ -35,6 +36,23 @@ it('shows no restricted activity and performs no requests without grants', () =>
   expect(getMembership).not.toHaveBeenCalled();
   expect(getMembershipPoints).not.toHaveBeenCalled();
   expect(getSalePayments).not.toHaveBeenCalled();
+});
+it('hides disabled transaction reports even with a grant and keeps active activity available', () => {
+  renderWithProviders(
+    <MembershipActivity
+      id={id}
+      number="MBS-QA-1"
+      permissions={[
+        grant('operations.redemption'),
+        grant('finance.points'),
+        grant('finance.payment_verification'),
+      ]}
+    />,
+  );
+  expect(screen.queryByText('Transactions')).not.toBeInTheDocument();
+  expect(screen.getByText('Points')).toBeInTheDocument();
+  expect(screen.getByText('Payments')).toBeInTheDocument();
+  expect(getReport).not.toHaveBeenCalled();
 });
 it('loads authoritative points and its ledger lazily through the account identifier', async () => {
   vi.mocked(getMembershipPoints).mockResolvedValue(

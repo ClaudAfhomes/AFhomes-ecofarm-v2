@@ -23,6 +23,7 @@ import {
   createOstMemberSchema,
   officialOstFormDefaults,
   ostAnnualExpiry,
+  ostToday as today,
   parseOfficialOstFields,
 } from '@afhomes/contracts';
 import {
@@ -50,10 +51,6 @@ const IDENTITY_FIELDS = [
 ] as const;
 
 type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate' | 'email' | 'line1';
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export function CreateOstDialog({
   open,
