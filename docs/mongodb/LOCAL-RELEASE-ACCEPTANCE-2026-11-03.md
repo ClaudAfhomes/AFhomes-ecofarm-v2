@@ -121,3 +121,69 @@ screenshots, diagnostic/account-reset scripts and unrelated experimental databas
 harness changes remain outside this commit. Secret-pattern and exact local-secret
 value checks found no matches in the selected files; these checks are not a claim
 of a complete security audit.
+
+## Follow-up after checkpoint a16b9e0
+
+The company-v1 upload reproduced a missing review download: its parser produced
+validated rows without the original source-cell map used by the existing review
+renderer. Both native and retained source handlers now receive that map from the
+shared file reader. Exact generated review headers are accepted on re-upload;
+unmapped headers remain rejected. The native regression failed before the fix,
+then verified all entered source values, the red birth-date cell, explanations,
+corrected re-upload and unchanged customer counts. The relevant four-file API run
+passes 128 tests. Browser preview on the updated disposable runtime shows the
+download button and invalid-cell explanation. The download click was not verified:
+the native screenshot reference expired and the owner changed/closed the QA tab.
+
+The owner then explicitly requested Turnstile on every MongoDB login, including
+Admin/Super Admin. The former Admin exemption is removed. All login forms use
+the login action; the shared cookie client and both session providers forward
+the token in x-captcha-response. Better Auth's installed CAPTCHA plugin verifies
+the token before credential/session creation, limits issuance to the configured
+hostnames and login action, and fails closed on rejected/upstream-failed checks.
+Application launchers require the public site key and server-only
+AFHOMES_AUTH_TURNSTILE_SECRET. Isolated library fixtures can still omit login
+CAPTCHA configuration; they are not application entry points.
+
+The ignored local env now copies the existing matching Turnstile widget secret
+into the login-specific server variable. No credential was printed or committed;
+no Cloudflare setting, real administrator, password, role or business record was
+changed. Cloudflare's documented dummy secret is confined to HTTP loopback QA;
+its observed response reports example.com and omits action. That fixture-only
+response is accepted; live keys always require action=login and trusted hosts.
+
+Direct HTTP against the new disposable runtime and actual Cloudflare dummy
+Siteverify returned 400 without a token and 200 with the documented dummy token.
+That is integration proof, not real-key browser CAPTCHA acceptance. Controlled
+real-library tests deny invalid, expired/reused, wrong-host and wrong-action
+tokens without creating sessions; provider failure blocks login. Hosted HTTP
+tests retain secure cookies, password-change enforcement and revocation.
+
+VIP activation's subsequent ordinary login now receives its own challenge. If
+activation succeeds but login fails, the UI preserves the successful activation
+and points to Sign in rather than asking to reuse the consumed code. The relevant
+Web run passes 91 tests across five files. Public search keeps its existing
+shared identity display with no expiry or IST/OST distinction.
+
+Post-login-protection load passes 2,400 requests / 20 workers / 10,000 customers:
+zero failures, p95 395.24 ms, maximum 472.91 ms and 480 verified 256-KiB downloads.
+Cloudflare is stubbed for that fixture's single initial sign-in; these timings do
+not measure real external Siteverify latency, public TLS, Atlas or a Droplet.
+The hosted build and built environment isolation pass with an explicit synthetic
+public build key. Existing large-chunk warnings remain. A broad parallel API run
+was stopped after timeouts; a one-worker rerun is in progress without relaxed
+application/test deadlines. Full browser acceptance remains pending.
+
+The current disposable security QA origins are Admin 127.0.0.1:53601 and Web
+127.0.0.1:53602. The owner confirmed the Cloudflare/first-password/sign-in handoff;
+native Chrome then showed the signed-in synthetic Super Admin dashboard. This
+does not prove every role or the remaining purchase/import screens. Old disposable
+runtimes were stopped to release resources; their four frontend ports are no
+longer listening. The real localhost/Atlas runtime is separate.
+
+The owner requested this second checkpoint commit/push before continuing browser
+acceptance. Focused Admin tests pass 17/2, Web 91/5, shared cookie client 8/1,
+widget 2/1, native authentication/hosted configuration 30/3 and import 128/4.
+Workspace typecheck and scoped lint pass (existing UI warnings remain).
+The broader serial API run is still in progress; it is not recorded as a clean
+full-suite run. Local environment secrets and unrelated artifacts remain excluded.

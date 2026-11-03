@@ -4,6 +4,7 @@ type Turnstile = {
     element: HTMLElement,
     options: {
       sitekey: string;
+      action?: string;
       callback: (token: string) => void;
       'expired-callback': () => void;
       'error-callback': () => void;
@@ -33,15 +34,17 @@ function load() {
     });
   return loading;
 }
-/** Supabase Auth verifies this token server-side with its configured secret. */
+/** The active authentication backend must verify the returned token server-side. */
 export function TurnstileChallenge({
   siteKey,
   onToken,
   resetVersion = 0,
+  action,
 }: {
   siteKey?: string;
   onToken: (token: string | null) => void;
   resetVersion?: number;
+  action?: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
@@ -55,6 +58,7 @@ export function TurnstileChallenge({
         if (!live || !root.current || !window.turnstile) return;
         widget = window.turnstile.render(root.current, {
           sitekey: siteKey,
+          ...(action ? { action } : {}),
           callback: (token) => {
             if (!live) return;
             setError('');
@@ -77,7 +81,7 @@ export function TurnstileChallenge({
       live = false;
       if (widget) window.turnstile?.remove(widget);
     };
-  }, [siteKey, onToken, resetVersion, retryVersion]);
+  }, [siteKey, action, onToken, resetVersion, retryVersion]);
   if (!siteKey) return null;
   return (
     <div>

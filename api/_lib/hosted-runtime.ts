@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db, MongoClient } from 'mongodb';
-import { getAuthOptions } from './auth.js';
+import { getAuthOptions, requireAuthTurnstile } from './auth.js';
 import { mongoRuntimeDatabase } from './mongodb-scope.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { createMongoDevelopmentHandler } from './mongo-development-access.js';
@@ -41,6 +41,7 @@ export function hostedMongoConfig(env: NodeJS.ProcessEnv) {
     env.AFHOMES_AUTH_TRUSTED_ORIGINS.split(',').some((value) => value.trim() !== origin)
   )
     throw new Error('Unexpected hosted trusted origin');
+  requireAuthTurnstile(env);
   getAuthOptions(env);
   if (env.MONGODB_DB?.trim() !== mongoRuntimeDatabase(env))
     throw new Error('Hosted database must match the explicitly selected runtime scope');

@@ -46,6 +46,7 @@ const env = {
   AFHOMES_SEARCH_SECRET: randomBytes(48).toString('base64url'),
   AFHOMES_SEARCH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA',
   VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+  AFHOMES_AUTH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA',
   // Cloudflare's documented dummy keys can return example.com from Siteverify.
   AFHOMES_SEARCH_TURNSTILE_HOSTNAMES: '127.0.0.1,example.com',
   AFHOMES_SEARCH_CONTACT_RETENTION_DAYS: '1',
@@ -81,6 +82,7 @@ for (const [name, base] of [
     VITE_API_BASE_URL: '/api/v1',
     VITE_ADMIN_URL: `${adminBase}/admin`,
     VITE_WEB_URL: webBase,
+    VITE_TURNSTILE_SITE_KEY: env.VITE_TURNSTILE_SITE_KEY,
   });
   children.push(
     spawn(

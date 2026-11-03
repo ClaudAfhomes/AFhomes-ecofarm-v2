@@ -75,7 +75,7 @@ Verify that the unit's `/usr/bin/node` points to the reviewed Node 24 binary.
    typecheck/lint and appropriate tests. Build with public settings only:
 
    ```sh
-   AFHOMES_PUBLIC_ORIGIN=https://staging.example.invalid pnpm build:hosted
+   AFHOMES_PUBLIC_ORIGIN=https://staging.example.invalid VITE_TURNSTILE_SITE_KEY=your-public-site-key pnpm build:hosted
    ```
 
    This creates `vercel-static/` using the existing static assembler; despite its
@@ -95,12 +95,22 @@ Verify that the unit's `/usr/bin/node` points to the reviewed Node 24 binary.
    MONGODB_URI=<existing Atlas URI; enter privately>
    MONGODB_DB=afhomes_dev
    BETTER_AUTH_SECRET=<approved stable signing secret; enter privately>
+   VITE_TURNSTILE_SITE_KEY=<matching public login widget site key>
+   AFHOMES_AUTH_TURNSTILE_SECRET=<matching widget secret; enter privately>
    PORT=3084
    AFHOMES_PRIVATE_STORAGE_PROVIDER=filesystem
    AFHOMES_PRIVATE_STORAGE_ROOT=/var/lib/afhomes/private-files
    AFHOMES_MONGODB_ENABLE_CORE_WRITES=false
    AFHOMES_HOSTED_SEARCH_MAINTENANCE=false
    ```
+
+   Login protection covers Admin/Super Admin, staff/IST, VIP and OST. The server
+   verifies the login action and configured hostname through Cloudflare before
+   credentials can create a session. Both launch-time key values are mandatory;
+   public builds receive only the site key. Cloudflare dummy secrets are refused
+   outside local HTTP loopback fixtures. Keep the server secret out of builds,
+   shell history and Git. See Cloudflare's server-side validation documentation:
+   https://developers.cloudflare.com/turnstile/get-started/server-side-validation/.
 
    The stable secret and private file contents must survive releases. Hostname,
    storage and secret changes are separate reviewed operations. Existing local

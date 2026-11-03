@@ -9,6 +9,7 @@ import {
   TurnstileChallenge,
 } from '@afhomes/ui';
 import { env } from '../../lib/env';
+import { CookieAuthError } from '@afhomes/shared';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
@@ -51,6 +52,10 @@ export function OstLoginPage() {
       passwordRef.current?.focus();
       return;
     }
+    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+      setServerError('Complete security verification before signing in.');
+      return;
+    }
     setServerError(null);
     setPending(true);
     try {
@@ -77,8 +82,9 @@ export function OstLoginPage() {
         setServerError('We could not sign you in with that email and password.');
       }
       setPending(false);
-    } catch {
-      setServerError('We could not sign you in with that email and password.');
+    } catch (cause) {
+      setServerError(cause instanceof CookieAuthError && cause.reason !== 'rejected'
+        ? cause.message : 'We could not sign you in with that email and password.');
       setPending(false);
     } finally {
       setCaptchaToken(null);
@@ -148,6 +154,7 @@ export function OstLoginPage() {
 
         <div className={styles.submitRow}>
           <TurnstileChallenge
+            action="login"
             siteKey={env.VITE_TURNSTILE_SITE_KEY}
             onToken={setCaptchaToken}
             resetVersion={captchaVersion}

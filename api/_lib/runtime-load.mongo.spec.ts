@@ -3,12 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createTestReplica } from './testing/mongo-replica.js';
 import { seedPhase7Fixture } from './testing/phase7-fixture.js';
 import { createHostedMongoHandler } from './hosted-runtime.js';
 import { createHostedPrivateObjectStore } from './private-object-store.js';
 import type { MongoRow } from './customer-activation.mongo.js';
+afterEach(() => vi.restoreAllMocks());
 
 it.each([
   { name: 'baseline', customers: 1, requests: 240, concurrency: 8 },
@@ -25,8 +26,14 @@ it.each([
     AFHOMES_PUBLIC_ORIGIN: 'https://load.example.invalid', BETTER_AUTH_URL: 'https://load.example.invalid',
     AFHOMES_WEB_URL: 'https://load.example.invalid', AFHOMES_ADMIN_URL: 'https://load.example.invalid/admin',
     BETTER_AUTH_SECRET: 'synthetic-disposable-load-only'.repeat(3),
+    AFHOMES_AUTH_TURNSTILE_SECRET: 'synthetic-load-captcha-secret',
+    VITE_TURNSTILE_SITE_KEY: 'synthetic-load-site-key',
     AFHOMES_PRIVATE_STORAGE_PROVIDER: 'filesystem', AFHOMES_PRIVATE_STORAGE_ROOT: root,
   };
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    expect(String(url)).toBe('https://challenges.cloudflare.com/turnstile/v0/siteverify');
+    return Response.json({ success: true, hostname: 'load.example.invalid', action: 'login' });
+  });
   const server = http.createServer(createHostedMongoHandler(replica.db, replica.client, env));
   try {
     const fixture = await seedPhase7Fixture(replica.db, replica.client, env, 'SyntheticLoad123!');
@@ -49,6 +56,7 @@ it.each([
       const req = http.request({ hostname: '127.0.0.1', port, path: route, method: body ? 'POST' : 'GET', headers: {
         Host: 'load.example.invalid', 'X-Forwarded-Proto': 'https', Origin: env.AFHOMES_PUBLIC_ORIGIN,
         'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}),
+        'x-captcha-response': 'synthetic-load-token',
       } }, res => {
         let bytes = 0;
         res.on('data', chunk => { bytes += chunk.length; });

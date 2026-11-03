@@ -174,8 +174,8 @@ function MongoCustomerSessionProvider({ children }: { children: ReactNode }) {
     };
   }, [resolve]);
   const signIn = useCallback(
-    async (email: string, password: string) => {
-      const result = await mongoAuth.signIn(email, password);
+    async (email: string, password: string, captchaToken?: string) => {
+      const result = await mongoAuth.signIn(email, password, captchaToken);
       if (result.twoFactorRedirect)
         throw new Error('Authenticator verification is required. Use your staff portal.');
       await resolve();

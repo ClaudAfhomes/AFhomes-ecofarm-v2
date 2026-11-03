@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('better-auth', () => ({ betterAuth: mocks.auth }));
 vi.mock('@better-auth/mongo-adapter', () => ({ mongodbAdapter: mocks.adapter }));
 
-import { createAfHomesAuth, getAuthOptions } from './auth.js';
+import { createAfHomesAuth, getAuthOptions, requireAuthTurnstile } from './auth.js';
 const initializationAtImport = mocks.auth.mock.calls.length + mocks.adapter.mock.calls.length;
 const env = {
   BETTER_AUTH_SECRET: 'phase2-unit-test-only-fixture-'.repeat(3),
@@ -17,6 +17,15 @@ const env = {
 
 describe('unmounted Better Auth foundation', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('requires login key pairs at application startup and refuses test secrets outside HTTP loopback', () => {
+    expect(() => requireAuthTurnstile(env)).toThrow('Login requires');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key' })).toThrow('Login requires');
+    const challenge = { ...env, VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA', AFHOMES_AUTH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA' };
+    expect(getAuthOptions(challenge).plugins[0]?.id).toBe('captcha');
+    expect(() => getAuthOptions({ ...challenge, NODE_ENV: 'production', BETTER_AUTH_URL: 'https://app.example.invalid' })).toThrow('test keys');
+    expect(() => getAuthOptions({ ...challenge, BETTER_AUTH_URL: 'https://app.example.invalid' })).toThrow('test keys');
+  });
 
   it('does not initialize authentication or the database adapter at import', () => {
     expect(initializationAtImport).toBe(0);

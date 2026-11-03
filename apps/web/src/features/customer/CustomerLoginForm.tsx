@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { AuthPortals } from '@afhomes/contracts';
 import { Alert, Button, PasswordField, TextField, TurnstileChallenge } from '@afhomes/ui';
+import { CookieAuthError } from '@afhomes/shared';
 import { env } from '../../lib/env';
 
 import { useCustomerSession } from '../../lib/customer-session';
@@ -50,6 +51,10 @@ export function CustomerLoginForm() {
       passwordRef.current?.focus();
       return;
     }
+    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+      setServerError('Complete security verification before signing in.');
+      return;
+    }
     setServerError(null);
     setPostLogin(null);
     setPending(true);
@@ -67,12 +72,13 @@ export function CustomerLoginForm() {
         if (next.signOut) await signOut();
         setPostLogin(next);
       }
-    } catch {
+    } catch (cause) {
       // A single generic message, and the underlying error is deliberately not
       // rendered: distinguishing "no such user" from "wrong password" would let
       // anyone enumerate registered customers. Nothing is logged either - the
       // submitted password must never reach a log sink.
-      setServerError('We could not sign you in with that email and password.');
+      setServerError(cause instanceof CookieAuthError && cause.reason !== 'rejected'
+        ? cause.message : 'We could not sign you in with that email and password.');
     } finally {
       setPending(false);
       setCaptchaToken(null);
@@ -138,6 +144,7 @@ export function CustomerLoginForm() {
 
       <div className={styles.submitRow}>
         <TurnstileChallenge
+          action="login"
           siteKey={env.VITE_TURNSTILE_SITE_KEY}
           onToken={setCaptchaToken}
           resetVersion={captchaVersion}

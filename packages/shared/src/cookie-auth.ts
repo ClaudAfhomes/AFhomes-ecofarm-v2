@@ -3,13 +3,15 @@ import { withRequestDeadline } from './request-deadline.js';
 
 const eventName = 'afhomes-cookie-auth-change';
 export class CookieAuthError extends Error {
-  constructor(readonly reason: 'unavailable' | 'rate_limited' | 'rejected') {
+  constructor(readonly reason: 'unavailable' | 'rate_limited' | 'rejected' | 'security') {
     super(
       reason === 'unavailable'
         ? 'The sign-in service is unavailable. Please try again shortly.'
         : reason === 'rate_limited'
           ? 'Too many sign-in attempts. Please wait before trying again.'
-          : 'Authentication request failed. Please try again.',
+          : reason === 'security'
+            ? 'Security verification failed or expired. Please complete it again.'
+            : 'Authentication request failed. Please try again.',
     );
   }
 }
@@ -43,18 +45,23 @@ function publish() {
   }
 }
 export function createCookieAuthGateway(apiBase: string) {
-  async function request(path: string, body?: unknown) {
+  async function request(path: string, body?: unknown, headers: Record<string, string> = {}) {
     try {
       return await withRequestDeadline(async (signal) => {
         const response = await fetch(`${apiBase}/auth/identity${path}`, {
           method: body === undefined ? 'GET' : 'POST',
           credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...headers },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           signal,
         });
         if (response.status === 429) throw new CookieAuthError('rate_limited');
         if (response.status >= 500) throw new CookieAuthError('unavailable');
+        if (!response.ok && path === '/sign-in/email') {
+          const error = await response.clone().json().catch(() => null);
+          if (['MISSING_RESPONSE', 'VERIFICATION_FAILED'].includes(error?.code))
+            throw new CookieAuthError('security');
+        }
         if (!response.ok) throw new CookieAuthError('rejected');
         return await response.json();
       });
@@ -68,9 +75,9 @@ export function createCookieAuthGateway(apiBase: string) {
     async read() {
       return cookieAuthSessionSchema.parse(await request('/get-session', {}));
     },
-    async signIn(email: string, password: string) {
+    async signIn(email: string, password: string, captchaToken?: string) {
       const parsed = cookieAuthSignInSchema.safeParse(
-        await request('/sign-in/email', { email, password }),
+        await request('/sign-in/email', { email, password }, captchaToken ? { 'x-captcha-response': captchaToken } : {}),
       );
       if (!parsed.success) throw new CookieAuthError('unavailable');
       const result = parsed.data;

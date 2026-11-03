@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createMongoClient } from '../_lib/mongodb.js';
 import { createMongoPhase5Runtime } from '../_lib/mongo-runtime.js';
-import { getAuthOptions } from '../_lib/auth.js';
+import { getAuthOptions, requireAuthTurnstile } from '../_lib/auth.js';
 import { createMongoDevelopmentHandler } from '../_lib/mongo-development-access.js';
 import { inspectMongoCoreSetup } from '../_lib/mongo-core-setup.js';
 import { createDevelopmentPrivateObjectStore } from '../_lib/private-object-store.js';
@@ -49,6 +49,7 @@ try {
     BETTER_AUTH_URL: apiBase,
     AFHOMES_AUTH_TRUSTED_ORIGINS: `${adminBase},${webBase}`,
   };
+  requireAuthTurnstile(env);
   getAuthOptions(env);
   const connection = createMongoClient(env);
   startupStage = 'connection';
@@ -87,6 +88,7 @@ try {
     VITE_API_BASE_URL: '/api/v1',
     VITE_ADMIN_URL: `${adminBase}/admin`,
     VITE_WEB_URL: webBase,
+    VITE_TURNSTILE_SITE_KEY: env.VITE_TURNSTILE_SITE_KEY,
   });
   for (const [name, base] of [
     ['admin', adminBase],
