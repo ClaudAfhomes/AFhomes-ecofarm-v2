@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, lstat, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  lstat,
+  readFile,
+  readdir,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
@@ -20,12 +30,7 @@ export type PublicMediaWrite = PublicMediaValidation & {
 };
 
 export type PublicMediaErrorCode =
-  | 'UNAVAILABLE'
-  | 'UNSUPPORTED_TYPE'
-  | 'INVALID_CONTENT'
-  | 'TOO_LARGE'
-  | 'FULL'
-  | 'NOT_FOUND';
+  'UNAVAILABLE' | 'UNSUPPORTED_TYPE' | 'INVALID_CONTENT' | 'TOO_LARGE' | 'FULL' | 'NOT_FOUND';
 
 export class PublicMediaError extends Error {
   constructor(
@@ -114,7 +119,11 @@ function imageDimensions(
       if (offset + 2 > bytes.length) return null;
       const length = (bytes[offset]! << 8) | bytes[offset + 1]!;
       if (length < 2 || offset + length > bytes.length) return null;
-      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      if (
+        [0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(
+          marker,
+        )
+      ) {
         const height = (bytes[offset + 3]! << 8) | bytes[offset + 4]!;
         const width = (bytes[offset + 5]! << 8) | bytes[offset + 6]!;
         return width && height ? { width, height } : null;
@@ -133,12 +142,9 @@ export function validatePublicMedia(mimeType: string, bytes: Uint8Array): Public
   if (!descriptor) throw new PublicMediaError('UNSUPPORTED_TYPE', 'Unsupported media type');
   if (!bytes.length) throw new PublicMediaError('INVALID_CONTENT', 'The file is empty');
   const valid =
-    descriptor.mediaType === 'document'
-      ? pdfSignature(bytes)
-      : imageSignature(mime, bytes);
+    descriptor.mediaType === 'document' ? pdfSignature(bytes) : imageSignature(mime, bytes);
   if (!valid) throw new PublicMediaError('INVALID_CONTENT', 'File contents do not match the type');
-  const dimensions =
-    descriptor.mediaType === 'image' ? imageDimensions(mime, bytes) : null;
+  const dimensions = descriptor.mediaType === 'image' ? imageDimensions(mime, bytes) : null;
   return {
     mimeType: descriptor.contentType,
     mediaType: descriptor.mediaType,
@@ -167,7 +173,8 @@ function parseLimit(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (!/^\d+$/.test(value.trim())) throw new Error('Invalid public media size limit');
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1024) throw new Error('Invalid public media size limit');
+  if (!Number.isSafeInteger(parsed) || parsed < 1024)
+    throw new Error('Invalid public media size limit');
   return parsed;
 }
 
@@ -200,8 +207,7 @@ export class LocalPublicMediaStore implements PublicMediaStore {
   }
 
   private file(key: string): string {
-    if (!PUBLIC_MEDIA_KEY_RE.test(key))
-      throw new PublicMediaError('NOT_FOUND', 'Media not found');
+    if (!PUBLIC_MEDIA_KEY_RE.test(key)) throw new PublicMediaError('NOT_FOUND', 'Media not found');
     return path.join(this.root, key);
   }
 
@@ -218,6 +224,11 @@ export class LocalPublicMediaStore implements PublicMediaStore {
     const temporary = path.join(this.root, `.upload-${randomUUID()}`);
     try {
       await writeFile(temporary, bytes, { flag: 'wx', mode: 0o644 });
+
+      // Explicitly apply public-read permissions despite a restrictive umask.
+      await chmod(temporary, 0o644);
+
+      // Publish only after the file permissions are correct.
       await rename(temporary, file);
     } catch {
       await unlink(temporary).catch(() => {});
@@ -246,7 +257,8 @@ export class LocalPublicMediaStore implements PublicMediaStore {
   async remove(key: string): Promise<void> {
     const file = this.file(key);
     await unlink(file).catch((error) => {
-      if (!isMissing(error)) throw new PublicMediaError('UNAVAILABLE', 'Public media storage is unavailable');
+      if (!isMissing(error))
+        throw new PublicMediaError('UNAVAILABLE', 'Public media storage is unavailable');
     });
   }
 
@@ -313,14 +325,10 @@ export function createLocalPublicMediaStore(
 ): PublicMediaStore | undefined {
   const root = env.AFHOMES_PUBLIC_MEDIA_ROOT?.trim();
   if (!root) return undefined;
-  if (!path.isAbsolute(root))
-    throw new Error('AFHOMES_PUBLIC_MEDIA_ROOT must be an absolute path');
+  if (!path.isAbsolute(root)) throw new Error('AFHOMES_PUBLIC_MEDIA_ROOT must be an absolute path');
   return new LocalPublicMediaStore({
     root,
     maxBytes: parseLimit(env.AFHOMES_PUBLIC_MEDIA_MAX_BYTES, 10 * 1024 * 1024),
-    maxTotalBytes: parseLimit(
-      env.AFHOMES_PUBLIC_MEDIA_MAX_TOTAL_BYTES,
-      2 * 1024 * 1024 * 1024,
-    ),
+    maxTotalBytes: parseLimit(env.AFHOMES_PUBLIC_MEDIA_MAX_TOTAL_BYTES, 2 * 1024 * 1024 * 1024),
   });
 }
