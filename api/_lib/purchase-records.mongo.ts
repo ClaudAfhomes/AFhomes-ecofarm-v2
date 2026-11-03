@@ -277,6 +277,8 @@ export function createMongoPurchaseRecords(db: Db) {
       fields = {
         ...identity,
         membershipNumber: text(membership!.membership_number),
+        tier: terms.tier,
+        activatedAt: text(membership!.activated_at),
         status: 'active',
         yearlyPoints: Number(terms.yearly_points),
         pointsAllocated: Number(membership!.yearly_points_allocated ?? 0),

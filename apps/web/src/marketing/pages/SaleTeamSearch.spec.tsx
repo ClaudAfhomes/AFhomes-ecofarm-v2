@@ -56,7 +56,7 @@ beforeEach(() => {
     throw new Error('Unexpected request');
   });
 });
-async function begin() {
+async function begin(aaNumber = record.aaNumber) {
   await screen.findByText(
     (_, element) =>
       (element?.textContent ?? '').replace(/\s+/g, ' ').trim() ===
@@ -65,7 +65,7 @@ async function begin() {
   );
   const field = screen.getByLabelText('AA number');
   await userEvent.clear(field);
-  await userEvent.type(field, record.aaNumber);
+  await userEvent.type(field, aaNumber);
   await userEvent.click(screen.getByRole('button', { name: 'Search' }));
   await screen.findByRole('dialog', { name: 'Privacy notice' });
 }
@@ -118,6 +118,7 @@ it('requires CAPTCHA, acknowledgment and contact before revealing a masked resul
   await enterContact();
   expect(await screen.findByText(record.maskedName)).toBeInTheDocument();
   expect(screen.getByText('Employee Identity')).toBeInTheDocument();
+  expect(screen.queryByText('Valid Until')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Phone: +63 960 431 6867' })).toHaveAttribute(
     'href',
     'tel:+639604316867',
@@ -127,6 +128,26 @@ it('requires CAPTCHA, acknowledgment and contact before revealing a masked resul
   );
   const call = api.request.mock.calls.find(([path]) => path.endsWith('/reveal'))!;
   expect(JSON.parse(call[2].body).contact.mobile).toBe('+639171234567');
+});
+it('keeps the same public identity display for OST without exposing kind or expiry', async () => {
+  const defaults = api.request.getMockImplementation()!;
+  api.request.mockImplementation(async (path: string) =>
+    path.endsWith('/reveal')
+      ? {
+          result: { ...record, aaNumber: 'AAO26110002', kind: 'OST', expiresOn: '2027-11-03' },
+          contactReceipt: 'synthetic-receipt',
+        }
+      : defaults(path),
+  );
+  renderWithProviders(<SaleTeamSearch />);
+  await begin('AAO26110002');
+  await acknowledge();
+  await enterContact();
+  expect(await screen.findByText('Employee Identity')).toBeVisible();
+  expect(screen.queryByText('OST Accreditation')).not.toBeInTheDocument();
+  const details = screen.getByTestId('accreditation-details');
+  expect(within(details).queryByText('Valid Until')).not.toBeInTheDocument();
+  expect(within(details).queryByText('Nov 3, 2027')).not.toBeInTheDocument();
 });
 it('reuses contact receipt while requiring CAPTCHA and acknowledgment for another search', async () => {
   renderWithProviders(<SaleTeamSearch />);

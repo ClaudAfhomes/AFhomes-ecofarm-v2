@@ -32,6 +32,12 @@ historical payment/points evidence; partial/interrupted retries and rollback.
 
 ## Task ledger
 
+- [x] **Password bridge preparation.** Explicit default-off tagged bcrypt
+  verifier, bounded cost/UTF-8 input, native new-password hashes and shared
+  old-password verification. Disposable HTTP forced-change/upgrade/owner proof;
+  see PASSWORD-COMPATIBILITY-VERIFICATION.md. Real identity import/enablement
+  remains gated and is not complete.
+
 - [x] **Permission parity implementation.** Define exact grants from later source migrations;
   update new-role setup; add a digest-bound read-only plan/operator apply for
   missing rows. Preserve existing grants/restrictions and test rollback/replay.
@@ -90,7 +96,16 @@ historical payment/points evidence; partial/interrupted retries and rollback.
   Three target indexes applied after explicit user approval; three import indexes
   initially deferred, then applied during the separately approved five-collection
   import initialization. Read-only canonical setup and core data checks pass;
-  validators and recovery remain incomplete. See DATABASE-READINESS-2026-10-28.md.
+  Six core validators are now proposed/tested with strict native purchase,
+  sales/activation and legacy/certified import flows (69 targeted tests).
+  Read-only live preflight: 18 core records, zero incompatible, six missing
+  validators; no apply. See CORE-VALIDATORS-REVIEW.md.
+  User then approved this scope; first DDL failed because the application DB user
+  lacks collMod. Six collections/18 documents and indexes verified unchanged.
+  See CORE-VALIDATORS-APPLY-RESULT.md; maintenance credentials are needed, with
+  approval preserved and no app-user privilege escalation.
+  Ruling: keep this task open until shared installation, broader schema review and
+  remaining measured performance/acceptance checks. See DATABASE-READINESS-2026-10-28.md.
 - [ ] **Recovery.** Implement and verify private database/file backup and restore
   against disposable targets, retaining a manifest and restoring independently
   from the existing target. No destructive restore into afhomes_dev.
@@ -103,9 +118,21 @@ historical payment/points evidence; partial/interrupted retries and rollback.
 - [ ] **Acceptance.** Full available tests/typechecks/lint/build; role-by-role
   browser purchase/Finance/activation/points/lookup/access-denial flows; private
   upload/download; staff first login/recovery; public IST/OST eligibility/privacy.
+  Latest full serial root run, 30 October: 5,033 passed, zero failures; fresh API
+  3,133 and Admin 1,017, five unchanged workspace tasks cached. Typecheck, build,
+  lint and env isolation pass. See COMPLETION-CHECKPOINT-2026-10-30.md. CMS remains
+  disabled. Browser/full-platform acceptance stays open; do not equate this
+  automated gate with real migration, backup or hosted acceptance.
 - [ ] **Target review.** Present the exact tested permission/index/validator and
   migration plans for approval. Record real target outcomes separately from
   disposable verification. No deployment or push.
+- [ ] **Native Droplet staging.** User selected DigitalOcean without Docker and
+  explicitly retained Atlas. Hosted Node entry point, public-build isolation,
+  persistent private filesystem support and systemd/Nginx templates are prepared;
+  see DIGITALOCEAN-NATIVE-HOSTING.md. Existing native business handlers and
+  conversion gates are reused. Ruling: this is staging preparation only. Linux
+  configuration validation, approved infrastructure/domain/Atlas access, private
+  file readiness, HTTPS/browser acceptance and production cutover remain open.
 
 ## Current ruling
 

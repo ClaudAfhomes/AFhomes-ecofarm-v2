@@ -1,9 +1,38 @@
-import { WORKFLOW_COLUMNS, WORKFLOW_REVIEW_HEADERS } from '@afhomes/contracts';
-import { readWorkbookParts } from './customer-xlsx.js';
+import {
+  CUSTOMER_WORKBOOK_FIELDS,
+  CUSTOMER_WORKBOOK_SHEETS,
+  WORKFLOW_COLUMNS,
+  WORKFLOW_REVIEW_HEADERS,
+} from '@afhomes/contracts';
+import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
 import { zipStored, toXlsx } from './report-export.js';
 type ReviewIssue = { sheet: string; row: number; field: string; column: number; message: string };
 type ReviewSource = { sheet: string; row: number; fields: Record<string, string> };
-type ReviewWorkbook = { issues: ReviewIssue[]; sources: ReviewSource[][] };
+export type ReviewWorkbook = { issues: ReviewIssue[]; sources: ReviewSource[][] };
+
+/** Preserve legacy source-column positions and raw values, including calculated columns. */
+export function companyWorkbookReview(
+  bytes: Uint8Array,
+  rows: { rowNumber: number }[],
+): ReviewWorkbook {
+  const matrices = readWorkbook(readWorkbookParts(bytes), CUSTOMER_WORKBOOK_SHEETS);
+  return {
+    issues: [],
+    sources: rows.map(({ rowNumber }) =>
+      CUSTOMER_WORKBOOK_SHEETS.map((sheet) => {
+        const matrix = matrices.get(sheet)!;
+        const keys = [...CUSTOMER_WORKBOOK_FIELDS[sheet]];
+        if (matrix[0]!.length === keys.length + 3)
+          keys.push('review_status', 'review_errors', 'review_warnings');
+        return {
+          sheet,
+          row: rowNumber,
+          fields: Object.fromEntries(keys.map((key, i) => [key, matrix[rowNumber - 1]?.[i] ?? ''])),
+        };
+      }),
+    ),
+  };
+}
 
 const xml = (s: string) =>
   s
@@ -40,7 +69,7 @@ export function annotateCustomerWorkbook(
         if (workflow.issues.some((v) => issue.message.includes(v.message))) continue;
         const sources = workflow.sources[i] ?? [];
         const secondary = issue.field.startsWith('secondary_');
-        const field = issue.field.replace(/^secondary_/, '');
+        let field = issue.field.replace(/^secondary_/, '');
         const source =
           sources.find(
             (s) =>
@@ -58,8 +87,9 @@ export function annotateCustomerWorkbook(
                       ].includes(field)
                     ? 'Sales Team'
                     : 'Customers') && Object.hasOwn(s.fields, field),
-          ) ?? sources[0];
+          ) ?? sources.find((s) => Object.hasOwn(s.fields, issue.field)) ?? sources[0];
         if (!source) continue;
+        if (Object.hasOwn(source.fields, issue.field)) field = issue.field;
 
         // Source fields retain their original column order, including legacy layouts.
         const index = Object.keys(source.fields).indexOf(field);

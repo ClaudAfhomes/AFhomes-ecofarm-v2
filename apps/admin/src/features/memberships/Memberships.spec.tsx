@@ -11,6 +11,18 @@ import { MembershipsPage } from './MembershipsPage';
 import { getMembershipCard, getMemberships } from './services';
 import { getAudit } from '../reports/services';
 
+const reportFeature = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return {
+    ...actual,
+    isFeaturePathEnabled: (path: string) =>
+      reportFeature.enabled && path === '/api/v1/reports/audit'
+        ? true
+        : actual.isFeaturePathEnabled(path),
+  };
+});
+
 vi.mock('./services', () => ({
   getMemberships: vi.fn(),
   getMembershipCard: vi.fn(),
@@ -124,6 +136,7 @@ const STAFF: SessionUser = {
 afterEach(() => vi.clearAllMocks());
 
 beforeEach(() => {
+  reportFeature.enabled = false;
   mockedGetAudit.mockResolvedValue({ ...HISTORY, data: [] });
 });
 
@@ -197,7 +210,8 @@ describe('Membership detail', () => {
     );
   }
 
-  it('renders card metadata, issuer, entitlement and history', async () => {
+  it('renders card metadata, issuer, entitlement and retained history when reports are enabled', async () => {
+    reportFeature.enabled = true;
     mockedGetMembershipCard.mockResolvedValue(CARD);
     mockedGetAudit.mockResolvedValue(HISTORY);
     renderDetail(STAFF);
@@ -214,11 +228,22 @@ describe('Membership detail', () => {
   });
 
   it('hides history without the audit grant', async () => {
+    reportFeature.enabled = true;
     mockedGetMembershipCard.mockResolvedValue(CARD);
     renderDetail({ ...STAFF, afHomesPermissions: STAFF.afHomesPermissions.slice(0, 1) });
     await screen.findByText('Pedro Reyes');
     expect(screen.queryByText('History')).not.toBeInTheDocument();
     expect(mockedGetAudit).not.toHaveBeenCalled();
+  });
+
+  it('does not render or request disabled history even with the audit grant', async () => {
+    mockedGetMembershipCard.mockResolvedValue(CARD);
+    renderDetail(STAFF);
+    await screen.findByText('Pedro Reyes');
+    expect(screen.queryByRole('region', { name: 'Card history' })).not.toBeInTheDocument();
+    expect(screen.queryByText('History')).not.toBeInTheDocument();
+    expect(mockedGetAudit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Record a print/ })).toBeInTheDocument();
   });
 
   it('shows a retryable error state', async () => {

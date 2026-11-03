@@ -91,10 +91,34 @@ describe('production configuration', () => {
     expect(loadProductionConfig({ ...base, PORT: '0' }, { allowEphemeralPort: true }).port).toBe(0);
   });
 
-  it('forbids development storage and the test-purge switch in production', () => {
+  it('accepts local persistent storage and requires an absolute root', () => {
+    expect(
+      loadProductionConfig({
+        ...base,
+        AFHOMES_PRIVATE_STORAGE_PROVIDER: 'local',
+        AFHOMES_PRIVATE_STORAGE_ROOT: '/var/lib/afhomes/private-files',
+      }),
+    ).toMatchObject({
+      storageProvider: 'local',
+      storageRoot: '/var/lib/afhomes/private-files',
+    });
+    expect(
+      loadProductionConfig({
+        ...base,
+        AFHOMES_PRIVATE_STORAGE_PROVIDER: 'filesystem',
+        AFHOMES_PRIVATE_STORAGE_ROOT: '/var/lib/afhomes/private-files',
+      }).storageProvider,
+    ).toBe('local');
     expect(() =>
       loadProductionConfig({ ...base, AFHOMES_PRIVATE_STORAGE_PROVIDER: 'local' }),
-    ).toThrow('s3');
+    ).toThrow('AFHOMES_PRIVATE_STORAGE_ROOT');
+    expect(() =>
+      loadProductionConfig({
+        ...base,
+        AFHOMES_PRIVATE_STORAGE_PROVIDER: 'local',
+        AFHOMES_PRIVATE_STORAGE_ROOT: 'relative/path',
+      }),
+    ).toThrow('AFHOMES_PRIVATE_STORAGE_ROOT');
     expect(() =>
       loadProductionConfig({ ...base, AFHOMES_ENABLE_TEST_PURGE: 'true' }),
     ).toThrow('AFHOMES_ENABLE_TEST_PURGE');

@@ -1,4 +1,5 @@
-import { loadEnvFile } from 'node:process';
+import { readFile } from 'node:fs/promises';
+import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createMongoClient } from '../_lib/mongodb.js';
 import { createTestReplica } from '../_lib/testing/mongo-replica.js';
@@ -10,8 +11,10 @@ try {
   if (process.argv.length > 2) throw new Error('This command accepts no write/apply options');
   reference = await createTestReplica();
   await setupMongoPhase5(reference.db);
-  loadEnvFile(fileURLToPath(new URL('../../.env.local', import.meta.url)));
-  const { client, database } = createMongoClient();
+  const env = parseEnv(
+    await readFile(fileURLToPath(new URL('../../.env.local', import.meta.url)), 'utf8'),
+  );
+  const { client, database } = createMongoClient(env);
   try {
     await client.connect();
     console.log(

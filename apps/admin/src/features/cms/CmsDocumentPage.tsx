@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { cmsContentSchemas, type CmsDocument, type CmsDocumentKey } from '@afhomes/contracts';
-import { Button, ErrorState, PageHeader, Skeleton, TextField, StatusChip } from '@afhomes/ui';
+import { Button, ConfirmDialog, ErrorState, PageHeader, Skeleton, TextField, StatusChip } from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { getCmsDocuments, publishCmsDocument, saveCmsDocument } from './services';
@@ -24,9 +24,9 @@ function DocumentEditor({title,description,documentKey,document:loaded,canUpdate
   const client=useQueryClient();const [document,setDocument]=useState(loaded);
   const [value,setValue]=useState(()=>initialCmsValue(loaded,documentKey));
   const [saved,setSaved]=useState(()=>JSON.stringify(value));const [summary,setSummary]=useState('');const [preview,setPreview]=useState(false);const [message,setMessage]=useState('');
-  const dirty=JSON.stringify(value)!==saved;useCmsUnsaved(dirty);
+  const dirty=JSON.stringify(value)!==saved;const unsaved=useCmsUnsaved(dirty);
   const valid=cmsContentSchemas[documentKey].safeParse(value);
-  const accept=async(next:CmsDocument)=>{setDocument(next);setValue(next.draftValue);setSaved(JSON.stringify(next.draftValue));setSummary('');setMessage('Draft saved. The public website is unchanged until you publish.');await client.invalidateQueries({queryKey:['cms']});};
+  const accept=async(next:CmsDocument)=>{unsaved.onCancel();setDocument(next);setValue(next.draftValue);setSaved(JSON.stringify(next.draftValue));setSummary('');setMessage('Draft saved. The public website is unchanged until you publish.');await client.invalidateQueries({queryKey:['cms']});};
   const save=useBusinessMutation({mutationFn:async()=>{if(!valid.success)throw Error(valid.error.issues.map(i=>`${i.path.join('.')}: ${i.message}`).join('\n'));return saveCmsDocument(documentKey,value,document?.version??1,summary)},onSuccess:accept});
   const publish=useBusinessMutation({mutationFn:(publishing:boolean)=>publishCmsDocument(documentKey,publishing,document!.version),onSuccess:async(next)=>{await accept(next);setMessage(next.status==='published'?'Saved draft published.':'Unpublished. The website uses its existing fallback content.')}});
   const allSchema=cmsContentSchemas[documentKey];let schema:z.ZodType=allSchema;let displayed=value;
@@ -45,5 +45,6 @@ function DocumentEditor({title,description,documentKey,document:loaded,canUpdate
     {message&&<p role="status">{message}</p>}{save.error&&<p role="alert">{save.error.message}</p>}{publish.error&&<p role="alert">{publish.error.message}</p>}
     <div className={styles.actions}>{canUpdate&&<Button disabled={!valid.success||save.isPending||publish.isPending||summary.trim().length<3} onClick={()=>save.mutate()}>Save Draft</Button>}{document&&<><Button variant="secondary" onClick={()=>setPreview(!preview)}>Preview Saved Draft</Button>{canUpdate&&<><Button disabled={dirty||!valid.success||publish.isPending||save.isPending} onClick={()=>publish.mutate(true)}>Publish Saved Draft</Button>{document.status==='published'&&<Button variant="secondary" disabled={dirty||publish.isPending||save.isPending} onClick={()=>publish.mutate(false)}>Unpublish</Button>}</>}</>}</div>
     {preview&&document&&<CmsPreview document={document} onClose={()=>setPreview(false)}/>}
+    <ConfirmDialog {...unsaved} title="Leave this editor?" message="Your unsaved changes will be lost." confirmLabel="Leave editor"/>
   </section>;
 }

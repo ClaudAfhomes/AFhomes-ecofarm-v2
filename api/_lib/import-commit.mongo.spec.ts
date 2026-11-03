@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { createTestReplica } from './testing/mongo-replica.js';
+import { installTestCoreValidators } from './testing/core-validators.js';
 import { seedPhase7Fixture } from './testing/phase7-fixture.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { companyWorkbook } from './customer-workbook-export.js';
@@ -134,6 +135,7 @@ beforeAll(async () => {
     AFHOMES_AUTH_TRUSTED_ORIGINS: base,
   };
   fixture = await seedPhase7Fixture(replica.db, replica.client, env, 'SyntheticCommit123!');
+  await installTestCoreValidators(replica.db);
   server.on('request', createMongoPhase5Runtime(replica.db, replica.client, env));
   const login = await request(
     'auth/identity/sign-in/email',
@@ -173,6 +175,73 @@ afterAll(async () => {
   server?.closeAllConnections();
   if (server?.listening) await new Promise<void>((r) => server.close(() => r()));
   await replica?.stop();
+});
+
+it('blocks migrated jobs and direct row continuation until fresh native revalidation', async () => {
+  const source = await reviewRow('synthetic-migrated-review@example.invalid');
+  await col('customer_import_jobs').updateOne({ _id: source.job }, { $set: { migration_revalidation_required: true } });
+  const before = await Promise.all(['customers', 'card_sales', 'payments', 'memberships', 'auth_users'].map(table => col(table).countDocuments()));
+  await json(await confirm(source.job), 409);
+  await json(await request(`customer-imports/rows/${source.row}/continuation`, {
+    requestId: randomUUID(),
+    expectedSourceHash: source.preview.expectedSourceHash,
+    expectedTargetVersion: source.preview.expectedTargetVersion,
+  }), 409);
+  expect(await Promise.all(['customers', 'card_sales', 'payments', 'memberships', 'auth_users'].map(table => col(table).countDocuments()))).toEqual(before);
+  expect(await col('customer_import_rows').findOne({ _id: source.row })).toMatchObject({ raw_data: source.raw, committed_at: null });
+});
+
+it('creates one linked fresh review on concurrent revalidation and preserves archived evidence', async () => {
+  const archived = await reviewRow('synthetic-archived-resume@example.invalid');
+  await col('customer_import_jobs').updateOne({ _id: archived.job }, { $set: { migration_revalidation_required: true } });
+  const originalJob = (await col('customer_import_jobs').findOne({ _id: archived.job }))!;
+  const originalRow = await col('customer_import_rows').findOne({ _id: archived.row });
+  const payload = {
+    source: 'csv', resumeJobId: archived.job,
+    contentBase64: Buffer.from('first_name,last_name,email,mobile,source_status\nSynthetic,Resumed,synthetic-resumed@example.invalid,09171234567,Pending').toString('base64'),
+  };
+  const counts = () => Promise.all(['customers', 'card_sales', 'payments', 'memberships', 'auth_users'].map(name => col(name).countDocuments()));
+  const before = await counts();
+  const results = await Promise.all([request('customer-imports/parse', payload), request('customer-imports/parse', payload)]).then(responses => Promise.all(responses.map(response => json(response, 201))));
+  expect(results[0].job.id).toBe(results[1].job.id);
+  expect(results[0].reviewFile?.content).toBeTruthy();
+  expect(results[0].reviewFile).toEqual(results[1].reviewFile);
+  expect(results[0].job).toMatchObject({ status: 'ready', revalidationOfJobId: archived.job, migrationRevalidationRequired: false });
+  expect(results[0].job.id).not.toBe(archived.job);
+  expect(results[0].rows[0].normalized).not.toHaveProperty('continuationPreview');
+  expect(results[0].rows[0].normalized.externalVerified).not.toBe(true);
+  expect(await counts()).toEqual(before);
+  const currentJob = (await col('customer_import_jobs').findOne({ _id: archived.job }))!;
+  delete currentJob.migration_revalidated_job_id;
+  delete currentJob.migration_revalidation_fingerprint;
+  expect(currentJob).toEqual(originalJob);
+  expect(await col('customer_import_rows').findOne({ _id: archived.row })).toEqual(originalRow);
+  expect(await col('customer_import_jobs').countDocuments({ migration_revalidation_of_job_id: archived.job })).toBe(1);
+  expect(await col('audit_events').countDocuments({ action: 'CUSTOMER_IMPORT_PARSED', entity_id: results[0].job.id })).toBe(1);
+  await json(await request('customer-imports/parse', { ...payload, sourceName: 'different name', contentBase64: Buffer.from('first_name\nChanged').toString('base64') }), 409);
+  await json(await request(`customer-imports/jobs/${archived.job}/cancel`, {}), 409);
+  await json(await confirm(archived.job), 409);
+  const committed = await json(await confirm(results[0].job.id));
+  expect(committed.failed).toBe(0);
+  expect(await col('customers').countDocuments({ email: 'synthetic-resumed@example.invalid' })).toBe(1);
+  await json(await request('customer-imports/parse', payload, ''), 401);
+});
+
+it('rolls back revalidation lineage and review rows when its audit write fails', async () => {
+  const archived = await reviewRow('synthetic-archived-rollback@example.invalid');
+  await col('customer_import_jobs').updateOne({ _id: archived.job }, { $set: { migration_revalidation_required: true } });
+  const before = await col('customer_import_jobs').findOne({ _id: archived.job });
+  const rowCount = await col('customer_import_rows').countDocuments();
+  await replica.db.command({ collMod: 'audit_events', validator: { action: { $ne: 'CUSTOMER_IMPORT_PARSED' } }, validationLevel: 'strict' });
+  try {
+    await json(await request('customer-imports/parse', {
+      source: 'csv', resumeJobId: archived.job,
+      contentBase64: Buffer.from('first_name,last_name,email,mobile,source_status\nSynthetic,Rollback,synthetic-resume-rollback@example.invalid,09171234567,Pending').toString('base64'),
+    }), 503);
+    expect(await col('customer_import_jobs').findOne({ _id: archived.job })).toEqual(before);
+    expect(await col('customer_import_rows').countDocuments()).toBe(rowCount);
+    expect(await col('customer_import_jobs').countDocuments({ migration_revalidation_of_job_id: archived.job })).toBe(0);
+  } finally { await replica.db.command({ collMod: 'audit_events', validator: {} }); }
 });
 
 it('confirms one reviewed purchase under concurrent retries without money, membership or account creation', async () => {

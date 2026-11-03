@@ -14,7 +14,7 @@
  */
 import { createMongoClient } from './_lib/mongodb.js';
 import { createMongoPhase5Runtime } from './_lib/mongo-runtime.js';
-import { createS3PrivateObjectStore } from './_lib/private-object-store.js';
+import { createProductionPrivateObjectStore } from './_lib/private-object-store.js';
 import { createMongoSearchMaintenance } from './_lib/search-maintenance.mongo.js';
 import { createLocalPublicMediaStore } from './_lib/public-media-store.js';
 import {
@@ -73,9 +73,9 @@ async function main(): Promise<void> {
     await db.command({ ping: 1 });
 
     stage = 'storage';
-    // `undefined` means private-file routes fail closed; `local` is rejected by
-    // configuration, so a development store can never be selected here.
-    const objects = createS3PrivateObjectStore(process.env);
+    // `undefined` means private-file routes fail closed. `local` keeps bytes on
+    // the persistent disk root; S3 remains available behind the same interface.
+    const objects = createProductionPrivateObjectStore(process.env);
 
     stage = 'media';
     const mediaStore = createLocalPublicMediaStore(process.env);
@@ -111,6 +111,10 @@ async function main(): Promise<void> {
       runtime,
       readiness: async () => {
         await db.command({ ping: 1 });
+        if (objects?.health) {
+          const storage = await objects.health();
+          if (!storage.ok) throw new Error('Private storage is not ready');
+        }
       },
       maintenance,
     });

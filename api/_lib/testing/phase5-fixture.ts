@@ -153,9 +153,13 @@ export async function seedPhase5Fixture(
     sale_id: sale,
     amount: '100000.00',
     payment_number: 'SYNTHETIC-PAYMENT',
+    payment_type: 'full',
     method: 'cash',
     status: 'verified',
+    recorded_by: created.user.id,
+    verified_by: created.user.id,
     recorded_at: activationDate.toISOString(),
+    verified_at: activationDate.toISOString(),
   });
   return {
     staff: { id: created.user.id, email, password },

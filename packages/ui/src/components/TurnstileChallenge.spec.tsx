@@ -32,3 +32,11 @@ it('retries a failed widget, ignores its stale callbacks and clears the error on
   expect(onToken).toHaveBeenCalledWith('fresh-token');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
+
+it('binds login challenges to their server-checked action', async () => {
+  const widget = { render: vi.fn<NonNullable<Window['turnstile']>['render']>(() => 'login-widget'), remove: vi.fn() };
+  window.turnstile = widget;
+  render(<TurnstileChallenge siteKey="synthetic-key" action="login" onToken={vi.fn()} />);
+  await waitFor(() => expect(widget.render).toHaveBeenCalled());
+  expect(widget.render.mock.calls[0]?.[1]).toMatchObject({ action: 'login' });
+});

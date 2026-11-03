@@ -2,6 +2,216 @@
 
 ## Active MongoDB conversion branch
 
+Latest owner decision (3 November): fresh native MongoDB operation. Do not
+combine or import Supabase history into Atlas. Historical source/identity/file
+mapping and merge-conflict reviews below are archived preparation, not active
+runtime blockers. Preserve Supabase, existing MongoDB records, administrator,
+password and assignments; "fresh start" does not authorize deleting/resetting
+anything. Keep capture archives and unmounted preparation code intact. Focus on
+native workflow correctness, measured performance and remaining browser proof.
+See docs/mongodb/NATIVE-READINESS-2026-11-03.md for current verification scope.
+3 November native checkpoint: fixed UTC/Manila date disagreement in OST form
+validation and Create/Convert defaults. Full API rerun passes 3,281 tests/223
+files; contracts 319/23, focused Admin 18/5, typecheck, scoped lint, environment
+isolation and both SPA builds pass. Earlier whole runs were interrupted by PC
+sleep/time jumps; the clean run used temporary process-scoped sleep prevention,
+restored afterward, without relaxing application/test expiry or timeout rules.
+Synthetic loopback load: 240 requests/8 workers, zero failures, p95 83.08 ms.
+No Atlas capacity claim or full browser acceptance is implied.
+Later 3 November acceptance: a 10,000-customer / 2,400-request / 20-worker hosted
+workload exposed default directory enrichment before pagination. The corrected
+default page preserves derived-filter ordering and passes real-Mongo equivalence
+tests. Full API now passes 3,284 tests/224 files; hosted build/built env isolation
+pass. Browser QA observed synthetic IST/OST creation with AA numbers, immediate
+OST accreditation and a blank same-document repeat OST form. Tablet badge wrapping
+is corrected and visually checked; 32 focused UI tests/typecheck/hosted rebuild
+pass. Public-result/role/purchase browser acceptance remains pending. See
+docs/mongodb/LOCAL-RELEASE-ACCEPTANCE-2026-11-03.md. The owner
+confirmed there is no Droplet deployment yet: production-mode local proof only.
+
+Latest migration preparation (2 November): 83 definitions (44 domain adapters and
+39 empty-source guards) plus
+separate identity/counter planners and a digest-approved local file copier are
+unmounted. Explicit timestampPrecision=preserve-source retains raw timestamp
+evidence; default behavior still rejects nonzero microseconds. Never auto-link
+non-owner accounts by email except the three explicitly reviewed test-account
+aliases. Source export is now explicitly approved and an
+encrypted capture of 93 tables/595 rows/10 private files has source-free raw
+staging verification. The owner calls the three colliding identities test
+accounts and approved history aliases preserving native passwords/profiles/roles.
+The approved archive decodes 420 rows; points, finance, forms, import, audit, rule/policy history, document metadata and legacy OST/
+document source checks pass. One of ten archived private files has no business
+link and stays blocked for ownership review. Historical document read schemas
+retain old signature fields and tier/activation time without changing write forms.
+The three source import jobs / 30 rows reconcile. The owner chose native
+revalidation/resumption. Mapped jobs preserve evidence and carry a mandatory
+revalidation gate on bulk/direct continuation writes. Native parse now accepts
+an explicitly selected archived job and creates one linked fresh review with
+transactional retries/audit rollback; Job history exposes Revalidate workbook.
+Original evidence stays gated and immutable apart from lineage metadata. No
+source jobs were imported to Atlas and browser acceptance remains deferred.
+Legacy OST member IDs must match staff/auth identity snapshots; expired dates,
+original form data and sponsor snapshots stay historical. Old referral codes map
+to history-only legacy_referral_codes, never active referral capabilities. Source
+renewals/conversions are empty-only guarded until their adapters are reviewed.
+Identity-document metadata stays file-transfer-gated until owner aliases and
+original/copied bytes verify. A source-free disposable rehearsal copied/linked
+both actual archived ID files and proved identical replay without auth identities.
+Profile-photo planners preserve the protected owner's photo and block replacing
+existing native photos; their runtime linking/apply remains unmounted. One
+unlinked private object stays preserved and unresolved. No Atlas import ran.
+The 148 historical audit events retain exact bigint IDs/timestamp evidence and
+unchanged payloads. Actor mapping requires auth identity snapshots, not staff-only
+bindings. Known credential/government-ID payload keys block the plan without
+redacting the source or returning private values; no live audit import ran.
+Commission rules preserve exact rates/date ranges and keep target_id aligned with
+the generated typed FK after aliases; overlapping active ranges block planning.
+Source privacy/MFA settings go only to migration_source_* history collections,
+never active policy. Existing approval, contacts, cleanup state and MFA remain
+untouched. New history-collection setup requires the future reviewed apply.
+All 93 captured tables/595 rows have explicit dispositions; empty guards do not
+claim nonempty-domain migration support. A source-only native rehearsal inserts
+418 records and nine identities, reconciles replay and preserves a synthetic
+owner in a fresh loopback database. Four high-water counters include exact int64
+points-ledger; a rollback probe verifies the next native ID is unused. The owner
+selected preserve-both merging. A digest-bound metadata candidate retains native
+references and complete source evidence for 46 differences; grants, activation,
+prices/caps and department links cannot be bypassed. Nine missing role department
+links, five business-key conflicts and one ledger-ID collision remain blocked.
+No source reference history or merge was applied to Atlas.
+It uses a separately unapplied points-ledger
+validator proposal preserving legacy paired null deltas. Current Atlas validators
+remain unchanged. Source-to-current-dev merging still has explicit conflicts.
+The separately approved native VIP setup is applied: two existing native numbers,
+unique index, nondecreasing counter, setup marker and one audit event. Encrypted
+before/after comparison proves no other collection data changed; independent
+restore passed. No source tombstones or credentials were imported into Atlas.
+See docs/mongodb/MIGRATION-PREPARATION-2026-11-02.md and
+docs/mongodb/SOURCE-MAPPING-REVIEW.md. The
+dated scope descriptions below are historical; do not treat them as cutover proof.
+See docs/mongodb/SOURCE-CAPTURE-AND-REHEARSAL-2026-10-31.md. No Atlas data import
+or active native identity/business-flow rehearsal was performed by this capture.
+
+2 November full workspace runs: API 3,271/221 files, Admin 1,021/111, web 267/23,
+contracts 317/23, shared 56/7, config 7/1, UI 237/35: 5,176 tests pass. Later
+unmounted migration-only additions pass 140 tests/24 files plus archived-source
+rehearsal. Typecheck/env isolation/scoped lint pass; SPA builds use valid cache.
+Shared address-cache fixes, bounded HTTP/files, immediate permission changes and
+points contention pass locally; production capacity/browser acceptance are unproven.
+Fresh read-only target readiness found no missing reference collections or
+indexes and no declared core data inconsistencies (66 collections, six validators).
+This does not complete migration, native file linking or browser acceptance.
+
+31 October operations: six previously approved core validators are installed and
+read back strict/error with unchanged business/administrator/credential hashes.
+Local AES-GCM backups and a daily 21:00 signed-in-user task have real encrypted
+capture/independent restore proof. The key is Windows DPAPI-protected; there is
+no off-device/portable-key protection. Maintenance credentials are in ignored
+.env.mongodb-maintenance.local and expire 1 November at 09:49 Singapore time.
+See docs/mongodb/LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md. Do not apply the
+separate tier proposal or migrate source data under the six-validator approval.
+
+30 October migration preparation: the pure, unmounted dry-run mapper supports
+exact bigint IDs, safe integer quantities, dependent natural-key matching,
+explicit field renames, UTC millisecond timestamps, dates, required fields and
+strict booleans and canonical UUIDs before/after alias resolution. Reviewed
+access/assignment column/PK/nullability/boolean/UUID/time declarations match the
+recorded inventory. Write-requires-view and nonempty-deny source CHECKs
+are enforced; remaining domain CHECKs/types are not yet covered.
+Reusable definitions for six organization/access tables are in
+api/_lib/migration-access-manifest.ts; full source metadata/FK checks and disposable
+tests use them directly, including actual organization index setup. Text/int32 and
+source code/slug CHECKs are validated; reference flag/history conflicts block reuse.
+The reviewed staff definition adds all 13 source fields and source email/status
+checks. Full staff planning requires source/target ID/email-only auth snapshots;
+missing/conflicting/duplicate identities block output, and non-owner IDs cannot
+be coalesced by email. Credential/provider state and counters remain separate.
+31 October: the full 23-field network profile definition adds declared staff
+references and source sex/civil-status/PSGC CHECKs, with native unique-index,
+owner-preservation and empty-replay proof. Private fields stay out of diagnostics;
+address-reference, accreditation, genealogy and file reconciliation remain open.
+The catalog component in api/_lib/migration-catalog-manifest.ts adds six category
+and 29 plan fields, source CHECKs, exact strings and conflict-blocking reuse after
+category alias resolution. Native catalog indexes/storage/replay are proven only
+in disposable tests; real catalog/economic reconciliation remains open.
+The points-tier definition adds the four source fields with positive safe-integer
+caps and actor remapping. Baseline reconciliation detects unrelated target changes;
+the file verifier reads declared copies only and never transfers files. The new
+tier validator/index is a separate unapproved proposal, proven only locally.
+See docs/mongodb/MIGRATION-RECONCILIATION-AND-FILES.md for scope and open gates.
+Runtime does not mount these eleven definitions; remaining business mappings
+are still required.
+Different grants/denies, unsafe renames, invalid dates and dependency cycles block
+the plan. Nonzero microseconds remain blocked pending a preservation policy.
+Raw source checksums, historical JSON and the protected owner/profile/assignments
+stay intact. Three disposable mapping loads prove native storage/replay boundaries;
+no real import or routing change ran. Full table/state/reference,
+identity/file/counter mapping and real reconciliation remain open. See
+docs/mongodb/SOURCE-MAPPING-REVIEW.md; preserve the existing administrator.
+
+30 October membership follow-up: embedded Transactions and History use the shared
+feature-path guard as well as permissions before rendering/querying Reports APIs.
+Do not enable Reports/Redemption or widen the conversion allowlist to bypass these
+UI errors. Active points/payments/card controls stay permission-gated. See
+docs/mongodb/MEMBERSHIP-DISABLED-PANELS-FIX.md for regression/browser evidence and
+the independently corrected synthetic payment fixture. Fresh API: 3,134 tests/
+198 files pass; membership/UI: 40 tests pass; API/Admin typecheck and scoped lint
+pass. Full browser acceptance
+remains unfinished; preserve the existing administrator and real business data.
+
+30 October checkpoint: root tests are green (5,033 total; fresh API 3,133 and
+Admin 1,017, five unchanged tasks cached). Typecheck/build/lint/env isolation pass.
+Retained CMS tests are scoped on only in their test module; CMS stays disabled.
+Strict-CA read-only source inventory covers 93 selected tables/1,291 columns/
+254 foreign keys, with no business/password/file export. Runtime production scope
+is prepared behind explicit settings, not enabled; setup tools stay development-
+only. No shared DB/env/account/push/deploy changes. See
+docs/mongodb/COMPLETION-CHECKPOINT-2026-10-30.md. Browser acceptance, full migration
+adapters/reconciliation, durable real backups/restore, maintenance-only validator
+apply and production initialization remain open. Preserve the existing owner.
+
+29 October approved validator apply: user authorized the reviewed six validators.
+The first collMod (card_sales) failed; read-only privilege inspection found the
+configured application user has no applicable collMod grant. Independent BSON,
+index and option checks verified all six collections/18 documents unchanged and
+zero validators applied. Approval remains scoped/valid; do not broaden app-user
+permissions, reset accounts or retry blindly. A separate ignored maintenance
+connection is needed; see docs/mongodb/CORE-VALIDATORS-APPLY-RESULT.md. No env,
+account, document, index, push or deployment changes. CMS remains last.
+
+29 October validator preparation: six proposed core validators reuse contract
+money/state rules and safe integer points. Strict disposable sales, purchase,
+activation and historical/legacy import flows pass (69 targeted tests). The
+read-only `pnpm mongodb:validators` preflight inspected 18 live core records,
+found zero incompatible records and six missing validators. No target DDL/data
+write ran. See docs/mongodb/CORE-VALIDATORS-REVIEW.md for exact scope and limits;
+shared installation requires separate explicit approval. The CLI has no apply
+mode. CMS stays last; browser, migration, durable backup and deployment stay open.
+
+29 October password compatibility: the default-off server flag
+AFHOMES_ENABLE_LEGACY_PASSWORDS enables only explicitly tagged source bcrypt
+credentials; new/reset/changed passwords remain native. Thirty focused tests
+pass, including disposable HTTP forced-change/upgrade and separate owner
+preservation. See docs/mongodb/PASSWORD-COMPATIBILITY-VERIFICATION.md. This does
+not export/import identities or enable the bridge on Atlas; preserve the owner.
+The full API serial run with this addition passed 3,126 tests/196 files.
+Root tests now run one workspace/worker at a time to avoid resource contention.
+The full run completed without worker errors: 5,002 passed, 21 deferred CMS-related
+failures (20 CMS screen expectations, one shared dialog scan). API typecheck,
+environment isolation and scoped API lint pass. See
+docs/mongodb/TEST-GATE-2026-10-29.md; the whole-repository gate is not green.
+Keep CMS last.
+
+29 October hosting decision: user chose a native DigitalOcean Droplet without
+Docker, retaining MongoDB Atlas. `api/server.ts` is an opt-in hosted API behind a
+loopback HTTPS proxy; `build:hosted` isolates public builds from runtime secrets.
+Systemd/Nginx staging templates and persistent private filesystem support are in
+deploy/digitalocean and docs/mongodb/DIGITALOCEAN-NATIVE-HOSTING.md. Existing
+localhost behavior, afhomes_dev scope, owner and workflow gates remain intact.
+Do not provision/deploy, change DNS/Atlas access, enable hosted writes/cleanup or
+push these changes without the relevant authorization. Linux/TLS/browser acceptance
+and production cutover are not complete. Keep CMS last and local artifacts local.
+
 29 October mapping preparation: unmounted explicit-manifest business mapping now
 preserves the current owner/assignments, remaps only declared scalar references,
 keeps JSON evidence intact and blocks conflicts/unknown fields/credential import.

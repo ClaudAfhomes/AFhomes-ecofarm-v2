@@ -30,6 +30,16 @@ export function ProfilePhotoCard({ scope = 'customer' }: { scope?: 'customer' | 
       if (input.expectedUserId === user?.authUserId) void client.invalidateQueries({ queryKey });
     },
   });
+  const remove = useMutation({
+    retry: false,
+    mutationFn: () => request(`/profile-photo/${scope}`, profilePhotoSchema, { method: 'DELETE' }),
+    onSuccess: (data) => {
+      if (client.getQueryState(queryKey)) client.setQueryData(queryKey, data);
+    },
+    onError: () => {
+      void client.invalidateQueries({ queryKey });
+    },
+  });
   return (
     <ProfilePhotoEditor
       photo={photo.data}
@@ -41,6 +51,7 @@ export function ProfilePhotoCard({ scope = 'customer' }: { scope?: 'customer' | 
           ? upload.mutateAsync({ dataBase64: data, expectedUserId: user.authUserId })
           : Promise.reject(new Error('Sign in again before uploading.'))
       }
+      onRemove={user ? () => remove.mutateAsync() : undefined}
     />
   );
 }

@@ -43,6 +43,7 @@ import {
 import { parseCustomerWorkbook } from './customer-workbook.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
 import { hashIdentifier } from './identifier.js';
+import { companyWorkbookReview, type ReviewWorkbook } from './customer-workflow-review.js';
 export type CustomerImportFileInput = {
   source: 'csv' | 'excel' | 'google_sheets';
   contentBase64?: string;
@@ -57,7 +58,7 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
   let workflowRecords: WorkbookCustomerV2[] | null = null;
   let workflowReview: {
     bytes: Uint8Array;
-    workbook: NonNullable<ReturnType<typeof parseCustomerWorkbookV2>>;
+    workbook: ReviewWorkbook;
   } | null = null;
   let sheetId: string | null = null;
   // Sectioned-template extras surface as per-row warnings below, next to
@@ -66,7 +67,7 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
   // Guided-template part columns (names, the supplementary address) are
   // joined per row and overlaid onto the parsed fields after parsing.
   let v2Joins: { rowNumber: number; values: Record<string, string> }[] = [];
-  let sourceHash: string | null = null;
+  let sourceHash: string;
   try {
     if (source === 'google_sheets') {
       if (!input.sheetUrl) throw new Error('A Google Sheets URL is required');
@@ -101,6 +102,8 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
               unknownHeaders: workflow.unknownHeaders,
             }
           : parseCustomerWorkbook(bytes);
+        if (!workflow && workbookRecords)
+          workflowReview = { bytes, workbook: companyWorkbookReview(bytes, workbookRecords.rows) };
         if (workbookRecords) {
           matrix = [];
         } else {
@@ -132,6 +135,7 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
                 error instanceof Error
                   ? error.message.slice(0, 300)
                   : 'Import requires exactly one worksheet; for guided entry use the sectioned membership template (README + Primary/Supplementary/Related/Package)',
+                { cause: error },
               );
             }
           }
@@ -147,7 +151,9 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
       }
     }
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message.slice(0, 200) : 'Unparseable file');
+    throw new Error(error instanceof Error ? error.message.slice(0, 200) : 'Unparseable file', {
+      cause: error,
+    });
   }
   let records: { rowNumber: number; fields: Record<string, string> }[];
   let unknownHeaders: string[];
@@ -211,7 +217,7 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
       }
     }
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Empty spreadsheet');
+    throw new Error(error instanceof Error ? error.message : 'Empty spreadsheet', { cause: error });
   }
   if (records.length > MAX_IMPORT_ROWS)
     throw new Error(`Import exceeds the ${MAX_IMPORT_ROWS}-row limit`);

@@ -31,7 +31,7 @@ import styles from './AdminLoginPage.module.css';
  */
 export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
   const isAdmin = portal === 'admin';
-  const captchaSiteKey = isAdmin ? undefined : env.VITE_TURNSTILE_SITE_KEY;
+  const captchaSiteKey = env.VITE_TURNSTILE_SITE_KEY;
   const navigate = useNavigate();
   const location = useLocation();
   const { status, signIn, logout } = useSession();
@@ -227,6 +227,7 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
 
           <div className={styles.submitRow}>
             <TurnstileChallenge
+              action="login"
               siteKey={captchaSiteKey}
               onToken={setCaptchaToken}
               resetVersion={captchaVersion}

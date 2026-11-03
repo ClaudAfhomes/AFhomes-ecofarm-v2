@@ -338,32 +338,33 @@ export async function mongoCustomerDirectory(db: Db, filters: Record<string, unk
     sort.sort_value = 1;
   }
   Object.assign(sort, { created_at: -1, _id: 1 });
-  pipeline.push({
+  const page = [
+    { $sort: sort },
+    { $skip: Number(filters.offset ?? 0) },
+    { $limit: Number(filters.limit ?? 50) },
+  ];
+  const projection = {
+    $unset: [
+      'sales', 'reservations', 'purchases', 'latest', 'application',
+      'plan', 'points', 'member', 'sort_value',
+    ],
+  };
+  // Default pages need enrichment only for visible rows; derived filters/sorts must run first.
+  const pageFirst = Object.keys(derived).length === 0 && (!filters.sort || filters.sort === 'created');
+  const query = pageFirst ? [pipeline[0]!] : pipeline;
+  query.push({
     $facet: {
       count: [{ $count: 'total' }],
       rows: [
-        { $sort: sort },
-        { $skip: Number(filters.offset ?? 0) },
-        { $limit: Number(filters.limit ?? 50) },
-        {
-          $unset: [
-            'sales',
-            'reservations',
-            'purchases',
-            'latest',
-            'application',
-            'plan',
-            'points',
-            'member',
-            'sort_value',
-          ],
-        },
+        ...page,
+        ...(pageFirst ? pipeline.slice(1) : []),
+        projection,
       ],
     },
   });
   const [result] = await db
     .collection('customers')
-    .aggregate<{ count: { total: number }[]; rows: MongoRow[] }>(pipeline)
+    .aggregate<{ count: { total: number }[]; rows: MongoRow[] }>(query)
     .toArray();
   return {
     total: result?.count[0]?.total ?? 0,

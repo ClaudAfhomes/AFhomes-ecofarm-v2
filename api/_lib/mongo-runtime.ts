@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db, MongoClient } from 'mongodb';
 import { randomUUID } from 'node:crypto';
-import { hashPassword, verifyPassword } from 'better-auth/crypto';
+import { hashPassword } from 'better-auth/crypto';
 import { getRequest, setResponse } from 'better-call/node';
 import {
   changeAfHomesStaffPasswordSchema,
@@ -47,7 +47,7 @@ import {
 } from './ost-accreditation.mongo.js';
 import { createMongoOstHandler } from './ost.mongo.js';
 import { createMongoProfilePhotoHandler, setupMongoProfilePhotos } from './profile-photo.mongo.js';
-import { createS3PrivateObjectStore, type PrivateObjectStore } from './private-object-store.js';
+import { createProductionPrivateObjectStore, type PrivateObjectStore } from './private-object-store.js';
 import { createAddressHandler } from '../_handlers/_address.js';
 import { createMongoOfficialFormsHandler, setupMongoOfficialForms } from './official-forms.mongo.js';
 import {
@@ -93,7 +93,8 @@ export function createMongoPhase5Runtime(
 ) {
   const auth = createAfHomesAuth(db, client, env, delivery),
     options = getAuthOptions(env);
-  const objects = objectStore === null ? undefined : objectStore ?? createS3PrivateObjectStore(env);
+  const objects =
+    objectStore === null ? undefined : objectStore ?? createProductionPrivateObjectStore(env);
   const mediaStore =
     runtimeOptions.mediaStore === null
       ? undefined
@@ -212,7 +213,10 @@ export function createMongoPhase5Runtime(
       if (
         !account ||
         typeof account.password !== 'string' ||
-        !(await verifyPassword({ hash: account.password, password: parsed.data.currentPassword }))
+        !(await options.emailAndPassword.password.verify({
+          hash: account.password,
+          password: parsed.data.currentPassword,
+        }))
       )
         return fail(res, 'UNAUTHORIZED', 'Current password is incorrect', 401, {
           reason: 'CURRENT_PASSWORD_INVALID',

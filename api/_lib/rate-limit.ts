@@ -55,9 +55,10 @@ const keyOf = (req: {
  * The caller-supplied identity is part of the key, so one employee cannot exhaust
  * another's budget and lock a colleague out of a busy till.
  */
-export function consumeIdentifierAttempt(
+function consume(
   req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
   principalId: string,
+  maxAttempts: number,
 ): RateVerdict {
   const now = Date.now();
   const key = `${principalId}|${keyOf(req)}`;
@@ -74,10 +75,24 @@ export function consumeIdentifierAttempt(
     return { allowed: true };
   }
   existing.count += 1;
-  if (existing.count > MAX_ATTEMPTS) {
+  if (existing.count > maxAttempts) {
     return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((WINDOW_MS - (now - existing.startedAt)) / 1000)) };
   }
   return { allowed: true };
+}
+
+export function consumeIdentifierAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+  principalId: string,
+): RateVerdict {
+  return consume(req, principalId, MAX_ATTEMPTS);
+}
+
+/** Signed private-file downloads are cheaper than identifier guesses and pages can batch images. */
+export function consumePrivateDownloadAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+): RateVerdict {
+  return consume(req, 'private-files', 10_000);
 }
 
 /** Test seam. */

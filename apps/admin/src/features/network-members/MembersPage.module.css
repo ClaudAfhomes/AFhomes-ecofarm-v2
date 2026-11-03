@@ -226,6 +226,11 @@
   .tableWrap > table {
     min-width: 760px;
   }
+
+  .tableWrap [data-label='Position'] > *,
+  .tableWrap [data-label='Status'] > * {
+    white-space: nowrap;
+  }
 }
 
 .pagination {

@@ -159,6 +159,22 @@ it('uses private signed byte upload, server verification, current-ID selection a
   expect(list.data[0].extractedFields).toBeUndefined();
 }, 30000);
 
+it('keeps staged migration metadata out of current documents, downloads and review mutations', async () => {
+  const original = (await col('identity_documents').findOne({ _id: document }))!;
+  const staged = randomUUID();
+  await col('identity_documents').insertOne({ ...original, _id: staged, created_at: '2099-01-01T00:00:00.000Z', migration_file_transfer_required: true });
+  try {
+    expect(await json(await request('/documents/' + staged))).toMatchObject({ hasFile: false, isCurrent: false });
+    const current = await json(await request(`/documents/current?subjectType=customer&subjectId=${customer}`));
+    expect(current.currentDocument.id).toBe(document);
+    const audits = await col('audit_events').countDocuments();
+    for (const operation of ['access-url', 'complete-upload', 'confirm', 'ocr'])
+      await json(await request(`/documents/${staged}/${operation}`, operation === 'access-url' ? undefined : {}), 409);
+    expect(await col('identity_documents').findOne({ _id: staged })).toMatchObject({ migration_file_transfer_required: true, reviewed_data: original.reviewed_data });
+    expect(await col('audit_events').countDocuments()).toBe(audits);
+  } finally { await col('identity_documents').deleteOne({ _id: staged }); }
+});
+
 it('rejects anonymous, malformed, wrong-size and forged uploads and enforces seller scope', async () => {
   expect((await request('/documents/' + document, undefined, '')).status).toBe(401);
   const grant = await json(await request('/documents/customer/upload-url', uploadInput()), 201);
