@@ -54,7 +54,8 @@ export function createMongoOstHandler(db: Db, resolve: typeof resolveAfHomesPrin
         const rows = [];
         for (const row of await col('ost_applications').find(filter).sort({ submitted_at: -1, _id: -1 }).toArray()) {
           const sponsor = await col('staff_users').findOne({_id:String(row.sponsor_staff_id)}, {projection:{full_name:1}});
-          const code = await col('referral_codes').findOne({_id:String(row.referral_code_id)}, {projection:{code_hint:1}});
+          const code = await col('referral_codes').findOne({_id:String(row.referral_code_id)}, {projection:{code_hint:1}})
+            ?? await col('legacy_referral_codes').findOne({_id:String(row.referral_code_id)}, {projection:{code_hint:1}});
           const value = ostApplicationSchema.parse({id:row._id,applicantName:[row.first_name,row.middle_name,row.last_name].filter(Boolean).join(' '),
             email:row.email,phone:row.phone,birthDate:row.birth_date,address:row.address ?? null,sponsorStaffId:row.sponsor_staff_id,
             sponsorName:sponsor?.full_name ?? '',referralCodeHint:code?.code_hint ?? '',status:row.status,reviewNotes:row.review_notes ?? null,

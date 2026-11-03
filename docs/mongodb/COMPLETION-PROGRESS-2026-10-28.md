@@ -1,5 +1,36 @@
 # MongoDB completion progress and reviewed apply scope
 
+## Latest - 2 November
+
+The approved archive now has typed decoding and source reconciliation for thirty
+business tables/221 rows, including memberships/points, finances, official forms
+and all 18 document payloads. Native component storage/replay and purchase HTTP
+tests pass; historical document compatibility is corrected without rewriting
+evidence or restoring removed reservation inputs. Two ancestry gaps and one
+unlinked private ID file are retained for review. Full native migration is still
+not ready; see MIGRATION-PREPARATION-2026-11-02.md and
+SOURCE-TYPED-REVIEW-2026-11-02.json. No shared data import, deployment or push ran.
+
+## Latest - 31 October
+
+The six approved core validators are applied and independently read back. Local
+AES-GCM backups, DPAPI-protected keys, source-free restore verification and the
+daily 21:00 task have real proof. No source import, administrator change, push or
+deployment occurred. Same-PC backups do not protect against PC/profile loss.
+See LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md.
+
+Migration preparation now includes fifteen business definitions, a separately
+tested bcrypt/native identity planner, exact source timestamp evidence, a
+non-decreasing counter planner and an exclusive-create resumable local file
+copier. The owner then approved encrypted source export: 93 tables, 595 rows and
+10 private files were captured and verified in source-free disposable raw staging.
+See SOURCE-CAPTURE-AND-REHEARSAL-2026-10-31.md. The three non-owner email/UUID
+collisions are test accounts; no automatic merge or account change was made. Remaining source
+tables, reference-history conflicts, issued-number tombstones, complete object
+coverage and real financial reconciliation are unfinished. See
+SOURCE-MAPPING-REVIEW.md and MIGRATION-RECONCILIATION-AND-FILES.md. Browser
+acceptance remains last. The dated entries below are historical checkpoints.
+
 30 October migration preparation: the pure dry-run mapper preserves bigint IDs,
 range-checks quantities, resolves parent aliases before permission comparisons,
 and supports explicit field renames, timezone-aware millisecond timestamps and
@@ -14,8 +45,29 @@ departments, modules, roles, grants, assignments and restrictions. Source metada
 text/int32/code checks, complete single-column FKs and native unique indexes are
 checked in the combined disposable load, including a new assignment and empty
 replay. Reference flags/timestamps must agree; native role-name collisions block
-the plan. This remains a reviewed subset; full staff/identity/business mappings
-and reconciliation are still required.
+the plan. The staff definition now covers all 13 source business fields and
+requires explicit source/target ID/email-only identity evidence. Missing,
+mismatched or duplicate identities and non-owner email collisions block output.
+The owner remains excluded; no credential/provider state is imported. The
+combined eight-table disposable load also preserves the full 23-field network
+profile, declared staff references and protected owner profile, using native
+member index setup. All 12 unique indexes plus empty replay are checked. Source
+profile sex/civil-status/PSGC-code CHECKs are enforced; private values stay out of
+diagnostics. Fresh mapping/identity/password gate: 51 tests pass.
+31 October catalog follow-up: six category and 29 plan columns now have reviewed
+definitions and source CHECKs, preserving exact money/rate strings and all terms.
+Category aliases resolve before strict plan reuse; any differing target term
+blocks output. The combined ten-table disposable load checks 15 unique indexes,
+stored records and empty replay. Focused mapping/identity/password gate: 53 pass.
+No actual catalog reconciliation, operational-economics acceptance or real apply ran.
+31 October reconciliation/file checkpoint: eleven reviewed table components now
+include points-tier caps, complete target-baseline comparison and an unmounted
+private-file verifier. The separate tier validator/index proposal has disposable
+denial proof; shared setup remains unapplied. All 68 focused tests pass; see
+MIGRATION-RECONCILIATION-AND-FILES.md. Source file coverage, identity-state policy,
+remaining mappings, real reconciliation/backups and maintenance access remain open.
+Address-reference/accreditation/genealogy/file reconciliation and identity-state/password/counter policies,
+remaining business mappings and real reconciliation are still required.
 Source assignment `assigned_at` maps to native `created_at`.
 Date-only values remain calendar text; no age rule or timezone shift is applied.
 Conflicting grants/denies, unsafe renames, invalid dates and cycles block the plan.

@@ -85,7 +85,7 @@ export type CachedAddressProvider = AddressProvider & {
  * user typing quickly across three holders can open dozens of requests against a
  * provider that rate-limits at 120/minute.
  *
- * Every caller receives its own array. A shared instance would let one request
+ * Every caller receives its own rows and array. A shared instance would let one request
  * mutate cached reference data out from under every later request in the warm
  * window - a data-integrity bug that would look like a phantom provider edit.
  */
@@ -102,8 +102,10 @@ export function createCachedAddressProvider(
       hit && now - hit.at < ttlMs ? (hit.pending as Promise<T[]>) : load();
     if (!hit || pending !== hit.pending) entries.set(key, { at: now, pending });
     // A failed lookup must not be pinned for a day: drop it so a retry can win.
-    pending.catch(() => entries.delete(key));
-    return pending.then((rows) => [...rows]);
+    pending.catch(() => {
+      if (entries.get(key)?.pending === pending) entries.delete(key);
+    });
+    return pending.then((rows) => structuredClone(rows));
   };
 
   return {

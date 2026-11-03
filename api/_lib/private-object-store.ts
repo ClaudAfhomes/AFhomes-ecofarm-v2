@@ -21,7 +21,7 @@ export interface PrivateObjectStore {
   downloadURL(key: string, ttlSeconds: number): Promise<{ url: string; expiresAt: string }>;
   serve?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
 }
-function checkKey(key: string) {
+export function checkKey(key: string) {
   if (
     !key ||
     key.length > 512 ||
@@ -214,6 +214,19 @@ class DiskPrivateObjectStore implements PrivateObjectStore {
         if (!missing(error)) throw error;
       });
     }
+  }
+  async createIfAbsent(key: string, bytes: Uint8Array, contentType: string): Promise<boolean> {
+    const file = this.file(key);
+    await mkdir(path.dirname(file), { recursive: true });
+    try {
+      await writeFile(file, bytes, { mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') return false;
+      throw error;
+    }
+    // An interrupted pair stays blocked for review; never overwrite or delete it on retry.
+    await writeFile(file + '.metadata', JSON.stringify({ contentType }), { mode: 0o600, flag: 'wx' });
+    return true;
   }
   async read(key: string, maxBytes: number) {
     const file = this.file(key);

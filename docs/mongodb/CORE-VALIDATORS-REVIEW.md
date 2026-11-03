@@ -1,9 +1,10 @@
 # Core collection validator review
 
-**Latest:** the user approved this exact apply. Execution stopped at the first
-DDL because the configured application user lacks collMod. Independent checks
-verified zero schema/data/index changes. See CORE-VALIDATORS-APPLY-RESULT.md;
-the approval remains valid, but a separate maintenance connection is required.
+**Latest, 31 October:** the exact six-validator approval was applied using a
+separate scoped, expiring maintenance identity. All six read back strict/error;
+business and administrator/credential hashes remained unchanged. See
+CORE-VALIDATORS-APPLY-RESULT.md and LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md.
+The separate points-tier proposal is not included in this approval or apply.
 
 29 October 2026. `AFhomes-ecofarm-v2`, `claud/mongodb-conversion`.
 

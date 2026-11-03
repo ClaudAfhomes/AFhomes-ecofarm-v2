@@ -1,5 +1,88 @@
 # Source mapping review - 30 October 2026
 
+Superseded scope (3 November): source-history migration is canceled. Retain this
+review and its unmounted preparation as historical evidence; do not import into
+Atlas. Native MongoDB operation is the active scope. See
+[native readiness](NATIVE-READINESS-2026-11-03.md).
+
+## Latest checkpoint - 2 November
+
+Eighty-three definitions (44 domain adapters, 39 fail-closed empty-source guards)
+decode 420 rows from the authenticated 31 October
+archive. Source points, finance, imports, audit review, rule/policy history, identity-document metadata, legacy OST and official-form/document reconciliation pass;
+all 18 immutable document payloads now read without changing their fields.
+Two sales lack frozen ancestry and remain explicitly unknown. Nine private files
+have source business links; one customer-ID object remains unlinked and preserved
+in the encrypted archive. Overall native import remains blocked/not ready. See
+MIGRATION-PREPARATION-2026-11-02.md for proof and remaining mappings. Earlier
+checkpoints below retain their original scope and dates.
+
+All 93 captured tables now have explicit dispositions. Old onboarding tokens,
+mutation receipts and privacy-search logs stay encrypted archive-only; they never
+restore active capabilities or current-host consent. The disabled redemption
+catalog goes to private history only. VIP issuance records retain retired owners
+without requiring a surviving customer FK. Unknown/new nonempty tables block.
+
+The source-only native rehearsal loads 418 business/history records and nine
+eligible identities, uses three counter high-water marks and proves exact replay.
+It uses six local validator proposals: points_ledger preserves source paired null
+allocations and rejects partial/inconsistent splits. This proposal is not applied
+to Atlas. Seven real archived photos copy/read back/link/replay in temporary local
+storage; two ID files have separate verified transfer proof. Existing development
+business data is not merged, and the current development merge remains blocked
+on reference/business-ID conflicts. Three reviewed test-account aliases preserve
+native credentials/profiles/roles; no automatic matching of other accounts.
+See SOURCE-NATIVE-REHEARSAL-2026-11-02.json. This is data/credential-storage proof,
+not actual source-password, browser, production or complete cutover acceptance.
+
+## Current checkpoint - 31 October
+
+Fifteen reviewed business definitions now cover organization/access (six), staff,
+network profiles, catalog (two), points tiers, referral relationships, current and
+historical sales-team accreditation, and customers. Native index/storage/replay
+tests use disposable replicas. This remains partial coverage of 93 source tables.
+
+The separate identity planner preserves UUIDs and bounded bcrypt credentials,
+requires explicit business bindings and eligible provider/state evidence, keeps
+staff password-change flags, and excludes the existing administrator. A disposable
+transaction rollback and HTTP sign-in/first-change gate are tested. The read-only
+source aggregate audit found ten email/password identities, all bcrypt cost 10;
+three non-owner email collisions with different native UUIDs remain blocked.
+No accounts were linked. Following explicit approval, a later encrypted capture
+now includes the reviewed source authentication projection; see
+SOURCE-CAPTURE-AND-REHEARSAL-2026-10-31.md. It has source-free raw staging proof,
+not native identity or business-flow migration acceptance.
+
+`timestampPrecision: preserve-source` is an explicit, digest-bound dry-run policy.
+It retains original timestamp strings, including microseconds and offsets, in
+`migration_source_timestamps`, while writing the existing native millisecond ISO
+fields. Renames retain source field names in that evidence. Invalid timestamps,
+forged evidence fields and evidence differences on replay/reference reuse block
+the plan. Without the option, nonzero microseconds still fail closed. Native
+queries still have millisecond resolution; the option is not approval to discard
+source evidence or to import without chronological/domain reconciliation.
+
+`migration-counters.ts` separately proposes maximum source/native/issued-number
+high-water values for company customer IDs, shared IST/OST monthly AA counters and
+VIP controls. It never lowers a counter, returns no partial changes on invalid
+evidence, blocks century-colliding AA source months, and binds the input to a
+digest. The caller must include current and retired numbers; this is not proof
+of a complete real inventory or an executable counter apply.
+
+Encrypted local MongoDB capture and independent restore now work; the approved
+six core validators are installed. See LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md.
+Encrypted source export is complete. Remaining business mappings, reference-history conflicts,
+complete private-file coverage, VIP issuance tombstones and real reconciliation
+remain open. The older checkpoints below describe their then-current scope.
+
+Fresh verification: 88 focused tests across nine files pass, including disposable
+replica storage/rollback/replay, native HTTP identity sign-in, encrypted restore
+and local file-copy failure/retry paths. API typecheck, explicit new-script
+typecheck, scoped ESLint, environment isolation and scoped diff whitespace checks
+pass. Fresh Atlas read-only review finds all six validators matching and zero
+invalid records. The scheduled backup reports last result 0 and next run 21:00.
+The full repository suite and browser acceptance were not repeated here.
+
 Fresh metadata collected with verified TLS and repeatable-read, read-only queries. No business rows, password hashes or private bytes were exported.
 
 All selected columns, SQL constraints and indexes are in the companion JSON. These are schema facts, not executable migration approval. Each candidate requires native field/key comparison and a disposable transformation/reconciliation test.
@@ -207,18 +290,69 @@ access fixture and disposable database load consume the same definitions. That
 load now calls the actual `setupMongoOrganization()` on the fresh disposable
 database, checks access/role/department keys against its installed indexes,
 and creates the module-key index in the disposable fixture to match the existing
-bootstrap index definition (without invoking account bootstrap). All eight
-declared unique keys are checked. The combined six-table fixture
+bootstrap index definition (without invoking account bootstrap). The native
+member setup adds the profile's unique staff key; native catalog setup adds the
+category/plan keys. The fixture separately installs the proposed tier guard/index
+only in disposable MongoDB. All sixteen declared unique keys are checked in the
+combined eleven-table fixture, including that unapproved shared-index proposal.
+The fixture
 inserts a missing staff assignment with mapped actor/time and a new permission,
 and verifies existing owner/access records plus a completely empty replay.
 
-This is a six-table manifest component, not the complete 93-table manifest.
-Full staff/identity mappings, owner bindings and remaining business tables still
-require separate review; the synthetic staff fixture remains partial.
+The staff definition now covers all 13 source fields, including department,
+employee/sales numbers and password-change state. Source email canonicalization
+and the four legal staff statuses are checked; identifiers are preserved rather
+than regenerated. The disposable load verifies the complete new staff record,
+unchanged target owner/assignments, native unique indexes and empty replay.
+
+The source staff primary key also references `auth.users.id`. A separate pure
+identity audit requires explicit source and target ID/email-only snapshots before
+the full staff mapping can be ready. It rejects missing identities, mismatched
+emails, duplicate IDs/emails, malformed headers and non-owner email collisions.
+Only the protected owner may use the reviewed source-to-target ID alias. Extra
+provider or credential fields are refused without echoing their contents. The
+plan digest binds the supplied identity evidence; business output contains no
+authentication writes. Callers must supply fresh snapshots at any future apply.
+
+This proves foreign-key identity matching only. It does not prove credential
+transfer, banned/deleted account policy, provider-state compatibility or login;
+those need a separately reviewed authentication adapter. This is an eleven-table
+manifest component, not the complete 93-table manifest. Remaining business,
+identity-state and counter mappings still require review.
+
+31 October network-profile preparation: the complete 23-field definition preserves
+source dates, contact and government-ID fields in business output, with all three
+staff references declared and source sex/civil-status/PSGC-code CHECKs enforced.
+The protected owner's profile is excluded; only declared reference fields use
+the owner alias. Empty source ZIP text and nullable optional values stay intact.
+Diagnostics/checksum metadata do not expose government-ID values. The disposable
+load uses `setupMongoMembers()` to prove native profile uniqueness, full stored
+content, owner preservation and empty replay. This is profile storage proof;
+IST/OST accreditation, genealogy, photos/private files, address-reference
+reconciliation and browser acceptance remain separate, unfinished work. No new
+age or postal rule is introduced by this migration adapter.
+
+31 October catalog preparation: `migration-catalog-manifest.ts` covers all six
+category and 29 plan columns, their nullability/types/PK/FK/unique keys and source
+CHECKs. Category aliases resolve before plan-code reuse; every stored term and
+history field must match before an existing target plan can be reused. Conflicts
+block output rather than overwrite prices or benefits. Exact price/rate strings,
+nullable descriptions and all validity/points/discount/holder/feature settings
+remain unchanged. Source price syntax rejects leading zeros even though the
+general shared money parser permits them. Native catalog indexes, stored plans
+and empty replay have disposable proof. This does not reconcile real catalog
+rows, validate all cross-field operational economics, change frozen sale snapshots
+or initialize any real database.
 The component is not mounted or imported by runtime handlers and has no database,
 filesystem, environment or apply operations. No shared setup/import ran.
 
-Latest focused gate: mapping/password suites 41 tests PASS, including three fresh
+31 October follow-up adds the four-field tier cap/actor definition, full target
+baseline reconciliation and read-only private-file verification. The tier
+validator/index is a separate local proposal, not part of shared native setup;
+see MIGRATION-RECONCILIATION-AND-FILES.md for proof and remaining gates.
+
+Latest focused gate: mapping/identity/password/file/storage/core-validator suites
+68 tests PASS, including fresh
 disposable mapping loads; API typecheck, scoped ESLint, environment isolation and
 scoped diff whitespace check PASS. Full-suite/browser acceptance was not repeated
 for the unmounted planner.
@@ -248,15 +382,15 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | private.member_workbook_jobs | id | Candidate member_workbook_jobs; field/state/key parity NOT REVIEWED |
 | private.member_workbook_rows | id | Candidate member_workbook_rows; field/state/key parity NOT REVIEWED; bigint range/string adapter: audit_id |
 | private.mutation_requests | id | Exclude active replay state; historical provenance needs separate review |
-| private.ost_accreditation_renewals | id | Candidate ost_accreditation_renewals; field/state/key parity NOT REVIEWED |
-| private.ost_accreditation_terms | id | Candidate ost_accreditation_terms; field/state/key parity NOT REVIEWED |
+| private.ost_accreditation_renewals | id | Full metadata declaration, empty-source-only guard; any nonempty capture requires domain adapter review |
+| private.ost_accreditation_terms | id | Reviewed historical dates/status/exclusive origin and declared links; source/native index/replay checks |
 | private.ost_applicant_changes | id | Candidate ost_applicant_changes; field/state/key parity NOT REVIEWED; bigint range/string adapter: id |
 | private.ost_import_jobs | id | Candidate ost_import_jobs; field/state/key parity NOT REVIEWED |
 | private.ost_import_rows | id | Candidate ost_import_rows; field/state/key parity NOT REVIEWED |
-| private.ost_ist_conversions | id | Candidate ost_ist_conversions; field/state/key parity NOT REVIEWED |
-| private.ost_registration_details | application_id | Candidate ost_registration_details; field/state/key parity NOT REVIEWED |
+| private.ost_ist_conversions | id | Full metadata declaration, empty-source-only guard; any nonempty capture requires domain adapter review |
+| private.ost_registration_details | application_id | Reviewed form/signature/program/source CHECKs; original JSON and payload hash preserved, actors remapped explicitly |
 | private.ost_team_transfers | request_id | Candidate ost_team_transfers; field/state/key parity NOT REVIEWED |
-| private.public_verification_settings | singleton | Candidate public_verification_settings; field/state/key parity NOT REVIEWED |
+| private.public_verification_settings | singleton | Reviewed source CHECKs/metadata; history-only migration_source_public_verification_settings; no runtime approval/contact/retention/scheduler overwrite |
 | private.purchase_document_evidence | id | Candidate purchase_document_evidence; field/state/key parity NOT REVIEWED |
 | private.sale_team_aa_counters | accreditation_month | Identifier allocator adapter; reserve IDs and reconcile collisions |
 | private.sale_team_accreditation_history | id | Candidate sale_team_accreditation_history; field/state/key parity NOT REVIEWED |
@@ -264,11 +398,11 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | private.sale_team_search_attempts | ip_hash | Retention/privacy review; do not restore old rate-limit state |
 | private.sale_team_search_contacts | id | Retention/privacy review; no blind contact-data copy |
 | private.sale_team_search_disclosures | ip_hash, request_id | Retention/privacy review of historical disclosure evidence |
-| private.staff_security_policy | singleton | Policy adapter; must not restore MFA or overwrite native policy |
+| private.staff_security_policy | singleton | Reviewed two-field history-only migration_source_staff_security_policy; cannot target native MFA policy or restore MFA |
 | private.vip_card_number_issuances | vip_card_number | Identifier allocator adapter; reserve IDs and reconcile collisions |
-| public.audit_events | id | Candidate audit_events; field/state/key parity NOT REVIEWED; bigint range/string adapter: id |
-| public.card_categories | id | Reference conflict adapter; never union grants or overwrite frozen terms |
-| public.card_plans | id | Reference conflict adapter; never union grants or overwrite frozen terms |
+| public.audit_events | id | Reviewed eleven-field history with exact bigint IDs and auth-actor gate; unchanged JSON/timestamps, targeted private-evidence blocks, protected-owner and native append/replay proof |
+| public.card_categories | id | Full six-field definition; source slug CHECK, native unique keys and strict alias/replay proof; real reconciliation remains |
+| public.card_plans | id | Full 29-field definition; source CHECKs, exact prices/rates, category aliases and conflict-blocking reuse; real economics/history reconciliation remains |
 | public.card_sale_hierarchy_snapshots | sale_id, ancestor_staff_id | Candidate card_sale_hierarchy_snapshots; field/state/key parity NOT REVIEWED |
 | public.card_sales | id | Candidate card_sales; field/state/key parity NOT REVIEWED |
 | public.cms_document_versions | id | Deferred CMS history; keep disabled; bigint range/string adapter: id |
@@ -277,7 +411,7 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | public.cms_page_sections | id | Deferred CMS history; keep disabled |
 | public.cms_page_versions | id | Deferred CMS history; keep disabled; bigint range/string adapter: id |
 | public.cms_pages | id | Deferred CMS history; keep disabled |
-| public.commission_rules | id | Reference conflict adapter; never union grants or overwrite frozen terms |
+| public.commission_rules | id | Reviewed 15-field source definition, generated typed-target FK parity and alias-safe target_id; exact rate/date history; overlapping active ranges block; no frozen commercial recompute |
 | public.commissions | id | Candidate commissions; field/state/key parity NOT REVIEWED |
 | public.customer_application_documents | id | Business metadata + private-file ownership adapter |
 | public.customer_application_holders | id | Candidate customer_application_holders; field/state/key parity NOT REVIEWED |
@@ -290,12 +424,12 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | public.departments | id | Reviewed reference definition; full column/type/PK/CHECK/unique metadata coverage and exact reuse proven; history conflicts/full reconciliation remain |
 | public.earning_claims | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: points_requested, points_awarded, points_capped, points_per_unit_snapshot, max_award_snapshot |
 | public.final_qualifications | id | Candidate final_qualifications; field/state/key parity NOT REVIEWED |
-| public.identity_documents | id | Business metadata + private-file ownership adapter; bigint range/string adapter: size_bytes |
+| public.identity_documents | id | Reviewed 18-field metadata, subject/FK/status/size/MIME/hash checks; staged transfer gate; real archived-byte copy/link/replay proven in disposable local rehearsal only |
 | public.memberships | id | Candidate memberships; field/state/key parity NOT REVIEWED; bigint range/string adapter: points_balance |
 | public.modules | id | Reviewed reference definition; full column/type/PK/CHECK/unique metadata coverage, int32 validation and exact reuse proven; full reconciliation remains |
-| public.network_member_profiles | staff_id | Protected owner/identity adapter; preserve existing credentials and assignments |
-| public.ost_applications | id | Candidate ost_applications; field/state/key parity NOT REVIEWED |
-| public.ost_members | id | Candidate ost_members; field/state/key parity NOT REVIEWED |
+| public.network_member_profiles | staff_id | Complete 23-field profile definition; native staff unique key, three references, source CHECKs, owner exclusion and disposable replay covered; address/file reconciliation remains |
+| public.ost_applications | id | Reviewed source status/JSON/unique/FK metadata and historical native reads; public registration stays disabled |
+| public.ost_members | id | Reviewed staff/auth identity binding, historical state/origin/keys and native indexes/replay; no automatic identity merge |
 | public.payments | id | Candidate payments; field/state/key parity NOT REVIEWED; composite foreign-key adapter required |
 | public.point_earning_rules | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: points_amount, max_award |
 | public.point_redemption_rules | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: min_points, max_points |
@@ -309,7 +443,7 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | public.redemption_items | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: points_cost |
 | public.redemption_quotes | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: points_requested, points_balance_snapshot, remaining_points_after, ledger_entry_id, weekday_points, weekend_points |
 | public.redemptions | id | Disabled Services/Redemption history adapter; do not enable routes; bigint range/string adapter: points_cost_snapshot, total_points, balance_before_snapshot, balance_after_snapshot |
-| public.referral_codes | id | Candidate referral_codes; field/state/key parity NOT REVIEWED |
+| public.referral_codes | id | History-only legacy_referral_codes mapping; preserve source evidence without enabling referral capabilities; authorized hint fallback only |
 | public.referral_relationships | id | Candidate referral_relationships; field/state/key parity NOT REVIEWED |
 | public.reservation_agreement_documents | id | Business metadata + private-file ownership adapter |
 | public.reservation_agreement_holders | id | Candidate reservation_agreement_holders; field/state/key parity NOT REVIEWED |
@@ -324,8 +458,8 @@ Scope: public/private base/partitioned tables plus auth.users and storage.object
 | public.staff_invitations | id | Exclude; no invitations |
 | public.staff_permission_restrictions | staff_id, module_id | Reusable reviewed access definition; column/PK/FK/types/CHECK/native unique key covered; reuse/owner protection proven; full reconciliation remains |
 | public.staff_role_assignments | staff_id | Reusable reviewed access definition; column/PK/FK/types/native unique key covered; assigned_at rename/owner exclusion/new assignment/replay proven; identity and full reconciliation remain |
-| public.staff_users | id | Protected owner/identity adapter; preserve existing credentials and assignments |
-| public.tier_points_config | tier | Reference conflict adapter; never union grants or overwrite frozen terms; bigint range/string adapter: annual_points_cap |
+| public.staff_users | id | Full 13-field business definition and explicit ID/email auth-FK gate; owner excluded; credential/provider state and counters remain separate |
+| public.tier_points_config | tier | Full four-field definition; positive safe-integer cap, legal tiers, actor alias and strict reuse; separate validator/index proposal local-only |
 | storage.buckets | NONE - explicit key adapter required | Storage policy/configuration review; never auto-provision; bigint range/string adapter: file_size_limit |
 | storage.objects | NONE - explicit key adapter required | Private-file adapter: bytes, checksum, ownership and native metadata |
 

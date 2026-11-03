@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Db, MongoClient } from 'mongodb';
 import { z } from 'zod';
-import { customerImportParseResponseSchema } from '@afhomes/contracts';
+import { customerImportParseResponseSchema, customerImportRowSchema } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
-import { MAX_IMPORT_BYTES, membershipTemplateV2Csv } from './customer-import.js';
+import { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, membershipTemplateV2Csv } from './customer-import.js';
+import { purchaseFingerprint } from './purchase-fingerprint.js';
 import { readCustomerImportFile, validateCustomerImportFile } from './customer-import-file.js';
 import { loadMongoCustomerImportContext } from './customer-import-context.mongo.js';
 import { shapeImportJob, shapeImportRow } from './customer-import-model.js';
@@ -28,6 +29,7 @@ const inputSchema = z.object({
   sheetUrl: z.string().trim().max(500).optional(),
   sourceName: z.string().trim().min(1).max(200).optional(),
   externalVerificationReason: z.string().trim().min(10).max(500).optional(),
+  resumeJobId: z.uuid().optional(),
 });
 const pageSchema = z.object({
   offset: z.coerce.number().int().min(0).max(4999).default(0),
@@ -61,7 +63,8 @@ export function createMongoCustomerImportJobsHandler(
 ) {
   const col = (table: string) => db.collection<MongoRow>(table),
     records = createMongoPurchaseRecords(db);
-  const preview = continuation.preview, confirm = createMongoImportJobCommitHandler(db,client,authorize,continuation);
+  const preview = continuation.preview,
+    confirm = createMongoImportJobCommitHandler(db, client, authorize, continuation);
   const jobView = (row: MongoRow) => shapeImportJob({ ...row, id: row._id });
   const rowView = (row: MongoRow) => shapeImportRow({ ...row, id: row._id });
   return async (req: VercelRequest, res: VercelResponse) => {
@@ -69,7 +72,7 @@ export function createMongoCustomerImportJobsHandler(
     const path = subPath(req),
       verb = method(req),
       match = /^jobs\/([^/]+)(?:\/(cancel|confirm))?$/.exec(path);
-    if (verb === 'POST' && match?.[2] === 'confirm') return confirm(req,res,match[1]!);
+    if (verb === 'POST' && match?.[2] === 'confirm') return confirm(req, res, match[1]!);
     const parsing = path === 'parse' && verb === 'POST',
       cancelling = !!match?.[2] && verb === 'POST';
     if (
@@ -144,6 +147,8 @@ export function createMongoCustomerImportJobsHandler(
           if ('error' in access) refuse(access.error.status, 'Import update is not permitted');
           const job = await col('customer_import_jobs').findOne({ _id: match![1]! }, { session });
           if (!job) refuse(404, 'Import job not found');
+          if (job!.migration_revalidation_required)
+            refuse(409, 'Archived import evidence cannot be cancelled; review its revalidated job');
           if (!['ready', 'validated'].includes(String(job!.status)))
             refuse(409, 'The import job changed; reload before cancelling');
           await col('customer_import_jobs').updateOne(
@@ -166,6 +171,45 @@ export function createMongoCustomerImportJobsHandler(
       const parsed = inputSchema.safeParse(jsonBody(req));
       if (!parsed.success) refuse(400, 'Invalid import request');
       if (!parsed.success) return;
+      const resumeId = parsed.data.resumeJobId;
+      const requireResumeAccess = async () => {
+        for (const action of ['view', 'update'] as const) {
+          const access = await authorize(req, 'governance.customer_import', action);
+          if ('error' in access)
+            refuse(access.error.status, 'Import revalidation is not permitted');
+        }
+      };
+      const resumeSource = async (inTransaction = false) => {
+        const options = inTransaction ? { session } : {};
+        const job = await col('customer_import_jobs').findOne({ _id: resumeId! }, options);
+        if (!job) refuse(404, 'Import job not found');
+        if (
+          job!.migration_revalidation_required !== true ||
+          !['ready', 'validated'].includes(String(job!.status))
+        )
+          refuse(409, 'Only pending migrated jobs can be revalidated');
+        const archivedRows = await col('customer_import_rows')
+          .find({ import_job_id: resumeId! }, options)
+          .sort({ row_number: 1 })
+          .limit(MAX_IMPORT_ROWS + 1)
+          .toArray();
+        if (
+          archivedRows.length !== job!.total_rows ||
+          archivedRows.length > MAX_IMPORT_ROWS ||
+          archivedRows.some((row) => row.committed_at)
+        )
+          refuse(409, 'Review the archived job before revalidation');
+        const evidence = { ...job! };
+        delete evidence.migration_revalidated_job_id;
+        delete evidence.migration_revalidation_fingerprint;
+        return { job: job!, hash: purchaseFingerprint({ job: evidence, rows: archivedRows }) };
+      };
+      if (resumeId) {
+        await requireResumeAccess();
+        if (parsed.data.source === 'google_sheets')
+          refuse(400, 'Upload the workbook or CSV to revalidate archived import evidence');
+      }
+      const original = resumeId ? await resumeSource() : null;
       const historicalPermissions = async () => {
         for (const [module, action] of [
           ['sales.customers', 'create'],
@@ -173,7 +217,8 @@ export function createMongoCustomerImportJobsHandler(
           ['finance.payment_verification', 'update'],
         ] as const) {
           const access = await authorize(req, module, action);
-          if ('error' in access) refuse(access.error.status, 'Historical certification is not permitted');
+          if ('error' in access)
+            refuse(access.error.status, 'Historical certification is not permitted');
         }
       };
       if (parsed.data.externalVerificationReason) await historicalPermissions();
@@ -193,10 +238,22 @@ export function createMongoCustomerImportJobsHandler(
         file.records,
       );
       const validated = await validateCustomerImportFile(
-        file, ctx, staffMatches, raOwners, parsed.data.externalVerificationReason,
+        file,
+        ctx,
+        staffMatches,
+        raOwners,
+        parsed.data.externalVerificationReason,
       );
       const id = randomUUID(),
         now = new Date().toISOString();
+      const resumeFingerprint = original
+        ? purchaseFingerprint({
+            source: original.hash,
+            file: file.sourceHash,
+            actor: actor.userId,
+            externalVerificationReason: parsed.data.externalVerificationReason ?? null,
+          })
+        : null;
       // Review reads stay outside the short atomic evidence write.
       const rows: MongoRow[] = [];
       for (const value of validated) {
@@ -260,6 +317,37 @@ export function createMongoCustomerImportJobsHandler(
         const access = await authorize(req, 'governance.customer_import', 'create');
         if ('error' in access) refuse(access.error.status, 'Import creation is not permitted');
         if (parsed.data.externalVerificationReason) await historicalPermissions();
+        if (original) {
+          await requireResumeAccess();
+          const current = await resumeSource(true);
+          if (current.hash !== original.hash)
+            refuse(409, 'Archived import changed; reload before revalidation');
+          if (current.job.migration_revalidated_job_id) {
+            if (current.job.migration_revalidation_fingerprint !== resumeFingerprint)
+              refuse(409, 'This archived job already has a revalidated review job');
+            const existing = await col('customer_import_jobs').findOne(
+              { _id: String(current.job.migration_revalidated_job_id) },
+              { session },
+            );
+            if (!existing) refuse(409, 'The revalidated review job requires operator review');
+            const existingRows = await col('customer_import_rows')
+              .find({ import_job_id: existing!._id }, { session })
+              .sort({ row_number: 1 })
+              .limit(MAX_IMPORT_ROWS + 1)
+              .toArray();
+            if (
+              existingRows.length !== existing!.total_rows ||
+              existingRows.length !== validated.length
+            )
+              refuse(409, 'The revalidated review rows require operator review');
+            return {
+              job: jobView(existing!),
+              pageSize: 10,
+              rows: existingRows.slice(0, 10).map(rowView),
+              reviewRows: existingRows.map(row => customerImportRowSchema.parse(rowView(row))),
+            };
+          }
+        }
 
         const job: MongoRow = {
           _id: id,
@@ -291,9 +379,26 @@ export function createMongoCustomerImportJobsHandler(
           failed_at: null,
           cancelled_at: null,
           failed_rows: 0,
+          ...(original
+            ? {
+                migration_revalidation_of_job_id: resumeId,
+                migration_source_evidence_hash: original.hash,
+              }
+            : {}),
         };
         await col('customer_import_jobs').insertOne(job, { session });
         if (rows.length) await col('customer_import_rows').insertMany(rows, { session });
+        if (original)
+          await col('customer_import_jobs').updateOne(
+            { _id: resumeId! },
+            {
+              $set: {
+                migration_revalidated_job_id: id,
+                migration_revalidation_fingerprint: resumeFingerprint,
+              },
+            },
+            { session },
+          );
         await records.audit(
           actor.userId,
           'CUSTOMER_IMPORT_PARSED',
@@ -305,19 +410,27 @@ export function createMongoCustomerImportJobsHandler(
             total: validated.length,
             valid: job.valid_rows,
             sourceHash: file.sourceHash,
+            ...(original
+              ? { revalidationOfJobId: resumeId, sourceEvidenceHash: original.hash }
+              : {}),
           },
           session,
         );
-        return { job: jobView(job), pageSize: 10, rows: rows.slice(0, 10).map(rowView) };
+        return {
+          job: jobView(job),
+          pageSize: 10,
+          rows: rows.slice(0, 10).map(rowView),
+          reviewRows: validated,
+        };
       });
       const reviewBytes = file.workflowReview
         ? annotateCustomerWorkbook(
             file.workflowReview.bytes,
             file.workflowReview.workbook,
-            validated,
+            result.reviewRows,
           )
         : file.reviewMatrix
-          ? annotateFlatCustomerImport(file.reviewMatrix, validated)
+          ? annotateFlatCustomerImport(file.reviewMatrix, result.reviewRows)
           : null;
       return res.status(201).json(
         customerImportParseResponseSchema.parse({

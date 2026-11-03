@@ -1,4 +1,11 @@
-# Approved core-validator apply: blocked by database privilege
+# Approved core-validator apply status
+
+**31 October completion:** the user authorized configuring maintenance access.
+All six approved validators are now installed and independently read back as
+strict/error, with zero invalid records. Protected document/credential/assignment
+hashes were unchanged. A verified encrypted local backup precedes the apply and
+another follows it. See LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md. The earlier
+blocked attempt below is retained as history, not the current state.
 
 29 October 2026. `AFhomes-ecofarm-v2`, `claud/mongodb-conversion`.
 

@@ -784,6 +784,12 @@ it('validates all five immutable evidence contracts and renders authorized histo
       { sort: { revision: -1 } },
     );
     expect(evidence).toBeTruthy();
+    if(kind==='membership_activated') {
+      const member=await col('memberships').findOne({_id:membershipId});
+      const agreement=await col('reservation_agreements').findOne({_id:reservationId});
+      const terms=await col('customer_application_purchase_terms').findOne({_id:String(agreement!.purchase_terms_id)});
+      expect(evidence!.fields).toMatchObject({tier:terms!.tier,activatedAt:member!.activated_at});
+    }
     purchaseDocumentEvidenceSchema.parse({
       id: evidence!._id,
       kind,

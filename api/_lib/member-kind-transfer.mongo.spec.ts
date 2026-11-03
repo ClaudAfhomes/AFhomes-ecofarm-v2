@@ -7,10 +7,6 @@ import { createTestReplica } from './testing/mongo-replica.js';
 import { seedPhase7Fixture } from './testing/phase7-fixture.js';
 import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { createMongoDevelopmentHandler } from './mongo-development-access.js';
-import { createMongoMembersHandler } from './members.mongo.js';
-import { makeRes } from './testing/supabase-fake.js';
-import type { authorizeAfHomes } from './afhomes-access.js';
-import type { VercelRequest } from './http.js';
 
 import type { MongoRow } from './customer-activation.mongo.js';
 let replica: Awaited<ReturnType<typeof createTestReplica>>,
@@ -21,7 +17,6 @@ let base = '',
   member = '',
   other = '',
   head = '',
-  vd = '',
   province = '',
   city = '';
 const col = (name: string) => replica.db.collection<MongoRow>(name);
@@ -38,10 +33,9 @@ async function request(path: string, body?: unknown, auth = cookie, method?: str
 }
 async function json(r: Response, status = 200) {
   const body = await r.json();
-  expect({ status: r.status, body }).toMatchObject({ status });
+  expect(r.status, JSON.stringify(body)).toBe(status);
   return body;
 }
-const patch = (body: unknown, auth = cookie) => request(`/members/${member}`, body, auth, 'PATCH');
 beforeAll(async () => {
   replica = await createTestReplica();
   server = http.createServer();
@@ -79,7 +73,6 @@ beforeAll(async () => {
   );
   const members = await json(await request('/members'));
   head = members.data.find((r: { position: string }) => r.position === 'senior_sales_manager').id;
-  vd = members.data.find((r: { position: string }) => r.position === 'vice_director').id;
   const departments = await json(await request('/admin/afhomes/departments'));
   const dept = departments.data.find((r: { code: string }) => r.code === 'SALES');
   const provinces = await json(await request('/address'));
@@ -124,7 +117,7 @@ afterAll(async () => {
   await replica?.stop();
 });
 
-const toIst = (id = fixture.ost.id) => ({
+const toIst = () => ({
   direction: 'OST_TO_IST',
   requestId: randomUUID(),
   reason: 'Synthetic approved kind conversion',
@@ -218,7 +211,7 @@ it('converts IST to already-accredited OST with the same AA suffix, complete sig
   expect(await col('card_sale_hierarchy_snapshots').findOne({ _id: snapshot._id })).toEqual(
     snapshot,
   );
-  expect((await convert(member, toIst(member))).status).toBe(409);
+  expect((await convert(member, toIst())).status).toBe(409);
 });
 it('refuses open renewals, missing evidence, mismatched identity and active downlines', async () => {
   const term = await col('ost_accreditation_terms').findOne({ ost_id: member, status: 'active' });
@@ -232,7 +225,7 @@ it('refuses open renewals, missing evidence, mismatched identity and active down
     ost_id: member,
     status: 'submitted',
   });
-  expect((await convert(member, toIst(member))).status).toBe(409);
+  expect((await convert(member, toIst())).status).toBe(409);
   await col('ost_accreditation_renewals').deleteOne({ _id: pending });
   const body = toOst(other);
   expect(
@@ -302,7 +295,7 @@ it('rolls back OST retirement, successor allocation and history on a failed IST 
     validationLevel: 'strict',
   });
   try {
-    expect((await convert(member, toIst(member))).status).toBe(503);
+    expect((await convert(member, toIst())).status).toBe(503);
     expect(await col('sale_team_accreditations').findOne({ staff_id: member })).toEqual(old);
     expect(await col('ost_accreditation_terms').findOne({ _id: term!._id })).toEqual(term);
     expect((await col('ost_members').findOne({ _id: member }))!.status).toBe('active');

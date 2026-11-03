@@ -12,6 +12,7 @@ import {
   createReservationAgreementSchema,
   reservationHolderSchema,
   vipTierSchema,
+  signatureStatusSchema,
   reservationAgreementSchema,
 } from './official-forms.js';
 import {
@@ -440,6 +441,9 @@ const commercialFields = {
   inclusions: z.array(z.string().min(1).max(300)).max(30),
 };
 const agreementDocumentFields = {
+  // Read historical evidence without restoring signature inputs on new reservations.
+  primarySignatureStatus: signatureStatusSchema.optional(),
+  secondarySignatureStatus: signatureStatusSchema.nullable().optional(),
   secondaryAddress: z.string().nullable(),
   schedule: z.array(
     z.strictObject({
@@ -500,6 +504,8 @@ export const purchaseDocumentEvidenceSchema = z.discriminatedUnion('kind', [
     fields: z.strictObject({
       ...identityFields,
       membershipNumber: z.string().min(1),
+      tier: vipTierSchema.optional(),
+      activatedAt: timestamp.optional(),
       status: z.literal('active'),
       yearlyPoints: z.number().int().nonnegative(),
       pointsAllocated: z.number().int().nonnegative(),

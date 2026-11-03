@@ -1,5 +1,12 @@
 # Durable backup preparation - 30 October 2026
 
+31 October update: user selected this computer as the current backup destination.
+Encrypted native MongoDB/private-file capture, Windows-protected key storage,
+independent local restore verification and a daily 21:00 current-user task now
+work. See LOCAL-BACKUP-AND-VALIDATOR-SETUP-2026-10-31.md for actual results and limits.
+Off-device/portable key recovery and production capture coordination remain open.
+The earlier preparation status below predates that setup.
+
 Status: **not operational**. The existing recovery test restores synthetic
 encrypted BSON/schema/files to independent disposable servers. Its key is
 ephemeral and archives are removed, so it is not a durable real-data backup.
