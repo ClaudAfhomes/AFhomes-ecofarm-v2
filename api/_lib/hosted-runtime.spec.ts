@@ -2,7 +2,7 @@ import http from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createTestReplica } from './testing/mongo-replica.js';
 import { hostedMongoConfig, createHostedMongoHandler } from './hosted-runtime.js';
 import { createHostedPrivateObjectStore } from './private-object-store.js';
@@ -15,12 +15,22 @@ const env = {
   AFHOMES_PUBLIC_ORIGIN: 'https://staging.example.invalid',
   BETTER_AUTH_URL: 'https://staging.example.invalid',
   BETTER_AUTH_SECRET: 'synthetic-hosted-fixture-only'.repeat(3),
+  AFHOMES_AUTH_TURNSTILE_SECRET: 'synthetic-hosted-captcha-secret',
+  VITE_TURNSTILE_SITE_KEY: 'synthetic-public-key',
   AFHOMES_WEB_URL: 'https://staging.example.invalid',
   AFHOMES_ADMIN_URL: 'https://staging.example.invalid/admin',
   MONGODB_DB: 'afhomes_dev',
   AFHOMES_PRIVATE_STORAGE_PROVIDER: 'filesystem',
   AFHOMES_PRIVATE_STORAGE_ROOT: path.resolve('synthetic-private-files'),
 };
+const actualFetch = globalThis.fetch;
+beforeEach(() => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) =>
+    String(url) === 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+      ? Promise.resolve(Response.json({ success: true, hostname: 'staging.example.invalid', action: 'login' }))
+      : actualFetch(url, init));
+});
+afterEach(() => vi.restoreAllMocks());
 it('isolates browser builds from credentials, existing VITE values and runtime Node injection flags', () => {
   const built = hostedBuildEnvironment(
     {
@@ -54,6 +64,8 @@ it('requires explicit production opt-in, canonical HTTPS URLs, a private storage
     coreWritesEnabled: false,
   });
   for (const patch of [
+    { AFHOMES_AUTH_TURNSTILE_SECRET: undefined },
+    { VITE_TURNSTILE_SITE_KEY: undefined },
     { NODE_ENV: 'development' },
     { AFHOMES_HOSTED_RUNTIME_ENABLED: '' },
     { AFHOMES_PUBLIC_ORIGIN: 'http://staging.example.invalid' },
@@ -166,6 +178,7 @@ it('preserves secure staff cookies, forced password change and session revocatio
             'X-Forwarded-Proto': 'https',
             Origin: origin,
             'Content-Type': 'application/json',
+            'x-captcha-response': 'synthetic-hosted-token',
             ...(cookie ? { Cookie: cookie } : {}),
           },
         },

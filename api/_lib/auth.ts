@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { hashPassword, verifyPassword } from 'better-auth/crypto';
-import { admin } from 'better-auth/plugins';
+import { admin, captcha } from 'better-auth/plugins';
 import { APIError } from 'better-auth/api';
 import { mongodbAdapter } from '@better-auth/mongo-adapter';
 import type { Db, MongoClient } from 'mongodb';
@@ -16,6 +16,15 @@ export type AuthDelivery = {
     token: string;
   }) => Promise<void>;
 };
+
+/** Application launchers require a complete pair; isolated library fixtures may omit both. */
+export function requireAuthTurnstile(env: NodeJS.ProcessEnv) {
+  const siteKey = env.VITE_TURNSTILE_SITE_KEY;
+  const secretKey = env.AFHOMES_AUTH_TURNSTILE_SECRET;
+  if (!siteKey || !secretKey || siteKey !== siteKey.trim() || secretKey !== secretKey.trim() || secretKey.length < 16)
+    throw new Error('Login requires VITE_TURNSTILE_SITE_KEY and server-only AFHOMES_AUTH_TURNSTILE_SECRET.');
+  return { siteKey, secretKey };
+}
 
 function trustedOrigin(value: string, name: string, allowLoopback: boolean): URL {
   try {
@@ -53,6 +62,11 @@ export function getAuthOptions(env: NodeJS.ProcessEnv = process.env) {
       (origin) =>
         trustedOrigin(origin.trim(), 'AFHOMES_AUTH_TRUSTED_ORIGINS', allowLoopback).origin,
     ) ?? [];
+  const challenge = env.AFHOMES_AUTH_TURNSTILE_SECRET !== undefined
+    ? requireAuthTurnstile(env) : null;
+  const testChallenge = challenge && /^[123]x0+AA$/.test(challenge.secretKey);
+  if (testChallenge && (!allowLoopback || base.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)))
+    throw new Error('Turnstile test keys are permitted only in disposable/local HTTP loopback configuration.');
 
   return {
     appName: 'AFHomes',
@@ -105,7 +119,14 @@ export function getAuthOptions(env: NodeJS.ProcessEnv = process.env) {
       database: { generateId: () => randomUUID() },
     },
     rateLimit: { enabled: true, storage: 'database', modelName: 'auth_rate_limits' },
-    plugins: [],
+    plugins: challenge ? [captcha({
+      provider: 'cloudflare-turnstile',
+      secretKey: challenge.secretKey,
+      endpoints: ['/sign-in/email'],
+      // Cloudflare's loopback-only dummy response can omit action; live keys always require it.
+      expectedAction: testChallenge ? undefined : 'login',
+      allowedHostnames: [...new Set([base.hostname, ...extraOrigins.map(origin => new URL(origin).hostname), ...(testChallenge ? ['example.com'] : [])])],
+    })] : [],
     telemetry: { enabled: false },
   } satisfies BetterAuthOptions;
 }

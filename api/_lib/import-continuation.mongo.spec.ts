@@ -8,7 +8,8 @@ import { createMongoPhase5Runtime } from './mongo-runtime.js';
 import { buildImportedCustomerFacts } from './customer-import-continuation.js';
 import { companyWorkbook } from './customer-workbook-export.js';
 import { customerWorkflowTemplate } from './customer-workflow-export.js';
-import { readWorkbookParts } from './customer-xlsx.js';
+import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
+import { parseCustomerWorkbook } from './customer-workbook.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
 import { zipStored } from './report-export.js';
 import type { MongoRow } from './customer-activation.mongo.js';
@@ -631,6 +632,58 @@ it('returns a downloadable guided review workbook retaining bad/good values, cel
   expect(refreshed).toContain('Retained');
   expect(await col('customers').countDocuments()).toBe(before);
   // Two full workbook builds/uploads plus re-parsing and cell-level review checks.
+}, 30000);
+
+it('returns and refreshes the original company-v1 review workbook without changing entered values', async () => {
+  const input = companyWorkbook([
+    { first_name: 'Synthetic', last_name: 'Flagged', email: 'company-review@example.invalid',
+      mobile: '09123456789', birth_date: 'not-a-date' },
+    { first_name: 'Synthetic', last_name: 'Retained', email: 'company-retained@example.invalid',
+      mobile: '09123456780', birth_date: '1990-01-01' },
+  ]);
+  const before = await col('customers').countDocuments();
+  const parsed = await json(await request('parse', cookie, {
+    source: 'excel', contentBase64: Buffer.from(input).toString('base64'),
+  }), 201);
+  expect(parsed.job).toMatchObject({ totalRows: 2, invalidRows: 1 });
+  expect(parsed.reviewFile).toMatchObject({ filename: 'customer-import-review.xlsx' });
+  const bytes = Buffer.from(parsed.reviewFile.content, 'base64');
+  const parts = readWorkbookParts(bytes);
+  const original = readWorkbook(readWorkbookParts(input), ['Primary', 'Supplementary', 'Related', 'Package']);
+  const reviewed = readWorkbook(parts, [...original.keys()]);
+  for (const [sheet, matrix] of original)
+    for (const [index, values] of matrix.entries())
+      expect(Array.from({ length: matrix[0]!.length }, (_, i) => reviewed.get(sheet)![index]?.[i] ?? ''))
+        .toEqual(Array.from({ length: matrix[0]!.length }, (_, i) => values[i] ?? ''));
+  expect(parseCustomerWorkbook(bytes)!.rows).toEqual(parseCustomerWorkbook(input)!.rows);
+  const path = 'xl/worksheets/sheet2.xml';
+  const text = new TextDecoder().decode(parts.get(path));
+  expect(text).toContain('not-a-date');
+  expect(text).toContain('Needs correction');
+  expect(text).toContain('Use a real past birth date');
+  const style = Number(/\bs="(\d+)"/.exec(/<c\b[^>]*r="G2"[^>]*>/.exec(text)![0])![1]);
+  const styles = new TextDecoder().decode(parts.get('xl/styles.xml'));
+  const xfs = [.../<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)![1]!.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)];
+  const fill = Number(/fillId="(\d+)"/.exec(xfs[style]![0])![1]);
+  const fills = [.../<fills\b[^>]*>([\s\S]*?)<\/fills>/.exec(styles)![1]!.matchAll(/<fill\b[\s\S]*?<\/fill>/g)];
+  expect(fills[fill]![0]).toContain('FFFADBD8');
+  parts.set(path, new TextEncoder().encode(text.replace('not-a-date', '1990-01-01')));
+  const corrected = zipStored([...parts].map(([name, data]) => ({ name, data })), true);
+  const again = await json(await request('parse', cookie, {
+    source: 'excel', contentBase64: Buffer.from(corrected).toString('base64'),
+  }), 201);
+  expect(again.job).toMatchObject({ totalRows: 2, invalidRows: 0 });
+  const refreshed = new TextDecoder().decode(readWorkbookParts(Buffer.from(again.reviewFile.content, 'base64')).get(path));
+  expect(refreshed).not.toContain('Use a real past birth date');
+  expect(refreshed).not.toContain('Needs correction');
+  expect(refreshed).toContain('Retained');
+  expect(await col('customers').countDocuments()).toBe(before);
+  expect(text).toContain('Errors to correct');
+  parts.set(path, new TextEncoder().encode(text.replace('Errors to correct', 'Unmapped extra field')));
+  const unmapped = zipStored([...parts].map(([name, data]) => ({ name, data })), true);
+  await json(await request('parse', cookie, {
+    source: 'excel', contentBase64: Buffer.from(unmapped).toString('base64'),
+  }), 400);
 }, 30000);
 
 it.each([

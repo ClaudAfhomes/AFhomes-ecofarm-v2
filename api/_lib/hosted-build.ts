@@ -14,6 +14,8 @@ export function hostedBuildEnvironment(
     base.hash
   )
     throw new Error('A public HTTPS build origin is required');
+  if (!input.VITE_TURNSTILE_SITE_KEY?.trim())
+    throw new Error('Hosted login requires a public Turnstile site key at build time');
   const safe: NodeJS.ProcessEnv = {};
   for (const key of [
     'PATH',

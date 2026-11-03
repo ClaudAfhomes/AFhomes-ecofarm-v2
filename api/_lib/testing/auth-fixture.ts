@@ -5,7 +5,7 @@ import { getAuthOptions } from '../auth.js';
 type Mail = { email: string; token: string; url: string };
 
 /** Real library + disposable memory only. Captures callbacks; never sends mail. */
-export function createMemoryAuthFixture() {
+export function createMemoryAuthFixture(env: NodeJS.ProcessEnv = {}) {
   const store: Record<string, Record<string, unknown>[]> = {
     auth_users: [],
     auth_sessions: [],
@@ -19,6 +19,7 @@ export function createMemoryAuthFixture() {
     ...getAuthOptions({
       BETTER_AUTH_SECRET: 'phase2-memory-fixture-only-'.repeat(3),
       BETTER_AUTH_URL: 'http://localhost:3000',
+      ...env,
     }),
     database: memoryAdapter(store),
   };

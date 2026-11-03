@@ -6,7 +6,7 @@
  * stubbed and the portals probe answered over stubbed fetch, so entry
  * gating, wrong-portal messaging, and post-login destinations are exercised.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLocation } from 'react-router';
@@ -258,21 +258,40 @@ describe('admin entry decisions', () => {
       env.VITE_TURNSTILE_SITE_KEY = previousKey;
     }
   });
-  it('signs in through the admin login without CAPTCHA even when a site key is configured', async () => {
+  it('requires CAPTCHA for Admin and Super Admin login when a site key is configured', async () => {
     const previousKey = env.VITE_TURNSTILE_SITE_KEY;
     env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
     portalsBody.current = staffPortals('admin');
     try {
       renderWithProviders(<><App /><LocationProbe /></>, { route: '/admin/login' });
       await screen.findByRole('heading', { name: 'Admin Login' });
-      expect(screen.queryByLabelText('Security verification')).not.toBeInTheDocument();
+      await signInAs('admin@afhomes.test');
+      expect(await screen.findByText('Complete security verification before signing in.')).toBeVisible();
+      expect(authMock.signInWithPassword).not.toHaveBeenCalled();
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+    }
+  });
+  it.each(['admin', 'super_admin'])('forwards a completed challenge for %s sign-in', async (role) => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    const widget = vi.fn<NonNullable<Window['turnstile']>['render']>(() => 'synthetic-widget');
+    window.turnstile = { render: widget, remove: vi.fn() };
+    portalsBody.current = staffPortals(role);
+    try {
+      renderWithProviders(<><App /><LocationProbe /></>, { route: '/admin/login' });
+      await screen.findByRole('heading', { name: 'Admin Login' });
+      await waitFor(() => expect(widget).toHaveBeenCalled());
+      act(() => widget.mock.calls[0]![1].callback('synthetic-login-token'));
       await signInAs('admin@afhomes.test');
       await expectLocation('/admin');
       expect(authMock.signInWithPassword).toHaveBeenCalledWith({
         email: 'admin@afhomes.test', password: 'Password123!',
+        options: { captchaToken: 'synthetic-login-token' },
       });
     } finally {
       env.VITE_TURNSTILE_SITE_KEY = previousKey;
+      delete window.turnstile;
     }
   });
   it('accepts an admin', async () => {

@@ -285,8 +285,8 @@ function MongoSessionProvider({ children }: { children: ReactNode }) {
     };
   }, [resolve]);
   const signIn = useCallback(
-    async (email: string, password: string) => {
-      await mongoAuth.signIn(email, password);
+    async (email: string, password: string, captchaToken?: string) => {
+      await mongoAuth.signIn(email, password, captchaToken);
       await resolve();
     },
     [resolve],

@@ -11,8 +11,9 @@ import {
   CITIZENSHIP_OPTIONS,
   tinNumberSchema,
   applicationHolderSchema,
+  WORKFLOW_REVIEW_HEADERS,
 } from '@afhomes/contracts';
-import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
+import { readWorkbook, readWorkbookParts, readWorkbookCustomProperties } from './customer-xlsx.js';
 import type { ImportFieldRow, ValidatedImportRow } from './customer-import.js';
 import type { AddressProvider } from './address-provider.js';
 import { resolvePostalCode } from './postal-reference.js';
@@ -150,27 +151,34 @@ export function parseCustomerWorkbook(
   // four entry tabs, no reference tabs) carries the same entry headers but
   // belongs to the sectioned-merge chain, so it is never claimed here.
   if (!/name=["']PSGC_[A-Za-z]+["']/.test(meta)) return null;
+  const reviewed = readWorkbookCustomProperties(parts).get('AFHomesReviewWorkbook') === '1';
+  const reviewTail = (values: string[] | undefined, headers: readonly string[]) =>
+    reviewed &&
+    values?.length === headers.length + 3 &&
+    WORKFLOW_REVIEW_HEADERS.every((header, i) => values[headers.length + i] === header);
+  const validHeaders = (values: string[] | undefined, headers: readonly string[]) =>
+    (values?.length === headers.length || reviewTail(values, headers)) &&
+    headers.every((header, i) => values?.[i] === header);
   // Shape probe: only a workbook whose Primary header row is the company
   // vocabulary is claimed. Any other workbook (a guided or legacy template,
   // an unrelated export) returns null so the sectioned-merge chain can decide
   // it; a workbook with the company headers but malformed content still
   // throws below.
   const primary = readWorkbook(parts, ['Primary']).get('Primary')!;
-  if (
-    primary[0]?.length !== CUSTOMER_WORKBOOK_HEADERS.Primary.length ||
-    CUSTOMER_WORKBOOK_HEADERS.Primary.some((h, i) => primary[0]?.[i] !== h)
-  )
+  if (!validHeaders(primary[0], CUSTOMER_WORKBOOK_HEADERS.Primary))
     return null;
   const sheets = readWorkbook(parts, CUSTOMER_WORKBOOK_SHEETS);
   const rows = new Map<number, Record<string, string>>();
   for (const name of CUSTOMER_WORKBOOK_SHEETS) {
     const matrix = sheets.get(name)!;
     const headers = CUSTOMER_WORKBOOK_HEADERS[name];
-    if (matrix[0]?.length !== headers.length || headers.some((h, i) => matrix[0]?.[i] !== h))
+    if (!validHeaders(matrix[0], headers))
       throw new Error(`${name}: incorrect worksheet headers or order`);
     matrix.slice(1).forEach((cells, index) => {
       const values: Record<string, string> = {};
       cells.forEach((value, col) => {
+        if (reviewTail(matrix[0], headers) && col >= headers.length && col < headers.length + 3)
+          return;
         const field = WORKBOOK_FIELDS[name]![col];
         if (!field && value) throw new Error(`${name}: unexpected column at row ${index + 2}`);
         if (field && !['age', 'secondary_age'].includes(field)) values[field] = value;
