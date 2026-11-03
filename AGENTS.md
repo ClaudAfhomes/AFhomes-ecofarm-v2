@@ -1,5 +1,220 @@
 # AGENTS.md
 
+## Active MongoDB conversion branch
+
+29 October mapping preparation: unmounted explicit-manifest business mapping now
+preserves the current owner/assignments, remaps only declared scalar references,
+keeps JSON evidence intact and blocks conflicts/unknown fields/credential import.
+Six synthetic/native tests pass; see docs/mongodb/MIGRATION-MAPPING-DRYRUN.md.
+This is not a full-source migration dry run or importer. Bcrypt compatibility,
+durable real backups, full schema/file maps and browser acceptance remain open.
+No Atlas/source data transfer or account changes; CMS stays last.
+
+29 October intake/recovery: non-member Inactive/Cancelled intake and source update
+semantics now have native proof. `pnpm test:mongodb:recovery` rehearses encrypted
+BSON/schema/private-file restore after stopping a synthetic source, with restored
+sign-in, forced-change preservation and tamper rejection. It accepts no URI or
+existing target; runtime compatibility uses afhomes_dev only on a newly created
+loopback server. See docs/mongodb/RECOVERY-REHEARSAL.md. Real backup/key recovery,
+migration and browser acceptance remain open. No Atlas changes; keep CMS last.
+206 import tests and 3 recovery tests pass; the continuation/recovery rerun has
+17 passing tests after a scoped 30s two-upload workbook test budget. API typecheck,
+targeted lint and environment isolation pass. Application request limits unchanged.
+
+29 October financial continuation: flat reservation/down-payment/partial/fully
+paid imports now create native frozen sale/payment history. Fully settled imports
+enter payment_verified and the activation queue; partial imports require later
+verified settlement before separate activation. This corrects the source legacy
+payment_pending/activation mismatch without bypassing Finance. See
+docs/mongodb/LEGACY-FINANCIAL-IMPORT-REPORT.md. No Atlas changes; CMS stays last.
+Fresh full API verification: 3,108 tests / 192 files passed with two workers;
+API typecheck, targeted lint and environment isolation passed. Browser acceptance,
+migration compatibility and recovery remain incomplete.
+
+29 October workbook flag proof: native HTTP guided download retains every source
+field, marks the bad cell red with an explanation, and accepts the corrected
+review workbook without stale errors. 203 focused tests pass; full API checkpoint
+3,105 passes with two workers (before that additional regression). No timeout
+limits were raised. See docs/mongodb/ANNOTATED-WORKBOOK-VERIFICATION.md. Actual
+browser download acceptance remains unverified; keep CMS last.
+
+29 October legacy member CREATE: flat Active VIP/Suspended/Expired histories now
+restore exact verified settlement, original dates, zero/nonzero points and member
+IDs in a native guarded transaction. 26 import-confirmation tests pass, including
+rollback/concurrency/replay. See docs/mongodb/LEGACY-MEMBER-CREATE-REPORT.md.
+Non-member financial legacy creation stays gated: source fully-paid imports use
+payment_pending, which activation rejects. No Atlas changes. Keep CMS last.
+
+29 October member-update compatibility: flat legacy member updates now preserve
+source lifecycle rules, fresh ownership/tier checks, metadata and financial/points
+history with native transaction/HTTP proof. Four new scenarios bring the focused
+import suite to 184 passing tests. See LEGACY-MEMBER-UPDATE-REPORT.md in
+docs/mongodb. Legacy financial/member CREATE and browser acceptance remain open.
+No Atlas changes; preserve the existing administrator and keep CMS last.
+
+29 October Pending compatibility: flat Pending CSV/standard XLSX and the downloaded
+CSV template now confirm natively, with fresh source/identity checks, non-member
+metadata preservation, permissions, referral revalidation and atomic audit/replay.
+180 relevant tests, API typecheck, targeted lint and environment isolation passed.
+See `docs/mongodb/LEGACY-PENDING-IMPORT-REPORT.md`. Financial/member legacy writes
+remain gated; browser acceptance remains unverified. No Atlas data/schema changed.
+
+29 October: user-approved historical schema setup completed on afhomes_dev.
+Three empty collections/six unique indexes are verified; read-only canonical
+schema and listed integrity checks pass. No business data or accounts changed.
+See `docs/mongodb/HISTORICAL-IMPORT-TRANSACTION-REPORT.md` for exact apply scope.
+This is not migration, browser or whole-platform acceptance. Keep CMS last.
+
+28 October certified transaction checkpoint: guided historical imports now have
+native HTTP/transaction proof for all six source lifecycle stages, immutable
+cutover policy, original payment/membership dates and replay-safe remaining
+points. Full API suite 3,089 passed. Atlas is still gated by three absent
+historical collections/six unique indexes; no target apply ran. See
+`docs/mongodb/HISTORICAL-IMPORT-TRANSACTION-REPORT.md` for exact scope and proof.
+Flat/legacy writes remain blocked. Preserve source rules and keep CMS last.
+
+28 October historical-review checkpoint: certified guided-workbook upload and
+native continuation review now preserve source permission/history checks. See
+`docs/mongodb/HISTORICAL-IMPORT-REVIEW-REPORT.md`. Certified confirmation and legacy
+business import writes remain 501; this is review proof, not migrated history or
+full cutover acceptance. No Atlas records changed. CMS stays last.
+
+28 October latest: IST/direct OST creation now has its own bounded 45s transaction
+budget rather than inheriting the ordinary client's 15s budget. Two accelerated
+deadline regressions first failed 503 and now pass. 35 native member/photo tests,
+API TypeScript and environment isolation passed. See
+`docs/mongodb/MEMBER-CREATION-DEADLINE-REPORT.md`; the original browser retry is
+pending and this does not prove its sole cause. Preserve credential/account rules.
+
+The user selected one-time Supabase data migration preparation, not ongoing sync.
+Read-only live inventory is complete; see
+`docs/mongodb/ONE-TIME-DATA-MIGRATION-PLAN.md`. Passwords are bcrypt in the source,
+and the existing MongoDB owner has an email/ID collision with the source owner.
+Preserve that owner and resolve mappings before import. Backup/export, a full
+transformation dry run and target apply are NOT RUN. CMS remains last.
+
+27 October latest: ordinary company-workbook confirmation, source commit/recovery
+and import-backed application creation now use native transactions. See
+`docs/mongodb/IMPORT-CONFIRMATION-REPORT.md`. 156 relevant API and 56 React tests
+passed, including imported application -> reservation -> claim matching -> full
+verified payment -> membership activation on a disposable HTTP/Mongo runtime.
+Preserve canonical receipts, stale-review checks, original terms, private fields
+and verified-only accounting. Flat/legacy business confirmations and certified
+historical writes still return 501. Browser acceptance is pending. CMS stays last.
+The older entries below describe earlier checkpoints, not current blockers.
+
+27 October latest: workbook upload/review jobs, row pagination, templates and
+cancellation are native. See `docs/mongodb/WORKBOOK-REVIEW-REPORT.md`. The source
+and MongoDB handlers share the existing parsers/validators. Preview evidence is
+persisted atomically and creates no business records. 260 relevant API and 25 UI
+tests passed, followed by 11 native HTTP tests after bulk-write tightening.
+Business confirm/source recovery, import-backed application completion and
+certified history remain blocked. CMS stays last; preserve existing CMS work.
+
+27 October latest: ordinary company-workbook continuation review and application
+intake now have native readers with ownership/permission checks, deduplicated
+pagination, masked private values and actual purchase stages. See
+`docs/mongodb/IMPORT-CONTINUATION-REVIEW-REPORT.md`. 76 targeted API and 42 UI
+tests passed. No customer or source is created by these readers. File parse,
+job commit, source recovery writes and certified history remain unported;
+certified continuation and unported writes fail closed. CMS stays last.
+
+27 October latest: imported-payment claim review, receipt upload/download and
+hold/reject/match/record now use native MongoDB transactions. See
+`docs/mongodb/IMPORT-CLAIM-RECONCILIATION-REPORT.md`. Preserve stale-review checks,
+duplicate-payment decisions, private single-use upload grants and verified-only
+totals. Claim recording reuses the purchase recorder; it cannot verify money.
+Workbook import/commit and source continuation remain unported. CMS stays last.
+
+27 October latest: controlled OST applicant corrections now use native append-only
+ledger transactions and a shared current-applicant projection for member detail.
+See `docs/mongodb/OST-APPLICANT-CORRECTIONS-REPORT.md`. Preserve original account,
+registration and frozen renewal snapshots, reason/address checks, both management
+permissions, replay protection and field-only audits. 97 relevant API tests and
+24 existing OST React tests passed;
+new browser acceptance remains pending. CMS stays last.
+
+27 October newest: native member profile/account edits and recorded staff sales
+involvement are implemented with disposable HTTP/browser proof. See
+`docs/mongodb/MEMBER-PROFILE-REPORT.md`. Preserve temporary-password enforcement,
+strict scope, field-only audits, frozen sale/AA history and CMS-last ordering.
+Controlled IST/OST kind conversions now have native transaction/HTTP proof; see
+`docs/mongodb/MEMBER-KIND-CONVERSION-REPORT.md`. OST-to-IST also passed browser
+submission/reload. IST-to-OST browser acceptance remains pending because the
+computer-use connection became unavailable. Preserve the same login, date-free
+new IST identities, AA history and immutable historical sale snapshots.
+
+User instruction on 27 October: **CMS last**. Preserve existing CMS work while
+finishing remaining native business workflows. OST expired-term team transfers
+are now converted and browser-verified; generic referral writes cannot bypass
+transfer/renewal approval. See `docs/mongodb/MEMBER-TEAM-TRANSFER-REPORT.md`.
+
+27 October continuation: native ID intake/private delivery, core purchase through
+activation, VIP portal payments, and dashboard overview/trend have disposable
+HTTP/browser proof. See `docs/mongodb/IDENTITY-PURCHASE-ACCEPTANCE.md`. Normal
+reservation claim-panel reads are native; imported claim reconciliation and
+certified attribution remain blocked. Preserve existing source role/snapshot rules.
+
+
+This checkout is `ClaudAfhomes/AFhomes-ecofarm-v2`, local branch
+`claud/mongodb-conversion`. The user explicitly selected this existing VS Code
+folder. Preserve its existing uncommitted CMS and other work. MongoDB changes were
+transferred from the separate `afhomes-mongodb` workspace using the original
+`develop` snapshot as the merge base; do not copy that workspace wholesale.
+
+The administrator is already bootstrapped **in the current Supabase system**,
+as confirmed by the user. A **separate MongoDB Super Admin** was then explicitly
+authorized and created on 26 October 2026; see
+`docs/mongodb/ADMIN-BOOTSTRAP-REPORT.md`. Preserve both accounts. Do not rerun
+bootstrap to reset credentials or repair assignments.
+Preserve its identity, password and
+assignments; do not bootstrap or reset it. Staff onboarding uses administrator-set
+temporary passwords and enforced first-login changes, never invitations. VIP
+customers still activate through single-use, expiring codes/links and choose their
+password. The private Better Auth admin handler must never be mounted.
+
+User clarification on 26 October 2026: OST uses direct creation and is already
+accredited when created. Do not introduce a registration/endorsement journey.
+The user also requested removal of MongoDB MFA. Native authentication is now
+password-only, with the mandatory temporary-password change and RBAC preserved;
+the original Supabase MFA code remains intact. See
+`docs/mongodb/ACCOUNT-CREATION-SEARCH-REPORT.md` for scope and local proof.
+
+On 26 October 2026 the user explicitly approved the additive core initialization
+of `afhomes_dev`. It completed, adding missing canonical roles/departments and
+required indexes without changing existing administrators or their assignments.
+See `docs/mongodb/CORE-READINESS-REPORT.md`. This is not permission for bootstrap,
+data migration, deployment or unrelated remote writes. The user deferred paid
+cloud storage: the real development launcher now defaults to persistent private
+files under the user's home folder `.afhomes/private-storage/afhomes_dev`, with
+signed downloads. Hosted runtimes still require explicit S3 configuration.
+The user subsequently authorized the current develop reference catalog: three
+plans are configured and verified; see `docs/mongodb/CATALOG-READINESS-REPORT.md`.
+Native public
+settings/retention are implemented, with readiness derived from real worker health.
+
+27 October continuation: native private ID intake/review and signed ID images in
+Customer Lookup are implemented. The core purchase flow was browser-verified
+through activation and active-VIP lookup using disposable records. See
+`docs/mongodb/IDENTITY-PURCHASE-ACCEPTANCE.md` for proof and remaining boundaries.
+The actual public browser test remains unverified after external widget failure;
+no privacy approval or real hostname gate was bypassed.
+
+See `docs/mongodb/WORKSPACE-HANDOFF.md`, `CORE-WORKFLOWS-REPORT.md` and
+`PHASE5-INTEGRATION-REPORT.md` under `docs/mongodb/` for current
+scope and evidence. Production routing still uses Supabase. On this branch,
+`pnpm dev` now launches the user-requested real MongoDB localhost: admin 5184,
+web 5183, API 3084. Only converted reads and account/password changes are
+enabled against Atlas; commercial writes and automatic schema setup are blocked.
+`dev:mongodb:local` remains the separate disposable synthetic runtime.
+Earlier phase checkboxes do not prove
+full migration or browser parity. Tests must not target Atlas. Redemption and
+operational Services remain disabled, with their source preserved.
+
+Never print credentials or raw MongoDB errors. Keep `.env.local` untouched and
+ignored. No existing-data migration, existing-database writes, real-admin changes,
+commits, pushes or deployments without explicit authorization.
+
 pnpm + Turborepo monorepo for the **AF Homes Ecofarm** platform (membership-card
 business). Stack: **React 19 + Vite 8 SPAs → TanStack Query → Vercel Functions
 REST API → Supabase Postgres + Supabase Auth**.

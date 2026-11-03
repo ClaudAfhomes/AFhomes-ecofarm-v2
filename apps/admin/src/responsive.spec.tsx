@@ -719,3 +719,9 @@ describe('Phase 33 mobile shows no permission-hidden links', () => {
     expect(screen.getByText(/access denied|forbidden|not allowed/i)).not.toBeNull();
   });
 });
+
+// Explicit feature-on fixture preserves coverage for retained, disabled source.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+ const actual = await importOriginal<typeof import('@afhomes/shared')>();
+ return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
+});

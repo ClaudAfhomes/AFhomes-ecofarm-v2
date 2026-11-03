@@ -43,12 +43,65 @@ export async function handlePublicSaleTeamSearch(
   db: Db,
   path: string,
 ): Promise<void> {
-  let config = searchConfiguration();
-  const saved = await db.rpc('get_public_verification_settings');
-  const parsedSettings = saved.error
-    ? null
-    : publicVerificationSettingsSchema.safeParse(saved.data);
-  if (parsedSettings?.success) config = searchConfiguration(parsedSettings.data);
+  return handlePublicSaleTeamSearchWithStore(
+    req,
+    res,
+    {
+      async settings() {
+        const result = await db.rpc('get_public_verification_settings');
+        return result.error ? null : result.data;
+      },
+      begin: (ip, aa) => rpc(db, 'begin_sale_team_search', { p_ip_hash: ip, p_aa_number: aa }),
+      contactExists: (id) => rpc(db, 'sale_team_search_contact_exists', { p_contact_id: id }),
+      saveContact: (key, contact) =>
+        rpc(db, 'save_sale_team_search_contact', {
+          p_dedupe_key: key,
+          p_name: contact.name,
+          p_email: contact.email,
+          p_mobile: contact.mobile,
+        }),
+      reveal: (args) => rpc(db, 'reveal_sale_team_search', args),
+      async photoUrl(id) {
+        if (typeof db.storage?.from !== 'function') return null;
+        const signed = await db.storage
+          .from('afhomes-profile-photos')
+          .createSignedUrl(`${id}/profile.jpg`, 300);
+        return signed.data?.signedUrl ?? null;
+      },
+    },
+    path,
+  );
+}
+
+export interface PublicSaleTeamSearchStore {
+  settings(): Promise<unknown>;
+  begin(ipHash: string, aaNumber: string): Promise<unknown>;
+  contactExists(id: string): Promise<unknown>;
+  saveContact(
+    key: string,
+    contact: { name: string; email: string; mobile: string },
+  ): Promise<unknown>;
+  reveal(args: Record<string, unknown>): Promise<unknown>;
+  photoUrl(id: string): Promise<string | null>;
+}
+
+/** Shared transport/security contract; persistence is supplied by the selected backend. */
+export async function handlePublicSaleTeamSearchWithStore(
+  req: VercelRequest,
+  res: VercelResponse,
+  store: PublicSaleTeamSearchStore,
+  path: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  let config = searchConfiguration(undefined, env);
+  let saved: unknown;
+  try {
+    saved = await store.settings();
+  } catch {
+    return fail(res, 'INTERNAL', 'Verification is unavailable. Please retry later.', 503);
+  }
+  const parsedSettings = publicVerificationSettingsSchema.safeParse(saved);
+  if (parsedSettings.success) config = searchConfiguration(parsedSettings.data, env);
   res.setHeader('Cache-Control', 'no-store');
   if (path === 'search/config' && method(req) === 'GET') {
     res.status(200).json(config.public);
@@ -61,7 +114,7 @@ export async function handlePublicSaleTeamSearch(
   if (JSON.stringify(req.body ?? '').length > 8192)
     return fail(res, 'VALIDATION_ERROR', 'Search request is too large.', 400);
   try {
-    const ip = searchIp(req);
+    const ip = searchIp(req, env.VERCEL === '1');
     const ipHash = searchDigest(config.secret, 'search-ip-v1', ip);
     const early = consumeIdentifierAttempt(
       { headers: { 'x-forwarded-for': ip } },
@@ -78,9 +131,7 @@ export async function handlePublicSaleTeamSearch(
       const body = parsed.data;
       if (!(await verifySearchCaptcha(config.captchaSecret, body.captchaToken, config.hostnames)))
         return fail(res, 'VALIDATION_ERROR', 'Security verification failed. Please retry.', 400);
-      const attempt = attemptSchema.parse(
-        await rpc(db, 'begin_sale_team_search', { p_ip_hash: ipHash, p_aa_number: body.aaNumber }),
-      );
+      const attempt = attemptSchema.parse(await store.begin(ipHash, body.aaNumber));
       if (!attempt.allowed) {
         res.setHeader('Retry-After', String(attempt.retryAfter));
         return fail(res, 'RATE_LIMITED', 'Too many requests. Try again later.', 429);
@@ -129,10 +180,7 @@ export async function handlePublicSaleTeamSearch(
         400,
       );
     }
-    if (
-      contactId &&
-      (await rpc(db, 'sale_team_search_contact_exists', { p_contact_id: contactId })) !== true
-    )
+    if (contactId && (await store.contactExists(contactId)) !== true)
       return fail(
         res,
         'VALIDATION_ERROR',
@@ -140,25 +188,18 @@ export async function handlePublicSaleTeamSearch(
         400,
       );
     // A signed flow is reusable for delivery retries, so its requests also need shared throttling.
-    const attempt = attemptSchema.parse(
-      await rpc(db, 'begin_sale_team_search', { p_ip_hash: ipHash, p_aa_number: flow.aaNumber }),
-    );
+    const attempt = attemptSchema.parse(await store.begin(ipHash, flow.aaNumber!));
     if (!attempt.allowed) {
       res.setHeader('Retry-After', String(attempt.retryAfter));
       return fail(res, 'RATE_LIMITED', 'Too many requests. Try again later.', 429);
     }
     if (!contactId && body.contact) {
-      contactId = z.uuid().parse(
-        await rpc(db, 'save_sale_team_search_contact', {
-          p_dedupe_key: contactDigest(config.secret, body.contact),
-          p_name: body.contact.name,
-          p_email: body.contact.email,
-          p_mobile: body.contact.mobile,
-        }),
-      );
+      contactId = z
+        .uuid()
+        .parse(await store.saveContact(contactDigest(config.secret, body.contact), body.contact));
     }
     const answer = revealSchema.parse(
-      await rpc(db, 'reveal_sale_team_search', {
+      await store.reveal({
         p_ip_hash: ipHash,
         p_request_id: flow.id,
         p_aa_number: flow.aaNumber,
@@ -180,12 +221,9 @@ export async function handlePublicSaleTeamSearch(
     const seller = saleTeamLookupSchema.parse(raw === null ? null : { ...clean, photoUrl: null });
     if (seller && seller.status !== 'accredited') throw new Error('Ineligible result');
     let photoUrl: string | null = null;
-    if (seller && typeof staffId === 'string' && typeof db.storage?.from === 'function') {
+    if (seller && typeof staffId === 'string') {
       try {
-        const signed = await db.storage
-          .from('afhomes-profile-photos')
-          .createSignedUrl(`${staffId}/profile.jpg`, 300);
-        photoUrl = signed.data?.signedUrl ?? null;
+        photoUrl = await store.photoUrl(staffId);
       } catch {
         /* Photo delivery may fail without invalidating accreditation. */
       }

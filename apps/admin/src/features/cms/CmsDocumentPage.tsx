@@ -1,197 +1,49 @@
-import { useMemo, useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import {
-  Button,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  Skeleton,
-  StatusChip,
-  TextAreaField,
-  TextField,
-} from '@afhomes/ui';
-import type { CmsDocument, CmsDocumentKey } from '@afhomes/contracts';
-
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
+import { cmsContentSchemas, type CmsDocument, type CmsDocumentKey } from '@afhomes/contracts';
+import { Button, ErrorState, PageHeader, Skeleton, TextField, StatusChip } from '@afhomes/ui';
 import { useSession } from '../../lib/session';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { getCmsDocuments, publishCmsDocument, saveCmsDocument } from './services';
+import { ContentFields } from './ContentFields';
+import { initialCmsValue,cmsDisplayState,vipMarketingFields } from './content-model';
+import { CmsPreview } from './CmsPreview';
+import { useCmsUnsaved } from './useCmsUnsaved';
 import styles from './cms.module.css';
 
-export function CmsDocumentPage({
-  title,
-  description,
-  documentKey,
-}: {
-  title: string;
-  description: string;
-  documentKey: CmsDocumentKey;
-}) {
-  const { user } = useSession();
-  const documents = useQuery({
-    queryKey: ['cms', 'documents'],
-    queryFn: getCmsDocuments,
-    // Refetches keep the previous draft visible instead of blanking the editor.
-    placeholderData: keepPreviousData,
-  });
-  const document = useMemo(
-    () => documents.data?.find((item) => item.key === documentKey),
-    [documents.data, documentKey],
-  );
-  // First load skeletonizes the whole page - header and editor - so no static
-  // content flashes before the data it describes. Refetches keep the previous
-  // draft visible via placeholderData and never reach this branch.
-  if (documents.isPending)
-    return (
-      <section className={styles.page}>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading CMS content"
-        >
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
-            <Skeleton style={{ height: 32, maxWidth: 240 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
-          </div>
-          <Skeleton style={{ height: 320 }} />
-          <Skeleton style={{ height: 40, maxWidth: 320 }} />
-        </div>
-      </section>
-    );
-  if (documents.isError)
-    return (
-      <section className={styles.page}>
-        <PageHeader title={title} description={description} />
-        <ErrorState
-          title="CMS content could not be loaded"
-          error={documents.error}
-          onRetry={() => void documents.refetch()}
-        />
-      </section>
-    );
-  const permission = documentKey === 'site' ? 'cms.settings' : 'cms.pages';
-  const canUpdate =
-    user?.afHomesPermissions.some((item) => item.moduleKey === permission && item.canUpdate) ===
-    true;
-  return (
-    <section className={styles.page}>
-      <DocumentEditor
-        key={`${documentKey}-${document?.version ?? 'new'}`}
-        title={title}
-        description={description}
-        documentKey={documentKey}
-        document={document}
-        canUpdate={canUpdate}
-      />
-    </section>
-  );
+export function CmsDocumentPage({title,description,documentKey,mode}:{title:string;description:string;documentKey:CmsDocumentKey;mode?:'seo'|'site'}) {
+  const {user}=useSession();const documents=useQuery({queryKey:['cms','documents'],queryFn:getCmsDocuments});
+  const document=documents.data?.find(d=>d.key===documentKey);
+  const canUpdate=user?.afHomesPermissions.some(p=>p.moduleKey===(documentKey==='site'?'cms.settings':'cms.pages')&&p.canUpdate)===true;
+  if(documents.isPending)return <Skeleton style={{height:300}}/>;
+  if(documents.isError)return <ErrorState error={documents.error} onRetry={()=>void documents.refetch()}/>;
+  return <DocumentEditor key={documentKey+':'+mode} title={title} description={description} documentKey={documentKey} document={document} canUpdate={canUpdate} mode={mode}/>;
 }
-
-function DocumentEditor({
-  title,
-  description,
-  documentKey,
-  document,
-  canUpdate,
-}: {
-  title: string;
-  description: string;
-  documentKey: CmsDocumentKey;
-  document: CmsDocument | undefined;
-  canUpdate: boolean;
-}) {
-  const client = useQueryClient();
-  const [value, setValue] = useState(() => JSON.stringify(document?.draftValue ?? {}, null, 2));
-  const [summary, setSummary] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
-  const save = useBusinessMutation({
-    mutationFn: async () => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(value);
-      } catch {
-        throw new Error('Content must be valid JSON.');
-      }
-      return saveCmsDocument(documentKey, parsed, document?.version ?? 1, summary);
-    },
-    onSuccess: async () => {
-      setSummary('');
-      setMessage('Draft saved.');
-      await client.invalidateQueries({ queryKey: ['cms', 'documents'] });
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Could not save.'),
-  });
-  const publish = useBusinessMutation({
-    mutationFn: (next: boolean) => publishCmsDocument(documentKey, next),
-    onSuccess: async () => {
-      setMessage('Publication state updated.');
-      await client.invalidateQueries({ queryKey: ['cms', 'documents'] });
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : 'Could not publish.'),
-  });
-  return (
-    <>
-      <PageHeader
-        title={title}
-        description={description}
-        actions={
-          document ? (
-            <StatusChip
-              label={document.status}
-              tone={document.status === 'published' ? 'success' : 'neutral'}
-            />
-          ) : undefined
-        }
-      />
-      {!document && (
-        <EmptyState
-          title="No draft exists yet"
-          description="Saving creates the first managed draft without changing the public website."
-        />
-      )}
-      <div className={styles.editor}>
-        <TextAreaField
-          id="cms-document-content"
-          name="content"
-          label="Structured content (JSON)"
-          optional
-          rows={24}
-          value={value}
-          onChange={setValue}
-          disabled={!canUpdate}
-        />
-        <TextField
-          id="cms-document-summary"
-          name="summary"
-          label="Change summary"
-          optional
-          value={summary}
-          maxLength={500}
-          onChange={setSummary}
-          disabled={!canUpdate}
-        />
-        {message && !save.isError && !publish.isError ? <p role="status">{message}</p> : null}
-        {save.isError ? <p role="alert">{save.error.message}</p> : null}
-        {publish.isError ? <p role="alert">{publish.error.message}</p> : null}
-        {canUpdate && (
-          <div className={styles.actions}>
-            <Button
-              disabled={save.isPending || summary.trim().length < 3}
-              onClick={() => save.mutate()}
-            >
-              Save draft
-            </Button>
-            {document && (
-              <Button
-                variant="secondary"
-                disabled={publish.isPending}
-                onClick={() => publish.mutate(document.status !== 'published')}
-              >
-                {document.status === 'published' ? 'Unpublish' : 'Publish draft'}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  );
+function DocumentEditor({title,description,documentKey,document:loaded,canUpdate,mode}:{title:string;description:string;documentKey:CmsDocumentKey;document?:CmsDocument;canUpdate:boolean;mode?:'seo'|'site'}) {
+  const client=useQueryClient();const [document,setDocument]=useState(loaded);
+  const [value,setValue]=useState(()=>initialCmsValue(loaded,documentKey));
+  const [saved,setSaved]=useState(()=>JSON.stringify(value));const [summary,setSummary]=useState('');const [preview,setPreview]=useState(false);const [message,setMessage]=useState('');
+  const dirty=JSON.stringify(value)!==saved;useCmsUnsaved(dirty);
+  const valid=cmsContentSchemas[documentKey].safeParse(value);
+  const accept=async(next:CmsDocument)=>{setDocument(next);setValue(next.draftValue);setSaved(JSON.stringify(next.draftValue));setSummary('');setMessage('Draft saved. The public website is unchanged until you publish.');await client.invalidateQueries({queryKey:['cms']});};
+  const save=useBusinessMutation({mutationFn:async()=>{if(!valid.success)throw Error(valid.error.issues.map(i=>`${i.path.join('.')}: ${i.message}`).join('\n'));return saveCmsDocument(documentKey,value,document?.version??1,summary)},onSuccess:accept});
+  const publish=useBusinessMutation({mutationFn:(publishing:boolean)=>publishCmsDocument(documentKey,publishing,document!.version),onSuccess:async(next)=>{await accept(next);setMessage(next.status==='published'?'Saved draft published.':'Unpublished. The website uses its existing fallback content.')}});
+  const allSchema=cmsContentSchemas[documentKey];let schema:z.ZodType=allSchema;let displayed=value;
+  const obj=(value??{}) as Record<string,unknown>;
+  if(documentKey==='site'){
+    const fields=Object.keys(cmsContentSchemas.site.shape).filter(k=>mode==='seo'?['seo','pageSeo'].includes(k):!['seo','pageSeo','social'].includes(k));
+    schema=cmsContentSchemas.site.pick(Object.fromEntries(fields.map(k=>[k,true])) as never);displayed=Object.fromEntries(fields.map(k=>[k,obj[k]]));
+  }
+  return <section className={styles.page}><PageHeader title={title} description={description} actions={<StatusChip label={valid.success?cmsDisplayState(document):'Needs Review'} tone={valid.success?'neutral':'warning'}/>}/>
+    <p>{document?`Saved version ${document.version}.`:'No saved draft yet. Current website content is shown; opening this editor makes no changes.'} {dirty?'You have unsaved changes.':''}</p>
+    {documentKey==='vip'&&<p>Marketing name and imagery only. Prices, discounts, validity, Annual Welcome Gifts and Loyalty Stay Points are managed by the operational card plans.</p>}
+    {mode==='site'&&<p>Official payment instructions and verification support details remain in <a href="/admin/settings/public-verification">Public Verification Settings</a>. This editor does not change them.</p>}
+    {!valid.success&&<div role="alert"><p>Content needs review. The original data is preserved; correct the fields below before saving.</p><ul>{valid.error.issues.slice(0,15).map((issue,i)=><li key={i}>{issue.path.join(' / ')}: {issue.message}</li>)}</ul></div>}
+    <ContentFields schema={schema} value={displayed} path={documentKey} label={title} disabled={!canUpdate||save.isPending||publish.isPending} allowed={documentKey==='vip'?vipMarketingFields:undefined} onChange={next=>setValue(documentKey==='site'?{...obj,...next as object}:next)}/>
+    <TextField id="cms-document-summary" name="summary" label="Change summary" value={summary} onChange={setSummary} disabled={!canUpdate} optional maxLength={500}/>
+    {message&&<p role="status">{message}</p>}{save.error&&<p role="alert">{save.error.message}</p>}{publish.error&&<p role="alert">{publish.error.message}</p>}
+    <div className={styles.actions}>{canUpdate&&<Button disabled={!valid.success||save.isPending||publish.isPending||summary.trim().length<3} onClick={()=>save.mutate()}>Save Draft</Button>}{document&&<><Button variant="secondary" onClick={()=>setPreview(!preview)}>Preview Saved Draft</Button>{canUpdate&&<><Button disabled={dirty||!valid.success||publish.isPending||save.isPending} onClick={()=>publish.mutate(true)}>Publish Saved Draft</Button>{document.status==='published'&&<Button variant="secondary" disabled={dirty||publish.isPending||save.isPending} onClick={()=>publish.mutate(false)}>Unpublish</Button>}</>}</>}</div>
+    {preview&&document&&<CmsPreview document={document} onClose={()=>setPreview(false)}/>}
+  </section>;
 }

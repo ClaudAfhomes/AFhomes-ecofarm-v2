@@ -39,6 +39,7 @@ import {
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { filterHolderNameInput, filterMobileInput } from '../../lib/normalize';
 import { createOstMember } from './services';
+import { isMongoAuth } from '../../lib/cookie-auth';
 import styles from './MembersPage.module.css';
 
 const IDENTITY_FIELDS = [
@@ -352,7 +353,7 @@ export function CreateOstDialog({
             Accreditation and completion
           </h2>
           <div className={styles.formFields}>
-            <label className={styles.fieldLabel}>
+            {!isMongoAuth && <label className={styles.fieldLabel}>
               Outcome
               <Select
                 value={mode}
@@ -365,7 +366,7 @@ export function CreateOstDialog({
                   },
                 ]}
               />
-            </label>
+            </label>}
             {mode === 'complete' ? (
               <>
                 <label className={styles.fieldLabel}>

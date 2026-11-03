@@ -4,14 +4,22 @@
   "type": "module",
   "scripts": {
     "dev": "cd .. && tsx watch api/dev-server.ts",
+    "build:artifact": "node scripts/build-api.mjs",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@afhomes/contracts": "workspace:*",
     "@afhomes/shared": "workspace:*",
+    "@aws-sdk/client-s3": "3.1156.0",
+    "@aws-sdk/s3-request-presigner": "3.1156.0",
+    "@better-auth/mongo-adapter": "1.7.12",
     "@supabase/auth-js": "2.117.2",
     "@supabase/supabase-js": "2.117.2",
+    "better-auth": "1.7.12",
+    "better-call": "1.4.4",
+    "mongodb": "7.7.0",
     "nodemailer": "10.0.10",
     "saxes": "6.0.0",
     "zod": "^4.4.3"
@@ -19,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/nodemailer": "8.0.2",
+    "esbuild": "0.28.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }

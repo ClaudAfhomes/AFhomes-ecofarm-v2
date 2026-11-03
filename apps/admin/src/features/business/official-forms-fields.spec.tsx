@@ -194,6 +194,13 @@ describe('holder birth date', () => {
 });
 
 describe('postal code hint', () => {
+  it('requests reference review rather than suggesting a missing ZIP can be submitted blank', () => {
+    render({ cityMunicipalityCode: '0205706000', postalCode: '' });
+    expect(
+      screen.getByText('Postal reference needs review for this location.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('No published code. Leave blank.')).not.toBeInTheDocument();
+  });
   it('no longer claims the postal code fills from the city', () => {
     render();
     expect(screen.queryByText('Fills from the city selected.')).not.toBeInTheDocument();
@@ -342,6 +349,15 @@ describe('VIP recommender', () => {
 });
 
 describe('recommender typed fields', () => {
+  it.each(['0917ABC', '123'])('does not offer invalid stored phone %s', async (phone) => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone, email: 'ana@example.com' },
+    });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    expect(await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: new RegExp(phone) })).not.toBeInTheDocument();
+  });
   it('refuses a contact number carrying letters by not offering invalid options', async () => {
     vi.mocked(getGenealogy).mockResolvedValue([
       node('ost-1', 'ANA SANTOS', 'ost'),
@@ -359,6 +375,7 @@ describe('recommender typed fields', () => {
       const contactSelect = screen.getByLabelText('Recommender Contact');
       expect(within(contactSelect).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
     });
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /ana@example\.com/ })).not.toBeInTheDocument();
     // Invalid contact numbers with letters are never offered as options
     expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /0917abc/ })).not.toBeInTheDocument();
   });
@@ -371,8 +388,8 @@ describe('recommender typed fields', () => {
       'ost-1': { phone: '09171234567', email: 'Ana@Example.COM' },
     });
     renderRecommender({
-      referrerStaffId: 'ost-1',
-      vipRecommenderName: '',
+      referrerStaffId: '',
+      vipRecommenderName: 'ANA SANTOS',
     });
     await waitFor(() => expect(screen.getByLabelText('Recommender Email')).toBeInTheDocument());
     // Wait for email options to load

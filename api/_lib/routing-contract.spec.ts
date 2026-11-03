@@ -272,22 +272,21 @@ describe('router -> handler contract matrix', () => {
     expect((r.body as { scope?: { kind?: string } }).scope?.kind).toBe('global');
   });
 
-  it('redemptions and cms', async () => {
+  it('keeps redemption, reports and cms disabled at the router', async () => {
     let r = await dispatch('/api/v1/redemptions/resolve?identifier=x');
-    expect(r.handled).toBe(true);
-    expect(r.status).toBe(401);
+    expect(r.handled).toBe(false);
 
     r = await dispatch('/api/v1/redemptions/items', { token: TOKEN2.finance });
-    expect(r.handled).toBe(true);
-    expect(r.status).toBe(200);
+    expect(r.handled).toBe(false);
 
     r = await dispatch('/api/v1/redemptions', { token: TOKEN2.finance });
-    expect(r.handled).toBe(true);
-    expect(r.status).toBe(200);
+    expect(r.handled).toBe(false);
 
     r = await dispatch('/api/v1/cms/public');
-    expect(r.handled).toBe(true);
-    expect(r.status).toBe(200);
+    expect(r.handled).toBe(false);
+
+    r = await dispatch('/api/v1/reports/sales', { token: TOKEN.superAdmin });
+    expect(r.handled).toBe(false);
   });
 
   it('ost, documents, customer portal, activation, admin, health', async () => {
@@ -497,14 +496,13 @@ describe('authorization across the repaired routes', () => {
   });
 
   it('finance and employee boundaries hold on the repaired routes', async () => {
-    // Finance has no catalog maintenance grant.
+    // Phase 1 disables catalog access for every principal before authorization.
     let r = await dispatch('/api/v1/redemptions/items', {
       method: 'POST',
       token: TOKEN2.finance,
       body: { code: 'X', name: 'X', pointsCost: 1 },
     });
-    expect(r.handled).toBe(true);
-    expect(r.status).toBe(403);
+    expect(r.handled).toBe(false);
 
     // The ost approval route still authorizes before touching the database.
     r = await dispatch(`/api/v1/ost/applications/${UUID.adminStaff}/approve`, {

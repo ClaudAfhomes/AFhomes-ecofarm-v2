@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@afhomes/ui';
 import { env } from '../../lib/env';
 import type { AuthPortals } from '@afhomes/contracts';
+import { CookieAuthError } from '@afhomes/shared';
 
 import { useSession } from '../../lib/session';
 import { getAuthPortals } from '../../lib/portals';
@@ -119,10 +120,14 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
       } else await signIn(email, password);
       const portals: AuthPortals = await getAuthPortals();
       applyDecision(decideForPortal(portal, portals, requested));
-    } catch {
+    } catch (error) {
       // Generic on purpose: distinguishing unknown user from wrong password
       // would enumerate staff accounts.
-      setServerError('We could not sign you in with that email and password.');
+      setServerError(
+        error instanceof CookieAuthError && error.reason !== 'rejected'
+          ? error.message
+          : 'We could not sign you in with that email and password.',
+      );
     } finally {
       setPending(false);
       setCaptchaToken(null);

@@ -11,6 +11,7 @@ import { Alert, AuthLayout, Button, TextField } from '@afhomes/ui';
 import { env } from '../../lib/env';
 import { useSession } from '../../lib/session';
 import { getSupabaseClient } from '../../lib/supabase';
+import { isMongoAuth, mongoAuth } from '../../lib/cookie-auth';
 import styles from './AdminLoginPage.module.css';
 
 /**
@@ -51,6 +52,20 @@ export function AdminForgotPasswordPage({ portal = 'admin' }: { portal?: 'admin'
     setServerError(null);
     setPending(true);
     try {
+      if (isMongoAuth) {
+        const redirectTo =
+          portal === 'staff'
+            ? buildRecoveryRedirect(
+                window.location.origin,
+                '/staff/reset-password',
+                window.location.origin,
+              )
+            : buildRecoveryRedirect(env.VITE_ADMIN_URL, '/reset-password', window.location.origin);
+        await mongoAuth.request('/request-password-reset', { email: trimmed, redirectTo });
+        setSent(true);
+        setPending(false);
+        return;
+      }
       const client = getSupabaseClient();
       if (!client) {
         setServerError('Password reset is unavailable right now. Please try again later.');

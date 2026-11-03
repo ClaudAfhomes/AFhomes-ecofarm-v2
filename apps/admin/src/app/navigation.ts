@@ -1,5 +1,6 @@
 import type { AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
 import type { BreadcrumbItem, SidebarItem } from '@afhomes/ui';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 
 export type NavLink = { to: string; label: string; module: AfHomesModuleKey };
 export type AdminNavItem = {
@@ -169,15 +170,23 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     ],
   },
   {
+    to: '/admin/media',
+    label: 'Media Library',
+    icon: 'image',
+    module: 'cms.media',
+  },
+  {
     to: '/admin/cms',
     label: 'Website CMS',
     icon: 'image',
     module: 'cms.pages',
     dropdown: [
-      { to: '/admin/cms/pages', label: 'Pages', module: 'cms.pages' },
-      { to: '/admin/cms/media', label: 'Media', module: 'cms.media' },
+      { to: '/admin/cms/pages', label: 'Website Pages', module: 'cms.pages' },
+      { to: '/admin/cms/media', label: 'Media Library', module: 'cms.media' },
       { to: '/admin/cms/stories', label: 'Stories', module: 'cms.pages' },
       { to: '/admin/cms/experiences', label: 'Experiences', module: 'cms.pages' },
+      { to: '/admin/cms/faq', label: 'FAQ', module: 'cms.pages' },
+      { to: '/admin/cms/vip', label: 'VIP Website Content', module: 'cms.pages' },
       { to: '/admin/cms/site-settings', label: 'Site Settings', module: 'cms.settings' },
       { to: '/admin/cms/seo', label: 'SEO', module: 'cms.settings' },
       { to: '/admin/cms/history', label: 'History', module: 'cms.history' },
@@ -213,6 +222,7 @@ export function navItemsForPermissions(
   items = ADMIN_NAV_ITEMS,
 ): SidebarItem[] {
   return items.flatMap((item) => {
+    if (!isFeaturePathEnabled(item.to)) return [];
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
@@ -245,9 +255,6 @@ export function istNavItemsForPermissions(permissions?: readonly AfHomesPermissi
       ],
     },
     ADMIN_NAV_ITEMS.find((item) => item.to === '/admin/genealogy')!,
-    {
-      to: '/admin/ist/accreditation', label: 'Accreditation', icon: 'file-text', module: 'dashboard.view',
-    },
     { to: '/admin/profile', label: 'Profile', icon: 'user', module: 'dashboard.view' },
   ]);
 }
@@ -272,6 +279,7 @@ export const EXTRA_GATED_ROUTES: readonly {
   { pathPrefix: '/admin/ist/team-commissions', module: 'network.commissions' },
   { pathPrefix: '/admin/ist/accreditation', module: 'dashboard.view' },
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
+  { pathPrefix: '/admin/media', module: 'cms.media' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
   // `/admin/documents` list/review route removed; the scan travels with the
   // application. The `sales.id_documents` module still gates the image on the
@@ -286,6 +294,7 @@ export function canAccessNavTarget(
   permissions: readonly AfHomesPermission[] | undefined,
   pathname: string,
 ): boolean {
+  if (!isFeaturePathEnabled(pathname)) return false;
   // `/admin/reports` is visible on ANY report permission, not one key: the
   // screen then offers only the reports the session allows.
   if (pathname === '/admin/reports') return canViewReports(permissions);

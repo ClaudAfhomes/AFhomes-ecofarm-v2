@@ -125,15 +125,15 @@ const server = http.createServer(async (req, res) => {
   };
 
   // Adapt Node ServerResponse to the VercelResponse shape handlers expect.
-  const headersOut: Record<string, string> = {};
+  const headersOut: Record<string, string | string[]> = {};
   let statusCode = 200;
   const vercelRes: Record<string, unknown> & {
-    setHeader: (n: string, v: string) => void;
+    setHeader: (n: string, v: string | string[]) => void;
     status: (c: number) => typeof vercelRes;
     json: (b: unknown) => void;
     end: () => void;
   } = {
-    setHeader: (n: string, v: string) => {
+    setHeader: (n: string, v: string | string[]) => {
       headersOut[n.toLowerCase()] = v;
     },
     status: (code: number) => {

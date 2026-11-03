@@ -100,6 +100,11 @@ export function GeographicAddressFields({
 
   return (
     <>
+      {((value.province && !value.provinceCode) ||
+        (value.cityMunicipality && !value.cityMunicipalityCode) ||
+        (value.barangay && !value.barangayCode)) && (
+        <p role="status">Stored value unverified. Select official geographic entries to verify it.</p>
+      )}
       <Combobox
         id={`${idPrefix}-province`}
         label="Province"

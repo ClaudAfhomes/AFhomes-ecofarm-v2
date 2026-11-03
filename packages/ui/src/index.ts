@@ -126,3 +126,5 @@ export type {
 } from './hooks/useQrScanner.js';
 export { OstAddressFields, emptyOstAddress } from './components/OstAddressFields';
 export type { OstAddressSelection } from './components/OstAddressFields';
+export { CookiePasswordResetForm } from './components/CookiePasswordResetForm';
+export { SalesParticipationList } from './components/SalesParticipationList';

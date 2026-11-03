@@ -6,11 +6,17 @@ describe('loadPublicEnv', () => {
   it('defaults VITE_API_BASE_URL when absent', () => {
     const env = loadPublicEnv({});
     expect(env.VITE_API_BASE_URL).toBe('/api/v1');
+    expect(env.VITE_AUTH_PROVIDER).toBe('supabase');
   });
 
   it('reads an explicit VITE_API_BASE_URL', () => {
     const env = loadPublicEnv({ VITE_API_BASE_URL: 'https://api.example.test/api/v1' });
     expect(env.VITE_API_BASE_URL).toBe('https://api.example.test/api/v1');
+  });
+
+  it('selects MongoDB explicitly and rejects unknown authentication providers', () => {
+    expect(loadPublicEnv({ VITE_AUTH_PROVIDER: 'mongodb' }).VITE_AUTH_PROVIDER).toBe('mongodb');
+    expect(() => loadPublicEnv({ VITE_AUTH_PROVIDER: 'other' })).toThrow();
   });
 
   it('ignores unknown keys', () => {
@@ -38,6 +44,9 @@ describe('loadPublicEnv', () => {
       SUPABASE_PUBLISHABLE_KEY: 'server-only-key',
       SUPABASE_ANON_KEY: 'server-only-key',
       DATABASE_URL: 'postgresql://user:pass@pooler:6543/postgres',
+      MONGODB_URI: 'mongodb://server-only-key@localhost/afhomes_dev',
+      MONGODB_DB: 'afhomes_dev',
+      BETTER_AUTH_SECRET: 'server-only-key',
       AFHOMES_TARGET_PROJECT_REF: 'projectref',
       AFHOMES_SUPERADMIN_EMAIL: 'owner@example.com',
       AFHOMES_ADMIN_URL: 'https://afhomes.example/admin',
@@ -54,11 +63,13 @@ describe('loadPublicEnv', () => {
     expect(Object.keys(env).sort()).toEqual([
       'VITE_ADMIN_URL',
       'VITE_API_BASE_URL',
+      'VITE_AUTH_PROVIDER',
       'VITE_WEB_URL',
     ]);
     const serialised = JSON.stringify(env);
     for (const secret of [
       'server-only-key',
+      'afhomes_dev',
       'secret-project',
       'pooler',
       'projectref',

@@ -147,6 +147,9 @@ const CmsHistoryPage = lazy(() =>
 const CmsMediaPage = lazy(() =>
   import('../features/cms/CmsMediaPage').then((m) => ({ default: m.CmsMediaPage })),
 );
+const MediaLibraryPage = lazy(() =>
+  import('../features/media/MediaLibraryPage').then((m) => ({ default: m.MediaLibraryPage })),
+);
 const CmsPagesPage = lazy(() =>
   import('../features/cms/CmsPagesPage').then((m) => ({ default: m.CmsPagesPage })),
 );
@@ -266,7 +269,7 @@ export default function App() {
             <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
             <Route element={<AdminLayout />}>
               {/* GSD / Employee customer desk. Read-only, and gated on the same
-          `operations.redemption` view the nav uses, so hiding the link and
+          `operations.customer_lookup` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
               <Route
                 path="/admin/customer-lookup"
@@ -464,8 +467,11 @@ export default function App() {
               `governance.audit` - the guard and the server both enforce it. */}
               <Route path="/admin/reports" element={protectedPage(<ReportsPage />)} />
               <Route path="/admin/audit" element={protectedPage(<AuditPage />)} />
+              <Route path="/admin/media" element={protectedPage(<MediaLibraryPage />)} />
               <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
               <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
+              <Route path="/admin/cms/faq" element={protectedPage(<CmsDocumentPage title="FAQ" description="Questions and answers for the public website." documentKey="faq" />)} />
+              <Route path="/admin/cms/vip" element={protectedPage(<CmsDocumentPage title="VIP Website Content" description="Marketing names and imagery; operational entitlements are read-only." documentKey="vip" />)} />
               <Route path="/admin/cms/media" element={protectedPage(<CmsMediaPage />)} />
               <Route
                 path="/admin/cms/stories"
@@ -492,7 +498,8 @@ export default function App() {
                 element={protectedPage(
                   <CmsDocumentPage
                     title="Site Settings"
-                    description="Site identity, contact details, navigation and footer content."
+                    description="Site identity, public contacts, navigation and footer content."
+                    mode="site"
                     documentKey="site"
                   />,
                 )}
@@ -501,9 +508,10 @@ export default function App() {
                 path="/admin/cms/seo"
                 element={protectedPage(
                   <CmsDocumentPage
-                    title="Page Content and SEO"
-                    description="Structured copy and page-level metadata for the Phase 3 templates."
-                    documentKey="pageContent"
+                    title="SEO"
+                    mode="seo"
+                    description="Global and page-specific search and sharing metadata."
+                    documentKey="site"
                   />,
                 )}
               />

@@ -359,6 +359,7 @@ describe('GeographicAddressFields legacy records', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ province: 'Laguna', provinceCode: '0403400000' }),
     );
+    expect(screen.queryByText(/Stored value unverified/i)).not.toBeInTheDocument();
   });
 
   it('does not force a legacy record to gain codes in order to save', () => {

@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { validateRecoveryPassword } from '@afhomes/shared';
-import { Alert, AuthLayout, Button, PasswordField } from '@afhomes/ui';
+import { Alert, AuthLayout, Button, PasswordField, CookiePasswordResetForm } from '@afhomes/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
+import { isMongoAuth, mongoAuth } from '../../lib/cookie-auth';
 import styles from './auth.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
@@ -20,7 +21,7 @@ type Phase = 'checking' | 'ready' | 'invalid' | 'done';
  * requires a linked customer in an allowed state. Recovery changes the
  * password only.
  */
-export function CustomerResetPasswordPage() {
+function LegacyCustomerResetPasswordPage() {
   // An explicit `?error=` from Supabase wins over any coincidental session:
   // it means THIS recovery attempt failed, so a stale session must not
   // upgrade the page to ready.
@@ -181,5 +182,26 @@ export function CustomerResetPasswordPage() {
         </div>
       )}
     </AuthLayout>
+  );
+}
+
+export function CustomerResetPasswordPage() {
+  return isMongoAuth ? (
+    <AuthLayout
+      eyebrow="AFhomes Ecofarm"
+      title="Choose a new password"
+      brandTitle="Your farm membership, in your pocket."
+      brandLead="Track points, view your digital membership card, and follow your payments."
+    >
+      <CookiePasswordResetForm
+        loginHref="/customer/login"
+        validate={validateRecoveryPassword}
+        reset={async (token, password) => {
+          await mongoAuth.request('/reset-password', { token, newPassword: password });
+        }}
+      />
+    </AuthLayout>
+  ) : (
+    <LegacyCustomerResetPasswordPage />
   );
 }

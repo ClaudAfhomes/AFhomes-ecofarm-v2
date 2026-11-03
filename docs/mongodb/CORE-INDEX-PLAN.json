@@ -1,0 +1,927 @@
+{
+  "database": "afhomes_dev",
+  "generatedAgainst": "disposable loopback replica only",
+  "collections": [
+    {
+      "collection": "auth_accounts",
+      "indexes": [
+        {
+          "key": {
+            "providerId": 1,
+            "accountId": 1
+          },
+          "name": "providerId_1_accountId_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "auth_users",
+      "indexes": [
+        {
+          "key": {
+            "email": 1
+          },
+          "name": "email_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "background_jobs",
+      "indexes": [
+        {
+          "key": {
+            "name": 1
+          },
+          "name": "name_1"
+        }
+      ]
+    },
+    {
+      "collection": "card_categories",
+      "indexes": [
+        {
+          "key": {
+            "slug": 1
+          },
+          "name": "slug_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "name": 1
+          },
+          "name": "name_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "card_plans",
+      "indexes": [
+        {
+          "key": {
+            "code": 1
+          },
+          "name": "code_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "category_id": 1,
+            "is_active": 1,
+            "sort_order": 1
+          },
+          "name": "category_id_1_is_active_1_sort_order_1"
+        }
+      ]
+    },
+    {
+      "collection": "card_sale_hierarchy_snapshots",
+      "indexes": [
+        {
+          "key": {
+            "sale_id": 1,
+            "ancestor_staff_id": 1
+          },
+          "name": "sale_id_1_ancestor_staff_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "card_sales",
+      "indexes": [
+        {
+          "key": {
+            "customer_id": 1
+          },
+          "name": "customer_id_1"
+        },
+        {
+          "key": {
+            "sale_number": 1
+          },
+          "name": "sale_number_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "customer_id": 1,
+            "plan_id": 1
+          },
+          "name": "customer_id_1_plan_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "status": {
+              "$in": [
+                "draft",
+                "submitted",
+                "payment_pending",
+                "payment_in_progress",
+                "payment_verified",
+                "activation_pending"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "commissions",
+      "indexes": [
+        {
+          "key": {
+            "commission_number": 1
+          },
+          "name": "commission_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "commission_number": {
+              "$type": "string"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "counters",
+      "indexes": [
+        {
+          "key": {
+            "last_used_at": 1
+          },
+          "name": "last_used_at_1"
+        }
+      ]
+    },
+    {
+      "collection": "customer_application_purchase_terms",
+      "indexes": [
+        {
+          "key": {
+            "application_id": 1,
+            "version": 1
+          },
+          "name": "application_id_1_version_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "customer_applications",
+      "indexes": [
+        {
+          "key": {
+            "customer_id": 1
+          },
+          "name": "customer_id_1"
+        }
+      ]
+    },
+    {
+      "collection": "customer_onboarding_tokens",
+      "indexes": [
+        {
+          "key": {
+            "token_hash": 1
+          },
+          "name": "token_hash_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "customer_id": 1,
+            "purpose": 1
+          },
+          "name": "customer_id_1_purpose_1"
+        }
+      ]
+    },
+    {
+      "collection": "customers",
+      "indexes": [
+        {
+          "key": {
+            "auth_user_id": 1
+          },
+          "name": "auth_user_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "auth_user_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "customer_number": 1
+          },
+          "name": "customer_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "customer_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "customer_code": 1
+          },
+          "name": "customer_code_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "customer_code": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "ra_number": 1
+          },
+          "name": "ra_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "ra_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "government_id_number": 1
+          },
+          "name": "government_id_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "government_id_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "vip_card_number": 1
+          },
+          "name": "vip_card_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "vip_card_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "email": 1
+          },
+          "name": "email_1",
+          "unique": true,
+          "collation": {
+            "locale": "en",
+            "caseLevel": false,
+            "caseFirst": "off",
+            "strength": 2,
+            "numericOrdering": false,
+            "alternate": "non-ignorable",
+            "maxVariable": "punct",
+            "normalization": false,
+            "backwards": false,
+            "version": "57.1"
+          }
+        },
+        {
+          "key": {
+            "status": 1,
+            "created_at": -1
+          },
+          "name": "status_1_created_at_-1"
+        }
+      ]
+    },
+    {
+      "collection": "departments",
+      "indexes": [
+        {
+          "key": {
+            "code": 1
+          },
+          "name": "code_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "name": 1
+          },
+          "name": "name_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "memberships",
+      "indexes": [
+        {
+          "key": {
+            "customer_id": 1
+          },
+          "name": "customer_id_1"
+        },
+        {
+          "key": {
+            "sale_id": 1
+          },
+          "name": "unique_membership_sale_id",
+          "unique": true,
+          "partialFilterExpression": {
+            "sale_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "customer_id": 1
+          },
+          "name": "unique_membership_customer_id",
+          "unique": true,
+          "partialFilterExpression": {
+            "customer_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "membership_number": 1
+          },
+          "name": "unique_membership_membership_number",
+          "unique": true,
+          "partialFilterExpression": {
+            "membership_number": {
+              "$type": "string"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "mutation_requests",
+      "indexes": [
+        {
+          "key": {
+            "actor_id": 1,
+            "operation": 1,
+            "request_id": 1
+          },
+          "name": "actor_id_1_operation_1_request_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "network_member_profiles",
+      "indexes": [
+        {
+          "key": {
+            "staff_id": 1
+          },
+          "name": "staff_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "ost_accreditation_renewals",
+      "indexes": [
+        {
+          "key": {
+            "request_id": 1
+          },
+          "name": "request_id_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "renewal_number": 1
+          },
+          "name": "renewal_number_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "ost_id": 1
+          },
+          "name": "ost_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "status": {
+              "$in": [
+                "submitted",
+                "under_review",
+                "changes_requested",
+                "endorsed"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "ost_accreditation_terms",
+      "indexes": [
+        {
+          "key": {
+            "ost_id": 1
+          },
+          "name": "ost_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "status": "active"
+          }
+        },
+        {
+          "key": {
+            "application_id": 1
+          },
+          "name": "application_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "application_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "renewal_id": 1
+          },
+          "name": "renewal_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "renewal_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "ost_members",
+      "indexes": [
+        {
+          "key": {
+            "application_id": 1
+          },
+          "name": "application_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "application_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "ost_number": 1
+          },
+          "name": "ost_number_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "ost_registration_details",
+      "indexes": [
+        {
+          "key": {
+            "request_id": 1
+          },
+          "name": "request_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "request_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "application_id": 1
+          },
+          "name": "application_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "application_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "form_number": 1
+          },
+          "name": "form_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "form_number": {
+              "$type": "string"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "payments",
+      "indexes": [
+        {
+          "key": {
+            "sale_id": 1,
+            "status": 1
+          },
+          "name": "sale_id_1_status_1"
+        },
+        {
+          "key": {
+            "reservation_id": 1,
+            "status": 1
+          },
+          "name": "reservation_id_1_status_1"
+        },
+        {
+          "key": {
+            "sale_id": 1,
+            "reference": 1
+          },
+          "name": "sale_id_1_reference_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "sale_id": {
+              "$type": "string"
+            },
+            "reference": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "payment_number": 1
+          },
+          "name": "payment_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "payment_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "reservation_id": 1,
+            "reference": 1
+          },
+          "name": "reservation_id_1_reference_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "reservation_id": {
+              "$type": "string"
+            },
+            "reference": {
+              "$type": "string"
+            },
+            "origin": "reservation"
+          }
+        },
+        {
+          "key": {
+            "reservation_id": 1,
+            "status": 1
+          },
+          "name": "payments_reservation_status_idx",
+          "partialFilterExpression": {
+            "origin": "reservation"
+          }
+        }
+      ]
+    },
+    {
+      "collection": "points_accounts",
+      "indexes": [
+        {
+          "key": {
+            "membership_id": 1
+          },
+          "name": "membership_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "points_ledger",
+      "indexes": [
+        {
+          "key": {
+            "account_id": 1,
+            "created_at": -1,
+            "_id": -1
+          },
+          "name": "account_id_1_created_at_-1__id_-1",
+          "collation": {
+            "locale": "en",
+            "caseLevel": false,
+            "caseFirst": "off",
+            "strength": 3,
+            "numericOrdering": true,
+            "alternate": "non-ignorable",
+            "maxVariable": "punct",
+            "normalization": false,
+            "backwards": false,
+            "version": "57.1"
+          }
+        }
+      ]
+    },
+    {
+      "collection": "points_periods",
+      "indexes": [
+        {
+          "key": {
+            "account_id": 1,
+            "period_start": 1
+          },
+          "name": "account_id_1_period_start_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "profile_photos",
+      "indexes": [
+        {
+          "key": {
+            "owner_id": 1
+          },
+          "name": "owner_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "purchase_document_evidence",
+      "indexes": [
+        {
+          "key": {
+            "kind": 1,
+            "source_id": 1,
+            "revision": 1
+          },
+          "name": "kind_1_source_id_1_revision_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "reservation_id": 1
+          },
+          "name": "reservation_id_1",
+          "sparse": true
+        },
+        {
+          "key": {
+            "payment_id": 1
+          },
+          "name": "payment_id_1",
+          "sparse": true
+        },
+        {
+          "key": {
+            "sale_id": 1
+          },
+          "name": "sale_id_1",
+          "sparse": true
+        },
+        {
+          "key": {
+            "membership_id": 1
+          },
+          "name": "membership_id_1",
+          "sparse": true
+        }
+      ]
+    },
+    {
+      "collection": "referral_relationships",
+      "indexes": [
+        {
+          "key": {
+            "subject_staff_id": 1
+          },
+          "name": "subject_staff_id_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "is_active": true
+          }
+        }
+      ]
+    },
+    {
+      "collection": "reservation_agreements",
+      "indexes": [
+        {
+          "key": {
+            "customer_id": 1
+          },
+          "name": "customer_id_1"
+        }
+      ]
+    },
+    {
+      "collection": "role_permissions",
+      "indexes": [
+        {
+          "key": {
+            "role_id": 1,
+            "module_id": 1
+          },
+          "name": "role_id_1_module_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "roles",
+      "indexes": [
+        {
+          "key": {
+            "slug": 1
+          },
+          "name": "slug_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "name": 1
+          },
+          "name": "name_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "sale_team_accreditation_history",
+      "indexes": [
+        {
+          "key": {
+            "aa_number": 1
+          },
+          "name": "aa_number_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "sale_team_accreditations",
+      "indexes": [
+        {
+          "key": {
+            "staff_id": 1
+          },
+          "name": "staff_id_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "aa_number": 1
+          },
+          "name": "aa_number_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "sale_team_search_attempts",
+      "indexes": [
+        {
+          "key": {
+            "updated_at": 1
+          },
+          "name": "updated_at_1"
+        }
+      ]
+    },
+    {
+      "collection": "sale_team_search_contacts",
+      "indexes": [
+        {
+          "key": {
+            "dedupe_key": 1
+          },
+          "name": "dedupe_key_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "created_at": 1
+          },
+          "name": "created_at_1"
+        }
+      ]
+    },
+    {
+      "collection": "sale_team_search_disclosures",
+      "indexes": [
+        {
+          "key": {
+            "ip_hash": 1,
+            "request_id": 1
+          },
+          "name": "ip_hash_1_request_id_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "ip_hash": 1,
+            "disclosed_at": 1
+          },
+          "name": "ip_hash_1_disclosed_at_1"
+        }
+      ]
+    },
+    {
+      "collection": "staff_permission_restrictions",
+      "indexes": [
+        {
+          "key": {
+            "staff_id": 1,
+            "module_id": 1
+          },
+          "name": "staff_id_1_module_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "staff_role_assignments",
+      "indexes": [
+        {
+          "key": {
+            "staff_id": 1
+          },
+          "name": "staff_id_1",
+          "unique": true
+        }
+      ]
+    },
+    {
+      "collection": "staff_users",
+      "indexes": [
+        {
+          "key": {
+            "email": 1
+          },
+          "name": "email_1",
+          "unique": true
+        },
+        {
+          "key": {
+            "employee_number": 1
+          },
+          "name": "employee_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "employee_number": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "key": {
+            "sales_number": 1
+          },
+          "name": "sales_number_1",
+          "unique": true,
+          "partialFilterExpression": {
+            "sales_number": {
+              "$type": "string"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collection": "storage_cleanup_jobs",
+      "indexes": [
+        {
+          "key": {
+            "object_key": 1
+          },
+          "name": "object_key_1",
+          "unique": true
+        }
+      ]
+    }
+  ]
+}

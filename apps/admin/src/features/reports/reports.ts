@@ -1,3 +1,4 @@
+import { isFeaturePathEnabled } from '@afhomes/shared';
 /**
  * Phase 15 Reports and Audit Center admin surface.
  *
@@ -200,6 +201,7 @@ export function availableReports(
 ): ReportDef[] {
   return REPORT_DEFS.filter(
     (def) =>
+      isFeaturePathEnabled(`/reports/${def.type}`) &&
       (roleSlug !== 'employee' || def.type === 'redemptions') &&
       def.modules.some(
         (key) => permissions?.some((p) => p.moduleKey === key && p.canView) === true,

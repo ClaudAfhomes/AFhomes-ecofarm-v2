@@ -1327,11 +1327,11 @@ export function makeRes() {
   const state = {
     status: 200,
     body: undefined as unknown,
-    headers: {} as Record<string, string>,
+    headers: {} as Record<string, string | string[]>,
     ended: false,
   };
   const res = {
-    setHeader(name: string, value: string) {
+    setHeader(name: string, value: string | string[]) {
       state.headers[name.toLowerCase()] = value;
     },
     status(code: number) {

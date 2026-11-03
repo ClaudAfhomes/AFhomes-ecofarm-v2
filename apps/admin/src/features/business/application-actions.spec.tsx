@@ -10,8 +10,15 @@ import {
   getCustomerApplication,
   getReservationAgreements,
   reopenCustomerApplication,
+  reviewApplicationPurchaseTerms,
 } from './services';
 import { purchaseTermsProposalSchema } from '@afhomes/contracts';
+import { notifyWarning } from '@afhomes/ui';
+
+vi.mock('@afhomes/ui', async (original) => {
+  const actual = await original<typeof import('@afhomes/ui')>();
+  return { ...actual, notifyWarning: vi.fn(actual.notifyWarning) };
+});
 
 /** A server-shaped offer. Built lazily: the module mock factory runs before ids. */
 const buildOffer = () =>
@@ -58,6 +65,7 @@ vi.mock('./services', async (original) => ({
   getPurchaseTermsProposal: vi.fn(async () => buildOffer()),
   decideCustomerApplication: vi.fn(),
   reopenCustomerApplication: vi.fn(),
+  reviewApplicationPurchaseTerms: vi.fn(async () => detail('submitted')),
   exportCustomerApplication: vi.fn(),
   // The workflow panel reads the reservation this application produced, so the
   // next action is derived from real server state rather than local guesswork.
@@ -118,7 +126,7 @@ const detail = (status: CustomerApplicationStatus) =>
     approvedAt: null,
     rejectedAt: null,
   });
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(getReservationAgreements).mockResolvedValue([]); });
 
 /** The MemoryRouter's live location, so a button's navigation is provable. */
 function LocationProbe() {
@@ -153,32 +161,33 @@ async function show(status: CustomerApplicationStatus) {
     },
   );
   await screen.findByText('QA APPLICATION');
-  await waitFor(() => expect(screen.getByLabelText('First name')).toHaveValue('Ana'));
+  if (status === 'draft')
+    await waitFor(() => expect(screen.getByLabelText('First name')).toHaveValue('Ana'));
 }
 it.each(['draft', 'submitted', 'approved', 'rejected', 'cancelled'] as const)(
   'keeps %s actions outside the read-only fields',
   async (status) => {
     await show(status);
-    // Submit lives in the header and the sticky footer alike; both share
-    // state. This fixture has no current identity document, so the ID gate
-    // blocks the action for every status, and non-draft records are read-only.
-    const saves = screen.getAllByRole('button', { name: 'Submit' });
-    expect(saves).toHaveLength(1);
-    for (const save of saves) expect(save).toBeDisabled();
-    expect(screen.getByLabelText('First name')).toHaveProperty('disabled', false);
-    if (status !== 'draft') expect(screen.getByLabelText('First name')).toBeDisabled();
-    for (const name of ['Export XLSX', 'Export PDF'])
-      expect(screen.getByRole('button', { name })).toBeEnabled();
-    for (const name of ['Approve', 'Reject']) {
-      if (status === 'submitted') expect(screen.getByRole('button', { name })).toBeEnabled();
-      else expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    if (status === 'draft') {
+      expect(screen.getByLabelText('First name')).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    } else {
+      expect(screen.queryByLabelText('First name')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
     }
-    if (status === 'submitted' || status === 'rejected')
-      expect(screen.getByRole('button', { name: 'Reopen to draft' })).toBeEnabled();
-    else expect(screen.queryByRole('button', { name: 'Reopen to draft' })).not.toBeInTheDocument();
-    if (status !== 'cancelled')
-      expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
-    else expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    const actions = screen.queryByRole('region', { name: 'Record actions' });
+    if (status === 'submitted' || status === 'rejected') {
+      expect(actions).toBeInTheDocument();
+      expect(actions!.closest('fieldset')).toBeNull();
+      expect(within(actions!).getByRole('button', { name: 'Reopen' })).toBeEnabled();
+      for (const name of ['Approve', 'Reject']) {
+        const button = within(actions!).getByRole('button', { name });
+        if (status === 'submitted') expect(button).toBeEnabled();
+        else expect(button).toBeDisabled();
+      }
+    } else expect(actions).not.toBeInTheDocument();
+    for (const name of ['Export XLSX', 'Export PDF', 'Cancel'])
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
   },
 );
 
@@ -192,6 +201,22 @@ it('names every blocker of the single save-and-submit action', async () => {
   expect(list).toHaveTextContent('Upload a valid ID and choose its ID type.');
   expect(list).not.toHaveTextContent('Certification and consent must be ticked.');
 });
+
+it.each(['submitted', 'approved', 'rejected', 'cancelled'] as const)(
+  'keeps the %s edit route read-only',
+  async (status) => {
+    vi.mocked(getCustomerApplication).mockResolvedValue(detail(status));
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customers/applications/:id/edit" element={<CustomerApplicationEditorPage />} />
+      </Routes>,
+      { route: `/admin/customers/applications/${id}/edit` },
+    );
+    expect(await screen.findByLabelText('First name')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    expect(screen.queryByRole('region', { name: 'Record actions' })).not.toBeInTheDocument();
+  },
+);
 
 /**
  * The next action is a NAVIGATION derived from server state. It never replaces
@@ -221,7 +246,7 @@ describe('purchase workflow next step', () => {
   it('offers Create Reservation for an approved application with no reservation', async () => {
     await show('approved');
     const panel = await screen.findByLabelText('Purchase workflow');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Create Reservation' }));
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Create Reservation' }));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent(
         `/admin/sales/reservations/new?application=${encodeURIComponent(id)}`,
@@ -229,11 +254,39 @@ describe('purchase workflow next step', () => {
     );
   });
 
+  it('does not offer a reservation action while the current reservation is unknown', async () => {
+    vi.mocked(getReservationAgreements).mockImplementationOnce(() => new Promise(() => {}));
+    await show('approved');
+    const panel = await screen.findByLabelText('Purchase workflow');
+    expect(within(panel).queryByRole('button', { name: 'Create Reservation' })).not.toBeInTheDocument();
+  });
+
+  it('requires a successful reservation lookup before offering creation', async () => {
+    vi.mocked(getReservationAgreements).mockRejectedValueOnce(new Error('Reservation lookup unavailable'));
+    await show('approved');
+    const panel = await screen.findByLabelText('Purchase workflow');
+    expect(await within(panel).findByRole('button', { name: /retry/i })).toBeEnabled();
+    expect(within(panel).queryByRole('button', { name: 'Create Reservation' })).not.toBeInTheDocument();
+  });
+
+  it('does not recapture frozen terms when approval has already created the reservation', async () => {
+    vi.mocked(decideCustomerApplication).mockImplementation(async () => {
+      vi.mocked(getReservationAgreements).mockResolvedValue([reservation('executed')]);
+      vi.mocked(getCustomerApplication).mockResolvedValue(detail('approved'));
+      return detail('approved');
+    });
+    await show('submitted');
+    fireEvent.click(screen.getByRole('button',{name:'Approve'}));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), { timeout:4000 });
+    expect(await screen.findByRole('button',{name:'Continue Payment'}, {timeout:4000})).toBeEnabled();
+    expect(reviewApplicationPurchaseTerms).not.toHaveBeenCalled();
+  });
+
   it('offers Continue Payment once the reservation is executed', async () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([reservation('executed')]);
     await show('approved');
     const panel = await screen.findByLabelText('Purchase workflow');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Continue Payment' }));
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Continue Payment' }));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent('/admin/finance/payments'),
     );
@@ -243,7 +296,7 @@ describe('purchase workflow next step', () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([reservation('submitted')]);
     await show('approved');
     const panel = await screen.findByLabelText('Purchase workflow');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Open Reservation' }));
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Open Reservation' }));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent(
         '/admin/sales/reservations/bbbbbbbb-0000-4000-8000-000000000009',
@@ -251,14 +304,13 @@ describe('purchase workflow next step', () => {
     );
   });
 
-  it('hands a finalized purchase to the activation queue and commissions', async () => {
+  it('hands a finalized purchase to the activation queue', async () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([
       reservation('executed', 'cccccccc-0000-4000-8000-000000000010'),
     ]);
     await show('approved');
     const panel = await screen.findByLabelText('Purchase workflow');
-    expect(within(panel).getByRole('button', { name: 'Open Commissions' })).toBeEnabled();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Continue Activation' }));
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Continue Activation' }));
     await waitFor(() =>
       expect(screen.getByLabelText('route')).toHaveTextContent('/admin/finance/activation'),
     );
@@ -268,7 +320,7 @@ describe('purchase workflow next step', () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([reservation('cancelled')]);
     await show('approved');
     const panel = await screen.findByLabelText('Purchase workflow');
-    expect(within(panel).getByRole('button', { name: 'Create Reservation' })).toBeEnabled();
+    expect(await within(panel).findByRole('button', { name: 'Create Reservation' })).toBeEnabled();
     expect(within(panel).queryByRole('button', { name: 'Open Reservation' })).toBeNull();
   });
 
@@ -289,11 +341,13 @@ describe('purchase workflow next step', () => {
   it('marks only reached steps as done', async () => {
     vi.mocked(getReservationAgreements).mockResolvedValue([reservation('executed')]);
     await show('approved');
-    const panel = (await screen.findByLabelText('Purchase workflow')).textContent ?? '';
-    expect(panel).toContain('✓ Application submitted');
-    expect(panel).toContain('✓ Reservation created');
-    expect(panel).toContain('→ Payment processing');
-    expect(panel).toContain('○ Commission');
+    const panel = await screen.findByLabelText('Purchase workflow');
+    await waitFor(() => {
+      for (const label of ['Application Submitted', 'Reservation Created'])
+        expect(within(panel).getByText(label).closest('li')).toHaveAttribute('data-state', 'Done');
+      expect(within(panel).getByText('Payment Processing').closest('li')).toHaveAttribute('data-state', 'Current');
+      expect(within(panel).getByText('Commission').closest('li')).toHaveAttribute('data-state', 'Pending');
+    });
   });
 });
 it('dispatches submitted decisions and reopen', async () => {
@@ -303,7 +357,6 @@ it('dispatches submitted decisions and reopen', async () => {
   for (const [name, decision] of [
     ['Approve', 'approved'],
     ['Reject', 'rejected'],
-    ['Cancel', 'cancelled'],
   ] as const) {
     fireEvent.click(screen.getByRole('button', { name }));
     // Every decision carries a request identity so a retry after a lost
@@ -320,8 +373,14 @@ it('dispatches submitted decisions and reopen', async () => {
       timeout: 4000,
     });
     await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+    if (decision === 'approved')
+      expect(reviewApplicationPurchaseTerms).toHaveBeenCalledWith(id, {
+        requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        expectedProposalHash: 'a'.repeat(64),
+        reason: 'Auto-confirmed on approval',
+      });
   }
-  fireEvent.click(screen.getByRole('button', { name: 'Reopen to draft' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
   await waitFor(() =>
     expect(reopenCustomerApplication).toHaveBeenCalledWith(id, expect.any(String)),
   );
@@ -337,12 +396,11 @@ it('shows the server-authoritative offer with no editable price', async () => {
   expect(screen.queryByLabelText(/^Total purchase amount$/)).toBeNull();
 });
 it.each(['xlsx', 'pdf'] as const)(
-  'shows %s export errors instead of rejecting silently',
+  'keeps the retired %s export off the application record',
   async (format) => {
     await show('approved');
-    vi.mocked(exportCustomerApplication).mockRejectedValue(new Error('Export unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: `Export ${format.toUpperCase()}` }));
-    expect(await screen.findByText('Export unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `Export ${format.toUpperCase()}` })).not.toBeInTheDocument();
+    expect(exportCustomerApplication).not.toHaveBeenCalled();
   },
 );
 
@@ -371,9 +429,11 @@ it('guides legacy submitted applications through terms capture instead of a doom
     { route: '/admin/customers/applications/' + id },
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
-  expect(await screen.findByRole('dialog')).toHaveTextContent('Reopen to review purchase terms');
+  expect(await screen.findByText(/Reopen to review purchase terms, check the offer/)).toBeInTheDocument();
+  expect(notifyWarning).toHaveBeenCalledOnce();
   expect(decideCustomerApplication).not.toHaveBeenCalled();
+  expect(reviewApplicationPurchaseTerms).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'OK' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: 'Reopen to review purchase terms' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Reopen' })).toBeEnabled();
 });

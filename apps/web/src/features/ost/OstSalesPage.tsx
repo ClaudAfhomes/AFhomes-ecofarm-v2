@@ -1,4 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
+import { OstSalesParticipation } from './OstSalesParticipation';
 import { Button, EmptyState, MetricCard, StatusChip } from '@afhomes/ui';
 import { formatMoney, formatCountOrDash } from '@afhomes/shared';
 
@@ -106,6 +107,7 @@ export function OstSalesPage() {
           </div>
         )}
       </Card>
+      <OstSalesParticipation />
     </>
   );
 }

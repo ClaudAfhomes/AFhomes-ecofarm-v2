@@ -12,7 +12,7 @@ export type VercelRequest = {
 };
 
 export type VercelResponse = {
-  setHeader: (name: string, value: string) => void;
+  setHeader: (name: string, value: string | string[]) => void;
   status: (code: number) => VercelResponse;
   json: (body: unknown) => void;
   end: () => void;

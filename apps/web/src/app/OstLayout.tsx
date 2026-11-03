@@ -13,7 +13,6 @@ const NAV = [
   { to: '/ost/dashboard', label: 'Dashboard' },
   { to: '/ost/sales', label: 'Sales' },
   { to: '/ost/commissions', label: 'Commissions' },
-  { to: '/ost/accreditation', label: 'Accreditation' },
   { to: '/ost/profile', label: 'Profile' },
 ];
 

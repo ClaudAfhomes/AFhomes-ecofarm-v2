@@ -1,5 +1,5 @@
 import { addMoney, compareMoney, subtractMoney, splitStayPoints } from '@afhomes/shared';
-import type { WorkbookPaymentClaim } from '@afhomes/contracts';
+import type { WorkbookPaymentClaim, CustomerImportContinuation } from '@afhomes/contracts';
 
 /** Called only after permission-gated historical certification; cached Excel formulas are never trusted. */
 export function externalImportSummary(
@@ -24,7 +24,7 @@ export function externalImportSummary(
     throw new Error('Existing Stay Points must be whole non-negative points up to 1000000000.');
   const existingPoints = rawPoints === '' ? null : Number(rawPoints);
   const split = existingPoints === null ? null : splitStayPoints(existingPoints);
-  const stage = inactive && compareMoney(paid, total) === 0 ? 'inactive'
+  const stage: NonNullable<CustomerImportContinuation['externalSummary']>['stage'] | null = inactive && compareMoney(paid, total) === 0 ? 'inactive'
     : activeClaim && compareMoney(paid, total) === 0 ? 'active'
     :
     status === 'Pending' && paid === '0.00'

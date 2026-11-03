@@ -9,5 +9,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["_lib/**/*.ts", "_handlers/**/*.ts", "router.ts", "dev-server.ts"]
+  "include": [
+    "_lib/**/*.ts",
+    "_handlers/**/*.ts",
+    "router.ts",
+    "dev-server.ts",
+    "_server.ts",
+    "scripts/verify-production-artifact.ts"
+  ]
 }

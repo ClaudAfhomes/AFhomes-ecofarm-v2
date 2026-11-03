@@ -54,7 +54,7 @@ vi.mock('../_lib/afhomes-access.js', () => ({
   },
 }));
 
-const address = (await import('./address.js')).default;
+const address = (await import('./_address-supabase.js')).default;
 const { resetAddressProviderCache } = await import('../_lib/address-source.js');
 
 const TOKEN = 'staff-token';

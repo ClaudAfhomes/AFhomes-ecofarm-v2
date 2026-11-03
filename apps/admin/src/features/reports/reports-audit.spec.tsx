@@ -12,6 +12,13 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Retained report behavior is tested enabled; default-off routing has its own suite.
+vi.mock('@afhomes/shared', async (original) => ({
+  ...await original<typeof import('@afhomes/shared')>(),
+  FEATURE_FLAGS: { redemption: true, services: true, reports: true, cms: false },
+  isFeaturePathEnabled: () => true,
+}));
+
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';

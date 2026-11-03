@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { OwnSalesParticipation } from './OwnSalesParticipation';
 import { useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -502,6 +503,7 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
                 <EmptyState title="No sales in this period" />
               )}
               {view === 'team-sales' ? <TeamSalesActivity /> : null}
+              {view === 'my-sales' ? <OwnSalesParticipation /> : null}
               {data.total > data.pageSize ? (
                 <Pagination
                   page={page}

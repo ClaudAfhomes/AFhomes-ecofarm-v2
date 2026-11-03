@@ -725,9 +725,9 @@ describe('safety and wiring', () => {
     expect(JSON.stringify(state.body)).not.toContain('secret database detail');
   });
 
-  it('dispatches through the real router with the deployed route key', async () => {
-    expect(selectHandler('/api/v1/reports/sales', {})?.routeKey).toBe('reports/sales');
-    expect(selectHandler('/api/v1/reports/audit', {})?.routeKey).toBe('reports/audit');
+  it('keeps Reports disabled through the real router even for Super Admin', async () => {
+    expect(selectHandler('/api/v1/reports/sales', {})).toBeNull();
+    expect(selectHandler('/api/v1/reports/audit', {})).toBeNull();
     const { res, state } = makeRes();
     const handled = await routeRequest(
       {
@@ -738,8 +738,7 @@ describe('safety and wiring', () => {
       } as never,
       res as never,
     );
-    expect(handled).toBe(true);
-    expect(state.status).toBe(200);
+    expect(handled).toBe(false);
   });
 
   it('ships no migration: Phase 15 reads only columns earlier phases own', async () => {

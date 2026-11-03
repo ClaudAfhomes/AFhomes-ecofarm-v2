@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { FEATURE_FLAGS } from '@afhomes/shared';
 import { paymentSchemeLabel } from '@afhomes/contracts';
 import {
   EmptyState,
@@ -101,7 +102,7 @@ export function CustomerDashboardPage() {
                     }`
                   : 'Points are not available right now.'
               }
-              to="/customer/points"
+              to={FEATURE_FLAGS.services ? '/customer/points' : undefined}
             />
           </li>
           <li>
@@ -137,8 +138,14 @@ export function CustomerDashboardPage() {
         {membership.data && (
           <FieldList>
             <Field label="Membership number" value={membership.data.membershipNumber} />
-            <Field label="Product" value={membership.data.productName ?? 'AFhomes VIP Privilege Card'} />
-            <Field label="Payment scheme" value={paymentSchemeLabel(membership.data.paymentScheme)} />
+            <Field
+              label="Product"
+              value={membership.data.productName ?? 'AFhomes VIP Privilege Card'}
+            />
+            <Field
+              label="Payment scheme"
+              value={paymentSchemeLabel(membership.data.paymentScheme)}
+            />
             <Field
               label="Status"
               value={
@@ -148,14 +155,21 @@ export function CustomerDashboardPage() {
             <Field label="Activated" value={formatDate(membership.data.activatedAt)} />
             {/* See CustomerMembershipPage: expiry wording, never "Renews". */}
             <Field label="Valid until" value={formatDate(membership.data.renewalDueAt)} />
-            <Field label="Annual points" value={membership.data.yearlyPointsAllocated.toLocaleString('en-PH')} />
+            <Field
+              label="Annual points"
+              value={membership.data.yearlyPointsAllocated.toLocaleString('en-PH')}
+            />
           </FieldList>
         )}
         {membership.data && (
           <p className={styles.notice}>
             <Link to="/customer/membership">Open your digital VIP card</Link>
-            {' · '}
-            <Link to="/customer/redemptions">Redemption history</Link>
+            {FEATURE_FLAGS.redemption && (
+              <>
+                {' · '}
+                <Link to="/customer/redemptions">Redemption history</Link>
+              </>
+            )}
             {' · '}
             <Link to="/customer/payments">Payment history</Link>
             {' · '}
@@ -166,7 +180,9 @@ export function CustomerDashboardPage() {
 
       <Card title="Recent points activity">
         {ledger.isLoading && <p role="status">Loading your points activity…</p>}
-        {ledger.isError && <p className={styles.notice}>Your points activity is not available right now.</p>}
+        {ledger.isError && (
+          <p className={styles.notice}>Your points activity is not available right now.</p>
+        )}
         {ledger.data && ledger.data.length === 0 && (
           <EmptyState
             title="No points activity"
@@ -208,7 +224,7 @@ export function CustomerDashboardPage() {
         )}
         {ledger.data && ledger.data.length > 0 && (
           <p className={styles.notice}>
-            <Link to="/customer/points">See all points activity</Link>
+            {FEATURE_FLAGS.services && <Link to="/customer/points">See all points activity</Link>}
           </p>
         )}
       </Card>
