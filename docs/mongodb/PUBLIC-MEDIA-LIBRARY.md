@@ -104,7 +104,8 @@ AFHOMES_PUBLIC_MEDIA_MAX_TOTAL_BYTES=2147483648
 
 Public URLs derive from `AFHOMES_WEB_URL`; set it to
 `https://portal.afhomes.com.ph`. Do not put the storage path in browser env.
-The existing private S3 settings remain independent and optional.
+Private business files use the separate local-disk or S3 provider documented in
+`PRIVATE-FILE-STORAGE-OPERATIONS.md`; the two roots must not overlap.
 
 ## Linux directories and permissions
 

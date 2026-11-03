@@ -10,6 +10,7 @@ export function ProfilePhotoEditor({
   error,
   onRefresh,
   onUpload,
+  onRemove,
   staged = false,
 }: {
   photo?: ProfilePhoto;
@@ -17,6 +18,7 @@ export function ProfilePhotoEditor({
   error?: string;
   onRefresh: () => void;
   onUpload: (dataBase64: string) => Promise<unknown>;
+  onRemove?: () => Promise<unknown>;
   staged?: boolean;
 }) {
   const id = useId(),
@@ -91,16 +93,45 @@ export function ProfilePhotoEditor({
       ) : null}
       {message ? <p role={failed ? 'alert' : 'status'}>{message}</p> : null}
       {!staged ? (
-        <Button
-          variant="secondary"
-          disabled={loading || busy}
-          onClick={() => {
-            setFailedUrl(null);
-            onRefresh();
-          }}
-        >
-          Refresh photo
-        </Button>
+        <>
+          <Button
+            variant="secondary"
+            disabled={loading || busy}
+            onClick={() => {
+              setFailedUrl(null);
+              onRefresh();
+            }}
+          >
+            Refresh photo
+          </Button>
+          {onRemove && imageUrl ? (
+            <Button
+              variant="secondary"
+              disabled={loading || busy}
+              onClick={async () => {
+                if (busy) return;
+                setBusy(true);
+                setMessage(null);
+                try {
+                  await onRemove();
+                  setFailedUrl(null);
+                  setMessage('Profile photo removed.');
+                } catch (cause) {
+                  setFailed(true);
+                  setMessage(
+                    cause instanceof Error
+                      ? cause.message
+                      : 'Could not remove your photo. Refresh to check before retrying.',
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Remove photo
+            </Button>
+          ) : null}
+        </>
       ) : null}
     </section>
   );

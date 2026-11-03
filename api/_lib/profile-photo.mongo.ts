@@ -77,14 +77,14 @@ export function createMongoProfilePhotoHandler(
     res.setHeader('Cache-Control', 'no-store');
     const scope = subPath(req),
       verb = method(req);
-    if (!['staff', 'customer'].includes(scope) || !['GET', 'PUT'].includes(verb))
+    if (!['staff', 'customer'].includes(scope) || !['GET', 'PUT', 'DELETE'].includes(verb))
       return fail(res, 'NOT_FOUND', 'Route not found', 404);
     let uploaded: string | undefined,
       saved = false;
     try {
       const principal = await owner(req, scope);
       if ('error' in principal) return deny(res, principal);
-      if (verb === 'PUT' && !principal.canUpload)
+      if (verb !== 'GET' && !principal.canUpload)
         throw new CustomerActivationError(
           403,
           'Complete account verification before changing your photo',
@@ -92,6 +92,56 @@ export function createMongoProfilePhotoHandler(
       if (!objects)
         throw new CustomerActivationError(503, 'Profile photos are unavailable. Please retry.');
       let metadata = await col('profile_photos').findOne({ owner_id: principal.userId });
+      if (verb === 'DELETE') {
+        if (!metadata) {
+          return res.status(200).json({
+            url: null,
+            expiresAt: null,
+            canUpload: principal.canUpload,
+            notice: null,
+          });
+        }
+        const current = metadata,
+          objectKey = typeof current.object_key === 'string' ? current.object_key : undefined;
+        const session = client.startSession();
+        try {
+          await session.withTransaction(async () => {
+            if (scope === 'staff')
+              await db
+                .collection<{ _id: string; seq: number }>('counters')
+                .updateOne(
+                  { _id: 'organization-write' },
+                  { $inc: { seq: 1 } },
+                  { upsert: true, session },
+                );
+            const removed = await col('profile_photos').deleteOne(
+              { owner_id: principal.userId, object_key: current.object_key },
+              { session },
+            );
+            if (!removed.deletedCount) return;
+            await col('audit_events').insertOne(
+              {
+                _id: randomUUID(),
+                actor_id: principal.userId,
+                action: 'PROFILE_PHOTO_REMOVED',
+                entity_type: 'profile_photo',
+                entity_id: principal.userId,
+                created_at: new Date().toISOString(),
+              },
+              { session },
+            );
+          });
+        } finally {
+          await session.endSession();
+        }
+        if (objectKey) await cleanup(objectKey);
+        return res.status(200).json({
+          url: null,
+          expiresAt: null,
+          canUpload: principal.canUpload,
+          notice: null,
+        });
+      }
       if (verb === 'PUT') {
         const verdict = consumeIdentifierAttempt(req, `photo:${principal.userId}`);
         if (!verdict.allowed) {
@@ -160,6 +210,18 @@ export function createMongoProfilePhotoHandler(
               { owner_id: principal.userId },
               { $set: row, $setOnInsert: { _id: randomUUID() } },
               { upsert: true, session },
+            );
+            await col('audit_events').insertOne(
+              {
+                _id: randomUUID(),
+                actor_id: principal.userId,
+                action: 'PROFILE_PHOTO_UPDATED',
+                entity_type: 'profile_photo',
+                entity_id: principal.userId,
+                after_data: { contentType: 'image/jpeg', size: bytes.length, scope },
+                created_at: new Date().toISOString(),
+              },
+              { session },
             );
             if (previous)
               await col('storage_cleanup_jobs').updateOne(

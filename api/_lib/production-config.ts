@@ -5,6 +5,8 @@
  * a socket. Error messages name the variable that is wrong and never include
  * its value, a connection string, or a credential.
  */
+import path from 'node:path';
+
 export type ProductionConfig = {
   host: string;
   port: number;
@@ -15,7 +17,9 @@ export type ProductionConfig = {
   trustedOrigins: string[];
   webUrl: string;
   adminUrl?: string;
-  storageProvider?: 's3';
+  storageProvider?: 's3' | 'local';
+  storageRoot?: string;
+  storageMinFreeBytes: number;
   enableSearchMaintenance: boolean;
   trustProxy: boolean;
   requestTimeoutMs: number;
@@ -26,6 +30,20 @@ export type ProductionConfig = {
 };
 
 type LoadOptions = { allowEphemeralPort?: boolean };
+
+function isAbsolutePath(value: string): boolean {
+  return path.isAbsolute(value);
+}
+
+function pathsOverlap(first: string, second: string): boolean {
+  const a = path.resolve(first),
+    b = path.resolve(second);
+  const inside = (parent: string, child: string) => {
+    const relative = path.relative(parent, child);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  };
+  return inside(a, b) || inside(b, a);
+}
 
 function value(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const raw = env[name];
@@ -133,9 +151,29 @@ export function loadProductionConfig(
   const adminUrl = adminRaw ? httpsUrl('AFHOMES_ADMIN_URL', adminRaw) : undefined;
 
   const storageRaw = value(env, 'AFHOMES_PRIVATE_STORAGE_PROVIDER');
-  if (storageRaw && storageRaw !== 's3')
-    throw new Error('AFHOMES_PRIVATE_STORAGE_PROVIDER must be s3 in production');
-  const storageProvider = storageRaw === 's3' ? ('s3' as const) : undefined;
+  if (storageRaw && !['s3', 'local', 'filesystem'].includes(storageRaw))
+    throw new Error('AFHOMES_PRIVATE_STORAGE_PROVIDER must be s3, local, or filesystem');
+  const storageProvider =
+    storageRaw === 's3' ? ('s3' as const) : storageRaw ? ('local' as const) : undefined;
+  const storageRootRaw = value(env, 'AFHOMES_PRIVATE_STORAGE_ROOT');
+  const storageRoot = storageRootRaw ? storageRootRaw : undefined;
+  if (storageProvider === 'local' && (!storageRoot || !isAbsolutePath(storageRoot)))
+    throw new Error('AFHOMES_PRIVATE_STORAGE_ROOT must be an absolute path for local storage');
+  const publicMediaRoot = value(env, 'AFHOMES_PUBLIC_MEDIA_ROOT');
+  if (
+    storageProvider === 'local' &&
+    storageRoot &&
+    publicMediaRoot &&
+    pathsOverlap(storageRoot, publicMediaRoot)
+  )
+    throw new Error('AFHOMES_PRIVATE_STORAGE_ROOT must not overlap public media storage');
+  const storageMinFreeBytes = integer(
+    env,
+    'AFHOMES_PRIVATE_STORAGE_MIN_FREE_BYTES',
+    128 * 1024 * 1024,
+    0,
+    16 * 1024 * 1024 * 1024,
+  );
 
   if (boolean(env, 'AFHOMES_ENABLE_TEST_PURGE', false))
     throw new Error('AFHOMES_ENABLE_TEST_PURGE is not allowed in production');
@@ -159,6 +197,8 @@ export function loadProductionConfig(
     webUrl,
     adminUrl,
     storageProvider,
+    storageRoot,
+    storageMinFreeBytes,
     enableSearchMaintenance: boolean(env, 'AFHOMES_ENABLE_SEARCH_MAINTENANCE', false),
     trustProxy: boolean(env, 'AFHOMES_TRUST_PROXY', false),
     requestTimeoutMs: integer(env, 'AFHOMES_REQUEST_TIMEOUT_MS', 60_000, 5_000, 300_000),

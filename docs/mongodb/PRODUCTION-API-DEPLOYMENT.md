@@ -14,7 +14,7 @@ Nginx (TLS, portal.afhomes.com.ph)
                         └── api/_server.ts → createMongoPhase5Runtime
                               ├── Better Auth (Mongo adapter, secure cookies)
                               ├── existing business handlers (unchanged)
-                              ├── private object store (S3 when configured)
+                              ├── private object store (local disk or S3)
                               └── optional search-retention worker
 ```
 
@@ -157,8 +157,12 @@ Optional:
 | Variable | Purpose |
 |---|---|
 | `AFHOMES_ADMIN_URL` | `https://portal.afhomes.com.ph/admin` |
-| `AFHOMES_PRIVATE_STORAGE_PROVIDER` | `s3` only; `local` is rejected in production |
-| `AFHOMES_S3_ENDPOINT`, `AFHOMES_S3_REGION`, `AFHOMES_S3_BUCKET`, `AFHOMES_S3_ACCESS_KEY_ID`, `AFHOMES_S3_SECRET_ACCESS_KEY` | private bucket configuration |
+| `AFHOMES_PRIVATE_STORAGE_PROVIDER` | `local` (or `filesystem` alias) for persistent disk, or `s3` |
+| `AFHOMES_PRIVATE_STORAGE_ROOT` | required for local: `/var/lib/afhomes/private-files` |
+| `AFHOMES_PRIVATE_STORAGE_MAX_BYTES` | per-object cap, default `16777216` |
+| `AFHOMES_PRIVATE_STORAGE_MIN_FREE_BYTES` | fail-closed free-space floor, default `134217728` |
+| `AFHOMES_PRIVATE_STORAGE_SCAN_COMMAND` | optional absolute ClamAV-compatible scanner |
+| `AFHOMES_S3_ENDPOINT`, `AFHOMES_S3_REGION`, `AFHOMES_S3_BUCKET`, `AFHOMES_S3_ACCESS_KEY_ID`, `AFHOMES_S3_SECRET_ACCESS_KEY` | private bucket configuration when provider is `s3` |
 | `AFHOMES_REQUEST_TIMEOUT_MS` | default `60000`, range `5000..300000` |
 | `AFHOMES_SHUTDOWN_GRACE_MS` | default `25000`, range `1000..30000` |
 | `AFHOMES_MAX_REQUEST_BYTES` | default `16777216` (16 MiB), range `65536..67108864` |
@@ -197,6 +201,8 @@ TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=true
+# Required when AFHOMES_PRIVATE_STORAGE_PROVIDER=local
+ReadWritePaths=/var/lib/afhomes
 
 [Install]
 WantedBy=multi-user.target
@@ -246,14 +252,19 @@ Public website media is separate and documented in `PUBLIC-MEDIA-LIBRARY.md`.
 It uses the persistent local directory `/var/lib/afhomes/media/public` and never
 shares a path or authorization rule with private business files.
 
-`AFHOMES_PRIVATE_STORAGE_PROVIDER=s3` uses the existing S3-compatible private
+`AFHOMES_PRIVATE_STORAGE_PROVIDER=local` keeps bytes on the persistent disk at
+`AFHOMES_PRIVATE_STORAGE_ROOT`. `s3` uses the existing S3-compatible private
 bucket implementation. Files are never served from the release directory.
+Startup validates the local root, permissions and free space; every write
+re-checks capacity and writes atomically with mode `0600`.
 
 If no provider is configured, the service still starts but every private-file
 route fails closed (uploads return 403; private downloads are unavailable).
-That is intentional: the development filesystem store can never be selected in
-production. Configuring the bucket is a deployment prerequisite for identity
-documents, payment receipts, and profile photos.
+Configuring a provider is a deployment prerequisite for identity documents,
+payment receipts, and profile photos.
+
+See `PRIVATE-FILE-STORAGE-OPERATIONS.md` for directory setup, backup, restore,
+the read-only reference audit, and rollback.
 
 ## Maintenance worker
 
@@ -328,9 +339,10 @@ connection strings, cookies, or request bodies.
 ## Known limitations and release gates
 
 1. **Private storage must be configured** for a fully functional deployment.
-   Without S3, identity documents, payment receipts, and profile photos are
-   unavailable (fail closed). This is the main deployment blocker after the
-   service itself.
+   Use local disk (`AFHOMES_PRIVATE_STORAGE_PROVIDER=local` plus an absolute
+   `AFHOMES_PRIVATE_STORAGE_ROOT`) or S3. Without a provider, identity
+   documents, payment receipts, and profile photos are unavailable (fail
+   closed). This is the main deployment blocker after the service itself.
 2. **Search retention worker is opt-in.** Enabling it performs approved deletes
    of expired public-search data. Do not enable it without policy approval.
 3. **No automatic schema preparation.** Run the existing approval-gated

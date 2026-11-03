@@ -53,12 +53,11 @@ export function hostedMongoConfig(env: NodeJS.ProcessEnv) {
     (env.HOST && env.HOST !== '127.0.0.1')
   )
     throw new Error('Hosted API requires an unprivileged loopback listener');
-  if (
-    env.AFHOMES_PRIVATE_STORAGE_PROVIDER === 'filesystem' &&
-    !path.isAbsolute(env.AFHOMES_PRIVATE_STORAGE_ROOT ?? '')
-  )
+  const privateProvider = env.AFHOMES_PRIVATE_STORAGE_PROVIDER?.trim();
+  const localProvider = privateProvider === 'local' || privateProvider === 'filesystem';
+  if (localProvider && !path.isAbsolute(env.AFHOMES_PRIVATE_STORAGE_ROOT ?? ''))
     throw new Error('Hosted private files require an absolute persistent directory');
-  if (env.AFHOMES_PRIVATE_STORAGE_PROVIDER === 'filesystem') {
+  if (localProvider) {
     const root = path.resolve(env.AFHOMES_PRIVATE_STORAGE_ROOT!);
     if (
       ['vercel-static', 'apps/web/dist', 'apps/admin/dist'].some(
@@ -67,8 +66,18 @@ export function hostedMongoConfig(env: NodeJS.ProcessEnv) {
       )
     )
       throw new Error('Private files cannot be placed inside a static site directory');
+    const publicRoot = env.AFHOMES_PUBLIC_MEDIA_ROOT?.trim();
+    if (publicRoot) {
+      const relative = (parent: string, child: string) => {
+        const value = path.relative(parent, child);
+        return value === '' || (!value.startsWith('..') && !path.isAbsolute(value));
+      };
+      const media = path.resolve(publicRoot);
+      if (relative(root, media) || relative(media, root))
+        throw new Error('Private and public media storage must not overlap');
+    }
   }
-  if (!['filesystem', 's3'].includes(env.AFHOMES_PRIVATE_STORAGE_PROVIDER ?? ''))
+  if (!['local', 'filesystem', 's3'].includes(privateProvider ?? ''))
     throw new Error('Hosted private storage must be explicit');
   const coreWritesEnabled = flag(env.AFHOMES_MONGODB_ENABLE_CORE_WRITES),
     maintenanceEnabled = flag(env.AFHOMES_HOSTED_SEARCH_MAINTENANCE);

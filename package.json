@@ -38,7 +38,8 @@
     "mongodb:validators": "tsx api/scripts/check-mongodb-validators.ts",
     "mongodb:core": "tsx api/scripts/prepare-mongodb-core.ts",
     "mongodb:catalog": "tsx api/scripts/prepare-mongodb-catalog.ts",
-    "mongodb:bootstrap-admin": "tsx api/scripts/bootstrap-mongodb-admin.ts"
+    "mongodb:bootstrap-admin": "tsx api/scripts/bootstrap-mongodb-admin.ts",
+    "private-files:audit": "tsx api/scripts/audit-private-files.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.117.2",
