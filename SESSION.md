@@ -5,124 +5,147 @@
 > session's context (do not append; delete stale sections). Keep it dense:
 > decisions, patterns, open threads, and verification state. No prose essays.
 
-## Stack (unchanging)
+## Stack (current)
 
-pnpm + Turborepo. `apps/web` (:5173; marketing + `/customer/**` + `/ost/**`) |
-`apps/admin` (:5174, `/admin/`) | single Vercel Function `api/router.ts` →
-`api/_lib/router.ts` (`BUSINESS_FAMILIES`) → `api/_handlers/**` → Supabase
-Postgres + Auth. `packages/contracts` (Zod SSOT; `lifecycle.ts` statuses;
-`afhomes.ts` module catalog; `customer-ssot.ts` 62-col registry;
-`member.ts` sales-network Members) | `packages/shared` (BigInt money) |
-`packages/config` (`VITE_`-only) | `packages/ui` (tokens + primitives).
-`SESSION.md`, `docs/security/`, `docs/testing/` are user items — do not touch.
-`docs/supabase/CURRENT-SCHEMA.sql` refreshes BY AGENT only on explicit
-"update schema" trigger.
+pnpm + Turborepo monorepo. Branch `develop` @ `77e37ac`.
+
+- `apps/web` (:5183 in MongoDB dev): marketing + `/customer/**` + `/ost/**` +
+  dev staff entry `/admin/login`, `/staff/login`.
+- `apps/admin` (:5184 in MongoDB dev): staff console, base `/admin/`.
+- `api/`: single entry `api/router.ts` → `api/_lib/router.ts`
+  (`BUSINESS_FAMILIES`) → `api/_handlers/**`.
+- **Default local runtime is now native MongoDB** via
+  `api/scripts/dev-mongodb-admin.ts`: API :3084, admin :5184, web :5183,
+  database `afhomes_dev`, Better Auth (password-only), private local files under
+  `~/.afhomes/private-storage/afhomes_dev`.
+- Supabase Postgres + Auth remains preserved as the legacy/production path.
+  MongoDB conversion is active; no Atlas import, no production cutover.
+- `packages/contracts` (Zod SSOT; `lifecycle.ts`, `afhomes.ts`,
+  `customer-ssot.ts`, `member.ts`) | `packages/shared` (exact-decimal money,
+  dates, feature flags) | `packages/config` (`VITE_`-only) | `packages/ui`
+  (tokens + primitives, incl. `TurnstileChallenge`).
+- MongoDB runtime: `api/_lib/mongo-runtime.ts`, `api/_lib/mongodb.ts`,
+  `api/_lib/auth.ts`, `api/_lib/hosted-runtime.ts`.
+- Do not touch `docs/security/`, `docs/testing/`; `SESSION.md` is the handoff
+  file updated only on explicit handoff request.
 
 ## Standing user preferences (apply without asking)
 
-- `@ponytail` active (full): smallest complete change, house components first,
-  no new deps, finish callers/tests/fixtures. End replies with skipped + risk.
-- UI rounds are UI-only: no handler/contract/SQL/history edits, no new deps;
-  preserve every flow and permission; inspect before implementing; desktop/
-  tablet/mobile; gate on focused vitest + `tsc` + `eslint` + admin build; end
-  with a short report. ONE named surface at a time — wait for the next.
-- Added copy gets reviewed and stripped. User-facing copy: every sentence max
-  5–6 words. Surface rules the user states win.
-- User edits in parallel — and commits mid-session. Re-check `git status`/
+- `@ponytail` full: smallest complete change, house components first, no new
+  deps, finish callers/tests/fixtures.
+- UI rounds are UI-only: no handler/contract/SQL/history edits; preserve flows
+  and permissions; desktop/tablet/mobile; gate on focused vitest + `tsc` +
+  `eslint` + admin build; one named surface at a time.
+- User-facing copy: every sentence max 5–6 words. Added copy gets reviewed and
+  stripped; surface rules the user states win.
+- User edits in parallel and commits mid-session. Re-check `git status` /
   `git log` before assuming state; re-read shared files before editing; leave
   foreign diffs alone; never restore what the user deliberately removed.
 - Version control: never stage/commit/push/branch/tag/stash/reset or GitHub
   actions unless explicitly commanded in-session. Working-tree edits are work.
-- Passwords/TIN/gov-IDs never returned, never in audits (masked reads only).
+- Passwords, TIN, government IDs, Turnstile secrets never returned or printed.
+  `.env.local` is read-only unless user explicitly authorizes; never commit it.
 - No `select('*')` on wide rows; filter in SQL; Free-quota rules per
   `docs/supabase/SUPABASE-FREE.md`.
-- Prettier NOT a gate (CRLF artifact). Gate on `tsc` + `eslint`.
+- Prettier is NOT a gate (CRLF artifact). Gate on `tsc` + `eslint`.
 
-## Repo state (verified 2026-10-23)
+## Repo state (verified 2026-11-04)
 
-- Branch `orly/develop` @ `d4b186f "enhance: reservation page"`. Production
-  project `ikaevepedpqygdlipsei`, last applied migration `20261212000004`.
-- **Untracked migrations (unapplied, in working tree):**
-  - `20261214000001_afhomes_auto_reservation_on_approval.sql` — application
-    approval auto-creates reservation (draft→submitted→executed) + ₱10,000
-    recorded payment; idempotent via parent + derived child request IDs.
-  - `20261215000001_afhomes_company_customer_id_format.sql` — user WIP.
-  - `20261215000001_afhomes_search_path_canonical.sql` — search_path hardening
-    for `reconcile_external_customer_import`.
-  - `20261216000001_afhomes_remove_reservation_signatures.sql` — drops
-    reservation signature columns + execute gate; redefines save/reserve/
-    transition/decide/build/fields_valid.
-  - `20261217000001_afhomes_remove_schedule_remarks.sql` — user WIP.
-- **Working tree:** extensive user WIP (CustomerDetailPage, CustomerRecordActions,
-  official-forms-applications/fields/reservations, genealogy, sale-team, etc.)
-  plus agent changes (official-forms.ts, BusinessFinanceQueuePage, activation
-  page, db-integration.ts). Leave foreign diffs alone.
-- **Pre-existing failures (NOT from this session):**
-  - admin `src/features/business`: 30 failed (application-actions 16,
-    PurchasePaymentsPage 11, final-blockers 3) — byte-identical baseline.
-  - DB: section 48 (customer import referral hierarchy) + section 58 (purchase
-    terms reason refusal ×3) — pre-existing; section 77 (OST team transfer)
-    still blocks `pnpm test:db:harness`.
-  - admin lint: 1 error (user WIP `CustomerRecordActions.tsx:36`) + 24 warnings.
-- **Gates this session:** `pnpm typecheck` clean (7/7 + supabase); `pnpm lint`
-  0 errors (admin) + 24 warnings; admin build green; `pnpm check:env` PASS;
-  `pnpm test:db:local` 1602/1606 (4 pre-existing failures). Admin focused
-  specs green (OfficialFormsPages, reservation-detail-panel, reservation-source-panel,
-  responsive-cards, official-form-list-contract, reservation-finance-queue,
-  finance-lifecycle badges).
+- Branch `develop` @ `77e37ac "Merge branch 'fixes/profile-mage' into develop"`.
+- Working tree has only this session's uncommitted changes:
+  - `M .env.example`
+  - `M api/_lib/auth.ts`
+  - `M api/_lib/auth.spec.ts`
+  - `M api/scripts/dev-mongodb-admin.ts`
+  - `M apps/web/src/features/staff/StaffEntryPage.tsx`
+  - `M apps/web/src/features/staff/staff-entry.spec.tsx`
+  - `?? api/_lib/startup-diagnostics.ts`
+  - `?? api/_lib/startup-diagnostics.spec.ts`
+- `.env.local` (gitignored, user-owned, not modified by agent) now contains a
+  valid `AFHOMES_AUTH_TURNSTILE_SECRET` and `VITE_TURNSTILE_SITE_KEY`. Auth
+  secret currently mirrors `AFHOMES_SEARCH_TURNSTILE_SECRET`; both belong to the
+  same widget prefix. Never print values.
+- `pnpm dev` now starts successfully: MongoDB `afhomes_dev` connected, core
+  workflows + search retention enabled, admin/web Vite up.
+- No commits, pushes, migrations, deployments, or shared-system writes.
 
 ## Last session's work (UNCOMMITTED)
 
-- **Application → reservation → payment auto-flow:** approval auto-creates
-  reservation (draft→submitted→executed) + ₱10,000 recorded payment; idempotent.
-  Frontend invalidates application/reservation/payment/finance/report caches.
-- **Removed reservation agreement signature tracking** (signature ≡ approval):
-  dropped DB columns + execute gate + contract fields + UI column + editor inputs.
-- **Reservations list:** Status column → Payment status (Cancelled/Fully Paid/
-  Partial/Pending/—); handler now computes `verified_total` + `fully_paid`.
-- **Finance queue:** row click → view details (not record payment); Status chip →
-  payment-derived status; payment modal closes on success + page loading skeleton.
-- **Activation queue:** Activate button spinner + success alert + loading
-  skeleton after success.
-- **Removed "New Agreement" button** + manual "Create reservation" next-action.
-- **Full reservation editing:** editable on draft/submitted/executed.
-- **Search-path hardening:** canonical order for `reconcile_external_customer_import`.
-- **DB test cleanup:** payment-keyed purchase-document-evidence deleted before
-  payments.
+1. **`pnpm dev` configuration failure**
+   - Root cause: missing `AFHOMES_AUTH_TURNSTILE_SECRET`; launcher called
+     `requireAuthTurnstile()` before DB connect and its `catch` discarded the
+     real error.
+   - Added `api/_lib/startup-diagnostics.ts` + spec: surfaces only whitelisted,
+     value-free configuration messages; hides connection/storage errors.
+   - `api/scripts/dev-mongodb-admin.ts` now prints the safe detail.
+   - `api/_lib/auth.ts`: `requireAuthTurnstile()` now reports the exact
+     missing/invalid variable (site key vs secret, whitespace, short secret)
+     and rejects `AFHOMES_AUTH_TURNSTILE_SECRET === VITE_TURNSTILE_SITE_KEY`.
+   - `.env.example` documents `AFHOMES_AUTH_TURNSTILE_SECRET` (server secret,
+     not the public site key).
+2. **Login CAPTCHA service unavailable**
+   - Root cause: auth secret had been set to the public site key; Cloudflare
+     returned HTTP 400 `invalid-input-secret`, which Better Auth maps to
+     `CAPTCHA service unavailable`.
+   - User then configured a valid secret. Guard now prevents the site-key
+     mistake at startup.
+3. **Login action mismatch**
+   - Root cause: `apps/web/src/features/staff/StaffEntryPage.tsx` rendered
+     `TurnstileChallenge` without `action="login"`, so the web `/admin/login`
+     and `/staff/login` tokens had an empty action.
+   - Fix: added `action="login"` to that widget.
+   - Regression test added to `staff-entry.spec.tsx` for both routes.
+   - Kept backend `expectedAction: 'login'`; did NOT weaken action enforcement.
+   - Admin app `PortalLoginPage.tsx` already passed `action="login"`.
 
-## Test gotchas (admin)
+## Verification this session
 
-- `(Optional)` marker renders WITHOUT a space → query `'AA Number(Optional)'`.
-- SweetAlert sets `aria-hidden` on the rest of the page while open.
-- Admin specs: no per-test mock reset — `vi.fn()` implementations persist.
-- Load flakes: re-run a flaked suite solo before believing it; root `pnpm test`
-  pins `--maxWorkers=2`. Never two admin suites in parallel in one workspace.
-- Prettier NOT a gate. Gate on `tsc` + `eslint`.
-- `formatMoneyInput` (user WIP) now strips invalid chars from the Amount field —
-  the "blocks invalid payment amount 1e3" tests are stale against it (8 failures).
+- `pnpm --filter api exec vitest run _lib/auth.spec.ts _lib/auth-turnstile.spec.ts _lib/startup-diagnostics.spec.ts --maxWorkers=1` — 31 passed.
+- `pnpm --filter @afhomes/web exec vitest run src/features/staff/staff-entry.spec.tsx --maxWorkers=1` — 18 passed.
+- `pnpm --filter @afhomes/admin exec vitest run src/features/auth/portal-login.spec.tsx --maxWorkers=1` — 15 passed.
+- `pnpm --filter api typecheck` — passed.
+- `pnpm --filter @afhomes/web typecheck` — passed.
+- `pnpm check:env` — passed (749 browser + 554 server files).
+- `pnpm dev` — starts; MongoDB ping/connection verified.
+- Full `pnpm test`, full `pnpm typecheck`, `pnpm lint`, `pnpm build`,
+  `pnpm test:db:local` were NOT re-run this session.
 
 ## Open threads
 
-- **Pre-existing DB failures** (section 48, 58, 77) — unrelated to this work;
-  reconcile in a separate pass.
-- **Customer-purge review** (committed but unapplied migration) — 8 verified
-  SQL defects, never tested. User declined the delete/deactivate UI.
-- **RF Only / Refunded / Installment** payment statuses — not defined; deferred.
-- **Finance queue Status chip** changed from lifecycle to payment-derived; lifecycle
-  info still in details panel. Consider showing both if needed.
-- **aria-label** on finance queue rows still says "Record a … payment" though
-  click now opens details — accessibility follow-up.
-- **Live authenticated visual pass** not done (no staff session).
-- Production apply of `20261213…`+ migrations — approval-gated, not run.
+- **Re-test login after hard refresh** (pending user confirmation). Use
+  `http://localhost:5184/admin/login` (admin app) or
+  `http://localhost:5183/admin/login` / `/staff/login` (web dev entry); Vite
+  HMR may have cached the old widget. If action mismatch persists, confirm
+  which URL/port produced the request.
+- **MongoDB conversion still gated:** no Atlas data import, migration prep
+  unmounted, hosted deployment/browser acceptance pending. Production routing
+  remains Supabase. Preserve existing Supabase data, admin, passwords,
+  assignments; no destructive resets.
+- **Carried-forward DB failures from prior session:** section 48 (customer
+  import referral hierarchy), section 58 (purchase terms reason refusal ×3),
+  section 77 (OST team transfer) still block `pnpm test:db:harness`; not
+  re-verified this session.
+- **Carried-forward product threads:** RF Only/Refunded/Installment payment
+  statuses undefined; finance queue row `aria-label` still says “Record a …”
+  although click opens details; live authenticated visual pass pending;
+  customer-purge review still outstanding.
+- **No commit/push/deploy** authorized or performed.
 
 ## Verify (from root)
 
 ```sh
-pnpm test                     # canonical gate
-pnpm typecheck                # turbo 7 + tsc -p supabase (clean)
-pnpm lint                     # 1 error (user WIP) + 24 warnings
-pnpm check:env                # PASS
-pnpm build                    # admin build green
-pnpm test:db:local            # 1602/1606 (4 pre-existing failures)
+pnpm dev                     # MongoDB localhost: API 3084, admin 5184, web 5183
+pnpm --filter api typecheck
+pnpm --filter @afhomes/web typecheck
+pnpm --filter api exec vitest run _lib/auth.spec.ts _lib/auth-turnstile.spec.ts _lib/startup-diagnostics.spec.ts --maxWorkers=1
+pnpm --filter @afhomes/web exec vitest run src/features/staff/staff-entry.spec.tsx --maxWorkers=1
+pnpm --filter @afhomes/admin exec vitest run src/features/auth/portal-login.spec.tsx --maxWorkers=1
+pnpm check:env
+# full gates when needed:
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+pnpm test:db:local
 pnpm test:db:harness          # blocked by pre-existing section 77
 ```

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAuthNodeHandler } from './auth-transport.js';
+import { createMemoryAuthFixture } from './testing/auth-fixture.js';
 import { makeRes } from './testing/supabase-fake.js';
 
 const servers: http.Server[] = [];
@@ -11,7 +12,26 @@ async function serve(handler: (request: Request) => Promise<Response>) {
   const address = server.address() as { port: number };
   return `http://127.0.0.1:${address.port}/api/v1/auth/identity`;
 }
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** A browser that sends a request and then leaves (reload, navigation, closed tab). */
+function abandon(url: string, body: string, contentLength = body.length) {
+  const request = http.request(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(contentLength),
+      Origin: 'http://localhost:3000',
+    },
+  });
+  request.on('error', () => {});
+  if (body.length === contentLength) request.end(body);
+  else request.write(body);
+  setTimeout(() => request.destroy(), 50);
+}
+const abortLogs = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.filter((args) => /aborted|SERVER_ERROR|ECONNRESET/.test(args.map(String).join(' ')));
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -125,5 +145,45 @@ describe('unmounted raw auth transport', () => {
     });
     expect(status).toBe(413);
     expect(consumed).not.toHaveBeenCalled();
+  });
+
+  it('delivers a fully received body even when the browser leaves before it is read', async () => {
+    let settle!: (value: string) => void;
+    const received = new Promise<string>((resolve) => (settle = resolve));
+    const url = await serve(async (request) => {
+      await delay(200);
+      settle(await request.text().catch((error: Error) => `FAILED ${error.message}`));
+      return new Response('{}');
+    });
+    abandon(url + '/get-session', '{}');
+    expect(await received).toBe('{}');
+  });
+
+  it('never dispatches a body the browser abandoned midway', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const handler = vi.fn(async () => new Response('{}'));
+    const url = await serve(handler);
+    abandon(url + '/sign-in/email', '{"email"', 64);
+    await delay(250);
+    expect(handler).not.toHaveBeenCalled();
+    expect(abortLogs(errors)).toEqual([]);
+  });
+
+  it('does not log a server error when the browser leaves during a real session check', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const test = createMemoryAuthFixture();
+    let settle!: () => void;
+    const finished = new Promise<void>((resolve) => (settle = resolve));
+    const url = await serve(async (request) => {
+      await delay(200); // stands in for rate-limit, Turnstile and Atlas latency
+      try {
+        return await test.auth.handler(request);
+      } finally {
+        settle();
+      }
+    });
+    abandon(url + '/get-session', '{}');
+    await finished;
+    expect(abortLogs(errors)).toEqual([]);
   });
 });

@@ -5,17 +5,19 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  MetricCard,
   OverflowMenu,
   PageHeader,
   SearchField,
   Select,
   Skeleton,
   StatusChip,
+  type StatusTone,
 } from '@afhomes/ui';
-import { formatCountOrDash } from '@afhomes/shared';
+import { formatCount, formatCountOrDash } from '@afhomes/shared';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
-import { formatDateTime } from '../../lib/format';
+import { formatDate, formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { humanizeCode } from '../business/format';
 import { membershipKeys } from '../business/queryKeys';
@@ -24,6 +26,26 @@ import { getMemberships } from './services';
 import styles from './MembershipsPage.module.css';
 
 const STATUSES = ['', 'active', 'expired', 'suspended', 'cancelled'];
+
+const STATUS_TONE: Record<string, StatusTone> = {
+  active: 'success',
+  expired: 'warning',
+  suspended: 'warning',
+  cancelled: 'danger',
+};
+
+/** Date on top, time underneath: the full instant without a wide column. */
+function DateCell({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <span className={styles.muted}>—</span>;
+  return (
+    <time dateTime={iso} title={formatDateTime(iso)} className={styles.dateCell}>
+      <span>{formatDate(iso)}</span>
+      <span className={styles.muted}>
+        {new Date(iso).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+      </span>
+    </time>
+  );
+}
 
 /**
  * Membership (card) management queue.
@@ -63,32 +85,24 @@ export function MembershipsPage() {
   // The sr-only line keeps the exact pending copy the earlier state used.
   if (query.isPending)
     return (
-      <section>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading memberships"
-        >
+      <section className={styles.page}>
+        <div className={styles.skeleton} role="status" aria-label="Loading memberships">
           <span className="sr-only">Loading memberships…</span>
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+          <div className={styles.skeletonHead}>
             <Skeleton style={{ height: 32, maxWidth: 240 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+            <Skeleton style={{ height: 16, maxWidth: 320 }} />
           </div>
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <Skeleton style={{ height: 88 }} />
-            <Skeleton style={{ height: 88 }} />
-            <Skeleton style={{ height: 88 }} />
+          <div className={styles.summary}>
+            <Skeleton style={{ height: 120 }} />
+            <Skeleton style={{ height: 120 }} />
+            <Skeleton style={{ height: 120 }} />
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
-            <Skeleton style={{ height: 40, width: 160 }} />
-          </div>
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
-            <Skeleton style={{ height: 48 }} />
+          <Skeleton style={{ height: 48 }} />
+          <div className={styles.skeletonRows}>
+            <Skeleton style={{ height: 64 }} />
+            <Skeleton style={{ height: 64 }} />
+            <Skeleton style={{ height: 64 }} />
+            <Skeleton style={{ height: 64 }} />
           </div>
         </div>
       </section>
@@ -96,28 +110,19 @@ export function MembershipsPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader
-        title="Memberships"
-        description="Issued member cards. Open a card to print it or to rotate its credentials."
-      />
+      <PageHeader title="Memberships" description="Issued member cards. Open one to manage." />
 
-      <div className={styles.summary} aria-label="Membership summary">
-        <StatusChip
-          label={`Cards in view: ${formatCountOrDash(rows.length)}`}
-          tone="neutral"
-          icon="grid"
-        />
-        <StatusChip
-          label={`Active cards: ${formatCountOrDash(activeCount)}`}
-          tone="success"
-          icon="user-check"
-        />
-        <StatusChip
-          label={`Points held: ${formatCountOrDash(pointsTotal)}`}
-          tone="neutral"
-          icon="wallet"
-        />
-      </div>
+      {query.isError ? null : (
+        <section className={styles.summary} aria-label="Membership summary">
+          <MetricCard label="Cards in view" value={formatCountOrDash(rows.length)} icon="grid" />
+          <MetricCard
+            label="Active cards"
+            value={formatCountOrDash(activeCount)}
+            icon="user-check"
+          />
+          <MetricCard label="Points held" value={formatCountOrDash(pointsTotal)} icon="wallet" />
+        </section>
+      )}
 
       <FilterBar
         search={
@@ -148,6 +153,17 @@ export function MembershipsPage() {
         }
       />
 
+      {!query.isError && rows.length > 0 ? (
+        <div className={styles.resultsHead}>
+          <h2 className={styles.resultsTitle}>
+            {formatCount(rows.length)} {rows.length === 1 ? 'card' : 'cards'}
+          </h2>
+          <span className={styles.updating} aria-live="polite">
+            {query.isPlaceholderData ? 'Updating results…' : ''}
+          </span>
+        </div>
+      ) : null}
+
       {query.isError ? (
         <ErrorState
           error={query.error}
@@ -156,7 +172,12 @@ export function MembershipsPage() {
           onRetry={() => void query.refetch()}
         />
       ) : rows.length === 0 ? (
-        <EmptyState title="No memberships" description="Activated cards appear here." />
+        <EmptyState
+          title="No memberships"
+          description={
+            needle || status ? 'Try another search or status.' : 'Activated cards appear here.'
+          }
+        />
       ) : (
         <div
           role="region"
@@ -164,21 +185,27 @@ export function MembershipsPage() {
           tabIndex={0}
           className={`table-scroll ${styles.tableWrap}`}
         >
-          <table>
+          <table className={styles.table}>
             <thead>
               <tr>
-                <th>Member</th>
-                <th>Number</th>
-                <th>Tier</th>
-                <th>Category</th>
-                <th>Status</th>
-                <th>Points</th>
-                <th>Activated</th>
-                <th>Valid until</th>
-                <th>Card Issued</th>
-                <th>Last Printed</th>
-                <th>Prints</th>
-                <th>Actions</th>
+                <th scope="col">Member</th>
+                <th scope="col">Number</th>
+                <th scope="col">Tier</th>
+                <th scope="col">Category</th>
+                <th scope="col">Status</th>
+                <th scope="col" className={styles.numeric}>
+                  Points
+                </th>
+                <th scope="col">Activated</th>
+                <th scope="col">Valid until</th>
+                <th scope="col">Card Issued</th>
+                <th scope="col">Last Printed</th>
+                <th scope="col" className={styles.numeric}>
+                  Prints
+                </th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -202,31 +229,35 @@ export function MembershipsPage() {
                         <span className={styles.identityAvatar} aria-hidden="true">
                           {(m.customerName.trim().charAt(0) || '•').toUpperCase()}
                         </span>
-                        <span className={styles.identityName}>{m.customerName}</span>
+                        <span className={styles.identityName} title={m.customerName}>
+                          {m.customerName}
+                        </span>
                       </span>
                     </td>
-                    <td data-label="Number">{m.membershipNumber}</td>
+                    <td data-label="Number">
+                      <span className={styles.numberRef}>{m.membershipNumber}</span>
+                    </td>
                     <td data-label="Tier">
                       <TierBadge tier={tierCode || null} />
                     </td>
                     <td data-label="Category">{m.categoryName ?? '—'}</td>
                     <td data-label="Status">
-                      <StatusChip label={humanizeCode(m.status)} />
+                      <StatusChip label={humanizeCode(m.status)} tone={STATUS_TONE[m.status]} />
                     </td>
-                    <td data-label="Points" className={styles.numeric}>
+                    <td data-label="Points" className={`${styles.numeric} ${styles.points}`}>
                       {formatCountOrDash(m.pointsBalance)}
                     </td>
                     <td data-label="Activated">
-                      {m.activatedAt ? formatDateTime(m.activatedAt) : '—'}
+                      <DateCell iso={m.activatedAt} />
                     </td>
                     <td data-label="Valid until">
-                      {m.expiresAt ? formatDateTime(m.expiresAt) : '—'}
+                      <DateCell iso={m.expiresAt} />
                     </td>
                     <td data-label="Card Issued">
-                      {m.cardIssuedAt ? formatDateTime(m.cardIssuedAt) : '—'}
+                      <DateCell iso={m.cardIssuedAt} />
                     </td>
                     <td data-label="Last Printed">
-                      {m.lastPrintedAt ? formatDateTime(m.lastPrintedAt) : '—'}
+                      <DateCell iso={m.lastPrintedAt} />
                     </td>
                     <td data-label="Prints" className={styles.numeric}>
                       {formatCountOrDash(m.printCount)}

@@ -596,6 +596,41 @@ describe('commission qualification ownership', () => {
     expect(row.textContent).toMatch(/Awaiting final qualification/);
     expect(within(row).getByRole('button', { name: 'Decide' })).toBeEnabled();
   });
+
+  it('lists recorded progress steps in order and flags only rows needing a decision', async () => {
+    install({
+      'GET /commissions': list([
+        AWAITING,
+        {
+          ...AWAITING,
+          id: '99990000-0000-4000-8000-000000002700',
+          saleNumber: 'SALE-PAIDOUT',
+          status: 'paid',
+          qualifiedAt: '2026-09-28T10:00:00.000Z',
+          earnedAt: '2026-09-28T10:00:00.000Z',
+          paidAt: '2026-09-30T10:00:00.000Z',
+        },
+        {
+          ...AWAITING,
+          id: '99990000-0000-4000-8000-000000002701',
+          saleNumber: 'SALE-VOIDED',
+          status: 'cancelled',
+          qualifiedAt: '2026-09-28T10:00:00.000Z',
+        },
+      ]),
+    });
+    render('/admin/finance/commissions', ADMIN_USER);
+    const steps = (sale: string) =>
+      within(screen.getByText(sale).closest('tr')!)
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('span')?.textContent);
+
+    const awaitingRow = (await screen.findByText('SALE-QUALIFY')).closest('tr')!;
+    expect(steps('SALE-PAIDOUT')).toEqual(['Created', 'Qualified', 'Earned', 'Paid']);
+    expect(steps('SALE-VOIDED')).toEqual(['Created', 'Cancelled']);
+    expect(awaitingRow).toHaveAttribute('data-attention');
+    expect(screen.getByText('SALE-PAIDOUT').closest('tr')).not.toHaveAttribute('data-attention');
+  });
 });
 
 describe('payment exact-decimal input UX', () => {

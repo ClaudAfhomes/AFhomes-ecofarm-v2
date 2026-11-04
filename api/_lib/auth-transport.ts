@@ -42,7 +42,15 @@ export function createAuthNodeHandler(
       if (Number(req.headers['content-length']) > BODY_LIMIT)
         return fail(413, 'Authentication request is too large');
       // Use the same adapter as Better Auth's Node wrapper, with a bounded raw body.
-      const request = getRequest({ request: req, base: origin, bodySizeLimit: BODY_LIMIT });
+      // Read it fully first: a browser leaving mid-request would otherwise error the
+      // live stream inside Better Auth and be logged as a server error.
+      const streamed = getRequest({ request: req, base: origin, bodySizeLimit: BODY_LIMIT });
+      const body = streamed.body ? await streamed.arrayBuffer() : null;
+      const request = new Request(streamed.url, {
+        method: streamed.method,
+        headers: streamed.headers,
+        body,
+      });
       const response = await handler(request);
       response.headers.set('Cache-Control', 'no-store');
       await setResponse(res, response);
