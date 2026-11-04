@@ -288,8 +288,8 @@ export function MembershipDetailPage() {
                   <TextAreaField
                     id="membership-rotate-reason"
                     name="rotateReason"
-                    label="Reason (required, min 5 characters)"
-                    optional
+                    label="Reason"
+                    hint="At least 5 characters."
                     value={reason}
                     onChange={setReason}
                     rows={3}

@@ -138,7 +138,7 @@
 .heroIdentity {
   display: grid;
   gap: var(--space-1);
-  flex: 1 1 12rem;
+  flex: 1 1 9rem;
   min-width: 0;
 }
 
@@ -176,7 +176,6 @@
 }
 
 .factsTight {
-  grid-template-columns: 1fr;
   gap: var(--space-3);
   padding-top: 0;
   border-top: 0;
@@ -209,12 +208,26 @@
 /* ---------- Card operations ---------- */
 
 .actions {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
-.actions > button {
-  width: 100%;
+/* Full-width buttons only where the panel is narrow: phones and the side column. */
+@container membership (max-width: 39.99rem) {
+  .actions > button {
+    width: 100%;
+  }
+}
+
+@container membership (min-width: 64rem) {
+  .aside .actions > button {
+    width: 100%;
+  }
+
+  .aside .factsTight {
+    grid-template-columns: 1fr;
+  }
 }
 
 .outcome {
@@ -253,6 +266,22 @@
   display: grid;
   gap: var(--space-3);
   padding: 0 var(--space-3) var(--space-3);
+}
+
+.securityBody > button {
+  justify-self: start;
+}
+
+@container membership (max-width: 39.99rem) {
+  .securityBody > button {
+    justify-self: stretch;
+  }
+}
+
+@container membership (min-width: 64rem) {
+  .aside .securityBody > button {
+    justify-self: stretch;
+  }
 }
 
 .securityTitle {
