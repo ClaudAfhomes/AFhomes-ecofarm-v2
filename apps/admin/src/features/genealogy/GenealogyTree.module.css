@@ -1,6 +1,19 @@
+/* Downline tree. Children nest inside their parent, so every level adds one
+   indent step; the step shrinks on phones so deep branches stay readable. */
 .tree {
+  /* Rail sits under the expand chevron; indent is the gap after the rail. */
+  --tree-rail: 19px;
+  --tree-indent: var(--space-5);
   display: grid;
   gap: var(--space-1);
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .tree {
+    --tree-rail: 6px;
+    --tree-indent: var(--space-2);
+  }
 }
 
 .nodeWrapper {
@@ -9,9 +22,10 @@
 
 .nodeRow {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
 }
@@ -24,29 +38,41 @@
   background: var(--color-state-hover);
 }
 
-.expandBtn {
-  width: 24px;
-  height: 24px;
+/* 40px tap target; the spacer keeps leaf avatars aligned with their siblings. */
+.expandBtn,
+.expandSpacer {
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
+}
+
+.expandBtn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
 }
 
 .expandBtn:hover {
   color: var(--color-text-primary);
+  background: var(--color-state-hover);
+}
+
+.expandBtn:focus-visible {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: 1px;
 }
 
 .avatar {
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
+  margin-top: 6px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
   color: #fff;
@@ -57,15 +83,38 @@
   justify-content: center;
 }
 
-.name {
+/* Name and chips share one line when there is room and wrap beneath the
+   name when there is not, always aligned after the avatar. */
+.body {
+  display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  min-height: 40px;
+}
+
+.name {
+  flex: 1 1 10rem;
+  min-width: 0;
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .children {
   display: grid;
   gap: var(--space-1);
+  min-width: 0;
+  margin-left: var(--tree-rail);
+  padding-left: var(--tree-indent);
   border-left: 2px solid var(--color-border-subtle);
 }
 

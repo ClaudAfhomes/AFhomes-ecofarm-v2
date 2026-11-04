@@ -106,6 +106,9 @@
     text-align: right;
     min-width: 0;
     max-width: 100%;
+    /* Bare text (emails, names) is an anonymous flex item the rule below
+       cannot reach; it inherits this so a long word wraps, not clips. */
+    overflow-wrap: anywhere;
   }
 
   .tableWrap tbody > tr > td > * {

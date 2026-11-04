@@ -100,7 +100,7 @@ export function GenealogyDetailsPage() {
           role="status"
           aria-label="Loading seller"
         >
-          <span className="sr-only">Loading sellerâ€¦</span>
+          <span className="sr-only">Loading seller…</span>
           <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
             <Skeleton style={{ height: 32, maxWidth: 280 }} />
             <Skeleton style={{ height: 16, maxWidth: 360 }} />
@@ -137,7 +137,7 @@ export function GenealogyDetailsPage() {
     <section className={styles.page}>
       <PageHeader
         title="Seller Record"
-        description={`${node.data.fullName} Â· ${humanizeCode(node.data.role)}`}
+        description={`${node.data.fullName} · ${humanizeCode(node.data.role)}`}
         actions={
           <Button variant="secondary" onClick={() => navigate('/admin/genealogy')}>
             Back
@@ -147,7 +147,7 @@ export function GenealogyDetailsPage() {
 
       <section className={styles.hero} aria-label="Seller identity">
         <span className={styles.heroAvatar} aria-hidden="true">
-          {(node.data.fullName.trim().charAt(0) || 'â€¢').toUpperCase()}
+          {(node.data.fullName.trim().charAt(0) || '•').toUpperCase()}
         </span>
         <div className={styles.heroText}>
           <div className={styles.heroNameRow}>
@@ -177,7 +177,7 @@ export function GenealogyDetailsPage() {
         {chain.isPending ? (
           <p role="status">
             <Skeleton style={{ height: 64 }} />
-            <span className="sr-only">Loading headâ€¦</span>
+            <span className="sr-only">Loading head…</span>
           </p>
         ) : chain.isError ? (
           <ErrorState
@@ -189,7 +189,7 @@ export function GenealogyDetailsPage() {
         ) : chain.data.length ? (
           <article className={styles.headCard} aria-label="Immediate head">
             <span className={styles.headAvatar} aria-hidden="true">
-              {(chain.data[0]!.fullName.trim().charAt(0) || 'â€¢').toUpperCase()}
+              {(chain.data[0]!.fullName.trim().charAt(0) || '•').toUpperCase()}
             </span>
             <div className={styles.headText}>
               {canViewUplineProfile(chain.data[0]!, user) ? (
@@ -207,10 +207,10 @@ export function GenealogyDetailsPage() {
               <p className={styles.headMeta}>
                 <StatusChip label={humanizeCode(chain.data[0]!.role)} />
                 {chain.data.length > 1 ? (
-                  <span className={styles.panelNote}> Â· reads through an unavailable head</span>
+                  <span className={styles.panelNote}> · reads through an unavailable head</span>
                 ) : null}
                 {chain.data.length > 1 && !canViewUplineProfile(chain.data[1]!, user) && (
-                  <span className={styles.panelNote}> Â· upline profile restricted</span>
+                  <span className={styles.panelNote}> · upline profile restricted</span>
                 )}
               </p>
             </div>
@@ -225,7 +225,7 @@ export function GenealogyDetailsPage() {
         {summary.isPending ? (
           <p role="status">
             <Skeleton style={{ height: 88 }} />
-            <span className="sr-only">Loading summaryâ€¦</span>
+            <span className="sr-only">Loading summary…</span>
           </p>
         ) : summary.isError ? (
           <ErrorState
@@ -299,7 +299,7 @@ export function GenealogyDetailsPage() {
           viewerId={user?.id ?? ''}
           onMemberClick={handleMemberClick}
         />
-        {memberLoading && <div className={styles.loading}>Loading member detailsâ€¦</div>}
+        {memberLoading && <div className={styles.loading}>Loading member details…</div>}
       </section>
 
       {viewingMember && (

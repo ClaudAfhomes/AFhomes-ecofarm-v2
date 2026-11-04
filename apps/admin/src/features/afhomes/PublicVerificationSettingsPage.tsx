@@ -31,7 +31,7 @@ export function PublicVerificationSettingsPage() {
     <section className={styles.page}>
       <PageHeader
         title="Public Verification Settings"
-        description="Control the public IST/OST verification service and company information displayed in results."
+        description="Control public verification and results."
       />
       {settings.isPending ? (
         <p role="status">Loading settings…</p>
@@ -153,105 +153,130 @@ function SettingsForm({
   };
 
   return (
-    <form
-      className={styles.form}
-      onSubmit={handleSubmit}
-    >
+    <form className={styles.form} onSubmit={handleSubmit}>
+      <div className={styles.formIntro}>
+        <p className={styles.helpText}>
+          Manage verification, accounts, notices, privacy.
+        </p>
+      </div>
+
       {/* Section 1: Public Search Controls */}
-      <fieldset className={styles.section}>
-        <legend className={styles.sectionLegend}>Public Search Controls</legend>
-        <label className={styles.toggle}>
-          <input
-            type="checkbox"
-            checked={enabled}
+      <section className={styles.sectionCard} aria-labelledby="public-search-heading">
+        <header className={styles.sectionHeader}>
+          <h2 id="public-search-heading" className={styles.sectionTitle}>Public Search Controls</h2>
+          <p className={styles.sectionDescription}>
+            Enable or disable public verification and manage contact retention.
+          </p>
+        </header>
+        <div className={styles.toggleGrid}>
+          <label className={styles.toggleRow}>
+            <span className={styles.toggleCopy}>
+              <span className={styles.toggleLabel}>Enable public IST/OST search</span>
+              <span className={styles.helpText}>
+                Disabling search stops new verification requests. Saved records continue through scheduled cleanup.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              className={styles.switch}
+              aria-label="Enable public IST/OST search"
+              checked={enabled}
+              disabled={disabled}
+              onChange={(event) => { setEnabled(event.target.checked); handleChange(); }}
+            />
+          </label>
+          <label className={styles.toggleRow}>
+            <span className={styles.toggleCopy}>
+              <span className={styles.toggleLabel}>
+                Limit each IP address to 3 successful searches in 24 hours
+              </span>
+              <span className={styles.helpText}>
+                Turn off for testing without the daily search limit. This applies to all public visitors. Anti-bot checks and short-term request limits stay active.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              className={styles.switch}
+              aria-label="Limit each IP address to 3 successful searches in 24 hours"
+              checked={dailyLimitEnabled}
+              disabled={disabled}
+              onChange={(event) => { setDailyLimitEnabled(event.target.checked); handleChange(); }}
+            />
+          </label>
+        </div>
+        <div className={styles.fieldGrid}>
+          <TextField
+            id="verification-phone"
+            name="verificationPhone"
+            label="Company verification phone"
+            value={phone}
+            onChange={(v) => { setPhone(v); handleChange(); }}
             disabled={disabled}
-            onChange={(event) => { setEnabled(event.target.checked); handleChange(); }}
           />
-          Enable public IST/OST search
-        </label>
-        <p className={styles.helpText}>
-          Disabling search stops new verification requests. Saved records continue through scheduled
-          cleanup.
-        </p>
-        <TextField
-          id="verification-phone"
-          name="verificationPhone"
-          label="Company verification phone"
-          value={phone}
-          onChange={(v) => { setPhone(v); handleChange(); }}
-          disabled={disabled}
-        />
-        <label className={styles.toggle}>
-          <input
-            type="checkbox"
-            checked={dailyLimitEnabled}
+          <TextField
+            id="retention-days"
+            name="retentionDays"
+            inputMode="numeric"
+            label="Contact retention (days)"
+            value={days}
+            onChange={(v) => { setDays(v); handleChange(); }}
             disabled={disabled}
-            onChange={(event) => { setDailyLimitEnabled(event.target.checked); handleChange(); }}
           />
-          Limit each IP address to 3 successful searches in 24 hours
-        </label>
-        <p className={styles.helpText}>
-          Turn off for testing without the daily search limit. This applies to all public visitors.
-          Anti-bot checks and short-term request limits stay active. Turn it back on after testing.
-        </p>
-        <TextField
-          id="retention-days"
-          name="retentionDays"
-          inputMode="numeric"
-          label="Contact retention (days)"
-          value={days}
-          onChange={(v) => { setDays(v); handleChange(); }}
-          disabled={disabled}
-          hint="1–3650 whole days. Applies to existing contacts at hourly cleanup, including when shortened."
-        />
+        </div>
         <Alert variant={settings.cleanupReady ? 'success' : 'warning'}>
           {settings.cleanupReady
             ? 'Cleanup ready: the hourly contact-cleanup job is configured and active.'
             : 'Cleanup not ready: the hourly contact-cleanup job is missing, inactive or misconfigured. Public verification is unavailable.'}
         </Alert>
-        <p className={styles.helpText}>Cleanup readiness is checked automatically. It cannot be enabled with a checkbox.</p>
-      </fieldset>
+        <p className={styles.helpText}>Cleanup status is automatic.</p>
+      </section>
 
       {/* Section 2: Customer Support */}
-      <fieldset className={styles.section}>
-        <legend className={styles.sectionLegend}>Customer Support & Payment Inquiries</legend>
-        <p className={styles.helpText}>
-          Information shown in the Customer Support section of public verification results.
-        </p>
-        <TextField
-          id="support-heading"
-          name="supportHeading"
-          label="Section heading"
-          value={supportHeading}
-          onChange={(v) => { setSupportHeading(v); handleChange(); }}
-          disabled={disabled}
-        />
-        <TextField
-          id="support-email"
-          name="supportEmail"
-          label="Support email"
-          type="email"
-          value={supportEmail}
-          onChange={(v) => { setSupportEmail(v); handleChange(); }}
-          disabled={disabled}
-        />
-        <TextField
-          id="support-phone"
-          name="supportPhone"
-          label="Support phone"
-          type="tel"
-          value={supportPhone}
-          onChange={(v) => { setSupportPhone(v); handleChange(); }}
-          disabled={disabled}
-        />
-      </fieldset>
+      <section className={styles.sectionCard} aria-labelledby="support-heading">
+        <header className={styles.sectionHeader}>
+          <h2 id="support-heading" className={styles.sectionTitle}>Customer Support & Payment Inquiries</h2>
+          <p className={styles.sectionDescription}>
+            Information shown in the Customer Support section of public verification results.
+          </p>
+        </header>
+        <div className={styles.fieldGrid}>
+          <TextField
+            id="support-heading"
+            name="supportHeading"
+            label="Section heading"
+            value={supportHeading}
+            onChange={(v) => { setSupportHeading(v); handleChange(); }}
+            disabled={disabled}
+          />
+          <TextField
+            id="support-email"
+            name="supportEmail"
+            label="Support email"
+            type="email"
+            value={supportEmail}
+            onChange={(v) => { setSupportEmail(v); handleChange(); }}
+            disabled={disabled}
+          />
+          <TextField
+            id="support-phone"
+            name="supportPhone"
+            label="Support phone"
+            type="tel"
+            value={supportPhone}
+            onChange={(v) => { setSupportPhone(v); handleChange(); }}
+            disabled={disabled}
+          />
+        </div>
+      </section>
 
       {/* Section 3: Official Company Bank Accounts */}
-      <fieldset className={styles.section}>
-        <legend className={styles.sectionLegend}>Official Company Bank Accounts</legend>
-        <p className={styles.helpText}>
-          Bank account details shown in the Official Company Bank Accounts section of public results.
-        </p>
+      <section className={styles.sectionCard} aria-labelledby="bank-heading">
+        <header className={styles.sectionHeader}>
+          <h2 id="bank-heading" className={styles.sectionTitle}>Official Company Bank Accounts</h2>
+          <p className={styles.sectionDescription}>
+            Bank account details shown in the Official Company Bank Accounts section of public results.
+          </p>
+        </header>
         <TextField
           id="bank-holder"
           name="bankHolder"
@@ -261,11 +286,12 @@ function SettingsForm({
           disabled={disabled}
         />
         <div className={styles.bankPair}>
-          <div className={styles.bankFieldGroup}>
+          <div className={styles.bankCard}>
+            <h3 className={styles.bankCardTitle}>Bank 1</h3>
             <TextField
               id="bank1-name"
               name="bank1Name"
-              label="Bank 1 name"
+              label="Bank name"
               value={bank1Name}
               onChange={(v) => { setBank1Name(v); handleChange(); }}
               disabled={disabled}
@@ -273,18 +299,19 @@ function SettingsForm({
             <TextField
               id="bank1-account"
               name="bank1Account"
-              label="Bank 1 account number"
+              label="Account number"
               value={bank1Account}
               onChange={(v) => { setBank1Account(v); handleChange(); }}
               disabled={disabled}
               hint="Enter as text to preserve leading zeros"
             />
           </div>
-          <div className={styles.bankFieldGroup}>
+          <div className={styles.bankCard}>
+            <h3 className={styles.bankCardTitle}>Bank 2</h3>
             <TextField
               id="bank2-name"
               name="bank2Name"
-              label="Bank 2 name"
+              label="Bank name"
               value={bank2Name}
               onChange={(v) => { setBank2Name(v); handleChange(); }}
               disabled={disabled}
@@ -292,7 +319,7 @@ function SettingsForm({
             <TextField
               id="bank2-account"
               name="bank2Account"
-              label="Bank 2 account number"
+              label="Account number"
               value={bank2Account}
               onChange={(v) => { setBank2Account(v); handleChange(); }}
               disabled={disabled}
@@ -308,14 +335,16 @@ function SettingsForm({
           onChange={(v) => { setCheckPayee(v); handleChange(); }}
           disabled={disabled}
         />
-      </fieldset>
+      </section>
 
       {/* Section 4: Payment Notices */}
-      <fieldset className={styles.section}>
-        <legend className={styles.sectionLegend}>Payment Notices</legend>
-        <p className={styles.helpText}>
-          Reminder messages shown in the public verification results.
-        </p>
+      <section className={styles.sectionCard} aria-labelledby="notices-heading">
+        <header className={styles.sectionHeader}>
+          <h2 id="notices-heading" className={styles.sectionTitle}>Payment Notices</h2>
+          <p className={styles.sectionDescription}>
+            Reminder messages shown in the public verification results.
+          </p>
+        </header>
         <TextAreaField
           id="bank-reminder"
           name="bankReminder"
@@ -336,16 +365,18 @@ function SettingsForm({
           disabled={disabled}
           rows={3}
           maxLength={500}
-          hint="Friendly reminder about agent payment policy. Displayed without warning styling."
+          hint="Agent payment policy reminder."
         />
-      </fieldset>
+      </section>
 
       {/* Section 5: Privacy Notice */}
-      <fieldset className={styles.section}>
-        <legend className={styles.sectionLegend}>Privacy Notice</legend>
-        <p className={styles.helpText}>
-          The privacy notice displayed to visitors before they can search. Use Edit mode to modify, Preview mode to see how it will appear.
-        </p>
+      <section className={styles.sectionCard} aria-labelledby="privacy-heading">
+        <header className={styles.sectionHeader}>
+          <h2 id="privacy-heading" className={styles.sectionTitle}>Privacy Notice</h2>
+          <p className={styles.sectionDescription}>
+            The privacy notice displayed to visitors before they can search. Use Edit mode to modify, Preview mode to see how it will appear.
+          </p>
+        </header>
         <Tabs
           items={noticeTabs}
           value={noticeMode}
@@ -362,24 +393,28 @@ function SettingsForm({
             disabled={disabled}
             rows={18}
             maxLength={20000}
-            hint="Use {{CONTACT_RETENTION_DAYS}} for retention and {{SEARCH_LIMIT_NOTICE}} for the current daily limit. Notice or daily-limit changes require visitors to acknowledge the new version."
+            hint="Use tokens; changes need acknowledgement."
           />
         ) : (
           <div className={styles.previewWrapper}>
             {renderPreview(notice)}
           </div>
         )}
-        <label className={styles.toggle}>
+        <label className={styles.toggleRow}>
+          <span className={styles.toggleCopy}>
+            <span className={styles.toggleLabel}>Privacy notice approved</span>
+            <span className={styles.helpText}>Approve the notice above before enabling public verification.</span>
+          </span>
           <input
             type="checkbox"
+            className={styles.switch}
+            aria-label="Privacy notice approved"
             checked={privacyApproved}
             disabled={disabled}
             onChange={(event) => { setPrivacyApproved(event.target.checked); handleChange(); }}
           />
-          Privacy notice approved
         </label>
-        <p className={styles.helpText}>Approve the notice above before enabling public verification.</p>
-      </fieldset>
+      </section>
 
       {validation || save.error ? (
         <Alert variant="danger">{validation || save.error?.message}</Alert>
@@ -387,19 +422,19 @@ function SettingsForm({
 
       {unsaved && !save.isPending && (
         <div className={styles.unsavedAlert}>
-          <Alert variant="warning">
-            You have unsaved changes.
-          </Alert>
+          <Alert variant="warning">You have unsaved changes.</Alert>
         </div>
       )}
 
-      {writable ? (
-        <Button type="submit" disabled={save.isPending} loading={save.isPending}>
-          Save Changes
-        </Button>
-      ) : (
-        <p className={styles.readOnly}>You have read-only access to these settings.</p>
-      )}
+      <div className={styles.saveBar}>
+        {writable ? (
+          <Button type="submit" disabled={save.isPending} loading={save.isPending}>
+            Save Changes
+          </Button>
+        ) : (
+          <p className={styles.readOnly}>You have read-only access to these settings.</p>
+        )}
+      </div>
     </form>
   );
 }

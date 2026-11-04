@@ -75,6 +75,15 @@ export function AdminLayout() {
                 ),
               }))
         }
+        topbarLeading={
+          <div className={styles.topbarBrand}>
+            <img src={logo} alt="" />
+            <div className={styles.brandTextBlock}>
+              <span className={styles.brandName}>AFhomes</span>
+              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+            </div>
+          </div>
+        }
         navLabel="AFhomes administration"
         menuLabel="Open navigation"
         menuPosition="right"

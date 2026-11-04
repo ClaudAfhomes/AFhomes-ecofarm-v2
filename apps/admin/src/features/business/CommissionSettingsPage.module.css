@@ -6,6 +6,7 @@
 .page {
   container: rules / inline-size;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
   align-content: start;
   min-width: 0;
@@ -384,6 +385,7 @@
     background: none;
     box-shadow: none;
     text-align: left;
+    overflow-wrap: anywhere;
   }
 
   /* Header line: target beside its status chip, then rate, terms, actions. */
@@ -419,6 +421,7 @@
 
   .actionGroup > * {
     flex: 1 1 auto;
+    min-height: 40px;
   }
 }
 
