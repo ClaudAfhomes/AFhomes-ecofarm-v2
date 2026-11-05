@@ -80,7 +80,13 @@ it('reduces documents/keys examined on the same 10000-row workloads without chan
     results.push(await query.toArray());
   }
   const plan = await inspectMongoPerformanceIndexes(test.db);
-  expect(plan.entries.every((entry) => entry.status === 'missing')).toBe(true);
+  const seeded = new Set(
+    (await test.db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name),
+  );
+  for (const entry of plan.entries)
+    expect(entry.status, entry.name).toBe(
+      seeded.has(entry.collection) ? 'missing' : 'missing-collection',
+    );
   await expect(installMongoPerformanceIndexes(test.db, 'stale')).rejects.toThrow('changed');
   expect((await installMongoPerformanceIndexes(test.db, plan.digest)).added).toHaveLength(6);
   const measurements = [];
@@ -112,13 +118,19 @@ it('reduces documents/keys examined on the same 10000-row workloads without chan
 });
 it('defers uninitialized import collections instead of creating collections or bypassing core setup', async () => {
   await col('customer_import_purchase_sources').drop();
+  const names = async () =>
+    (await test.db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name).sort();
+  const before = await names();
   const plan = await inspectMongoPerformanceIndexes(test.db);
-  expect((await installMongoPerformanceIndexes(test.db, plan.digest)).deferred).toEqual([
-    'customer_import_purchase_sources/read_import_original_source',
-  ]);
-  expect(
-    await test.db.listCollections({ name: 'customer_import_purchase_sources' }).hasNext(),
-  ).toBe(false);
+  const { deferred } = await installMongoPerformanceIndexes(test.db, plan.digest);
+  expect(deferred).toContain('customer_import_purchase_sources/read_import_original_source');
+  // Every entry on a collection this database has not initialized is deferred, never created.
+  expect(deferred).toEqual(
+    MONGO_PERFORMANCE_INDEXES.filter((entry) => !before.includes(entry.collection)).map(
+      (entry) => `${entry.collection}/${entry.name}`,
+    ),
+  );
+  expect(await names()).toEqual(before);
 });
 it('rejects a conflicting index name before creating any other index', async () => {
   const candidate = MONGO_PERFORMANCE_INDEXES[0];
@@ -132,4 +144,56 @@ it('rejects a conflicting index name before creating any other index', async () 
       (index) => index.name === candidate.name,
     )?.key,
   ).toEqual({ unexpected: 1 });
+});
+it('keeps proposed read indexes out of core setup and requires the digest-bound afhomes_dev apply', async () => {
+  const { setupMongoPhase5 } = await import('./mongo-runtime.js');
+  const fresh = test.client.db('afhomes_dev_core_only');
+  await setupMongoPhase5(fresh);
+  for (const entry of MONGO_PERFORMANCE_INDEXES) {
+    const exists = await fresh.listCollections({ name: entry.collection }).hasNext();
+    const indexes = exists ? await fresh.collection(entry.collection).listIndexes().toArray() : [];
+    expect(
+      indexes.map((index) => index.name),
+      entry.name,
+    ).not.toContain(entry.name);
+  }
+  await expect(installMongoPerformanceIndexes(fresh, '0'.repeat(64))).rejects.toThrow(
+    'afhomes_dev',
+  );
+  await expect(installMongoPerformanceIndexes(test.db, '0'.repeat(64))).rejects.toThrow(
+    'Index plan changed',
+  );
+  await fresh.dropDatabase();
+  // Runs the whole core setup on a fresh database: allow more than the 5 s default.
+}, 30_000);
+it('installs the session token index as unique and refuses to replace a non-unique one', async () => {
+  const sessions = col('auth_sessions');
+  await sessions.insertMany([
+    { _id: 'session-1', token: 'token-1', userId: 'user-1' },
+    { _id: 'session-2', token: 'token-2', userId: 'user-1' },
+  ]);
+  const token = (plan: Awaited<ReturnType<typeof inspectMongoPerformanceIndexes>>) =>
+    plan.entries.find((entry) => entry.name === 'unique_auth_session_token')!;
+  // A conflicting entry elsewhere (previous test) would block any apply; restore it first.
+  const candidate = MONGO_PERFORMANCE_INDEXES[0];
+  await col(candidate.collection).dropIndex(candidate.name);
+  // An existing non-unique index on the same key must be reviewed, never silently kept or replaced.
+  await sessions.createIndex({ token: 1 }, { name: 'manual_token' });
+  const clash = await inspectMongoPerformanceIndexes(test.db);
+  expect(token(clash).status).toBe('index-option-conflict');
+  await expect(installMongoPerformanceIndexes(test.db, clash.digest)).rejects.toThrow('conflicts');
+  await sessions.dropIndex('manual_token');
+  const plan = await inspectMongoPerformanceIndexes(test.db);
+  expect(token(plan).status).toBe('missing');
+  const { added } = await installMongoPerformanceIndexes(test.db, plan.digest);
+  expect(added).toContain('auth_sessions/unique_auth_session_token');
+  expect(added).toContain('auth_sessions/read_auth_session_user');
+  const created = (await sessions.listIndexes().toArray()).find(
+    (index) => index.name === 'unique_auth_session_token',
+  );
+  expect(created?.unique).toBe(true);
+  await expect(
+    sessions.insertOne({ _id: 'session-3', token: 'token-1', userId: 'user-2' }),
+  ).rejects.toMatchObject({ code: 11000 });
+  expect(token(await inspectMongoPerformanceIndexes(test.db)).status).toBe('present');
 });

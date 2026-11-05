@@ -232,6 +232,188 @@ it('shows upline names while denying upline and unrelated profiles and preservin
   });
   expect((await request('/genealogy', undefined, '')).status).toBe(401);
 });
+it('returns OST contacts only inside the caller genealogy view and never reveals other ids', async () => {
+  const blank = { phone: null, email: '' };
+  const contacts = async (staffIds: string[], cookie: string) => {
+    const response = await request(
+      `/genealogy/ost-contacts?staffIds=${encodeURIComponent(staffIds.join(','))}`,
+      undefined,
+      cookie,
+    );
+    return { status: response.status, text: await response.text() };
+  };
+  const json = (result: { text: string }) => JSON.parse(result.text);
+  const unknown = randomUUID();
+  // Disposable fixture only: the setup's sign-ins used the sign-in rate-limit window.
+  await col('auth_rate_limits').deleteMany({});
+  const otherSignIn = await request(
+    '/auth/identity/sign-in/email',
+    { email: 'network-other@example.invalid', password: 'NetworkFixtureother123' },
+    '',
+  );
+  expect(otherSignIn.status).toBe(200);
+  const otherTeam = otherSignIn.headers
+    .getSetCookie()
+    .map((value) => value.split(';')[0])
+    .join('; ');
+
+  // Unauthenticated: rejected before any lookup, no contact data.
+  const anonymous = await contacts([ids.ost!], '');
+  expect(anonymous.status).toBe(401);
+  expect(anonymous.text).not.toContain('09185550999');
+
+  // SM: own downline OST and own uplines (the official-form referral chain) are returned.
+  const own = await contacts([ids.ost!, ids.ssm!, ids.vd!], cookies.sm!);
+  expect(own.status).toBe(200);
+  expect(json(own)).toEqual({
+    [ids.ost!]: { phone: '09185550999', email: 'network-ost@example.invalid' },
+    [ids.ssm!]: { phone: null, email: 'network-ssm@example.invalid' },
+    [ids.vd!]: { phone: null, email: 'network-vd@example.invalid' },
+  });
+
+  // SM: other teams, a sibling branch and unknown ids are indistinguishable empty entries.
+  const mixed = await contacts([ids.ost!, ids.other!, ids.ssm2!, unknown], cookies.sm!);
+  expect(mixed.status).toBe(200);
+  expect(json(mixed)).toEqual({
+    [ids.ost!]: { phone: '09185550999', email: 'network-ost@example.invalid' },
+    [ids.other!]: blank,
+    [ids.ssm2!]: blank,
+    [unknown]: blank,
+  });
+  expect(mixed.text).not.toMatch(/network-other|network-ssm2/);
+
+  // Another team's VD cannot read this team's contacts.
+  const foreign = await contacts([ids.ost!, ids.sm!, ids.other!], otherTeam);
+  expect(json(foreign)).toEqual({
+    [ids.ost!]: blank,
+    [ids.sm!]: blank,
+    [ids.other!]: { phone: null, email: 'network-other@example.invalid' },
+  });
+  expect(foreign.text).not.toContain('09185550999');
+
+  // OST: itself and its uplines only; nothing sideways.
+  expect(json(await contacts([ids.ost!, ids.sm!, ids.other!], cookies.ost!))).toEqual({
+    [ids.ost!]: { phone: '09185550999', email: 'network-ost@example.invalid' },
+    [ids.sm!]: { phone: null, email: 'network-sm@example.invalid' },
+    [ids.other!]: blank,
+  });
+
+  // Super Admin keeps access to every seller; non-seller ids are not genealogy contacts.
+  expect(json(await contacts([ids.ost!, ids.other!, fixture.staff.id, unknown], admin))).toEqual({
+    [ids.ost!]: { phone: '09185550999', email: 'network-ost@example.invalid' },
+    [ids.other!]: { phone: null, email: 'network-other@example.invalid' },
+    [fixture.staff.id]: blank,
+    [unknown]: blank,
+  });
+
+  // Enumeration: a burst of guessed ids yields only identical empty entries.
+  const guesses = Array.from({ length: 200 }, () => randomUUID());
+  const probe = await contacts(guesses, cookies.sm!);
+  expect(probe.status).toBe(200);
+  expect(
+    Object.values(json(probe)).every((entry) => JSON.stringify(entry) === JSON.stringify(blank)),
+  ).toBe(true);
+
+  // A role without genealogy view (deny-only restriction) gets 403 and no data.
+  const genealogyModule = await col('modules').findOne({ key: 'network.genealogy' });
+  const restrictionId = randomUUID();
+  await col('staff_permission_restrictions').insertOne({
+    _id: restrictionId,
+    staff_id: ids.ost!,
+    module_id: genealogyModule!._id,
+    deny_view: true,
+  });
+  const restricted = await contacts([ids.ost!], cookies.ost!);
+  expect(restricted.status).toBe(403);
+  expect(restricted.text).not.toContain('09185550999');
+  await col('staff_permission_restrictions').deleteOne({ _id: restrictionId });
+
+  // Malformed requests fail closed without data.
+  const missing = await request('/genealogy/ost-contacts', undefined, cookies.sm);
+  expect(missing.status).toBe(400);
+  expect(await missing.text()).not.toContain('09185550999');
+});
+it('limits referral relationships to the caller genealogy (U8) and proves retired history', async () => {
+  const signIn = async (key: string) => {
+    await col('auth_rate_limits').deleteMany({});
+    const signed = await request(
+      '/auth/identity/sign-in/email',
+      { email: `network-${key}@example.invalid`, password: `NetworkFixture${key}123` },
+      '',
+    );
+    expect(signed.status).toBe(200);
+    return signed.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ');
+  };
+  const vd = await signIn('vd'),
+    ssm = await signIn('ssm'),
+    other = await signIn('other');
+  // Retired history: the OST once reported to the sibling SSM2.
+  const retiredId = randomUUID();
+  await col('referral_relationships').insertOne({
+    _id: retiredId,
+    subject_staff_id: ids.ost,
+    upline_staff_id: ids.ssm2,
+    hierarchy_role: 'ost',
+    is_authoritative: false,
+    is_active: false,
+    assigned_at: '2024-01-01T00:00:00.000Z',
+  });
+  const edges = async (cookie: string) => {
+    const response = await request('/referrals', undefined, cookie);
+    const text = await response.text();
+    const body = response.status === 200 ? JSON.parse(text) : null;
+    return {
+      status: response.status,
+      text,
+      pairs: new Set<string>(
+        (body?.data ?? []).map(
+          (row: { subjectStaffId: string; uplineStaffId: string; isActive: boolean }) =>
+            `${row.subjectStaffId}>${row.uplineStaffId}${row.isActive ? '' : ':retired'}`,
+        ),
+      ),
+    };
+  };
+  const pair = (a: string, b: string, retired = false) =>
+    `${ids[a]}>${ids[b]}${retired ? ':retired' : ''}`;
+  const chain = [pair('ost', 'sm'), pair('sm', 'ssm'), pair('ssm', 'vd')];
+  try {
+    // Super Admin keeps full visibility, including the retired history and the sibling branch.
+    const all = await edges(admin);
+    for (const expected of [...chain, pair('ssm2', 'vd'), pair('ost', 'ssm2', true)])
+      expect(all.pairs.has(expected), expected).toBe(true);
+    // VD: its own subtree only; retired history it was not a party to stays hidden.
+    expect([...(await edges(vd)).pairs].sort()).toEqual([...chain, pair('ssm2', 'vd')].sort());
+    // SSM / SM: own chain and downline; never the sibling SSM2 branch or its name.
+    for (const cookie of [ssm, cookies.sm!]) {
+      const seen = await edges(cookie);
+      expect([...seen.pairs].sort()).toEqual([...chain].sort());
+      expect(seen.text).not.toContain(ids.ssm2);
+      expect(seen.text.toLowerCase()).not.toContain('ssm two');
+    }
+    // OST: its upline chain plus its own retired relationship (it was a party to it).
+    expect([...(await edges(cookies.ost!)).pairs].sort()).toEqual(
+      [...chain, pair('ost', 'ssm2', true)].sort(),
+    );
+    // Another team's VD sees nothing of this branch (no names, no ids).
+    const foreign = await edges(other);
+    expect(foreign.status).toBe(200);
+    expect(foreign.pairs.size).toBe(0);
+    for (const key of ['vd', 'ssm', 'ssm2', 'sm', 'ost'])
+      expect(foreign.text).not.toContain(ids[key]);
+    // Unauthenticated and inactive callers are refused before any relationship is read.
+    expect((await edges('')).status).toBe(401);
+    await col('staff_users').updateOne({ _id: ids.other }, { $set: { status: 'inactive' } });
+    const inactive = await edges(other);
+    expect(inactive.status).toBe(403);
+    expect(inactive.text).not.toContain(ids.vd);
+  } finally {
+    await col('staff_users').updateOne({ _id: ids.other }, { $set: { status: 'active' } });
+    await col('referral_relationships').deleteOne({ _id: retiredId });
+  }
+});
 it('freezes a sale hierarchy and atomically retires an old upline during correction', async () => {
   const customer = await request('/customers', {
     firstName: 'Network',

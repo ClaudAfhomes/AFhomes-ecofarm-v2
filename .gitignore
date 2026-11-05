@@ -64,3 +64,14 @@ supabase/migrations/archive/
 # NOTE: `workflow/` is intentionally tracked (graphidian + opencode packs).
 # Do NOT add a `workflow/` ignore rule here — opencode's `@` file picker
 # surfaces tracked/non-ignored files, and ignoring it would hide the pack.
+
+# Quarantined one-off Atlas scripts that embedded live credentials (2026-11-04).
+# Never recreate them here; use api/scripts/* with .env.local (see docs/mongodb/SECURITY-REMEDIATION-2026-11-04.md).
+/scripts/check-auth.ts
+/scripts/check-mfa-policy.ts
+/scripts/check-mfa.ts
+/scripts/disable-mfa.ts
+/scripts/reset-password.ts
+/scripts/setup-atlas-indexes.ts
+/scripts/smoke-test-purchase.ts
+/scripts/verify-password.ts

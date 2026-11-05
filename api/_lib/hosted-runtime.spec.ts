@@ -177,6 +177,7 @@ it('preserves secure staff cookies, forced password change and session revocatio
             Host: 'staging.example.invalid',
             'X-Forwarded-Proto': 'https',
             Origin: origin,
+            'X-Real-IP': '198.51.100.42',
             'Content-Type': 'application/json',
             'x-captcha-response': 'synthetic-hosted-token',
             ...(cookie ? { Cookie: cookie } : {}),
@@ -200,6 +201,7 @@ it('preserves secure staff cookies, forced password change and session revocatio
     ).toBe(403);
     const signedIn = await request('auth/identity/sign-in/email', loginBody);
     expect(signedIn.status).toBe(200);
+    expect((await replica.db.collection('auth_sessions').findOne({}))?.ipAddress).toBe('198.51.100.42');
     expect(
       signedIn.cookies.length > 0 &&
         signedIn.cookies.every((value) => /; secure/i.test(value) && /; httponly/i.test(value)),

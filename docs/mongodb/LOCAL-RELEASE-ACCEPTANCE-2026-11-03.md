@@ -187,3 +187,81 @@ widget 2/1, native authentication/hosted configuration 30/3 and import 128/4.
 Workspace typecheck and scoped lint pass (existing UI warnings remain).
 The broader serial API run is still in progress; it is not recorded as a clean
 full-suite run. Local environment secrets and unrelated artifacts remain excluded.
+
+## Verification after d89023d
+
+The serial API run completed with 3,286 passing tests and one production-scope
+fixture failure: its hosted configuration lacked the newly mandatory login key
+pair. The fixture now supplies synthetic values to the hosted-config check;
+namespace/auth isolation assertions are unchanged. That regression and adjacent
+authentication/hosted tests pass. A complete rerun then passes **3,287 tests across
+225 files**, exit 0, in 337.62 seconds with two workers and unchanged deadlines.
+The earlier interrupted/failed runs are not treated as passing.
+
+Browser acceptance on 127.0.0.1:53601 downloaded customer-import-review.xlsx from
+the invalid company-v1 preview. Read-only inspection of that exact download
+verified every original source value, the red Primary!G2 cell, its reason and
+re-upload parser compatibility. The corrected synthetic source differs only in
+birth date. Its preview showed one valid / zero invalid rows; browser confirmation
+reported one written / zero failed. Job history persisted the completed job with
+one inserted row, while retaining the earlier invalid preview as a separate job.
+
+At tablet width, the import tab panel's minimum-content sizing stretched the page
+and vertically centered short values in a long review row. The page-scoped tab
+panel now shrinks around its existing horizontal table container, cells align at
+the top, the Errors column has readable width, and the CREATE chip stays on one
+line. Native Chrome verified contained horizontal scrolling, readable source
+values and reachable confirmation. Sixteen import-page tests pass. Further
+mobile/keyboard and application/payment/activation/role browser checks remain.
+
+These fixture/layout/report follow-ups are local and not yet committed.
+
+The browser's imported-purchase continuation exposed a legacy route redirect
+that discarded customerId and importRowId. The redirect now preserves query and
+fragment, using the same location handling as canonical staff routing. A routing
+regression failed with the original code, then passed alongside nine adjacent
+route/session checks. Admin TypeScript and scoped lint pass. Native Chrome
+confirmed both parameters survived, selected Synthetic Browser Workbook, and
+showed the imported-details review notice plus the mandatory actual purchase
+reference and acknowledgement date. The synthetic Bronze purchase reached the
+next-step action; submission, payment and activation were not completed before
+the disposable runtime stopped. This is a local frontend fix, not an Atlas apply.
+
+4 November: the prior disposable listeners and browser session were no longer
+running. A fresh synthetic loopback runtime was started for continuing acceptance;
+its first-login credential change requires another owner handoff. Earlier
+workbook/download and continuation observations remain recorded above, but the
+old runtime's synthetic records are not assumed to exist in the new one.
+
+The owner completed the fresh 4 November first-login change and sign-in.
+Native Chrome confirmed the signed-in synthetic Super Admin dashboard. The
+corrected workbook again previews one valid / zero invalid rows.
+
+Hosted authentication previously overwrote Nginx's client-IP header with its
+loopback socket address, making different users share one rate-limit key. Only
+the reviewed hosted runtime now opts into trusting a single valid X-Real-IP from
+a loopback peer; direct runtimes and non-loopback peers still use the socket IP.
+IP lists, invalid addresses and scoped IPv6 fall back to that socket peer. Nginx
+already overwrites incoming X-Real-IP. Nineteen transport/auth/hosted tests pass;
+the extended real-Mongo hosted test also verifies that the native auth session
+stores the proxy-provided synthetic client IP. API TypeScript and scoped lint
+pass. This is local proxy integration proof; no Droplet has been deployed.
+
+The fresh browser import committed one row with zero failures and resumed its
+identity/evidence/seller chain. Submission exposed another real UI defect: the
+Holders step marked a record complete without the address required by the write
+contract, then displayed raw schema issues. Holder readiness now uses the shared
+applicationHolderSchema, blocks submission consistently, and summarizes holder
+validation in readable, deduplicated guidance. The new regression failed first;
+the corrected prefill suite passes six tests including missing/valid-address
+cases and error guidance. The adjacent action/prefill run passes 31 tests.
+Chrome verified the new blocker, then accepted the completed catalog address and
+submitted AF-APP-2HB88. Approval succeeded and Finance displayed its reservation
+AF-RES-YHYXY. Payment recording/verification and activation are still in progress.
+
+Performance remains open: two new full workload attempts hit the unchanged
+60-second test deadline; smaller 240-request workloads had zero failures. A
+10,000-customer diagnostic measured 12,111 ms of setup and 26,441 ms for the first
+600 requests before timing out. Setup/progress/route timing is being collected
+without credentials or private-file URL values. The older complete passing run
+above remains historical evidence, not a claim that today's load gate passed.

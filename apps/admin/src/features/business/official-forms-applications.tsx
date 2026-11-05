@@ -19,6 +19,7 @@ import { ImportContinuationPanel } from './ImportContinuationPanel';
 import { canViewImportContinuations } from './import-continuation-access';
 import {
   createCustomerApplicationSchema,
+  applicationHolderSchema,
 
   registerCustomerApplicationSchema,
   optionalContactNumberSchema,
@@ -390,7 +391,7 @@ export function CustomerApplicationsPage() {
  * keeps its path but with a readable message.
  */
 export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message: string }[]) {
-  return issues
+  const messages = issues
     .map((issue) => {
       const [head, ...rest] = issue.path;
       if (head === 'customerId') return 'Select a customer for this application.';
@@ -398,10 +399,12 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
       if (head === 'saleId') return 'Select a sale for this reservation.';
       if (head === 'customerApplicationId')
         return 'This reservation must stay linked to its customer application.';
+      if (head === 'primary' || head === 'secondary')
+        return `Review the ${head} holder's identity, address and contact fields.`;
       const tail = [head, ...rest].filter((p) => typeof p === 'string').join('.');
       return tail ? `${tail}: ${issue.message}` : issue.message;
-    })
-    .join(' ');
+    });
+  return [...new Set(messages)].join(' ');
 }
 
 /**
@@ -920,7 +923,9 @@ export function CustomerApplicationEditorPage() {
   // One derived list, rendered next to the button: every condition that blocks
   // the single save-and-submit action. Transient states (a mutation in flight)
   // are deliberately NOT blockers - they are not something to fix.
+  const primaryComplete = applicationHolderSchema.safeParse(primary).success;
   const blockers: string[] = [];
+  if (!primaryComplete) blockers.push('Complete primary holder fields.');
   if (importRowId) {
     if (!mayLoadImport)
       blockers.push('Customer import access is required to review this purchase.');
@@ -1311,14 +1316,6 @@ export function CustomerApplicationEditorPage() {
       Submit
     </Button>
   );
-  const primaryComplete = [
-    primary.firstName,
-    primary.lastName,
-    primary.birthDate,
-    primary.mobile,
-    primary.email,
-    primary.printedName,
-  ].every((field) => field.trim() !== '');
   // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
   // the final authority, and Next can never refuse what Save allows.
   const stepBlockers: (string | null)[] = [

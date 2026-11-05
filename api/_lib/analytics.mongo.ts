@@ -28,11 +28,55 @@ import {
   mongoImportedAccountSales,
   hasUnmappedMongoImportedSales,
 } from './account-sales.mongo.js';
+import { globalAnalyticsAggregates, mergeAnalyticsAggregates } from './analytics-hybrid.mongo.js';
+
+/**
+ * Fields each projection reads (analytics-projection.ts, account-sales.ts). Reads fetch only
+ * these instead of whole documents, so calculations are unchanged while customer PII, form
+ * payloads and other unused fields never leave the database. Update with the projections.
+ */
+export const FIELDS: Record<string, string[]> = {
+  card_sales: [
+    'status',
+    'created_at',
+    'submitted_at',
+    'plan_id',
+    'payment_scheme',
+    'cash_price_snapshot',
+    'fully_paid_at',
+    'spot_cash_deadline',
+    'customer_id',
+    'attributed_staff_ids',
+    'seller_staff_id',
+    'seller_ost_id',
+  ],
+  card_sale_hierarchy_snapshots: ['sale_id', 'ancestor_staff_id'],
+  customers: ['created_at'],
+  card_plans: ['name'],
+  payments: ['sale_id', 'status', 'verified_at', 'amount'],
+  memberships: ['status', 'activated_at'],
+  commissions: ['sale_id', 'status', 'settled_before_system'],
+  redemptions: ['status', 'created_at', 'total_points', 'redemption_number', 'item_name_snapshot'],
+  referral_relationships: ['subject_staff_id', 'upline_staff_id', 'is_active'],
+  staff_users: ['full_name', 'status'],
+  staff_role_assignments: ['staff_id', 'role_id'],
+  roles: ['slug'],
+  departments: ['is_active'],
+  ost_members: [],
+};
 
 export function createMongoAnalyticsHandler(db: Db, authorize: typeof authorizeAfHomes) {
   const col = (name: string) => db.collection<MongoRow>(name);
-  const rows = async (name: string, filter: Filter<MongoRow> = {}): Promise<Row[]> =>
-    (await col(name).find(filter).toArray()).map((row) => ({ ...row, id: row._id }));
+  const rows = async (name: string, filter: Filter<MongoRow> = {}): Promise<Row[]> => {
+    const fields = FIELDS[name];
+    if (!fields) throw new Error(`No analytics projection declared for ${name}`);
+    const projection = Object.fromEntries(fields.map((field) => [field, 1]));
+    return (
+      await col(name)
+        .find(filter, { projection: { _id: 1, ...projection } })
+        .toArray()
+    ).map((row) => ({ ...row, id: row._id }));
+  };
   async function scopedSales(principal: AfHomesPrincipal, kind: ScopeKind) {
     if (kind === 'global' || kind === 'finance')
       return {
@@ -350,6 +394,19 @@ export function createMongoAnalyticsHandler(db: Db, authorize: typeof authorizeA
         kind === 'global' ||
         (kind === 'redemption' &&
           principal.permissions.some((p) => p.moduleKey === 'operations.redemption' && p.canView));
+      // Global/finance: canonical dates and exact money are aggregated in MongoDB; every other
+      // row still goes through projectAnalytics (analytics-hybrid.mongo.ts). Any doubt -> null.
+      const aggregates = global
+        ? await globalAnalyticsAggregates(db, {
+            sales: scoped.sales,
+            from,
+            to,
+            period: period.data,
+            withPayments: canCommissions,
+            withCommissions: canFinancial,
+            fields: FIELDS,
+          }).catch(() => null)
+        : null;
       const [
         allCustomers,
         plans,
@@ -364,11 +421,15 @@ export function createMongoAnalyticsHandler(db: Db, authorize: typeof authorizeA
         organizationDepartments,
         context,
       ] = await Promise.all([
-        rows('customers', global ? {} : { _id: { $in: customerIds } }),
+        aggregates?.fallback.customers ??
+          rows('customers', global ? {} : { _id: { $in: customerIds } }),
         rows('card_plans'),
-        canCommissions ? rows('payments', global ? {} : { sale_id: { $in: saleIds } }) : [],
-        rows('memberships', global ? {} : { sale_id: { $in: saleIds } }),
-        canFinancial ? rows('commissions', global ? {} : { sale_id: { $in: saleIds } }) : [],
+        aggregates?.fallback.payments ??
+          (canCommissions ? rows('payments', global ? {} : { sale_id: { $in: saleIds } }) : []),
+        aggregates?.fallback.memberships ??
+          rows('memberships', global ? {} : { sale_id: { $in: saleIds } }),
+        aggregates?.fallback.commissions ??
+          (canFinancial ? rows('commissions', global ? {} : { sale_id: { $in: saleIds } }) : []),
         canRedemption
           ? rows('redemptions', kind === 'global' ? {} : { redeemed_by: principal.userId })
           : [],
@@ -379,30 +440,33 @@ export function createMongoAnalyticsHandler(db: Db, authorize: typeof authorizeA
         kind === 'global' || kind === 'organization' ? rows('departments') : [],
         networkContext(principal, kind),
       ]);
-      return res.status(200).json(
-        analyticsOverviewSchema.parse(
-          projectAnalytics({
-            principal,
-            period: period.data,
-            from,
-            to,
-            kind,
-            scoped,
-            canCommissions,
-            canRedemption,
-            allCustomers,
-            plans,
-            paymentsAll,
-            membershipsAll,
-            commissionsAll,
-            redemptionsAll,
-            sellers: projectCurrentTeam(principal, kind, relationships, staff, assignments, roles),
-            organizationStaff: staff,
-            organizationDepartments,
-            networkContext: context,
-          }),
-        ),
-      );
+      const projected = projectAnalytics({
+        principal,
+        period: period.data,
+        from,
+        to,
+        kind,
+        scoped,
+        canCommissions,
+        canRedemption,
+        allCustomers,
+        plans,
+        paymentsAll,
+        membershipsAll,
+        commissionsAll,
+        redemptionsAll,
+        sellers: projectCurrentTeam(principal, kind, relationships, staff, assignments, roles),
+        organizationStaff: staff,
+        organizationDepartments,
+        networkContext: context,
+      });
+      return res
+        .status(200)
+        .json(
+          analyticsOverviewSchema.parse(
+            aggregates ? mergeAnalyticsAggregates(projected, aggregates) : projected,
+          ),
+        );
     } catch {
       return fail(res, 'INTERNAL', 'Could not load analytics', 500);
     }

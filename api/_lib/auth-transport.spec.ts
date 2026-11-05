@@ -5,8 +5,12 @@ import { createMemoryAuthFixture } from './testing/auth-fixture.js';
 import { makeRes } from './testing/supabase-fake.js';
 
 const servers: http.Server[] = [];
-async function serve(handler: (request: Request) => Promise<Response>) {
-  const server = http.createServer(createAuthNodeHandler(handler, 'http://localhost:3000'));
+async function serve(handler: (request: Request) => Promise<Response>, trustLoopbackProxy = false, peer?: string) {
+  const transport = createAuthNodeHandler(handler, 'http://localhost:3000', { trustLoopbackProxy });
+  const server = http.createServer((req, res) => {
+    if (peer) Object.defineProperty(req.socket, 'remoteAddress', { value: peer });
+    return transport(req, res);
+  });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as { port: number };
@@ -44,6 +48,22 @@ afterEach(async () => {
 });
 
 describe('unmounted raw auth transport', () => {
+  it.each([
+    [false, undefined, '198.51.100.10', '127.0.0.1'],
+    [true, undefined, '198.51.100.10', '198.51.100.10'],
+    [true, '::1', '2001:db8::10', '2001:db8::10'],
+    [true, '198.51.100.99', '198.51.100.10', '198.51.100.99'],
+    [true, undefined, '198.51.100.10, 198.51.100.11', '127.0.0.1'],
+    [true, undefined, 'not-an-ip', '127.0.0.1'],
+    [true, undefined, 'fe80::1%eth0', '127.0.0.1'],
+  ])('only trusts a single valid client IP behind an explicitly trusted loopback proxy (%s, %s, %s)', async (trusted, peer, forwarded, expected) => {
+    const url = await serve(async (request) => Response.json({ ip: request.headers.get('x-real-ip') }), trusted, peer);
+    const response = await fetch(url + '/get-session', {
+      headers: { 'X-Real-IP': forwarded, 'X-Forwarded-For': '203.0.113.222' },
+    });
+    expect(await response.json()).toEqual({ ip: expected });
+  });
+
   it('preserves independent cookies, including a comma inside Expires', async () => {
     const cookies = [
       'one=value; Path=/; HttpOnly; Expires=Wed, 21 Oct 2037 07:28:00 GMT',

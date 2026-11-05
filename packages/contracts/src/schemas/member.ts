@@ -341,6 +341,9 @@ export type MemberDetail = z.infer<typeof memberDetailSchema>;
 export const memberListQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   position: memberPositionSchema.optional(),
+  /** Opt-in pagination: sending `limit` or `cursor` returns one page plus `meta.nextCursor`. */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().min(1).max(4096).optional(),
 });
 export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
 

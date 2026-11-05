@@ -681,6 +681,16 @@ export const referralRelationshipSchema = z.object({
 });
 export type ReferralRelationship = z.infer<typeof referralRelationshipSchema>;
 
+/**
+ * GET /referrals query. Opt-in pagination: sending `limit` or `cursor` returns one page (newest
+ * assignment first, then id) plus `meta.total` and `meta.nextCursor`; without them the full list.
+ */
+export const referralListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().min(1).max(4096).optional(),
+});
+export type ReferralListQuery = z.infer<typeof referralListQuerySchema>;
+
 export const createReferralSchema = z.object({
   subjectStaffId: z.string().uuid(),
   uplineStaffId: z.string().uuid(),

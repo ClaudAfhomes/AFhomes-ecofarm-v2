@@ -24,7 +24,11 @@ const production = {
 
 it('keeps the development default and requires paired explicit production opt-ins', () => {
   expect(mongoRuntimeDatabase({})).toBe('afhomes_dev');
-  expect(hostedMongoConfig(production)).toMatchObject({ coreWritesEnabled: false });
+  expect(hostedMongoConfig({
+    ...production,
+    VITE_TURNSTILE_SITE_KEY: 'synthetic-scope-public-key',
+    AFHOMES_AUTH_TURNSTILE_SECRET: 'synthetic-scope-captcha-secret',
+  })).toMatchObject({ coreWritesEnabled: false });
   const connection = createMongoClient(production);
   expect(connection.database).toBe('afhomes_prod');
   for (const patch of [

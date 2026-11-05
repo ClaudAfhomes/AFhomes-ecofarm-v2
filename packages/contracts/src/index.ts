@@ -284,6 +284,7 @@ export {
   saleSchema,
   saleFinancialSummarySchema,
   referralRelationshipSchema,
+  referralListQuerySchema,
   createReferralSchema,
   correctReferralSchema,
 } from './schemas/sales.js';
@@ -303,6 +304,7 @@ export type {
   Sale,
   SaleFinancialSummary,
   ReferralRelationship,
+  ReferralListQuery,
   CreateReferralRequest,
   CorrectReferralRequest,
 } from './schemas/sales.js';

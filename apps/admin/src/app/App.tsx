@@ -316,7 +316,7 @@ export default function App() {
               />
               <Route
                 path="/admin/customers/applications/new"
-                element={<Navigate to="/admin/customers/new" replace />}
+                element={<Navigate to={`/admin/customers/new${location.search}${location.hash}`} replace />}
               />
               <Route
                 path="/admin/customers/applications/:id"

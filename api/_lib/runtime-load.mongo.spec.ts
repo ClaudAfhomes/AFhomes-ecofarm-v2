@@ -15,6 +15,7 @@ it.each([
   { name: 'baseline', customers: 1, requests: 240, concurrency: 8 },
   { name: '10000-customer production-mode workload', customers: 10000, requests: 2400, concurrency: 20 },
 ])('$name: concurrent reads/downloads preserve authorization', async (profile) => {
+  const setupStarted = performance.now();
   const replica = await createTestReplica({ timeoutMS: 15_000 });
   const root = await mkdtemp(path.join(tmpdir(), 'afhomes-runtime-load-'));
   if (path.dirname(root) !== path.resolve(tmpdir()) || !path.basename(root).startsWith('afhomes-runtime-load-')) {
@@ -79,8 +80,10 @@ it.each([
     const routes = ['/api/v1/admin/afhomes/session', '/api/v1/card-products', '/api/v1/card-categories', '/api/v1/customers', download];
     for (const [index, route] of routes.entries()) expect((await request(route, cookie)).status, `preflight route ${index}`).toBe(200);
     const results: Awaited<ReturnType<typeof request>>[] = [];
+    const routeTiming = routes.map((_, route) => ({ route, count: 0, totalMs: 0, maxMs: 0 }));
     let next = 0;
     const start = performance.now();
+    process.stdout.write('Disposable load setup: ' + JSON.stringify({ profile: profile.name, setupMs: Math.round(start - setupStarted) }) + '\n');
     const workers = await Promise.allSettled(Array.from({ length: profile.concurrency }, async () => {
       while (next < profile.requests) {
         const index = next++;
@@ -89,6 +92,12 @@ it.each([
         expect(result.cache).toContain('no-store');
         if (index % routes.length === 4) expect(result.bytes).toBe(bytes.length);
         results.push(result);
+        const timing = routeTiming[index % routes.length]!;
+        timing.count++;
+        timing.totalMs += result.ms;
+        timing.maxMs = Math.max(timing.maxMs, result.ms);
+        if (results.length % 600 === 0)
+          process.stdout.write('Disposable load progress: ' + JSON.stringify({ profile: profile.name, completed: results.length, elapsedMs: Math.round(performance.now() - start), routes: routeTiming.map(timing => ({ route: timing.route, count: timing.count, meanMs: Math.round(timing.totalMs / Math.max(1, timing.count)), maxMs: Math.round(timing.maxMs) })) }) + '\n');
       }
     }));
     const failures = workers.flatMap(worker => worker.status === 'rejected'
