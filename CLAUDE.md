@@ -3,7 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > This is Claude Code's compact reference. Full project authority is in **AGENTS.md**.
-> Current session state lives in **SESSION.md** (replace on handoff; never append).
+> Latest session handoff lives in the marker region of `workflow/claude/update-session.md` (replace, never append).
+> Start: `@workflow/claude/explore-session.md` · Save: `@workflow/claude/update-session.md`.
 
 ## Project
 

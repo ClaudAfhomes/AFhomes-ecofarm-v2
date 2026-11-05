@@ -626,7 +626,7 @@ family; filename prefixes are the pointers, full bodies are authoritative:
   `…_develop_transfer_integration`, `…_ost_ist_conversion`): OST → IST
   conversion and genealogy team moves via `OstTeamTransferDialog` and
   `POST /members/:id/team-transfer` (migration 00011; live authenticated
-  check still unverified — see SESSION.md open threads).
+  check still unverified).
 - **Card management & plans** (`…_phase10_card_management`,
   `…_phase19_card_plan_description`, `…_card_plan_order`,
   `…_vip_payment_schemes`, `…_official_vip_benefits`).

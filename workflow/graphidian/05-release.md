@@ -182,7 +182,7 @@ Lightweight by design. Neither routine rebuilds Graphify nor loads the vault.
 git status --porcelain && git log --oneline -3
 ```
 
-Then: verify `SESSION.md` against that output (repo wins) and read only the
+Then: verify the handoff in `workflow/claude/update-session.md` against that output (repo wins) and read only the
 curated note matching today's area. Confirm unfinished work exists, but do not
 resume it unless asked.
 
@@ -197,11 +197,9 @@ Produce a concise handoff covering:
 - awaiting-approval proposals;
 - whether Graphify and the vault are current.
 
-Update `SESSION.md` **only when the user asks** — it is a user-owned file. The
-existing structure works well: *Stack · Standing user preferences · Repo state ·
-Last session's work · Test gotchas · Open threads · Verify commands*, dense, no
-prose essays. Replace the whole file rather than appending stale sections, and
-re-verify every repo-state claim before you write it.
+Update the handoff **only when the user asks** (`@workflow/claude/update-session.md`).
+Follow that file's permanent instructions: replace only the marker region, never
+append stale sections, and re-verify every repo-state claim before you write it.
 
 ---
 
