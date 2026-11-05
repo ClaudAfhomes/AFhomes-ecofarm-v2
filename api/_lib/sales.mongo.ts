@@ -28,6 +28,7 @@ import {
   type MongoRow,
 } from './customer-activation.mongo.js';
 import { saleListQuerySchema, toSale } from './sale-model.js';
+import { resolveCommissionRule } from './commission-model.js';
 import { deny, fail, method, subPath, isoOrNull, list } from './handler-kit.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
@@ -410,31 +411,21 @@ export function createMongoSalesHandler(
             if ('error' in scheme) refuse(409, scheme.error);
             const date = timestamp.slice(0, 10),
               accredited = String(target?.activated_at ?? target?.created_at ?? '').slice(0, 10);
-            const rules = await col('commission_rules')
-              .find(
-                {
-                  is_active: true,
-                  effective_from: { $lte: date },
-                  $and: [
-                    { $or: [{ effective_until: null }, { effective_until: { $gte: date } }] },
+            const rule = resolveCommissionRule(
+                await col('commission_rules')
+                  .find(
                     {
-                      $or: [
-                        { accredited_on_or_after: null },
-                        { accredited_on_or_after: { $lte: accredited } },
-                      ],
-                    },
-                    {
+                      is_active: true,
                       $or: [
                         { target_type: 'staff', target_id: sellerId },
                         { target_type: 'role', target_id: role?._id },
                       ],
                     },
-                  ],
-                },
-                { session },
-              )
-              .toArray();
-            const rule = rules.find((row) => row.target_type === 'staff') ?? rules[0],
+                    { session },
+                  )
+                  .toArray(),
+                { staffId: sellerId, roleId: role?._id as string | undefined, date, accredited },
+              ),
               rate = String(rule?.rate ?? '0');
             const terms = snapshotSaleTerms({
               id: product!._id,

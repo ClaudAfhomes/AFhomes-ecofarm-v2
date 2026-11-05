@@ -25,6 +25,23 @@ export function formatRate(exactRate: string | null | undefined): string {
   return `${hundredths.slice(0, -2)}.${hundredths.slice(-2)}%`;
 }
 
+/**
+ * Percent text ("4", "4.5", "12.25") to the exact 4-decimal rate the API stores
+ * ("0.0400"), by integer arithmetic only. Null when it is not 0 to 100 with at
+ * most two decimals.
+ */
+export function percentToRate(percent: string): string | null {
+  const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(percent.trim());
+  if (!match) return null;
+  // Hundredths of a percent equal ten-thousandths of the rate.
+  const units = Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0') || 0);
+  if (units > 10000) return null;
+  return `${Math.floor(units / 10000)}.${String(units % 10000).padStart(4, '0')}`;
+}
+
+/** Stored rate ("0.0400") to editable percent text ("4.00"). */
+export const rateToPercent = (exactRate: string): string => formatRate(exactRate).replace('%', '');
+
 /** Module-level so every count render reuses one formatter. */
 const countFormatter = new Intl.NumberFormat('en-PH', { maximumFractionDigits: 0 });
 

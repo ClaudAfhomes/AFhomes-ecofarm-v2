@@ -25,9 +25,7 @@ const grant = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => 
   canDelete: false,
 });
 const open = (label: string) => {
-  const details = screen.getByText(label).closest('details')!;
-  details.open = true;
-  fireEvent(details, new Event('toggle'));
+  fireEvent.click(screen.getByRole('button', { name: label }));
 };
 it('shows no restricted activity and performs no requests without grants', () => {
   renderWithProviders(<MembershipActivity id={id} number="MBS-QA-1" permissions={[]} />);
@@ -36,6 +34,28 @@ it('shows no restricted activity and performs no requests without grants', () =>
   expect(getMembership).not.toHaveBeenCalled();
   expect(getMembershipPoints).not.toHaveBeenCalled();
   expect(getSalePayments).not.toHaveBeenCalled();
+});
+it('toggles a group and queries only after it opens', async () => {
+  vi.mocked(getMembershipPoints).mockResolvedValue(
+    pointsAccountSchema.parse({
+      id: accountId,
+      membershipId: id,
+      balance: 1,
+      lifetimeAllocated: 1,
+      lifetimeRedeemed: 0,
+      updatedAt: '2026-10-01',
+    }),
+  );
+  vi.mocked(getMembershipLedger).mockResolvedValue([]);
+  renderWithProviders(
+    <MembershipActivity id={id} number="MBS-QA-1" permissions={[grant('finance.points')]} />,
+  );
+  const trigger = screen.getByRole('button', { name: 'Points' });
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  expect(getMembershipPoints).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await waitFor(() => expect(getMembershipPoints).toHaveBeenCalled());
 });
 it('hides disabled transaction reports even with a grant and keeps active activity available', () => {
   renderWithProviders(

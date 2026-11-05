@@ -44,3 +44,34 @@ export const toRule = (row: Record<string, unknown>) => ({
   createdAt: isoOrNull(row.created_at) ?? '',
   updatedAt: isoOrNull(row.updated_at) ?? '',
 });
+
+type RuleRow = Record<string, unknown>;
+
+/**
+ * The one rule-selection policy. A staff rule beats a role rule; rules never stack;
+ * no match means no rule (0%). Callers load candidate rows however suits them
+ * (a per-sale query, or the whole active set for the roster) and this decides.
+ */
+export function resolveCommissionRule<R extends RuleRow>(
+  rules: readonly R[],
+  seller: {
+    staffId: string;
+    roleId?: string | null;
+    /** `YYYY-MM-DD` the sale or preview is dated. */
+    date: string;
+    /** `YYYY-MM-DD` the seller was accredited; '' when unknown. */
+    accredited: string;
+  },
+): R | undefined {
+  const matching = rules.filter(
+    (rule) =>
+      rule.is_active === true &&
+      String(rule.effective_from) <= seller.date &&
+      (rule.effective_until == null || String(rule.effective_until) >= seller.date) &&
+      (rule.accredited_on_or_after == null ||
+        String(rule.accredited_on_or_after) <= seller.accredited) &&
+      ((rule.target_type === 'staff' && rule.target_id === seller.staffId) ||
+        (rule.target_type === 'role' && seller.roleId != null && rule.target_id === seller.roleId)),
+  );
+  return matching.find((rule) => rule.target_type === 'staff') ?? matching[0];
+}

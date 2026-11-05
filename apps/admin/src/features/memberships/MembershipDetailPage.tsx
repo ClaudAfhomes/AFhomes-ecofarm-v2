@@ -27,6 +27,7 @@ import { membershipKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { getAudit } from '../reports/services';
 import { getMembershipCard, markMembershipPrinted, reissueMembershipCard } from './services';
+import { Disclosure } from './Disclosure';
 import { MembershipActivity } from './MembershipActivity';
 import styles from './MembershipDetailPage.module.css';
 
@@ -66,6 +67,7 @@ export function MembershipDetailPage() {
   const [issued, setIssued] = useState<ReissuedMembershipCard | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [confirmReissue, setConfirmReissue] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   const canReissue =
     user?.afHomesPermissions.some(
@@ -173,10 +175,8 @@ export function MembershipDetailPage() {
       <div className={styles.layout}>
         <section className={`${styles.panel} ${styles.hero}`} aria-label="Membership summary">
           <div className={styles.heroHead}>
-            <span className={styles.avatar} aria-hidden="true">
-              {(data.memberName.trim().charAt(0) || '•').toUpperCase()}
-            </span>
             <div className={styles.heroIdentity}>
+              <span className={styles.heroNumber}>{data.membershipNumber}</span>
               <h2 className={styles.heroName}>{data.memberName}</h2>
               <span className={styles.heroTier}>
                 <TierBadge tier={tierCode || null} />
@@ -188,18 +188,16 @@ export function MembershipDetailPage() {
             </div>
             <StatusChip label={humanizeCode(data.status)} tone={STATUS_TONE[data.status]} />
           </div>
-          <div className={styles.summary}>
-            <StatusChip
-              label={`Points balance: ${formatCountOrDash(data.pointsBalance)}`}
-              tone="neutral"
-              icon="wallet"
-            />
-            <StatusChip
-              label={`Yearly entitlement: ${formatCountOrDash(data.yearlyPointsAllocated)}`}
-              tone="neutral"
-              icon="file-text"
-            />
-          </div>
+          <dl className={styles.figures}>
+            <div>
+              <dt>Points balance</dt>
+              <dd>{formatCountOrDash(data.pointsBalance)}</dd>
+            </div>
+            <div>
+              <dt>Yearly entitlement</dt>
+              <dd>{formatCountOrDash(data.yearlyPointsAllocated)}</dd>
+            </div>
+          </dl>
           <dl className={styles.facts}>
             <div>
               <dt>Category</dt>
@@ -273,11 +271,17 @@ export function MembershipDetailPage() {
               </p>
             ) : null}
 
-            <details className={styles.security}>
-              <summary>
-                <Icon name="alert" size={16} aria-hidden="true" />
-                Security: credential recovery
-              </summary>
+            <Disclosure
+              tone="caution"
+              open={securityOpen}
+              onOpenChange={setSecurityOpen}
+              title={
+                <>
+                  <Icon name="alert" size={16} aria-hidden="true" />
+                  Security: credential recovery
+                </>
+              }
+            >
               {canReissue ? (
                 <div className={styles.securityBody}>
                   <h3 className={styles.securityTitle}>Rotate credentials</h3>
@@ -318,11 +322,11 @@ export function MembershipDetailPage() {
                   />
                 </div>
               ) : (
-                <p className={`${styles.panelNote} ${styles.securityBody}`}>
+                <p className={styles.panelNote}>
                   Rotation needs card-activation update access.
                 </p>
               )}
-            </details>
+            </Disclosure>
           </section>
         </aside>
 
