@@ -31,10 +31,6 @@ export default defineConfig(({ mode }) => ({
         target: process.env.AFHOMES_DEV_API_TARGET ?? 'http://localhost:3000',
         changeOrigin: true,
       },
-      '/media': {
-        target: process.env.AFHOMES_DEV_API_TARGET ?? 'http://localhost:3000',
-        changeOrigin: true,
-      },
     },
   },
   build: {

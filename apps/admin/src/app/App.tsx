@@ -147,9 +147,6 @@ const CmsHistoryPage = lazy(() =>
 const CmsMediaPage = lazy(() =>
   import('../features/cms/CmsMediaPage').then((m) => ({ default: m.CmsMediaPage })),
 );
-const MediaLibraryPage = lazy(() =>
-  import('../features/media/MediaLibraryPage').then((m) => ({ default: m.MediaLibraryPage })),
-);
 const CmsPagesPage = lazy(() =>
   import('../features/cms/CmsPagesPage').then((m) => ({ default: m.CmsPagesPage })),
 );
@@ -467,7 +464,6 @@ export default function App() {
               `governance.audit` - the guard and the server both enforce it. */}
               <Route path="/admin/reports" element={protectedPage(<ReportsPage />)} />
               <Route path="/admin/audit" element={protectedPage(<AuditPage />)} />
-              <Route path="/admin/media" element={protectedPage(<MediaLibraryPage />)} />
               <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
               <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
               <Route path="/admin/cms/faq" element={protectedPage(<CmsDocumentPage title="FAQ" description="Questions and answers for the public website." documentKey="faq" />)} />

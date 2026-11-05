@@ -121,3 +121,11 @@ it('shows cleanup readiness as automatic status without a writable checkbox', as
   expect(await screen.findByText(/Cleanup not ready:/)).toBeVisible();
   expect(screen.queryByRole('checkbox',{name:/cleanup/i})).not.toBeInTheDocument();
 });
+it('preserves line breaks in the privacy notice preview', async () => {
+  const notice = 'Line one\n\nLine two\nLine three';
+  vi.mocked(getPublicVerificationSettings).mockResolvedValue({ ...initial, privacyNotice: notice });
+  renderWithProviders(<PublicVerificationSettingsPage />, { user });
+  fireEvent.click(await screen.findByRole('tab', { name: 'Preview' }));
+  const preview = await screen.findByText(/Line one/);
+  expect(preview.textContent).toBe(notice);
+});

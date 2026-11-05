@@ -39,6 +39,7 @@ describe('module catalog covers every console page', () => {
     expect(byPrefix.get('/admin/member-lookup')).toBe('operations.redemption');
     expect(byPrefix.get('/admin/customer-lookup')).toBe('operations.customer_lookup');
     expect(byPrefix.has('/admin/documents')).toBe(false);
+    expect(byPrefix.has('/admin/media')).toBe(false);
     expect(byPrefix.get('/admin/customers/applications/import-export')).toBe(
       'governance.customer_import',
     );

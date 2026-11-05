@@ -8,7 +8,7 @@ required. Private business files keep using the existing private object store.
 ## Architecture
 
 ```
-Admin /admin/media
+Staff API clients (no admin page; see "Admin Media Library")
   └── /api/v1/media  (Better Auth + cms.media RBAC)
         ├── metadata: MongoDB `public_media_assets`
         └── bytes:    /var/lib/afhomes/media/public/<uuid>.<ext>
@@ -188,23 +188,17 @@ Notes:
 
 ## Admin Media Library
 
-Route: `/admin/media` (top-level nav item, module `cms.media`).
+Removed on 2026-11-05. The `/admin/media` page, its nav entry, and its route
+gate are gone from the admin console; `/admin/media` now renders Not Found.
 
-Supports:
+Reason: nothing in the system consumed its uploads. The public website reads
+media only through `/api/v1/cms/public` media blocks, which are disabled by
+`FEATURE_FLAGS.cms` and are not backed by `public_media_assets`.
 
-- Upload image/PDF with alt text and category.
-- Browse and search by filename/alt/category.
-- Preview images and open PDFs.
-- Copy public URL.
-- Replace a file (new URL; old record unpublished).
-- Unpublish (removes the public file).
-- Delete with explicit confirmation.
-- Clear upload/validation errors.
-
-The CMS module remains disabled. There is no media picker inside the disabled
-CMS content fields. Use the copied public URL in an existing supported image
-field when CMS editing is separately approved/activated. This is the remaining
-integration limitation, not a reason to enable all of CMS.
+The API, storage, contracts, and metadata above remain in place. Existing files
+stay public at their URLs; manage them through the API endpoints listed in
+"Architecture". Reintroduce an admin surface only together with a CMS media
+picker that writes these URLs into published content.
 
 ## Backup and restore
 
@@ -264,15 +258,13 @@ The API refuses new uploads at `AFHOMES_PUBLIC_MEDIA_MAX_TOTAL_BYTES` and return
     through the API; remove orphans manually during maintenance. Replacement
     removes the previous file best-effort after commit.
 11. CMS references are not scanned before deletion because CMS remains disabled;
-    the operator confirms deletion explicitly in the Media Library.
+    the operator confirms deletion explicitly with `?confirm=true`.
 
 ## Verification performed
 
 - `pnpm typecheck`
 - `pnpm --filter api exec vitest run _lib/public-media-store.spec.ts`
-- `pnpm --filter api exec vitest run _lib/media.mongo.spec.ts`
-- `pnpm --filter @afhomes/admin exec vitest run src/features/media/MediaLibraryPage.spec.tsx`
-- `pnpm --filter api build:artifact`
+- `pnpm --filter api exec vitest run _lib/media.mongo.spec.ts`- `pnpm --filter api build:artifact`
 - `pnpm verify:api:artifact` (includes real sign-in, authorized upload, public
   fetch, listing, unpublish, 404, delete, and private-file separation)
 - `pnpm build`

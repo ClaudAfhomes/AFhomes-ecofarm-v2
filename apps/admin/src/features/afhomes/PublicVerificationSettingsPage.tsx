@@ -127,21 +127,9 @@ function SettingsForm({
     save.mutate(input.data);
   };
 
-  const renderPreview = (text: string) => {
-    // Simple preview: escape HTML and preserve paragraphs
-    const escaped = text
-      .replace(/&/g, '&')
-      .replace(/</g, '<')
-      .replace(/>/g, '>')
-      .replace(/"/g, '"')
-      .replace(/'/g, '&#039;');
-    return (
-      <div
-        className={styles.previewContent}
-        dangerouslySetInnerHTML={{ __html: escaped.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') }}
-      />
-    );
-  };
+  const renderPreview = (text: string) => (
+    <div className={styles.previewContent}>{text}</div>
+  );
 
   const noticeTabs: TabItem[] = [
     { value: 'edit', label: 'Edit' },

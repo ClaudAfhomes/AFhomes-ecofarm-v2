@@ -1,4 +1,6 @@
-# CLAUDE.md — AF Homes Ecofarm Quick Reference
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > This is Claude Code's compact reference. Full project authority is in **AGENTS.md**.
 > Current session state lives in **SESSION.md** (replace on handoff; never append).
@@ -7,7 +9,8 @@
 
 AF Homes Ecofarm — membership-card business. pnpm + Turborepo monorepo.
 React 19 + Vite 8 SPAs → TanStack Query → REST API → MongoDB (dev, active conversion) / Supabase Postgres (production, preserved).
-Branch `claud/mongodb-conversion`; production routing is still Supabase. No Atlas import, no production cutover authorized.
+Conversion work spans branches (check `git branch`; don't assume). Production routing is still Supabase. No Atlas import, no production cutover authorized.
+Ports below are authoritative — README/AGENTS.md Layout still list stale `:5173`/`:5174`/`:3000`.
 
 ## Workspace Layout
 
@@ -20,6 +23,8 @@ Branch `claud/mongodb-conversion`; production routing is still Supabase. No Atla
 | `packages/shared` | `@afhomes/shared` | — | Exact-decimal money helpers (`formatMoney`, BigInt helpers) |
 | `packages/config` | `@afhomes/config` | — | `VITE_`-only env reader |
 | `packages/ui` | `@afhomes/ui` | — | Design tokens + shared primitives incl. `TurnstileChallenge` |
+| `packages/db-testing` | `@afhomes/db-testing` | — | Disposable-Postgres DB suite + harness scripts |
+| `supabase/` | — | — | Migrations (`afhomes_*` only), seeds, Super Admin bootstrap |
 
 ## Commands
 
@@ -45,7 +50,10 @@ pnpm dev:mongodb:local     # disposable synthetic runtime
 pnpm test:db:local         # disposable PostgreSQL + all SQL migrations
 pnpm test:db:harness       # fail-closed harness (pre-existing §77 failure — do not claim clean)
 pnpm mongodb:validators    # read-only Atlas validator preflight
+pnpm build:hosted / pnpm start:mongodb   # native hosting; need explicit hosted config (no deploy authorized)
 ```
+
+If `turbo` says "Unable to find package manager binary", run `corepack enable` (or `npx pnpm <cmd>`).
 
 **Single workspace typecheck / test pattern:**
 ```sh
@@ -84,7 +92,7 @@ deploy to Vercel, `pnpm db:migrate` against production, trigger remote crons, wr
 - **Mutations** — use `useBusinessMutation` (`apps/admin/src/lib/`).
 - **Form controls** — use `@afhomes/ui` (`Select`, `TextField`, `DateField`, `TextAreaField`, `FileField`). Mark optional fields with `"(Optional)"`.
 - **Styling** — CSS Modules per component; tokens from `@afhomes/ui`. No inline styles for layout/color.
-- **Tests** — colocated `<target>.spec.ts(x)`. API handler tests use the in-memory Supabase fake in `api/_lib/testing/`. Never import `@afhomes/mock` (removed).
+- **Tests** — colocated `<target>.spec.ts(x)`. API handler tests use the in-memory Supabase fake (`api/_lib/testing/supabase-fake.ts`); MongoDB-backed specs are named `*.mongo.spec.ts` and use `testing/mongo-replica.ts`. Never import `@afhomes/mock` (removed).
 - **Input normalization** — rules in `packages/contracts/src/schemas/input.ts`. Frontend normalizes on submit via `apps/admin/src/lib/normalize.ts`; handlers normalize optional fields on write.
 - **Live search** — `useDebouncedValue` (~300 ms), debounced term in queryKey. Latest query wins by key change.
 

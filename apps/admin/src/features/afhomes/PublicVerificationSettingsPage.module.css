@@ -192,6 +192,7 @@
   line-height: var(--line-height-body);
   font-size: var(--text-body);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .unsavedAlert {
