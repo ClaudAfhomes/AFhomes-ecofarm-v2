@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router';
 import { renderWithProviders } from '../../test/utils';
-import { CustomerApplicationEditorPage } from './OfficialFormsPages';
+import { CustomerApplicationEditorPage, humanizeApplicationIssues } from './OfficialFormsPages';
 import { getCustomerImportPrefill, getCustomerById } from './services';
 
 vi.mock('./services', async (original) => ({
@@ -133,6 +133,33 @@ it('clears imported holder details when a different customer is selected', async
   fireEvent.change(screen.getByLabelText('Customer'), { target: { value: second } });
   await goToHolders();
   expect(screen.getByLabelText('First name')).toHaveValue('');
+});
+it.each([false, true])('uses the contract-required address for imported holder completion (address supplied: %s)', async (addressSupplied) => {
+  vi.mocked(getCustomerImportPrefill).mockResolvedValue({
+    ...prefill,
+    primary: {
+      firstName: 'Imported', lastName: 'Applicant', birthDate: '1990-01-01',
+      mobile: '+639170000201', email: 'applicant@example.invalid', printedName: 'Imported Applicant',
+      ...(addressSupplied ? { permanentAddressLine1: 'Synthetic QA address', province: 'Laguna', cityMunicipality: 'Alaminos' } : {}),
+    },
+  });
+  show();
+  await screen.findByRole('option', { name: /Customer Alpha/ });
+  fireEvent.change(screen.getByLabelText('Customer'), { target: { value: first } });
+  await userEvent.click(await screen.findByRole('button', { name: 'Load imported customer details' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'OK' }));
+  await goToHolders();
+  if (addressSupplied) expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+  else {
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByText('Complete primary holder fields.')).toBeInTheDocument();
+  }
+});
+it('summarizes holder validation without raw schema details or repeated messages', () => {
+  expect(humanizeApplicationIssues([
+    { path: ['primary', 'permanentAddressLine1'], message: 'Too small: expected string to have >=1 characters' },
+    { path: ['primary', 'province'], message: 'Too small: expected string to have >=1 characters' },
+  ])).toBe("Review the primary holder's identity, address and contact fields.");
 });
 it('ignores a late import-prefill response for a customer that is no longer selected', async () => {
   let finish!: (value: typeof prefill) => void;

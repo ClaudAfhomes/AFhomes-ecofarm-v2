@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
 import { getRequest, setResponse } from 'better-call/node';
 import { toErrorEnvelope } from './envelope.js';
 
@@ -18,11 +19,17 @@ const BODY_LIMIT = 65_536;
 export function createAuthNodeHandler(
   handler: (request: Request) => Promise<Response>,
   baseURL: string,
+  trustLoopbackProxy = false,
 ) {
   const origin = new URL(baseURL).origin;
   return async (req: IncomingMessage, res: ServerResponse) => {
-    // Only the actual socket peer is trusted here; client IP headers are overwritten.
-    req.headers['x-real-ip'] = req.socket.remoteAddress ?? '127.0.0.1';
+    const peer = req.socket.remoteAddress ?? '127.0.0.1';
+    const forwarded = req.headers['x-real-ip'];
+    // Hosted Nginx overwrites this header; direct clients must not choose their rate-limit key.
+    req.headers['x-real-ip'] = trustLoopbackProxy &&
+      ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer) &&
+      typeof forwarded === 'string' && isIP(forwarded) && !forwarded.includes('%')
+      ? forwarded : peer;
     const fail = (status: number, message: string) => {
       req.resume();
       const { error } = toErrorEnvelope(status === 404 ? 'NOT_FOUND' : 'INTERNAL', message, status);

@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { hashPassword } from 'better-auth/crypto';
-import type { ClientSession, Db, MongoClient } from 'mongodb';
+import type { ClientSession, Db, Document, MongoClient } from 'mongodb';
 import { z } from 'zod';
 import {
   createMemberSchema,
@@ -12,6 +12,8 @@ import {
   MEMBER_UPLINE_ROLE,
   MEMBER_POSITIONS,
   type MemberPosition,
+  type Member,
+  type MemberListQuery,
 } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import { permissionsAreSubset } from './afhomes-access.js';
@@ -36,6 +38,43 @@ const refuse = (status: number, message: string): never => {
 };
 const nullable = (v: unknown) => (typeof v === 'string' && v ? v : null);
 type Principal = Exclude<Awaited<ReturnType<typeof authorizeAfHomes>>, { error: unknown }>;
+const isNaNValue = (value: unknown) => typeof value === 'number' && Number.isNaN(value);
+/** network_member_profiles fields the member views read (TIN / government ID handled apart). */
+const PROFILE_FIELDS = [
+  'staff_id',
+  'referrer_staff_id',
+  'ost_referrer_staff_id',
+  'date_of_birth',
+  'sex',
+  'civil_status',
+  'street_no',
+  'city_municipality',
+  'province',
+  'province_code',
+  'city_municipality_code',
+  'zip_code',
+  'tel_no',
+  'mobile_no',
+  'fb_messenger',
+  'employer_name',
+  'employer_address',
+  'job_position',
+  'government_id_type',
+];
+/** Last four characters of a non-empty ASCII string (code points = UTF-16 units); else as is. */
+const lastFour = (field: string) => ({
+  $cond: [
+    { $eq: [{ $type: field }, 'string'] },
+    {
+      $cond: [
+        { $regexMatch: { input: field, regex: '^[\\x01-\\x7f]+\\z' } },
+        { $substrCP: [field, { $max: [0, { $subtract: [{ $strLenCP: field }, 4] }] }, 4] },
+        field,
+      ],
+    },
+    field,
+  ],
+});
 export async function setupMongoMembers(db: Db) {
   await db.collection('network_member_profiles').createIndex({ staff_id: 1 }, { unique: true });
 }
@@ -46,41 +85,166 @@ export function createMongoMembersHandler(
   client: MongoClient,
   authorize: typeof authorizeAfHomes,
   objects?: PrivateObjectStore,
+  /** Key that signs paged-list cursors; without one a per-process random key is used. */
+  cursorSecret?: Buffer,
 ) {
   const col = (name: string) => db.collection<MongoRow>(name),
-    access = createMongoOstAccess(db);
-  async function rows(session?: ClientSession) {
-    const [staff, assignments, roles, profiles, departments, numbers, edges] = await Promise.all(
-      [
-        'staff_users',
-        'staff_role_assignments',
-        'roles',
-        'network_member_profiles',
-        'departments',
-        'sale_team_accreditations',
-        'referral_relationships',
-      ].map((name) => col(name).find({}, { session }).toArray()),
-    );
+    access = createMongoOstAccess(db),
+    cursorKey = cursorSecret ?? randomBytes(32);
+  /** Member profiles with TIN / government ID reduced to their last four characters (see rows). */
+  const readProfiles = (filter: Document, session?: ClientSession, leanFields?: string[]) =>
+    col('network_member_profiles')
+      .aggregate(
+        [
+          { $match: filter },
+          {
+            $project: leanFields
+              ? { _id: 0, ...Object.fromEntries(leanFields.map((field) => [field, 1])) }
+              : {
+                  _id: 0,
+                  ...Object.fromEntries(PROFILE_FIELDS.map((field) => [field, 1])),
+                  tin: lastFour('$tin'),
+                  government_id_number: lastFour('$government_id_number'),
+                },
+          },
+        ],
+        { session },
+      )
+      .toArray();
+  /**
+   * leanProfiles: only the profile fields list filtering and ordering read (paged lists fetch the
+   * full, masked profile for the page rows separately).
+   */
+  async function rows(session?: ClientSession, leanProfiles = false) {
+    // Rows keyed by staff_id / subject_staff_id never read their own _id, so it is not fetched.
+    const read = (name: string, fields: string[], withId = true) =>
+      col(name)
+        .find(
+          {},
+          {
+            session,
+            projection: {
+              ...(withId ? {} : { _id: 0 }),
+              ...Object.fromEntries(fields.map((field) => [field, 1])),
+            },
+          },
+        )
+        .toArray();
+    const [staff, assignments, roles, profiles, departments, numbers, edges] = await Promise.all([
+      read('staff_users', [
+        'employee_number',
+        'full_name',
+        'email',
+        'department_id',
+        'status',
+        'created_at',
+      ]),
+      read('staff_role_assignments', ['staff_id', 'role_id'], false),
+      read('roles', ['slug', 'name', 'is_active']),
+      // Raw TIN / government ID numbers never leave MongoDB when they are plain ASCII text: only
+      // their last four characters are read, which is all the masked views use
+      // ('***' + String(value).slice(-4) gives the same text for the tail). Other forms are
+      // returned unchanged and masked by the same JS code as before.
+      readProfiles({}, session, leanProfiles ? ['staff_id', 'referrer_staff_id'] : undefined),
+      read('departments', ['name', 'code', 'is_active']),
+      read('sale_team_accreditations', ['staff_id', 'aa_number'], false),
+      read('referral_relationships', ['subject_staff_id', 'upline_staff_id', 'is_active'], false),
+    ]);
+    return { staff, assignments, roles, profiles, departments, numbers, edges } as Record<
+      'staff' | 'assignments' | 'roles' | 'profiles' | 'departments' | 'numbers' | 'edges',
+      MongoRow[]
+    >;
+  }
+  const indexCache = new WeakMap<object, ReturnType<typeof buildIndexes>>();
+  function indexes(data: Awaited<ReturnType<typeof rows>>) {
+    let built = indexCache.get(data);
+    if (!built) indexCache.set(data, (built = buildIndexes(data)));
+    return built;
+  }
+  /** Lookup maps that return exactly what the former Array.find calls returned (first match). */
+  function buildIndexes(data: Awaited<ReturnType<typeof rows>>) {
+    const first = (
+      list: MongoRow[],
+      key: (row: MongoRow) => unknown,
+      keep = (_: MongoRow) => true,
+    ) => {
+      const map = new Map<unknown, MongoRow>();
+      for (const row of list) {
+        const value = key(row);
+        // NaN never matched under ===, but Map keys use SameValueZero; keep the old behaviour.
+        if (isNaNValue(value) || !keep(row) || map.has(value)) continue;
+        map.set(value, row);
+      }
+      return map;
+    };
+    const activeChildren = new Map<unknown, MongoRow[]>();
+    for (const row of data.edges)
+      if (row.is_active === true && !isNaNValue(row.upline_staff_id)) {
+        const list = activeChildren.get(row.upline_staff_id);
+        if (list) list.push(row);
+        else activeChildren.set(row.upline_staff_id, [row]);
+      }
     return {
-      staff: staff!,
-      assignments: assignments!,
-      roles: roles!,
-      profiles: profiles!,
-      departments: departments!,
-      numbers: numbers!,
-      edges: edges!,
+      staff: first(data.staff, (row) => row._id),
+      assignment: first(data.assignments, (row) => row.staff_id),
+      role: first(data.roles, (row) => row._id),
+      profile: first(data.profiles, (row) => row.staff_id),
+      department: first(data.departments, (row) => row._id),
+      number: first(data.numbers, (row) => row.staff_id),
+      activeEdge: first(
+        data.edges,
+        (row) => row.subject_staff_id,
+        (row) => row.is_active === true,
+      ),
+      activeChildren,
     };
   }
+  /** Every member view, validated (the canonical read used by every non-paged path). */
   function views(data: Awaited<ReturnType<typeof rows>>) {
-    const getStaff = (id: unknown) => data.staff.find((row) => row._id === id);
+    return unvalidatedViews(data).map((value) => memberSchema.parse(value));
+  }
+  /**
+   * Only the fields listFilter and pageKey read, with the same values as unvalidatedViews: paged
+   * lists filter and order every member with these, then build full views for the page rows.
+   */
+  function listKeys(data: Awaited<ReturnType<typeof rows>>) {
+    const index = indexes(data);
     return data.staff.flatMap((staff) => {
-      const assignment = data.assignments.find((row) => row.staff_id === staff._id),
-        role = data.roles.find((row) => row._id === assignment?.role_id);
+      const role = index.role.get(index.assignment.get(staff._id)?.role_id);
       if (!role || !MEMBER_POSITIONS.includes(role.slug as MemberPosition)) return [];
-      const profile = data.profiles.find((row) => row.staff_id === staff._id),
-        edge = data.edges.find(
-          (row) => row.subject_staff_id === staff._id && row.is_active === true,
-        );
+      const headId =
+        index.activeEdge.get(staff._id)?.upline_staff_id ??
+        index.profile.get(staff._id)?.referrer_staff_id ??
+        null;
+      return [
+        {
+          id: staff._id,
+          employeeNumber: staff.employee_number ?? null,
+          fullName: staff.full_name,
+          email: staff.email,
+          position: role.slug,
+          positionLabel: role.name,
+          referrerName: index.staff.get(headId)?.full_name ?? null,
+          aaNumber: index.number.get(staff._id)?.aa_number ?? null,
+        } as Record<string, unknown>,
+      ];
+    });
+  }
+  /** Member views before memberSchema validation, in staff order. */
+  function unvalidatedViews(
+    data: Awaited<ReturnType<typeof rows>>,
+    profiles?: Map<unknown, MongoRow>,
+    only?: Set<unknown>,
+  ) {
+    const index = indexes(data);
+    const getStaff = (id: unknown) => index.staff.get(id);
+    // Lookups always use every row; `only` limits which members get a view.
+    return (only ? data.staff.filter((row) => only.has(row._id)) : data.staff).flatMap((staff) => {
+      const assignment = index.assignment.get(staff._id),
+        role = index.role.get(assignment?.role_id);
+      if (!role || !MEMBER_POSITIONS.includes(role.slug as MemberPosition)) return [];
+      const profile = (profiles ?? index.profile).get(staff._id),
+        edge = index.activeEdge.get(staff._id);
       const headId = edge?.upline_staff_id ?? profile?.referrer_staff_id ?? null;
       const value: Record<string, unknown> = {
         id: staff._id,
@@ -89,14 +253,13 @@ export function createMongoMembersHandler(
         email: staff.email,
         position: role.slug,
         positionLabel: role.name,
-        departmentName:
-          data.departments.find((row) => row._id === staff.department_id)?.name ?? null,
+        departmentName: index.department.get(staff.department_id)?.name ?? null,
         status: staff.status,
         referrerName: getStaff(headId)?.full_name ?? null,
         ostReferrerName: getStaff(profile?.ost_referrer_staff_id)?.full_name ?? null,
         referrerStaffId: headId,
         ostReferrerStaffId: profile?.ost_referrer_staff_id ?? null,
-        aaNumber: data.numbers.find((row) => row.staff_id === staff._id)?.aa_number ?? null,
+        aaNumber: index.number.get(staff._id)?.aa_number ?? null,
         createdAt: staff.created_at ?? '',
         tinMasked: profile?.tin ? '***' + String(profile.tin).slice(-4) : null,
         governmentIdMasked: profile?.government_id_number
@@ -122,24 +285,142 @@ export function createMongoMembersHandler(
         governmentIdType: 'government_id_type',
       }))
         value[field] = nullable(profile?.[column]);
-      return [memberSchema.parse(value)];
+      return [value];
+    });
+  }
+  /**
+   * Rows a list request may return: caller visibility, then the position and search filters.
+   * Search sees what the caller sees: a member outside the caller's detail scope is listed with a
+   * blank email (listRow), so its email is not searchable either - otherwise repeated searches
+   * could reveal the masked address.
+   */
+  function listFilter(scope: ReturnType<typeof visibility>, query: MemberListQuery) {
+    return (row: Record<string, unknown>) =>
+      (!scope || scope.visible.has(row.id as string)) &&
+      (!query.position || row.position === query.position) &&
+      matchesSearch(query.search ?? '', [
+        row.fullName,
+        !scope || scope.detail.has(row.id as string) ? row.email : '',
+        row.employeeNumber,
+        row.aaNumber,
+        row.positionLabel,
+        row.referrerName,
+      ]);
+  }
+  /** List masking: members outside the caller's detail scope lose contact and identity fields. */
+  function listRow(row: Member, scope: ReturnType<typeof visibility>) {
+    const detailAuthorized = !scope || scope.detail.has(row.id);
+    if (detailAuthorized) return { ...row, detailAuthorized };
+    const masked: Record<string, unknown> = { ...row, detailAuthorized: false, email: '' };
+    for (const key of [
+      'dateOfBirth',
+      'streetNo',
+      'cityMunicipality',
+      'province',
+      'zipCode',
+      'telNo',
+      'mobileNo',
+      'fbMessenger',
+      'tinMasked',
+      'governmentIdMasked',
+      'employerName',
+      'employerAddress',
+      'jobPosition',
+    ])
+      masked[key] = null;
+    return memberSchema.parse(masked);
+  }
+  /** Deterministic paged order: full name, then id (plain code-unit comparison). */
+  const pageKey = (row: Record<string, unknown>) => [String(row.fullName ?? ''), String(row.id)];
+  const comparePageKeys = (a: string[], b: string[]) =>
+    a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : a[1]! < b[1]! ? -1 : a[1]! > b[1]! ? 1 : 0;
+  /** HMAC-signed cursor bound to the caller and the exact filters; it only marks a position. */
+  function writeCursor(userId: string, filters: string, key: string[]) {
+    const body = Buffer.from(JSON.stringify({ v: 1, u: userId, f: filters, k: key })).toString(
+      'base64url',
+    );
+    return `${body}.${createHmac('sha256', cursorKey).update(body).digest('base64url')}`;
+  }
+  function readCursor(cursor: string, userId: string, filters: string): string[] | null {
+    const [body, mac, extra] = cursor.split('.');
+    if (!body || !mac || extra !== undefined) return null;
+    const expected = createHmac('sha256', cursorKey).update(body).digest();
+    const given = Buffer.from(mac, 'base64url');
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+      return payload?.v === 1 &&
+        payload.u === userId &&
+        payload.f === filters &&
+        Array.isArray(payload.k) &&
+        payload.k.length === 2 &&
+        payload.k.every((part: unknown) => typeof part === 'string')
+        ? payload.k
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * Opt-in paged member list (`limit` and/or `cursor`). Same visibility, filters and masking as
+   * the full list; exact total after authorization; deterministic name/id order. Only the page
+   * rows are validated with memberSchema (approved for paged reads) and only they load full
+   * profiles, so the other members' sensitive fields are never read. Writes are unaffected.
+   */
+  async function pagedList(principal: Principal, req: VercelRequest, res: VercelResponse) {
+    const query = memberListQuerySchema.parse(req.query);
+    const limit = query.limit ?? 50;
+    const filters = JSON.stringify([query.position ?? null, query.search ?? '']);
+    const after = query.cursor ? readCursor(query.cursor, principal.userId, filters) : null;
+    if (query.cursor && !after) refuse(400, 'The page cursor is invalid for this list');
+    const data = await rows(undefined, true);
+    const scope = visibility(principal, data);
+    const matching = listKeys(data)
+      .filter(listFilter(scope, query))
+      .sort((a, b) => comparePageKeys(pageKey(a), pageKey(b)));
+    let start = 0;
+    if (after) {
+      start = matching.findIndex((row) => comparePageKeys(pageKey(row), after) > 0);
+      if (start < 0) start = matching.length;
+    }
+    const page = matching.slice(start, start + limit);
+    const ids = new Set(page.map((row) => row.id));
+    const fullProfiles = new Map<unknown, MongoRow>();
+    if (ids.size)
+      for (const profile of await readProfiles({ staff_id: { $in: [...ids] } }))
+        if (!fullProfiles.has(profile.staff_id))
+          fullProfiles.set(profile.staff_id, profile as MongoRow);
+    const byId = new Map(
+      unvalidatedViews(data, fullProfiles, ids).map((value) => [value.id, value]),
+    );
+    const rowsOut = page.map((row) => listRow(memberSchema.parse(byId.get(row.id)), scope));
+    const last = page[page.length - 1];
+    res.status(200).json({
+      data: rowsOut,
+      meta: {
+        total: matching.length,
+        limit,
+        nextCursor:
+          last && start + page.length < matching.length
+            ? writeCursor(principal.userId, filters, pageKey(last))
+            : null,
+      },
     });
   }
   function visibility(principal: Principal, data: Awaited<ReturnType<typeof rows>>) {
     if (!MEMBER_POSITIONS.includes(principal.roleSlug as MemberPosition)) return null;
+    const index = indexes(data);
     const detail = new Set([principal.userId]),
       visible = new Set([principal.userId]),
       queue = [principal.userId];
     if (principal.roleSlug !== 'ost')
-      while (queue.length) {
-        const parent = queue.shift()!;
-        for (const edge of data.edges.filter(
-          (row) => row.upline_staff_id === parent && row.is_active === true,
-        )) {
+      for (let head = 0; head < queue.length; head++) {
+        const parent = queue[head]!;
+        for (const edge of index.activeChildren.get(parent) ?? []) {
           const id = String(edge.subject_staff_id);
           if (detail.has(id)) continue;
-          const assignment = data.assignments.find((row) => row.staff_id === id),
-            role = data.roles.find((row) => row._id === assignment?.role_id);
+          const assignment = index.assignment.get(id),
+            role = index.role.get(assignment?.role_id);
           if (principal.roleSlug === 'sales_manager' && role?.slug !== 'ost') continue;
           detail.add(id);
           visible.add(id);
@@ -150,9 +431,7 @@ export function createMongoMembersHandler(
       let cursor = principal.userId;
       const seen = new Set([cursor]);
       while (true) {
-        const edge = data.edges.find(
-          (row) => row.subject_staff_id === cursor && row.is_active === true,
-        );
+        const edge = index.activeEdge.get(cursor);
         if (!edge || seen.has(String(edge.upline_staff_id))) break;
         cursor = String(edge.upline_staff_id);
         seen.add(cursor);
@@ -216,6 +495,8 @@ export function createMongoMembersHandler(
         return res.status(200).json(row);
       }
       if (!creating) {
+        if (path === '' && (req.query.limit !== undefined || req.query.cursor !== undefined))
+          return await pagedList(principal as Principal, req, res);
         const data = await rows(),
           all = views(data),
           scope = visibility(principal, data);
@@ -285,46 +566,7 @@ export function createMongoMembersHandler(
         const query = memberListQuerySchema.parse(req.query);
         return list(
           res,
-          all
-            .filter(
-              (row) =>
-                (!scope || scope.visible.has(row.id)) &&
-                (!query.position || row.position === query.position) &&
-                matchesSearch(query.search ?? '', [
-                  row.fullName,
-                  row.email,
-                  row.employeeNumber,
-                  row.aaNumber,
-                  row.positionLabel,
-                  row.referrerName,
-                ]),
-            )
-            .map((row) => {
-              const detailAuthorized = !scope || scope.detail.has(row.id);
-              if (detailAuthorized) return { ...row, detailAuthorized };
-              const masked: Record<string, unknown> = {
-                ...row,
-                detailAuthorized: false,
-                email: '',
-              };
-              for (const key of [
-                'dateOfBirth',
-                'streetNo',
-                'cityMunicipality',
-                'province',
-                'zipCode',
-                'telNo',
-                'mobileNo',
-                'fbMessenger',
-                'tinMasked',
-                'governmentIdMasked',
-                'employerName',
-                'employerAddress',
-                'jobPosition',
-              ])
-                masked[key] = null;
-              return memberSchema.parse(masked);
-            }),
+          all.filter(listFilter(scope, query)).map((row) => listRow(row, scope)),
         );
       }
       const input = direct

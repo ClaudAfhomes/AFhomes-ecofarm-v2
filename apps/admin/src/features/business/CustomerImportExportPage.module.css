@@ -8,6 +8,10 @@
   max-width: 100%;
 }
 
+.workspace > [role='tabpanel'] {
+  min-width: 0;
+}
+
 @media (max-width: 639px) {
   .workspace {
     overflow-x: clip;
@@ -156,9 +160,21 @@
   max-width: 100%;
 }
 
+.tableWrap.tableWrap > table td {
+  vertical-align: top;
+}
+
 @media (min-width: 640px) {
   .tableWrap > table {
     min-width: 960px;
+  }
+
+  .tableWrap td[data-label='Errors'] {
+    min-width: 320px;
+  }
+
+  .tableWrap td[data-label='Action'] > * {
+    white-space: nowrap;
   }
 
   .jobsWrap > table {

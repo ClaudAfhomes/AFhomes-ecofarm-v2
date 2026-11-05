@@ -22,24 +22,74 @@ export function createMongoStaffAccess(
     error: toErrorEnvelope(code, message, status),
   });
   const col = (name: string) => db.collection<MongoRow>(name);
+  /** Same reads and deny order as loadSequential, issued as one parallel round trip. */
+  async function loadParallel(userId: string) {
+    // The assignment read joins its active role and that role's grants by the same keys the
+    // separate queries use (staff_id and role_id+module_id are unique).
+    const [staff, joined, modules, restrictions] = await Promise.all([
+      col('staff_users').findOne({ _id: userId }),
+      col('staff_role_assignments')
+        .aggregate<MongoRow>([
+          { $match: { staff_id: userId } },
+          { $limit: 1 },
+          {
+            $lookup: {
+              from: 'roles',
+              localField: 'role_id',
+              foreignField: '_id',
+              pipeline: [{ $match: { is_active: true } }, { $limit: 1 }],
+              as: '_role',
+            },
+          },
+          {
+            $lookup: {
+              from: 'role_permissions',
+              localField: 'role_id',
+              foreignField: 'role_id',
+              as: '_grants',
+            },
+          },
+        ])
+        .next(),
+      col('modules').find({ is_active: true }).toArray(),
+      col('staff_permission_restrictions').find({ staff_id: userId }).toArray(),
+    ]);
+    if (!staff || staff.status !== 'active')
+      return denied('FORBIDDEN', 'Active staff access required', 403);
+    if (!joined || typeof joined.role_id !== 'string')
+      return denied('FORBIDDEN', 'Staff role assignment required', 403);
+    const role = (joined._role as MongoRow[])[0];
+    if (!role) return denied('FORBIDDEN', 'Assigned role is inactive', 403);
+    return { staff, role, grants: joined._grants as MongoRow[], modules, restrictions };
+  }
+  /** The original per-request reads, in order. */
+  async function loadSequential(userId: string) {
+    const staff = await col('staff_users').findOne({ _id: userId });
+    if (!staff || staff.status !== 'active')
+      return denied('FORBIDDEN', 'Active staff access required', 403);
+    const assignment = await col('staff_role_assignments').findOne({ staff_id: userId });
+    if (!assignment || typeof assignment.role_id !== 'string')
+      return denied('FORBIDDEN', 'Staff role assignment required', 403);
+    const role = await col('roles').findOne({ _id: assignment.role_id, is_active: true });
+    if (!role) return denied('FORBIDDEN', 'Assigned role is inactive', 403);
+    const [modules, grants, restrictions] = await Promise.all([
+      col('modules').find({ is_active: true }).toArray(),
+      col('role_permissions').find({ role_id: role._id }).toArray(),
+      col('staff_permission_restrictions').find({ staff_id: userId }).toArray(),
+    ]);
+    return { staff, role, grants, modules, restrictions };
+  }
   async function resolve(req: VercelRequest) {
     try {
       const identity = await sessions.read(req);
       if (!identity) return denied('UNAUTHORIZED', 'Invalid session', 401);
       const userId = identity.user.id;
-      const staff = await col('staff_users').findOne({ _id: userId });
-      if (!staff || staff.status !== 'active')
-        return denied('FORBIDDEN', 'Active staff access required', 403);
-      const assignment = await col('staff_role_assignments').findOne({ staff_id: userId });
-      if (!assignment || typeof assignment.role_id !== 'string')
-        return denied('FORBIDDEN', 'Staff role assignment required', 403);
-      const role = await col('roles').findOne({ _id: assignment.role_id, is_active: true });
-      if (!role) return denied('FORBIDDEN', 'Assigned role is inactive', 403);
-      const [modules, grants, restrictions] = await Promise.all([
-        col('modules').find({ is_active: true }).toArray(),
-        col('role_permissions').find({ role_id: role._id }).toArray(),
-        col('staff_permission_restrictions').find({ staff_id: userId }).toArray(),
-      ]);
+      // Fast path: one parallel round trip, still fresh on every request (nothing is cached). If it
+      // fails for any reason (e.g. an oversized joined document), the original sequential reads
+      // run instead, so every outcome - including deny order and errors - matches them exactly.
+      const loaded = await loadParallel(userId).catch(() => loadSequential(userId));
+      if ('error' in loaded) return loaded;
+      const { staff, role, grants, modules, restrictions } = loaded;
       const permissions: AfHomesPermission[] = modules.map((module) => {
         const grant = grants.find((row) => row.module_id === module._id),
           deny = restrictions.find((row) => row.module_id === module._id);

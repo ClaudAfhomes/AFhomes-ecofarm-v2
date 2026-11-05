@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Db, MongoClient } from 'mongodb';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { hashPassword } from 'better-auth/crypto';
 import { getRequest, setResponse } from 'better-call/node';
 import {
@@ -84,6 +84,7 @@ export function createMongoPhase5Runtime(
   env: NodeJS.ProcessEnv,
   delivery: AuthDelivery = {},
   objectStore?: PrivateObjectStore,
+  trustLoopbackProxy = false,
 ) {
   const auth = createAfHomesAuth(db, client, env, delivery),
     options = getAuthOptions(env);
@@ -98,7 +99,11 @@ export function createMongoPhase5Runtime(
   const commissions = createMongoCommissionsHandler(db, client, access.authorize);
   const queues = createMongoQueuesHandler(db, access.authorize);
   const memberships = createMongoMembershipsHandler(db, client, access.authorize, objects);
-  const referrals = createMongoReferralsHandler(db, client, access.authorize);
+  // Paged referral-list cursors use their own derived key (never interchangeable with members').
+  const referralCursorKey = env.BETTER_AUTH_SECRET
+    ? createHmac('sha256', env.BETTER_AUTH_SECRET).update('afhomes-referrals-cursor-v1').digest()
+    : undefined;
+  const referrals = createMongoReferralsHandler(db, client, access.authorize, referralCursorKey);
   const importClaims = createMongoImportClaimsHandlers(db, client, access.authorize, env, objects);
   const importContinuation = createMongoImportContinuationHandlers(db, client, access.authorize);
   const importJobs = createMongoCustomerImportJobsHandler(db, client, access.authorize, importContinuation);
@@ -113,7 +118,11 @@ export function createMongoPhase5Runtime(
     access.authorize,
   );
   const ost = createMongoOstHandler(db, access.resolve);
-  const members = createMongoMembersHandler(db, client, access.authorize, objects);
+  // Paged member-list cursors are signed with a key derived for that purpose only.
+  const memberCursorKey = env.BETTER_AUTH_SECRET
+    ? createHmac('sha256', env.BETTER_AUTH_SECRET).update('afhomes-members-cursor-v1').digest()
+    : undefined;
+  const members = createMongoMembersHandler(db, client, access.authorize, objects, memberCursorKey);
   const pointsAdjustment = createMongoPointsAdjustment(db,client,access.authorize);
   const ownSalesParticipation = createMongoStaffSalesInvolvementHandler(db,client,access.authorize,'self');
   const publicSettings = createMongoPublicVerificationSettingsHandler(db, client, access.authorize);
@@ -129,7 +138,7 @@ export function createMongoPhase5Runtime(
     authorizeStaff: access.authorize,
   });
   const officialForms = createMongoOfficialFormsHandler(db, client, access.authorize);
-  const identity = createAuthNodeHandler(auth.handler, options.baseURL);
+  const identity = createAuthNodeHandler(auth.handler, options.baseURL, trustLoopbackProxy);
   const col = (name: string) => db.collection<MongoRow>(name);
 
   const business = async (path: string, req: VercelRequest, res: VercelResponse) => {
@@ -177,7 +186,8 @@ export function createMongoPhase5Runtime(
     if (path === 'admin/afhomes/session' && req.method === 'GET') {
       const principal = await access.resolve(req);
       if ('error' in principal) return deny(res, principal);
-      const { userId: _, ...view } = principal;
+      const { userId, ...view } = principal;
+      void userId;
       return res.status(200).json(view);
     }
     if (path === 'admin/afhomes/public-verification-settings') return publicSettings(req,res);

@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { ClientSession, Db, MongoClient } from 'mongodb';
 import { z } from 'zod';
 import {
   createReferralSchema,
   correctReferralSchema,
   hierarchyAllowsUpline,
+  referralListQuerySchema,
 } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
@@ -19,15 +20,98 @@ export async function setupMongoReferrals(db: Db) {
       { unique: true, partialFilterExpression: { is_active: true } },
     );
 }
+/** Staff ids per name lookup (about 0.25 MB of ids per command). */
+const NAME_BATCH = 5000;
 const refuse = (status: number, message: string): never => {
   throw new CustomerActivationError(status, message);
 };
+const SELLER_ROLES = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'];
+type Caller = { userId?: unknown; roleSlug?: unknown };
+/**
+ * The rows GET /referrals returns to this caller, in the given order. Sellers (VD/SSM/SM/OST) see a
+ * CURRENT relationship only when both ends are inside their own genealogy view (self, up to four
+ * uplines, and - except OST - their downline), never sibling or unrelated branches (U8); a RETIRED
+ * relationship only when they were a party to it, the one way historical authority can be proven.
+ * Without a resolvable caller identity a seller gets no rows. Other roles see every row.
+ */
+function visibleTo(auth: Caller, rows: MongoRow[]) {
+  if (!SELLER_ROLES.includes(String(auth.roleSlug))) return rows;
+  if (typeof auth.userId !== 'string' || !auth.userId) return [];
+  const userId = auth.userId;
+  const parent = new Map(
+    rows
+      .filter((row) => row.is_active === true)
+      .map((row) => [String(row.subject_staff_id), String(row.upline_staff_id)]),
+  );
+  const children = new Map<string, string[]>();
+  for (const [child, head] of parent) {
+    const list = children.get(head);
+    if (list) list.push(child);
+    else children.set(head, [child]);
+  }
+  const visible = new Set([userId]);
+  let head = parent.get(userId),
+    depth = 0;
+  while (head && depth++ < 4 && !visible.has(head)) {
+    visible.add(head);
+    head = parent.get(head);
+  }
+  if (auth.roleSlug !== 'ost') {
+    const queue = [...(children.get(userId) ?? [])];
+    for (let head = 0; head < queue.length && visible.size < 10000; head++) {
+      const id = queue[head]!;
+      if (visible.has(id)) continue;
+      visible.add(id);
+      for (const child of children.get(id) ?? []) queue.push(child);
+    }
+  }
+  return rows.filter((row) => {
+    const subject = String(row.subject_staff_id),
+      upline = String(row.upline_staff_id);
+    return row.is_active === true
+      ? visible.has(subject) && visible.has(upline)
+      : subject === userId || upline === userId;
+  });
+}
+/** Paged order: newest assignment first (the displayed assignedAt), then id; code-unit order. */
+const pageKey = (row: MongoRow) => [isoOrNull(row.assigned_at) ?? '', String(row._id)];
+const comparePageKeys = (a: string[], b: string[]) =>
+  a[0]! > b[0]! ? -1 : a[0]! < b[0]! ? 1 : a[1]! < b[1]! ? -1 : a[1]! > b[1]! ? 1 : 0;
 export function createMongoReferralsHandler(
   db: Db,
   client: MongoClient,
   authorize: typeof authorizeAfHomes,
+  cursorSecret?: Buffer,
 ) {
   const col = (name: string) => db.collection<MongoRow>(name);
+  const cursorKey = cursorSecret ?? randomBytes(32);
+  /** HMAC-signed position in this caller's referral list; it never grants or widens access. */
+  function writeCursor(userId: string, key: string[]) {
+    const body = Buffer.from(JSON.stringify({ v: 1, l: 'referrals', u: userId, k: key })).toString(
+      'base64url',
+    );
+    return `${body}.${createHmac('sha256', cursorKey).update(body).digest('base64url')}`;
+  }
+  function readCursor(cursor: string, userId: string): string[] | null {
+    const [body, mac, extra] = cursor.split('.');
+    if (!body || !mac || extra !== undefined) return null;
+    const expected = createHmac('sha256', cursorKey).update(body).digest();
+    const given = Buffer.from(mac, 'base64url');
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+      return payload?.v === 1 &&
+        payload.l === 'referrals' &&
+        payload.u === userId &&
+        Array.isArray(payload.k) &&
+        payload.k.length === 2 &&
+        payload.k.every((part: unknown) => typeof part === 'string')
+        ? payload.k
+        : null;
+    } catch {
+      return null;
+    }
+  }
   async function role(id: string, session: ClientSession) {
     const assignment = await col('staff_role_assignments').findOne({ staff_id: id }, { session });
     return assignment
@@ -46,13 +130,37 @@ export function createMongoReferralsHandler(
       { _id: String(row.upline_staff_id) },
       { session, projection: { full_name: 1 } },
     );
+    return shape(row, subject?.full_name, upline?.full_name);
+  }
+  /** Same output as view() for many rows: one batched name read instead of two per row. */
+  async function views(rows: MongoRow[]) {
+    const ids = [
+      ...new Set(
+        rows.flatMap((row) => [String(row.subject_staff_id), String(row.upline_staff_id)]),
+      ),
+    ];
+    // Chunked so the $in list never approaches the 16 MB command limit on very large networks.
+    const names = new Map<unknown, unknown>();
+    for (let start = 0; start < ids.length; start += NAME_BATCH)
+      for (const staff of await col('staff_users')
+        .find(
+          { _id: { $in: ids.slice(start, start + NAME_BATCH) } },
+          { projection: { full_name: 1 } },
+        )
+        .toArray())
+        names.set(staff._id, staff.full_name);
+    return rows.map((row) =>
+      shape(row, names.get(String(row.subject_staff_id)), names.get(String(row.upline_staff_id))),
+    );
+  }
+  function shape(row: MongoRow, subjectName: unknown, uplineName: unknown) {
     return {
       id: row._id,
       subjectStaffId: row.subject_staff_id,
-      subjectName: String(subject?.full_name ?? ''),
+      subjectName: String(subjectName ?? ''),
       subjectRole: '',
       uplineStaffId: row.upline_staff_id,
-      uplineName: String(upline?.full_name ?? ''),
+      uplineName: String(uplineName ?? ''),
       hierarchyRole: row.hierarchy_role,
       isAuthoritative: row.is_authoritative === true,
       isActive: row.is_active === true,
@@ -74,41 +182,58 @@ export function createMongoReferralsHandler(
       const auth = await authorize(req, module, action);
       if ('error' in auth) return deny(res, auth);
       if (verb === 'GET') {
-        const rows = await col('referral_relationships').find().sort({ assigned_at: -1 }).toArray();
-        let visibleRows = rows;
-        if (
-          ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(auth.roleSlug)
-        ) {
-          const parent = new Map(
-            rows
-              .filter((row) => row.is_active === true)
-              .map((row) => [String(row.subject_staff_id), String(row.upline_staff_id)]),
-          );
-          const children = new Map<string, string[]>();
-          for (const [child, head] of parent)
-            children.set(head, [...(children.get(head) ?? []), child]);
-          const visible = new Set([auth.userId]);
-          let head = parent.get(auth.userId),
-            depth = 0;
-          while (head && depth++ < 4 && !visible.has(head)) {
-            visible.add(head);
-            head = parent.get(head);
-          }
-          if (auth.roleSlug !== 'ost') {
-            const queue = [...(children.get(auth.userId) ?? [])];
-            while (queue.length && visible.size < 10000) {
-              const id = queue.shift()!;
-              if (visible.has(id)) continue;
-              visible.add(id);
-              queue.push(...(children.get(id) ?? []));
-            }
-          }
-          visibleRows = rows.filter(
-            (row) =>
-              visible.has(String(row.subject_staff_id)) || visible.has(String(row.upline_staff_id)),
-          );
+        // Opt-in pagination (limit and/or cursor); without them the full list exactly as before.
+        const paged =
+          req.query.limit !== undefined || req.query.cursor !== undefined
+            ? referralListQuerySchema.safeParse(req.query)
+            : null;
+        if (paged && !paged.success)
+          return fail(res, 'VALIDATION_ERROR', 'Invalid referral page request', 400);
+        const caller = typeof auth.userId === 'string' ? auth.userId : '';
+        const after = paged?.data.cursor ? readCursor(paged.data.cursor, caller) : null;
+        if (paged?.data.cursor && !after)
+          return fail(res, 'VALIDATION_ERROR', 'The page cursor is invalid for this list', 400);
+        const rows = await col('referral_relationships')
+          .find(
+            {},
+            {
+              projection: {
+                subject_staff_id: 1,
+                upline_staff_id: 1,
+                hierarchy_role: 1,
+                is_authoritative: 1,
+                is_active: 1,
+                assigned_at: 1,
+              },
+            },
+          )
+          .sort({ assigned_at: -1 })
+          .toArray();
+        // U8 visibility (see visibleTo); names are resolved for kept rows only.
+        const visibleRows = visibleTo(auth, rows);
+        if (!paged) return list(res, await views(visibleRows));
+        // One page of the same authorized rows: exact total, deterministic order, and names
+        // resolved for the page rows only.
+        const limit = paged.data.limit ?? 50;
+        const ordered = visibleRows
+          .map((row) => ({ row, key: pageKey(row) }))
+          .sort((a, b) => comparePageKeys(a.key, b.key));
+        let start = 0;
+        if (after) {
+          start = ordered.findIndex((entry) => comparePageKeys(entry.key, after) > 0);
+          if (start < 0) start = ordered.length;
         }
-        return list(res, await Promise.all(visibleRows.map((row) => view(row))));
+        const page = ordered.slice(start, start + limit);
+        const last = page[page.length - 1];
+        return res.status(200).json({
+          data: await views(page.map((entry) => entry.row)),
+          meta: {
+            total: ordered.length,
+            limit,
+            nextCursor:
+              last && start + page.length < ordered.length ? writeCursor(caller, last.key) : null,
+          },
+        });
       }
       const input =
         verb === 'POST'

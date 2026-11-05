@@ -566,11 +566,17 @@ async function listRows(
   if (q.customerId && table === 'customer_applications') filter.customer_id = q.customerId;
   if (q.tier) filter.tier_snapshot = q.tier;
   if (q.seller) filter.created_by = q.seller;
-  if (q.from) filter.created_at = { $gte: q.from };
-  if (q.to) filter.created_at = { $lte: `${q.to}T23:59:59.999Z` };
+  // One inclusive range, same UTC bounds as the source handler (gte from, lte end of `to`).
+  if (q.from || q.to)
+    filter.created_at = {
+      ...(q.from ? { $gte: q.from } : {}),
+      ...(q.to ? { $lte: `${q.to}T23:59:59.999Z` } : {}),
+    };
   if (q.search) {
     const field = table === 'customer_applications' ? 'application_number' : 'reservation_number';
-    filter[field] = { $regex: q.search.replace(/[%_,]/g, ''), $options: 'i' };
+    // Literal, case-insensitive substring (source ILIKE semantics): never a caller-built pattern.
+    const literal = q.search.replace(/[%_,]/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter[field] = { $regex: literal, $options: 'i' };
   }
   if (table === 'reservation_agreements' && q.application)
     filter.customer_application_id = q.application;

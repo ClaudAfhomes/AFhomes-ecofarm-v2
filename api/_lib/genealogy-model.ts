@@ -63,27 +63,107 @@ export function projectGenealogy(
     }
     return null;
   };
+  /**
+   * Memoised displayParent: the first ACTIVE node at or after a cursor depends only on that
+   * cursor while the upward chain has no cycle, so long inactive chains are walked once instead of
+   * once per member. Any cycle (or a chain that returns to the starting member) falls back to the
+   * original cycle-guarded walk, so results are identical.
+   */
+  const CYCLE = Symbol('cycle');
+  const nextOf = (id: string) =>
+    (activeParent.has(id) ? activeParent.get(id) : storedUplines.get(id)?.[0]) ?? null;
+  const firstActive = new Map<string, string | null | typeof CYCLE>();
+  const resolveFrom = (start: string) => {
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    let cursor: string | null = start;
+    let result: string | null | typeof CYCLE;
+    while (true) {
+      // Any falsy cursor ends the walk, exactly like the original `while (cursor && ...)`.
+      if (!cursor) {
+        result = null;
+        break;
+      }
+      const known = firstActive.get(cursor);
+      if (known !== undefined) {
+        result = known;
+        break;
+      }
+      if (onPath.has(cursor)) {
+        result = CYCLE;
+        break;
+      }
+      if (statusByStaff.get(cursor) === 'active') {
+        result = cursor;
+        break;
+      }
+      onPath.add(cursor);
+      path.push(cursor);
+      cursor = nextOf(cursor);
+    }
+    for (const node of path) firstActive.set(node, result);
+    return result;
+  };
+  const headOf = (id: string): string | null => {
+    const next = nextOf(id);
+    if (!next) return null;
+    const head = resolveFrom(next);
+    return head === CYCLE || head === id ? displayParent(id) : head;
+  };
   const parent = new Map<string, string>();
   for (const s of staff ?? []) {
-    const head = displayParent((s as { id: string }).id);
+    const head = headOf((s as { id: string }).id);
     if (head) parent.set((s as { id: string }).id, head);
   }
   const children = new Map<string, string[]>();
   for (const [child, p] of parent) {
-    children.set(p, [...(children.get(p) ?? []), child]);
+    const list = children.get(p);
+    if (list) list.push(child);
+    else children.set(p, [child]);
   }
   const descendants = (id: string) => {
     const out: string[] = [];
     const seen = new Set([id]);
     const q = [...(children.get(id) ?? [])];
-    while (q.length && out.length < 10000) {
-      const x = q.shift()!;
+    // Index pointer instead of shift(): same breadth-first order without O(n) dequeues.
+    for (let head = 0; head < q.length && out.length < 10000; head++) {
+      const x = q[head]!;
       if (seen.has(x)) continue;
       seen.add(x);
       out.push(x);
-      q.push(...(children.get(x) ?? []));
+      for (const c of children.get(x) ?? []) q.push(c);
     }
     return out;
+  };
+  /**
+   * descendants(id).length for every id in one bottom-up pass. Each id has at most one display
+   * parent, so without cycles the reachable set is exactly the subtree (count capped at 10,000 as
+   * in descendants()). Any cycle -> null, and callers fall back to descendants(id).length.
+   */
+  let subtreeSizes: Map<string, number> | null | undefined;
+  const computeSubtreeSizes = () => {
+    const size = new Map<string, number>();
+    const pending = new Map<string, number>();
+    for (const [p, list] of children) pending.set(p, list.length);
+    const ready: string[] = [];
+    for (const child of parent.keys()) if (!pending.has(child)) ready.push(child);
+    let done = 0;
+    for (let head = 0; head < ready.length; head++) {
+      const x = ready[head]!;
+      done++;
+      const p = parent.get(x);
+      if (p === undefined) continue;
+      size.set(p, (size.get(p) ?? 0) + 1 + (size.get(x) ?? 0));
+      const left = pending.get(p)! - 1;
+      pending.set(p, left);
+      if (left === 0) ready.push(p);
+    }
+    const nodes = new Set([...parent.keys(), ...children.keys()]);
+    return done === nodes.size ? size : null;
+  };
+  const descendantCount = (id: string) => {
+    if (subtreeSizes === undefined) subtreeSizes = computeSubtreeSizes();
+    return subtreeSizes ? Math.min(subtreeSizes.get(id) ?? 0, 10000) : descendants(id).length;
   };
   const ancestors = (id: string) => {
     const out: string[] = [];
@@ -121,7 +201,7 @@ export function projectGenealogy(
           ostStatus: ostById.get(s.id) ?? null,
           uplineStaffId: parent.get(s.id) ?? null,
           directDownlineCount: (children.get(s.id) ?? []).length,
-          totalDescendantCount: descendants(s.id).length,
+          totalDescendantCount: descendantCount(s.id),
         },
       ];
     },
