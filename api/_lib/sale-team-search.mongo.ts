@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { ClientSession, Db, MongoClient } from 'mongodb';
-import type { PublicSaleTeamSearchStore } from './sale-team-public-search.js';
+import type { TransactionalSearchStore } from './sale-team-public-search.js';
 import type { MongoRow } from './customer-activation.mongo.js';
 import type { PrivateObjectStore } from './private-object-store.js';
-import { readMongoPublicVerificationSettings } from './public-verification-settings.mongo.js';
+import { readSavedMongoPublicVerificationSettings } from './public-verification-settings.mongo.js';
 
 /** Operator/test initialization only. Search requests never create indexes. */
 export async function setupMongoPublicSearch(db: Db) {
@@ -19,9 +19,9 @@ export async function setupMongoPublicSearch(db: Db) {
 export function createMongoPublicSearchStore(
   db: Db,
   client: MongoClient,
-  read: (id: string, session: ClientSession) => Promise<Record<string, unknown> | null>,
+  read: (aaNumber: string, session: ClientSession) => Promise<Record<string, unknown> | null>,
   objects?: PrivateObjectStore,
-): PublicSaleTeamSearchStore {
+): TransactionalSearchStore {
   const col = (name: string) => db.collection<MongoRow>(name);
   async function serialized<T>(ip: string, work: (session: ClientSession) => Promise<T>) {
     const session = client.startSession();
@@ -40,139 +40,137 @@ export function createMongoPublicSearchStore(
       await session.endSession();
     }
   }
-  async function lookup(aa: string, session: ClientSession) {
-    const record = await col('sale_team_accreditations').findOne(
-      { aa_number: aa },
-      { session, projection: { staff_id: 1 } },
+  /** Increments the per-IP counters and returns the one lookup, so callers never repeat it. */
+  async function throttle(ip: string, aa: string, session: ClientSession) {
+    const now = Date.now();
+    const state = await col('sale_team_search_attempts').findOne({ _id: ip }, { session });
+    const cooldown = Number(state?.cooldown_until ?? 0);
+    if (cooldown > now)
+      return { allowed: false, retryAfter: Math.max(1, Math.ceil((cooldown - now) / 1000)), found: null };
+    let window = Number(state?.window_started ?? now),
+      attempts = Number(state?.attempts ?? 0);
+    let invalidWindow = Number(state?.invalid_started ?? now),
+      invalid = Number(state?.invalid_attempts ?? 0);
+    if (window <= now - 60000) {
+      window = now;
+      attempts = 0;
+    }
+    if (invalidWindow <= now - 300000) {
+      invalidWindow = now;
+      invalid = 0;
+    }
+    if (attempts >= 30)
+      return {
+        allowed: false,
+        retryAfter: Math.max(1, Math.ceil((window + 60000 - now) / 1000)),
+        found: null,
+      };
+    attempts++;
+    const found = await read(aa, session);
+    if (!found) invalid++;
+    const until = invalid >= 20 ? now + 300000 : cooldown;
+    await col('sale_team_search_attempts').updateOne(
+      { _id: ip },
+      {
+        $set: {
+          window_started: window,
+          attempts,
+          invalid_started: invalidWindow,
+          invalid_attempts: invalid,
+          cooldown_until: until,
+          updated_at: new Date(now),
+        },
+      },
+      { session, upsert: true },
     );
-    if (!record) return null;
-    const result = await read(String(record.staff_id), session);
-    return result?.status === 'accredited' ? { ...result, staffId: record.staff_id } : null;
+    return { allowed: until <= now, retryAfter: until > now ? 300 : 0, found };
   }
+  /** The daily disclosure allowance and its record, for an already-looked-up result. */
+  async function disclose(
+    ip: string,
+    request: string,
+    noticeVersion: unknown,
+    result: Record<string, unknown> | null,
+    session: ClientSession,
+  ) {
+    const now = new Date(),
+      start = new Date(now.valueOf() - 86400000);
+    // One read: this IP's last 24 hours, plus this request's own record however old it is.
+    const rows = await col('sale_team_search_disclosures')
+      .find({ ip_hash: ip, $or: [{ disclosed_at: { $gt: start } }, { request_id: request }] }, { session })
+      .sort({ disclosed_at: 1 })
+      .toArray();
+    const retry = rows.some((row) => row.request_id === request);
+    const previous = rows.filter((row) => row.disclosed_at instanceof Date && row.disclosed_at > start);
+    const settings = await col('public_verification_settings').findOne({ _id: 'public' }, { session });
+    if (!retry && previous.length >= 3 && settings?.dailyLimitEnabled !== false)
+      return {
+        limited: true,
+        retryAfter: Math.max(
+          1,
+          Math.ceil((new Date(previous[0]!.disclosed_at as Date).valueOf() + 86400000 - now.valueOf()) / 1000),
+        ),
+        result: null,
+      };
+    if (result && !retry)
+      await col('sale_team_search_disclosures').insertOne(
+        {
+          _id: randomUUID(),
+          ip_hash: ip,
+          request_id: request,
+          notice_version: noticeVersion,
+          disclosed_at: now,
+        },
+        { session },
+      );
+    return { limited: false, retryAfter: 0, result };
+  }
+  const contacts = db.collection<{
+    _id: string;
+    dedupe_key: string;
+    name: string;
+    email: string;
+    mobile: string;
+    created_at: Date;
+    read_guard?: number;
+  }>('sale_team_search_contacts');
+  /** Touches the contact so retention cleanup cannot delete it mid-reveal. */
+  const guardContact = (id: string, session: ClientSession) =>
+    contacts.findOneAndUpdate({ _id: id }, { $inc: { read_guard: 1 } }, { session, returnDocument: 'after' });
   return {
-    async settings() {
-      const saved = await col('public_verification_settings').findOne({ _id: 'public' });
-      return saved ? readMongoPublicVerificationSettings(db) : null;
-    },
+    settings: () => readSavedMongoPublicVerificationSettings(db),
     async begin(ip, aa) {
       return serialized(ip, async (session) => {
-        const now = Date.now();
-        const state = await col('sale_team_search_attempts').findOne({ _id: ip }, { session });
-        const cooldown = Number(state?.cooldown_until ?? 0);
-        if (cooldown > now)
-          return { allowed: false, retryAfter: Math.max(1, Math.ceil((cooldown - now) / 1000)) };
-        let window = Number(state?.window_started ?? now),
-          attempts = Number(state?.attempts ?? 0);
-        let invalidWindow = Number(state?.invalid_started ?? now),
-          invalid = Number(state?.invalid_attempts ?? 0);
-        if (window <= now - 60000) {
-          window = now;
-          attempts = 0;
-        }
-        if (invalidWindow <= now - 300000) {
-          invalidWindow = now;
-          invalid = 0;
-        }
-        if (attempts >= 30)
-          return {
-            allowed: false,
-            retryAfter: Math.max(1, Math.ceil((window + 60000 - now) / 1000)),
-          };
-        attempts++;
-        if (!(await lookup(aa, session))) invalid++;
-        const until = invalid >= 20 ? now + 300000 : cooldown;
-        await col('sale_team_search_attempts').updateOne(
-          { _id: ip },
-          {
-            $set: {
-              window_started: window,
-              attempts,
-              invalid_started: invalidWindow,
-              invalid_attempts: invalid,
-              cooldown_until: until,
-              updated_at: new Date(now),
-            },
-          },
-          { session, upsert: true },
-        );
-        return { allowed: until <= now, retryAfter: until > now ? 300 : 0 };
+        const { allowed, retryAfter } = await throttle(ip, aa, session);
+        return { allowed, retryAfter };
       });
     },
-    async contactExists(id) {
-      return !!(await col('sale_team_search_contacts').findOne(
-        { _id: id },
-        { projection: { _id: 1 } },
-      ));
-    },
-    async saveContact(key, contact) {
-      const record = await col('sale_team_search_contacts').findOneAndUpdate(
-        { dedupe_key: key },
-        {
-          $setOnInsert: {
-            _id: randomUUID(),
-            dedupe_key: key,
-            name: contact.name,
-            email: contact.email,
-            mobile: contact.mobile,
-            created_at: new Date(),
-          },
-        },
-        { upsert: true, returnDocument: 'after' },
-      );
-      return record!._id;
-    },
-    async reveal(args) {
-      const ip = String(args.p_ip_hash),
-        request = String(args.p_request_id),
-        aa = String(args.p_aa_number);
-      return serialized(ip, async (session) => {
-        if (
-          !(await db.collection<{_id:string;read_guard?:number}>('sale_team_search_contacts').findOneAndUpdate(
-            { _id: String(args.p_contact_id) },
-            {$inc:{read_guard:1}},
-            { session,returnDocument:'after' },
-          ))
-        )
-          throw new Error('Contact required');
-        const now = new Date(),
-          start = new Date(now.valueOf() - 86400000);
-        const retry = await col('sale_team_search_disclosures').findOne(
-          { ip_hash: ip, request_id: request },
-          { session },
-        );
-        const previous = await col('sale_team_search_disclosures')
-          .find({ ip_hash: ip, disclosed_at: { $gt: start } }, { session })
-          .sort({ disclosed_at: 1 })
-          .toArray();
-        const settings = await col('public_verification_settings').findOne(
-          { _id: 'public' },
-          { session },
-        );
-        if (!retry && previous.length >= 3 && settings?.dailyLimitEnabled !== false)
-          return {
-            limited: true,
-            retryAfter: Math.max(
-              1,
-              Math.ceil(
-                (new Date(previous[0]!.disclosed_at as Date).valueOf() + 86400000 - now.valueOf()) /
-                  1000,
-              ),
-            ),
-            result: null,
-          };
-        const result = await lookup(aa, session);
-        if (result && !retry)
-          await col('sale_team_search_disclosures').insertOne(
+    async revealWithThrottle({ ipHash, aaNumber, requestId, noticeVersion, contactId, contact }) {
+      return serialized(ipHash, async (session) => {
+        // A stale receipt is refused before it can use any of the caller's allowance.
+        if (contactId && !(await guardContact(contactId, session))) return { contactMissing: true };
+        const gate = await throttle(ipHash, aaNumber, session);
+        if (!gate.allowed) return { throttled: true, retryAfter: gate.retryAfter };
+        let id = contactId;
+        if (!id) {
+          const saved = await contacts.findOneAndUpdate(
+            { dedupe_key: contact!.key },
             {
-              _id: randomUUID(),
-              ip_hash: ip,
-              request_id: request,
-              notice_version: args.p_notice_version,
-              disclosed_at: now,
+              $setOnInsert: {
+                _id: randomUUID(),
+                dedupe_key: contact!.key,
+                name: contact!.name,
+                email: contact!.email,
+                mobile: contact!.mobile,
+                created_at: new Date(),
+              },
+              $inc: { read_guard: 1 },
             },
-            { session },
+            { upsert: true, returnDocument: 'after', session },
           );
-        return { limited: false, retryAfter: 0, result };
+          id = saved!._id;
+        }
+        return { ...(await disclose(ipHash, requestId, noticeVersion, gate.found, session)), contactId: id };
       });
     },
     async photoUrl(id) {

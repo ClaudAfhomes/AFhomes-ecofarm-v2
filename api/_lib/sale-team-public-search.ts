@@ -30,6 +30,12 @@ const revealSchema = z.object({
   retryAfter: z.number().int().nonnegative(),
   result: z.unknown(),
 });
+const revealOutcomeSchema = z.union([
+  z.object({ contactMissing: z.literal(true) }),
+  z.object({ throttled: z.literal(true), retryAfter: z.number().int().nonnegative() }),
+  revealSchema.extend({ contactId: z.uuid() }),
+]);
+const CONTACT_EXPIRED = 'Contact session expired. Search again and enter your details.';
 
 async function rpc(db: Db, name: string, args: Record<string, unknown>): Promise<unknown> {
   const result = await db.rpc(name, args);
@@ -73,17 +79,33 @@ export async function handlePublicSaleTeamSearch(
   );
 }
 
-export interface PublicSaleTeamSearchStore {
+interface SearchStoreBase {
   settings(): Promise<unknown>;
   begin(ipHash: string, aaNumber: string): Promise<unknown>;
+  photoUrl(id: string): Promise<string | null>;
+}
+/** Driven one step at a time: contactExists, begin, saveContact, then reveal. */
+export interface SteppedSearchStore extends SearchStoreBase {
   contactExists(id: string): Promise<unknown>;
   saveContact(
     key: string,
     contact: { name: string; email: string; mobile: string },
   ): Promise<unknown>;
   reveal(args: Record<string, unknown>): Promise<unknown>;
-  photoUrl(id: string): Promise<string | null>;
 }
+/** The whole reveal step (throttle, contact, disclosure) in one transaction. */
+export interface TransactionalSearchStore extends SearchStoreBase {
+  revealWithThrottle(input: {
+    ipHash: string;
+    aaNumber: string;
+    requestId: string;
+    noticeVersion: string;
+    /** Exactly one of contactId (a validated receipt's contact) and contact is given. */
+    contactId?: string;
+    contact?: { key: string; name: string; email: string; mobile: string };
+  }): Promise<unknown>;
+}
+export type PublicSaleTeamSearchStore = SteppedSearchStore | TransactionalSearchStore;
 
 /** Shared transport/security contract; persistence is supplied by the selected backend. */
 export async function handlePublicSaleTeamSearchWithStore(
@@ -180,33 +202,50 @@ export async function handlePublicSaleTeamSearchWithStore(
         400,
       );
     }
-    if (contactId && (await store.contactExists(contactId)) !== true)
-      return fail(
-        res,
-        'VALIDATION_ERROR',
-        'Contact session expired. Search again and enter your details.',
-        400,
+    let answer: z.infer<typeof revealSchema>;
+    if ('revealWithThrottle' in store) {
+      const outcome = revealOutcomeSchema.parse(
+        await store.revealWithThrottle({
+          ipHash,
+          aaNumber: flow.aaNumber!,
+          requestId: flow.id,
+          noticeVersion: binding.noticeVersion,
+          ...(contactId
+            ? { contactId }
+            : { contact: { key: contactDigest(config.secret, body.contact!), ...body.contact! } }),
+        }),
       );
-    // A signed flow is reusable for delivery retries, so its requests also need shared throttling.
-    const attempt = attemptSchema.parse(await store.begin(ipHash, flow.aaNumber!));
-    if (!attempt.allowed) {
-      res.setHeader('Retry-After', String(attempt.retryAfter));
-      return fail(res, 'RATE_LIMITED', 'Too many requests. Try again later.', 429);
+      if ('contactMissing' in outcome) return fail(res, 'VALIDATION_ERROR', CONTACT_EXPIRED, 400);
+      if ('throttled' in outcome) {
+        res.setHeader('Retry-After', String(outcome.retryAfter));
+        return fail(res, 'RATE_LIMITED', 'Too many requests. Try again later.', 429);
+      }
+      answer = outcome;
+      contactId = outcome.contactId;
+    } else {
+      if (contactId && (await store.contactExists(contactId)) !== true)
+        return fail(res, 'VALIDATION_ERROR', CONTACT_EXPIRED, 400);
+      // A signed flow is reusable for delivery retries, so its requests also need shared throttling.
+      const attempt = attemptSchema.parse(await store.begin(ipHash, flow.aaNumber!));
+      if (!attempt.allowed) {
+        res.setHeader('Retry-After', String(attempt.retryAfter));
+        return fail(res, 'RATE_LIMITED', 'Too many requests. Try again later.', 429);
+      }
+      if (!contactId && body.contact) {
+        contactId = z
+          .uuid()
+          .parse(await store.saveContact(contactDigest(config.secret, body.contact), body.contact));
+      }
+      answer = revealSchema.parse(
+        await store.reveal({
+          p_ip_hash: ipHash,
+          p_request_id: flow.id,
+          p_aa_number: flow.aaNumber,
+          p_notice_version: binding.noticeVersion,
+          p_contact_id: contactId,
+        }),
+      );
     }
-    if (!contactId && body.contact) {
-      contactId = z
-        .uuid()
-        .parse(await store.saveContact(contactDigest(config.secret, body.contact), body.contact));
-    }
-    const answer = revealSchema.parse(
-      await store.reveal({
-        p_ip_hash: ipHash,
-        p_request_id: flow.id,
-        p_aa_number: flow.aaNumber,
-        p_notice_version: binding.noticeVersion,
-        p_contact_id: contactId,
-      }),
-    );
     if (answer.limited) {
       res.setHeader('Retry-After', String(answer.retryAfter));
       return fail(

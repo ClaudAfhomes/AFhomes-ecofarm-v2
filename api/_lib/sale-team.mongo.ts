@@ -28,35 +28,96 @@ export async function setupMongoSaleTeam(db: Db) {
     .collection('sale_team_accreditation_history')
     .createIndex({ aa_number: 1 }, { unique: true });
 }
+/** Equality join on the foreign collection's key; projects only what the status rules read. */
+const joinOne = (from: string, as: string, local: unknown, foreign: string, project: object) => ({
+  $lookup: {
+    from,
+    let: { key: local },
+    pipeline: [
+      { $match: { $expr: { $eq: [`$${foreign}`, '$$key'] } } },
+      { $limit: 1 },
+      { $project: project },
+    ],
+    as,
+  },
+});
+/**
+ * One accreditation with its staff, role, OST member and latest OST term in a single round trip.
+ * Every OST-only part is ignored by the caller unless the accreditation itself is OST.
+ */
+async function loadSaleTeam(
+  db: Db,
+  match: { staff_id: string } | { aa_number: string },
+  session?: ClientSession,
+) {
+  const [found] = await db
+    .collection<MongoRow>('sale_team_accreditations')
+    .aggregate<
+      MongoRow & { staff: MongoRow[]; assignment: MongoRow[]; role: MongoRow[]; ost: MongoRow[]; term: MongoRow[] }
+    >(
+      [
+        { $match: match },
+        { $limit: 1 },
+        joinOne('staff_users', 'staff', '$staff_id', '_id', { status: 1 }),
+        joinOne('staff_role_assignments', 'assignment', '$staff_id', 'staff_id', { role_id: 1 }),
+        joinOne(
+          'roles',
+          'role',
+          { $toString: { $arrayElemAt: ['$assignment.role_id', 0] } },
+          '_id',
+          { slug: 1, is_active: 1 },
+        ),
+        joinOne('ost_members', 'ost', '$staff_id', '_id', { status: 1 }),
+        {
+          $lookup: {
+            from: 'ost_accreditation_terms',
+            let: { key: '$staff_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $eq: ['$ost_id', '$$key'] },
+                  status: { $in: ['active', 'revoked'] },
+                },
+              },
+              { $sort: { approved_at: -1, _id: -1 } },
+              { $limit: 1 },
+              { $project: { status: 1, starts_on: 1, expires_on: 1 } },
+            ],
+            as: 'term',
+          },
+        },
+      ],
+      { session },
+    )
+    .toArray();
+  if (!found) return null;
+  const isOst = found.kind === 'OST';
+  return {
+    row: found,
+    staff: found.staff[0],
+    role: found.role[0],
+    ost: isOst ? found.ost[0] : undefined,
+    term: isOst ? found.term[0] : undefined,
+  };
+}
+type SaleTeamParts = NonNullable<Awaited<ReturnType<typeof loadSaleTeam>>>;
 export async function readMongoSaleTeam(db: Db, staffId: string, session?: ClientSession) {
-  const col = (name: string) => db.collection<MongoRow>(name);
-  const row = await col('sale_team_accreditations').findOne({ staff_id: staffId }, { session });
-  if (!row) return null;
-  const staff = await col('staff_users').findOne({ _id: staffId }, { session });
-  const assignment = await col('staff_role_assignments').findOne(
-    {
-      staff_id: staffId,
-    },
-    { session },
-  );
-  const role =
-    assignment && (await col('roles').findOne({ _id: String(assignment.role_id) }, { session }));
+  const parts = await loadSaleTeam(db, { staff_id: staffId }, session);
+  return parts && saleTeamFromParts(parts);
+}
+/** Public search lookup: the current accredited record by AA number, with its staff id for photo delivery. */
+export async function readMongoAccreditedSaleTeamByNumber(
+  db: Db,
+  aaNumber: string,
+  session?: ClientSession,
+) {
+  const parts = await loadSaleTeam(db, { aa_number: aaNumber }, session);
+  const result = parts && saleTeamFromParts(parts);
+  return result?.status === 'accredited' ? { ...result, staffId: parts!.row.staff_id } : null;
+}
+function saleTeamFromParts({ row, staff, role, ost, term }: SaleTeamParts) {
   if (!role || !staff) return null;
-  const ost =
-    row.kind === 'OST' ? await col('ost_members').findOne({ _id: staffId }, { session }) : null;
-  const term =
-    row.kind === 'OST'
-      ? await col('ost_accreditation_terms').findOne(
-          { ost_id: staffId, status: { $in: ['active', 'revoked'] } },
-          { session, sort: { approved_at: -1, _id: -1 } },
-        )
-      : null;
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
+  const today = manilaToday();
   const inactive =
     staff.status !== 'active' ||
     role.is_active !== true ||
@@ -259,7 +320,7 @@ export function createMongoSaleTeamHandler(
   const publicSearch = createMongoPublicSearchStore(
     db,
     client,
-    (id, session) => readMongoSaleTeam(db, id, session),
+    (aaNumber, session) => readMongoAccreditedSaleTeamByNumber(db, aaNumber, session),
     objects,
   );
   async function withPhoto<T extends {photoUrl:string|null}>(value: T | null, staffId: string): Promise<T|null> {
