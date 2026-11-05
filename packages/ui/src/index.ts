@@ -114,6 +114,7 @@ export type { OverflowMenuItem, OverflowMenuProps } from './components/OverflowM
 export { NormalizedInput } from './components/NormalizedInput.js';
 export { OstOfficialFields } from './components/OstOfficialFields.js';
 export { AccreditationId } from './components/AccreditationId.js';
+export { VerifiedBadge } from './components/VerifiedBadge.js';
 export { IdCapturePicker } from './components/IdCapturePicker.js';
 export { TurnstileChallenge } from './components/TurnstileChallenge.js';
 

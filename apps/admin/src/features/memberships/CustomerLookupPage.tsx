@@ -4,7 +4,7 @@ import {
   gsdActiveVipLookupSchema,
   type GsdActiveVipLookup,
 } from '@afhomes/contracts';
-import { PageHeader, SearchField, ErrorState, EmptyState, Icon } from '@afhomes/ui';
+import { PageHeader, SearchField, ErrorState, EmptyState, Icon, VerifiedBadge } from '@afhomes/ui';
 import styles from './MemberLookupPage.module.css';
 import { requestList } from '../../lib/api/client';
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
@@ -142,7 +142,10 @@ function CustomerCard({ customer }: { customer: GsdActiveVipLookup }) {
       </button>
       <div className={styles.cardBody}>
         <div className={styles.cardTitle}>
-          <h2>{name}</h2>
+          <h2 className={styles.nameRow}>
+            {name}
+            <VerifiedBadge />
+          </h2>
           <TierBadge tier={customer.vipTier} />
         </div>
         <dl className={styles.details}>

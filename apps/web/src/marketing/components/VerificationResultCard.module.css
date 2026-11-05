@@ -9,10 +9,19 @@
   font-size: 20px;
 }
 .identity {
-  padding: 0 14px;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid #e5d7c6;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px #39281912;
+  min-width: 0;
+  margin-bottom: 16px;
 }
 .badge {
   display: inline-flex;
+  width: fit-content;
   padding: 3px 14px;
   border-radius: 30px;
   background: #e8f2e1;
@@ -24,7 +33,7 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  margin: 18px 0 16px;
+  margin: 0;
 }
 .photo {
   position: relative;
@@ -70,11 +79,12 @@
   min-width: 0;
 }
 .status {
-  margin: 0 0 22px;
+  margin: 0;
   width: min(100%, 558px);
   padding: 14px 18px;
   border: 1px solid #e5d7c6;
   border-radius: 12px;
+  background: #fbf7f2;
 }
 .status dt {
   color: #85858b;
@@ -90,12 +100,6 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.verifiedBadge {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  color: var(--verification-blue);
 }
 .support {
   padding: 24px 26px;
@@ -279,7 +283,7 @@
     font-size: 16px;
   }
   .identity {
-    padding: 0;
+    padding: 16px;
   }
   .identityRow {
     gap: 12px;

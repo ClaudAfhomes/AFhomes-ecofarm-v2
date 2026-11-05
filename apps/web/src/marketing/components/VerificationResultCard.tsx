@@ -1,5 +1,5 @@
 import type { PublicSaleTeamSearchResult, SaleTeamSearchConfig } from '@afhomes/contracts';
-import { AccreditationId } from '@afhomes/ui';
+import { AccreditationId, VerifiedBadge } from '@afhomes/ui';
 import styles from './VerificationResultCard.module.css';
 
 function ContactIcon({ kind }: { kind: 'email' | 'phone' | 'check' }) {
@@ -24,29 +24,6 @@ function ContactIcon({ kind }: { kind: 'email' | 'phone' | 'check' }) {
         )}
       </svg>
     </span>
-  );
-}
-function VerifiedBadge() {
-  return (
-    <svg
-      className={styles.verifiedBadge}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        fill="currentColor"
-        d="M12 1.5l2.6 2.1 3.3-.3 1 3.2 2.9 1.7-.9 3.2.9 3.2-2.9 1.7-1 3.2-3.3-.3L12 22.5l-2.6-2.1-3.3.3-1-3.2-2.9-1.7.9-3.2-.9-3.2 2.9-1.7 1-3.2 3.3.3z"
-      />
-      <path
-        d="M7.5 12.4l3 3 6-6.2"
-        fill="none"
-        stroke="white"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 function BankAccount({ name, account }: { name: string; account: string }) {
