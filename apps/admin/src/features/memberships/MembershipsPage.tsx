@@ -5,7 +5,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   OverflowMenu,
   PageHeader,
   SearchField,
@@ -92,11 +91,13 @@ export function MembershipsPage() {
             <Skeleton style={{ height: 32, maxWidth: 240 }} />
             <Skeleton style={{ height: 16, maxWidth: 320 }} />
           </div>
-          <div className={styles.summary}>
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-          </div>
+          <ul className={styles.badges} aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <li key={index}>
+                <Skeleton style={{ height: 24, width: '10rem', borderRadius: '999px' }} />
+              </li>
+            ))}
+          </ul>
           <Skeleton style={{ height: 48 }} />
           <div className={styles.skeletonRows}>
             <Skeleton style={{ height: 64 }} />
@@ -113,15 +114,29 @@ export function MembershipsPage() {
       <PageHeader title="Memberships" description="Issued member cards. Open one to manage." />
 
       {query.isError ? null : (
-        <section className={styles.summary} aria-label="Membership summary">
-          <MetricCard label="Cards in view" value={formatCountOrDash(rows.length)} icon="grid" />
-          <MetricCard
-            label="Active cards"
-            value={formatCountOrDash(activeCount)}
-            icon="user-check"
-          />
-          <MetricCard label="Points held" value={formatCountOrDash(pointsTotal)} icon="wallet" />
-        </section>
+        <ul className={styles.badges} aria-label="Membership summary">
+          <li>
+            <StatusChip
+              label={`Cards in view: ${formatCountOrDash(rows.length)}`}
+              tone="neutral"
+              icon="grid"
+            />
+          </li>
+          <li>
+            <StatusChip
+              label={`Active cards: ${formatCountOrDash(activeCount)}`}
+              tone="success"
+              icon="user-check"
+            />
+          </li>
+          <li>
+            <StatusChip
+              label={`Points held: ${formatCountOrDash(pointsTotal)}`}
+              tone="info"
+              icon="wallet"
+            />
+          </li>
+        </ul>
       )}
 
       <FilterBar

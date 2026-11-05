@@ -47,10 +47,16 @@
   min-width: 0;
 }
 
-.summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: var(--space-3);
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badges > li {
   min-width: 0;
 }
 
@@ -58,25 +64,6 @@
   margin: 0;
   font-size: var(--text-caption);
   color: var(--color-text-muted);
-}
-
-/* Narrow: one swipeable row instead of three stacked cards, so the list
-   stays near the top. The next card peeks to signal more. */
-@container commissions (max-width: 39.99rem) {
-  .summary {
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(11.5rem, 72%);
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-    padding-bottom: var(--space-1);
-  }
-
-  .summary > * {
-    scroll-snap-align: start;
-  }
 }
 
 /* ---------- Filters ---------- */

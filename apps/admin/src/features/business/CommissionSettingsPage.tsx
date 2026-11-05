@@ -10,7 +10,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -188,11 +187,13 @@ export function CommissionSettingsPage() {
             <Skeleton style={{ height: 32, maxWidth: 280 }} />
             <Skeleton style={{ height: 16, maxWidth: 360 }} />
           </div>
-          <div className={styles.summary}>
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-          </div>
+          <ul className={styles.badges} aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <li key={index}>
+                <Skeleton style={{ height: 24, width: '10rem', borderRadius: '999px' }} />
+              </li>
+            ))}
+          </ul>
           <Skeleton style={{ height: 220 }} />
           <div className={styles.skeletonRows}>
             <Skeleton style={{ height: 64 }} />
@@ -221,26 +222,29 @@ export function CommissionSettingsPage() {
         <ErrorState error={rules.error} onRetry={rules.refetch} />
       ) : (
         <>
-          <section className={styles.summary} aria-label="Commission rule summary">
-            <MetricCard
-              label="Active rules"
-              value={formatCountOrDash(summary.active)}
-              description="Used for new sales."
-              icon="check"
-            />
-            <MetricCard
-              label="Disabled rules"
-              value={formatCountOrDash(summary.disabled)}
-              description="Kept for the record."
-              icon="close"
-            />
-            <MetricCard
-              label="Total rules"
-              value={formatCountOrDash(summary.total)}
-              description="All saved rules."
-              icon="file-text"
-            />
-          </section>
+          <ul className={styles.badges} aria-label="Commission rule summary">
+            <li>
+              <StatusChip
+                label={`Active rules: ${formatCountOrDash(summary.active)}`}
+                tone="success"
+                icon="check"
+              />
+            </li>
+            <li>
+              <StatusChip
+                label={`Disabled rules: ${formatCountOrDash(summary.disabled)}`}
+                tone="neutral"
+                icon="close"
+              />
+            </li>
+            <li>
+              <StatusChip
+                label={`Total rules: ${formatCountOrDash(summary.total)}`}
+                tone="neutral"
+                icon="file-text"
+              />
+            </li>
+          </ul>
 
           <section
             ref={formRef}

@@ -8,7 +8,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   Pagination,
   SearchField,
@@ -275,32 +274,24 @@ export function AfHomesRolesPage() {
         <EmptyState title="No roles" description="Create first custom role." />
       ) : (
         <>
-          <div className={styles.summary}>
-            <MetricCard
-              label="Roles"
-              value={summary.total}
-              description="Staff roles"
-              icon="users"
-            />
-            <MetricCard
-              label="System"
-              value={summary.system}
-              description="Protected roles"
-              icon="gear"
-            />
-            <MetricCard
-              label="Custom"
-              value={summary.custom}
-              description="Created here"
-              icon="plus"
-            />
-            <MetricCard
-              label="Assigned staff"
-              value={summary.assigned}
-              description="Across all roles"
-              icon="user-check"
-            />
-          </div>
+          <ul className={styles.badges} aria-label="Role summary">
+            <li>
+              <StatusChip label={`Roles: ${summary.total}`} tone="neutral" icon="users" />
+            </li>
+            <li>
+              <StatusChip label={`System: ${summary.system}`} tone="neutral" icon="gear" />
+            </li>
+            <li>
+              <StatusChip label={`Custom: ${summary.custom}`} tone="info" icon="plus" />
+            </li>
+            <li>
+              <StatusChip
+                label={`Assigned staff: ${summary.assigned}`}
+                tone="success"
+                icon="user-check"
+              />
+            </li>
+          </ul>
           <FilterBar
             search={
               <SearchField

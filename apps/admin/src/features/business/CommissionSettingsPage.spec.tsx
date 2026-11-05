@@ -77,8 +77,8 @@ describe('CommissionSettingsPage', () => {
     const user = userEvent.setup();
     renderWithProviders(<CommissionSettingsPage />, { user: MANAGER });
     expect(await screen.findByText('Sales Manager')).toBeInTheDocument();
-    expect(screen.getByLabelText('Active rules: 1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Disabled rules: 1')).toBeInTheDocument();
+    expect(screen.getByText('Active rules: 1')).toBeInTheDocument();
+    expect(screen.getByText('Disabled rules: 1')).toBeInTheDocument();
 
     const row = screen.getByText('ANA REYES').closest('tr')!;
     expect(row.textContent).toMatch(/On\/after 2026-09-01/);

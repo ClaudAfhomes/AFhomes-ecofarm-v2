@@ -9,7 +9,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  MetricCard,
   PageHeader,
   SearchField,
   Select,
@@ -157,11 +156,13 @@ export function BusinessCommissionsPage() {
             <Skeleton style={{ height: 32, maxWidth: 240 }} />
             <Skeleton style={{ height: 16, maxWidth: 320 }} />
           </div>
-          <div className={styles.summary}>
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-          </div>
+          <ul className={styles.badges} aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <li key={index}>
+                <Skeleton style={{ height: 24, width: '10rem', borderRadius: '999px' }} />
+              </li>
+            ))}
+          </ul>
           <Skeleton style={{ height: 48 }} />
           <div className={styles.skeletonRows}>
             <Skeleton style={{ height: 72 }} />
@@ -184,26 +185,29 @@ export function BusinessCommissionsPage() {
       ) : (
         <>
           <section className={styles.summaryBlock} aria-label="Commission summary">
-            <div className={styles.summary}>
-              <MetricCard
-                label="Needs decision"
-                value={formatCountOrDash(summary.awaiting)}
-                description="Ready for your review."
-                icon="clock"
-              />
-              <MetricCard
-                label="Ready to pay"
-                value={formatCountOrDash(summary.earned)}
-                description="Earned, not yet paid."
-                icon="wallet"
-              />
-              <MetricCard
-                label="Paid out"
-                value={formatCountOrDash(summary.paid)}
-                description="Payout recorded."
-                icon="dollar-sign"
-              />
-            </div>
+            <ul className={styles.badges}>
+              <li>
+                <StatusChip
+                  label={`Needs decision: ${formatCountOrDash(summary.awaiting)}`}
+                  tone="warning"
+                  icon="clock"
+                />
+              </li>
+              <li>
+                <StatusChip
+                  label={`Ready to pay: ${formatCountOrDash(summary.earned)}`}
+                  tone="info"
+                  icon="wallet"
+                />
+              </li>
+              <li>
+                <StatusChip
+                  label={`Paid out: ${formatCountOrDash(summary.paid)}`}
+                  tone="success"
+                  icon="dollar-sign"
+                />
+              </li>
+            </ul>
             {filtered ? <p className={styles.summaryNote}>Counts follow your filters.</p> : null}
           </section>
 

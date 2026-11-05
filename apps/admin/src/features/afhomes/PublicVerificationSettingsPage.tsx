@@ -1,6 +1,16 @@
-import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, PageHeader, TextAreaField, TextField, notifySuccess, Tabs, type TabItem } from '@afhomes/ui';
+import {
+  Alert,
+  Button,
+  PageHeader,
+  Skeleton,
+  TextAreaField,
+  TextField,
+  notifySuccess,
+  Tabs,
+  type TabItem,
+} from '@afhomes/ui';
 import {
   updatePublicVerificationSettingsSchema,
   type PublicVerificationSettings,
@@ -19,6 +29,7 @@ export function PublicVerificationSettingsPage() {
   const writable =
     user?.afHomesPermissions.some((p) => p.moduleKey === 'governance.config' && p.canUpdate) ===
     true;
+  const [reloadKey, setReloadKey] = useState(0);
   const settings = useQuery({
     queryKey: key,
     queryFn: getPublicVerificationSettings,
@@ -34,25 +45,88 @@ export function PublicVerificationSettingsPage() {
         description="Control public verification and results."
       />
       {settings.isPending ? (
-        <p role="status">Loading settings…</p>
+        <SettingsSkeleton />
       ) : settings.isError ? (
         <Alert variant="danger">
           <p>Settings could not be loaded.</p>
           <Button onClick={() => void settings.refetch()}>Retry</Button>
         </Alert>
       ) : (
-        <SettingsForm key={settings.data.revision} settings={settings.data} writable={writable} />
+        <SettingsForm
+          key={`${settings.data.revision}:${reloadKey}`}
+          settings={settings.data}
+          writable={writable}
+          onReload={() => void settings.refetch().then(() => setReloadKey((n) => n + 1))}
+        />
       )}
     </section>
   );
 }
 
+function SkeletonSection({ children }: { children: React.ReactNode }) {
+  return (
+    <div className={styles.sectionCard}>
+      <div className={styles.sectionHeader}>
+        <Skeleton className={styles.skelTitle} />
+        <Skeleton className={styles.skelText} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Mirrors the form layout: intro, five section cards, save bar. */
+function SettingsSkeleton() {
+  return (
+    <div className={styles.form} role="status" aria-busy="true" aria-label="Loading settings">
+      <Skeleton className={styles.skelText} />
+      <SkeletonSection>
+        <Skeleton className={styles.skelToggle} />
+        <Skeleton className={styles.skelToggle} />
+        <div className={styles.fieldGrid}>
+          <Skeleton className={styles.skelField} />
+          <Skeleton className={styles.skelField} />
+        </div>
+      </SkeletonSection>
+      <SkeletonSection>
+        <div className={styles.fieldGrid}>
+          <Skeleton className={styles.skelField} />
+          <Skeleton className={styles.skelField} />
+          <Skeleton className={styles.skelField} />
+        </div>
+      </SkeletonSection>
+      <SkeletonSection>
+        <Skeleton className={styles.skelField} />
+        <div className={styles.bankPair}>
+          <Skeleton className={styles.skelBank} />
+          <Skeleton className={styles.skelBank} />
+        </div>
+        <Skeleton className={styles.skelField} />
+      </SkeletonSection>
+      <SkeletonSection>
+        <Skeleton className={styles.skelArea} />
+        <Skeleton className={styles.skelArea} />
+      </SkeletonSection>
+      <SkeletonSection>
+        <Skeleton className={styles.skelTabs} />
+        <Skeleton className={styles.skelNotice} />
+        <Skeleton className={styles.skelToggle} />
+      </SkeletonSection>
+    </div>
+  );
+}
+
+const friendlyMessage = (message: string) =>
+  /^(Too |Invalid)/.test(message) ? 'Check this value.' : message;
+
 function SettingsForm({
   settings,
   writable,
+  onReload,
 }: {
   settings: PublicVerificationSettings;
   writable: boolean;
+  onReload: () => void;
 }) {
   const client = useQueryClient();
   const [enabled, setEnabled] = useState(settings.enabled);
@@ -78,13 +152,12 @@ function SettingsForm({
   // Privacy Notice edit/preview
   const [noticeMode, setNoticeMode] = useState<'edit' | 'preview'>('edit');
   const [validation, setValidation] = useState('');
-  const [unsaved, setUnsaved] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const save = useBusinessMutation({
     mutationFn: savePublicVerificationSettings,
     onSuccess: (saved) => {
       client.setQueryData(key, saved);
-      setUnsaved(false);
       notifySuccess({
         title: 'Settings saved',
         message: 'Public verification now uses these settings.',
@@ -94,35 +167,58 @@ function SettingsForm({
 
   const disabled = !writable || save.isPending;
 
-  const handleChange = () => setUnsaved(true);
+  const current = {
+    enabled,
+    dailyLimitEnabled,
+    privacyApproved,
+    verificationPhone: phone,
+    privacyNotice: notice,
+    retentionDays: days,
+    supportHeading,
+    supportEmail,
+    supportPhone,
+    bankHolder,
+    bank1Name,
+    bank1Account,
+    bank2Name,
+    bank2Account,
+    checkPayee,
+    bankReminder,
+    agentReminder,
+  };
+  // Trimmed compare: whitespace-only edits and reverted edits are not changes.
+  const dirty = Object.entries(current).some(([name, value]) => {
+    const saved = settings[name as keyof typeof current];
+    return typeof value === 'string' ? value.trim() !== String(saved).trim() : value !== saved;
+  });
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (disabled) return;
+    if (disabled || !dirty) return;
     const input = updatePublicVerificationSettingsSchema.safeParse({
-      enabled,
-      dailyLimitEnabled,
-      privacyApproved,
-      verificationPhone: phone,
-      privacyNotice: notice,
-      retentionDays: Number(days),
-      supportHeading,
-      supportEmail,
-      supportPhone,
-      bankHolder,
-      bank1Name,
-      bank1Account,
-      bank2Name,
-      bank2Account,
-      checkPayee,
-      bankReminder,
-      agentReminder,
+      ...current,
+      retentionDays: days.trim() === '' ? Number.NaN : Number(days),
       expectedRevision: settings.revision,
     });
     if (!input.success) {
-      setValidation(input.error.issues[0]?.message ?? 'Check the settings.');
+      const found: Record<string, string> = {};
+      for (const issue of input.error.issues) {
+        const field = String(issue.path[0] ?? '');
+        if (field && !found[field]) found[field] = friendlyMessage(issue.message);
+      }
+      setErrors(found);
+      setValidation('Check the marked fields.');
+      document.querySelector<HTMLElement>(`[name="${Object.keys(found)[0]}"]`)?.focus();
       return;
     }
+    setErrors({});
     setValidation('');
     save.mutate(input.data);
   };
@@ -166,11 +262,12 @@ function SettingsForm({
             </span>
             <input
               type="checkbox"
+              role="switch"
               className={styles.switch}
               aria-label="Enable public IST/OST search"
               checked={enabled}
               disabled={disabled}
-              onChange={(event) => { setEnabled(event.target.checked); handleChange(); }}
+              onChange={(event) => { setEnabled(event.target.checked); }}
             />
           </label>
           <label className={styles.toggleRow}>
@@ -184,11 +281,12 @@ function SettingsForm({
             </span>
             <input
               type="checkbox"
+              role="switch"
               className={styles.switch}
               aria-label="Limit each IP address to 3 successful searches in 24 hours"
               checked={dailyLimitEnabled}
               disabled={disabled}
-              onChange={(event) => { setDailyLimitEnabled(event.target.checked); handleChange(); }}
+              onChange={(event) => { setDailyLimitEnabled(event.target.checked); }}
             />
           </label>
         </div>
@@ -196,18 +294,20 @@ function SettingsForm({
           <TextField
             id="verification-phone"
             name="verificationPhone"
+            error={errors.verificationPhone}
             label="Company verification phone"
             value={phone}
-            onChange={(v) => { setPhone(v); handleChange(); }}
+            onChange={(v) => { setPhone(v); }}
             disabled={disabled}
           />
           <TextField
             id="retention-days"
             name="retentionDays"
+            error={errors.retentionDays}
             inputMode="numeric"
             label="Contact retention (days)"
             value={days}
-            onChange={(v) => { setDays(v); handleChange(); }}
+            onChange={(v) => { setDays(v); }}
             disabled={disabled}
           />
         </div>
@@ -229,29 +329,32 @@ function SettingsForm({
         </header>
         <div className={styles.fieldGrid}>
           <TextField
-            id="support-heading"
+            id="support-heading-input"
             name="supportHeading"
+            error={errors.supportHeading}
             label="Section heading"
             value={supportHeading}
-            onChange={(v) => { setSupportHeading(v); handleChange(); }}
+            onChange={(v) => { setSupportHeading(v); }}
             disabled={disabled}
           />
           <TextField
             id="support-email"
             name="supportEmail"
+            error={errors.supportEmail}
             label="Support email"
             type="email"
             value={supportEmail}
-            onChange={(v) => { setSupportEmail(v); handleChange(); }}
+            onChange={(v) => { setSupportEmail(v); }}
             disabled={disabled}
           />
           <TextField
             id="support-phone"
             name="supportPhone"
+            error={errors.supportPhone}
             label="Support phone"
             type="tel"
             value={supportPhone}
-            onChange={(v) => { setSupportPhone(v); handleChange(); }}
+            onChange={(v) => { setSupportPhone(v); }}
             disabled={disabled}
           />
         </div>
@@ -268,9 +371,10 @@ function SettingsForm({
         <TextField
           id="bank-holder"
           name="bankHolder"
+          error={errors.bankHolder}
           label="Account holder name"
           value={bankHolder}
-          onChange={(v) => { setBankHolder(v); handleChange(); }}
+          onChange={(v) => { setBankHolder(v); }}
           disabled={disabled}
         />
         <div className={styles.bankPair}>
@@ -279,17 +383,19 @@ function SettingsForm({
             <TextField
               id="bank1-name"
               name="bank1Name"
+              error={errors.bank1Name}
               label="Bank name"
               value={bank1Name}
-              onChange={(v) => { setBank1Name(v); handleChange(); }}
+              onChange={(v) => { setBank1Name(v); }}
               disabled={disabled}
             />
             <TextField
               id="bank1-account"
               name="bank1Account"
+              error={errors.bank1Account}
               label="Account number"
               value={bank1Account}
-              onChange={(v) => { setBank1Account(v); handleChange(); }}
+              onChange={(v) => { setBank1Account(v); }}
               disabled={disabled}
               hint="Enter as text to preserve leading zeros"
             />
@@ -299,17 +405,19 @@ function SettingsForm({
             <TextField
               id="bank2-name"
               name="bank2Name"
+              error={errors.bank2Name}
               label="Bank name"
               value={bank2Name}
-              onChange={(v) => { setBank2Name(v); handleChange(); }}
+              onChange={(v) => { setBank2Name(v); }}
               disabled={disabled}
             />
             <TextField
               id="bank2-account"
               name="bank2Account"
+              error={errors.bank2Account}
               label="Account number"
               value={bank2Account}
-              onChange={(v) => { setBank2Account(v); handleChange(); }}
+              onChange={(v) => { setBank2Account(v); }}
               disabled={disabled}
               hint="Enter as text to preserve leading zeros"
             />
@@ -318,9 +426,10 @@ function SettingsForm({
         <TextField
           id="check-payee"
           name="checkPayee"
+          error={errors.checkPayee}
           label="Check payable to"
           value={checkPayee}
-          onChange={(v) => { setCheckPayee(v); handleChange(); }}
+          onChange={(v) => { setCheckPayee(v); }}
           disabled={disabled}
         />
       </section>
@@ -336,9 +445,10 @@ function SettingsForm({
         <TextAreaField
           id="bank-reminder"
           name="bankReminder"
+          error={errors.bankReminder}
           label="Bank detail reminder"
           value={bankReminder}
-          onChange={(v) => { setBankReminder(v); handleChange(); }}
+          onChange={(v) => { setBankReminder(v); }}
           disabled={disabled}
           rows={3}
           maxLength={500}
@@ -347,9 +457,10 @@ function SettingsForm({
         <TextAreaField
           id="agent-reminder"
           name="agentReminder"
+          error={errors.agentReminder}
           label="Agent payment reminder"
           value={agentReminder}
-          onChange={(v) => { setAgentReminder(v); handleChange(); }}
+          onChange={(v) => { setAgentReminder(v); }}
           disabled={disabled}
           rows={3}
           maxLength={500}
@@ -375,9 +486,10 @@ function SettingsForm({
           <TextAreaField
             id="privacy-notice"
             name="privacyNotice"
+            error={errors.privacyNotice}
             label="Privacy notice (edit mode)"
             value={notice}
-            onChange={(v) => { setNotice(v); handleChange(); }}
+            onChange={(v) => { setNotice(v); }}
             disabled={disabled}
             rows={18}
             maxLength={20000}
@@ -395,28 +507,34 @@ function SettingsForm({
           </span>
           <input
             type="checkbox"
+              role="switch"
             className={styles.switch}
             aria-label="Privacy notice approved"
             checked={privacyApproved}
             disabled={disabled}
-            onChange={(event) => { setPrivacyApproved(event.target.checked); handleChange(); }}
+            onChange={(event) => { setPrivacyApproved(event.target.checked); }}
           />
         </label>
       </section>
 
       {validation || save.error ? (
-        <Alert variant="danger">{validation || save.error?.message}</Alert>
+        <Alert variant="danger">
+          <p>{validation || save.error?.message}</p>
+          {save.error && !validation ? (
+            <Button type="button" onClick={onReload}>
+              Discard edits and reload
+            </Button>
+          ) : null}
+        </Alert>
       ) : null}
 
-      {unsaved && !save.isPending && (
-        <div className={styles.unsavedAlert}>
-          <Alert variant="warning">You have unsaved changes.</Alert>
-        </div>
-      )}
+      <div role="status" className={styles.unsavedAlert}>
+        {dirty && !save.isPending && <Alert variant="warning">You have unsaved changes.</Alert>}
+      </div>
 
       <div className={styles.saveBar}>
         {writable ? (
-          <Button type="submit" disabled={save.isPending} loading={save.isPending}>
+          <Button type="submit" disabled={save.isPending || !dirty} loading={save.isPending}>
             Save Changes
           </Button>
         ) : (

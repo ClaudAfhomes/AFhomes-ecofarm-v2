@@ -195,6 +195,46 @@
   overflow-wrap: anywhere;
 }
 
+.skelTitle {
+  width: 40%;
+  max-width: 260px;
+  height: 22px;
+}
+
+.skelText {
+  width: 70%;
+  max-width: 420px;
+  height: 14px;
+}
+
+.skelToggle {
+  height: 72px;
+  border-radius: var(--radius-md);
+}
+
+.skelField {
+  height: 68px;
+}
+
+.skelBank {
+  height: 160px;
+  border-radius: var(--radius-md);
+}
+
+.skelArea {
+  height: 108px;
+}
+
+.skelTabs {
+  width: 160px;
+  height: 36px;
+}
+
+.skelNotice {
+  height: 280px;
+  border-radius: var(--radius-md);
+}
+
 .unsavedAlert {
   margin-top: var(--space-2);
 }
