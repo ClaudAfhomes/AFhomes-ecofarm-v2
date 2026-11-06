@@ -118,7 +118,10 @@ export async function loadMongoCustomerImportContext(
       .find({
         customer_id: { $in: customers.map((c) => c._id) },
         committed_at: { $type: 'string' },
-        'raw_data.workbook_format': 'company_v1',
+        // Both template generations are valid committed imports (see
+        // import-job-commit.mongo.ts), so a customer imported under the
+        // current company_v2 template must still produce a snapshot.
+        'raw_data.workbook_format': { $in: ['company_v1', 'company_v2'] },
       }, { session })
       .sort({ committed_at: -1 })
       .toArray()) {

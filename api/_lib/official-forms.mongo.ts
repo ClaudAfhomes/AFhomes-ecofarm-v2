@@ -1,4 +1,5 @@
 import { purchaseSellerFor, purchaseTermsForApplication, type PurchaseTerms } from './purchase-terms.mongo.js';
+import { workbookApplicationPrefill } from './customer-workbook.js';
 import { applicationPlanSnapshot, mirrorApplicationCustomer, applicationHolderRow, insertMongoApplication } from './application-records.mongo.js';
 import { createMongoImportSourceRecords } from './import-source.mongo.js';
 import { createMongoImportContinuationHandlers } from './import-continuation.mongo.js';
@@ -1081,11 +1082,16 @@ export function createMongoOfficialFormsHandler(
         if ('error' in importAccess) return deny(res, importAccess);
         const id = z.string().uuid().safeParse(importPrefill[1]!);
         if (!id.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer', 400);
+        // Both workbook template generations are valid committed imports - see
+        // import-job-commit.mongo.ts/import-continuation.mongo.ts, which treat
+        // company_v1 and company_v2 identically. A customer imported under the
+        // current template (company_v2, the active WORKFLOW_TEMPLATE_VERSION)
+        // must still be found here, not just legacy company_v1 rows.
         const imported = await col('customer_import_rows')
           .find({
             customer_id: id.data,
             committed_at: { $ne: null },
-            'raw_data.workbook_format': 'company_v1',
+            'raw_data.workbook_format': { $in: ['company_v1', 'company_v2'] },
           })
           .sort({ committed_at: -1 })
           .limit(20)
@@ -1093,7 +1099,9 @@ export function createMongoOfficialFormsHandler(
         const found = imported.find(
           (r) =>
             r.committed_at &&
-            (r.raw_data as Record<string, unknown>)?.workbook_format === 'company_v1',
+            ['company_v1', 'company_v2'].includes(
+              String((r.raw_data as Record<string, unknown>)?.workbook_format),
+            ),
         );
         if (!found)
           return fail(
@@ -1102,7 +1110,13 @@ export function createMongoOfficialFormsHandler(
             'No committed company workbook details for this customer',
             404,
           );
-        return res.status(200).json(found.raw_data);
+        // raw_data holds the flat workbook field names (first_name, mobile, …);
+        // the client expects the nested primary/secondary application-holder
+        // shape (companyApplicationPrefillSchema), so it must go through the
+        // same transform every other prefill consumer uses.
+        return res
+          .status(200)
+          .json(workbookApplicationPrefill(found.raw_data as Record<string, string>));
       }
       if (method(req) === 'GET' && path === 'customer/template') {
         const auth = await authorize(req, 'sales.customers', 'create');
