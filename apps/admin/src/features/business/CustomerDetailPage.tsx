@@ -526,6 +526,7 @@ export function CustomerDetailPage() {
           onClose={() => setEditing(false)}
           onSaved={() => void customer.refetch()}
           sales={sales.data ?? []}
+          canViewIdDocuments={canViewIdDocuments}
         />
       ) : null}
       <ConfirmDialog

@@ -790,6 +790,43 @@
   min-width: 0;
 }
 
+/* Government ID image replacement block: current scan, picker, preview. */
+.idImageField {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageLabel {
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.idImagePreview {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.idImagePreviewThumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .editEmpty {
   margin: 0;
   padding: var(--space-4);
