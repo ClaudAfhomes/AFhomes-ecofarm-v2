@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Customer, Sale } from '@afhomes/contracts';
 import {
   CIVIL_STATUS_OPTIONS,
+  GOVERNMENT_ID_TYPE_LABELS,
   PAYMENT_SCHEMES,
   PAYMENT_SCHEME_LABELS,
   SUFFIX_OPTIONS,
   TEMPLATE_PAYMENT_METHOD_OPTIONS,
   TEMPLATE_TIER_OPTIONS,
+  governmentIdTypeSchema,
   tinNumberSchema,
+  type GovernmentIdType,
 } from '@afhomes/contracts';
 import { DateField as AppDateField, Field, SelectField, chainOptions } from './official-forms-fields';
 import { Alert, Button, DateField, Dialog, Icon, Select, Tabs, TextField } from '@afhomes/ui';
@@ -16,6 +20,7 @@ import { formatStatedMoney } from '@afhomes/shared';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   filterBusinessTextInput,
+  filterGovernmentIdInput,
   filterHolderAddressInput,
   filterHolderNameInput,
   filterLandlineInput,
@@ -97,6 +102,18 @@ const formatMoneyInput = (value: string): string => {
   return formatted === '—' ? filtered : formatted;
 };
 
+// Mirrors the contract's governmentIdNumber bounds (min 4, max 40 chars).
+const governmentIdNumberSchema = z.string().trim().min(4).max(40);
+
+// Government ID type options, in the shared slug/label vocabulary.
+const GOVERNMENT_ID_TYPE_OPTIONS = [
+  { value: '', label: 'Not specified' },
+  ...governmentIdTypeSchema.options.map((value) => ({
+    value,
+    label: GOVERNMENT_ID_TYPE_LABELS[value],
+  })),
+];
+
 // Customer gender is stored lowercase (contract enum) and displayed Title Case.
 const CUSTOMER_GENDER_OPTIONS = [
   { value: '', label: 'Not specified' },
@@ -166,6 +183,10 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
     phone: text(customer.phone),
     raNumber: text(customer.raNumber),
     companyStatus: text(customer.companyStatus),
+    governmentIdType: text(customer.governmentIdType),
+    // The stored number is write-only and never read back; this starts blank
+    // and is only sent when the edit lock below is unchecked.
+    governmentIdNumber: '',
     addressLine1: addressPart(customer.address, 'line1'),
     addressLine2: addressPart(customer.address, 'line2'),
     province: addressPart(customer.address, 'province'),
@@ -215,6 +236,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
   }));
   const [hasSupplementary, setHasSupplementary] = useState(() => hasSupplementaryRecord(customer));
   const [tinEditable, setTinEditable] = useState(false);
+  const [governmentIdEditable, setGovernmentIdEditable] = useState(false);
   const [supplementaryTinEditable, setSupplementaryTinEditable] = useState(false);
   const [section, setSection] = useState<EditSection>('primary');
   const set = (key: keyof typeof form) => (value: string) =>
@@ -302,6 +324,12 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
         phone: orNull(form.phone) ?? undefined,
         raNumber: orNull(form.raNumber),
         companyStatus: orNull(form.companyStatus),
+        governmentIdType: orNull(form.governmentIdType) as GovernmentIdType | null,
+        // Write-only: sent only when staff explicitly unlocks and types a
+        // replacement. A blank, locked field never overwrites the stored number.
+        ...(governmentIdEditable && form.governmentIdNumber.trim()
+          ? { governmentIdNumber: form.governmentIdNumber.trim() }
+          : {}),
         // Required parts fall back to the stored value; optional parts are
         // omitted when blank, never sent as empty strings.
         address: {
@@ -491,6 +519,43 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
             options={withStoredValue(CUSTOMER_PAYMENT_STATUS_OPTIONS, form.companyStatus)}
           />
         </label>
+        <label className={styles.filterLabel}>
+          ID Type
+          <Select
+            id="ce-gov-id-type"
+            name="governmentIdType"
+            aria-label="ID Type"
+            value={form.governmentIdType}
+            onChange={(e) => set('governmentIdType')(e.target.value)}
+            options={withStoredValue(GOVERNMENT_ID_TYPE_OPTIONS, form.governmentIdType || undefined)}
+          />
+        </label>
+        <div className={styles.tinField}>
+          <Field
+            label="Government ID Number"
+            value={form.governmentIdNumber}
+            normalize={filterGovernmentIdInput}
+            validate={governmentIdEditable ? governmentIdNumberSchema : null}
+            validateMessage="Enter 4-40 characters."
+            readOnly={!governmentIdEditable}
+            placeholder={
+              customer.governmentIdMasked ? `Current: ${customer.governmentIdMasked}` : 'Not Recorded'
+            }
+            onChange={(v) => set('governmentIdNumber')(v)}
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={governmentIdEditable}
+              onChange={(e) => {
+                setGovernmentIdEditable(e.target.checked);
+                if (!e.target.checked) set('governmentIdNumber')('');
+              }}
+              aria-label="Edit Government ID Number"
+            />{' '}
+            Edit Government ID Number
+          </label>
+        </div>
         <TextField
           id="ce-addr1"
           name="addressLine1"

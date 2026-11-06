@@ -69,6 +69,8 @@ const RECORD = {
   raNumber: 'RA-1',
   tinNumber: '123456789',
   tinNumberMasked: '********9012',
+  governmentIdType: 'passport',
+  governmentIdMasked: '****4321',
   createdAt: '2026-09-01T00:00:00.000Z',
   updatedAt: '2026-09-02T00:00:00.000Z',
 } as unknown as Customer;
@@ -205,6 +207,46 @@ describe('Customer company edit', () => {
     await waitFor(() => expect(vi.mocked(updateCustomer)).toHaveBeenCalledTimes(2));
     expect(vi.mocked(updateCustomer).mock.calls[1]![1]).toMatchObject({
       tinNumber: '987-654-321',
+    });
+  });
+
+  it('prefills the ID type but never the stored government ID number', async () => {
+    renderWithProviders(
+      <CustomerCompanyEditDialog customer={RECORD} open onClose={() => {}} onSaved={() => {}} />,
+      { user: STAFF, route: '/admin/customers/c-1' },
+    );
+    const idType = await screen.findByLabelText('ID Type') as HTMLSelectElement;
+    expect(idType.value).toBe('passport');
+    const idNumber = screen.getByLabelText('Government ID Number') as HTMLInputElement;
+    expect(idNumber.value).toBe('');
+    expect(idNumber).toHaveAttribute('readonly');
+    expect(idNumber).toHaveAttribute('placeholder', 'Current: ****4321');
+    expect(screen.getByRole('checkbox', { name: 'Edit Government ID Number' })).not.toBeChecked();
+  });
+
+  it('keeps the government ID number unless unlocked and typed, and always sends the ID type', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <CustomerCompanyEditDialog customer={RECORD} open onClose={() => {}} onSaved={() => {}} />,
+      { user: STAFF, route: '/admin/customers/c-1' },
+    );
+
+    // Locked: saving omits the number but still sends the (unchanged) type.
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(vi.mocked(updateCustomer)).toHaveBeenCalledTimes(1));
+    const firstPayload = vi.mocked(updateCustomer).mock.calls[0]![1] as Record<string, unknown>;
+    expect(firstPayload).not.toHaveProperty('governmentIdNumber');
+    expect(firstPayload).toMatchObject({ governmentIdType: 'passport' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+
+    // Unlocked and typed: the new number is sent write-only.
+    await user.click(screen.getByRole('checkbox', { name: 'Edit Government ID Number' }));
+    const idNumber = screen.getByLabelText('Government ID Number') as HTMLInputElement;
+    await user.type(idNumber, 'P7654321');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(vi.mocked(updateCustomer)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(updateCustomer).mock.calls[1]![1]).toMatchObject({
+      governmentIdNumber: 'P7654321',
     });
   });
 

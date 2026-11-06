@@ -102,6 +102,33 @@ it('preserves all company fields, canonical IDs and safe create/list/detail proj
     phone: '+639175550123',
     vipCardNumber: expect.stringMatching(/^\d{11}B1C01S$/),
   });
+  // Government ID edit: persists to the real document, masks on every read
+  // (including the post-save "refresh" GET) and never reaches audit_events.
+  const idUpdate = await call('PATCH', created.id, {
+    governmentIdType: 'passport',
+    governmentIdNumber: 'NEWGOVID9999',
+  });
+  expect(idUpdate.status).toBe(200);
+  expect(JSON.stringify(idUpdate.body)).not.toContain('NEWGOVID9999');
+  const afterIdUpdate = await call('GET', created.id);
+  expect(afterIdUpdate.body).toMatchObject({
+    governmentIdType: 'passport',
+    governmentIdMasked: '********9999',
+  });
+  expect(JSON.stringify(afterIdUpdate.body)).not.toContain('NEWGOVID9999');
+  const rawRow = await test.db.collection<MongoRow>('customers').findOne({ _id: created.id });
+  expect(rawRow?.government_id_number).toBe('NEWGOVID9999');
+  const idAudits = await test.db
+    .collection('audit_events')
+    .find({ entity_id: created.id })
+    .toArray();
+  expect(JSON.stringify(idAudits)).not.toContain('NEWGOVID9999');
+  // An omitted governmentIdNumber on a later edit must never clear the stored value.
+  expect((await call('PATCH', created.id, { phone: '09175550124' })).status).toBe(200);
+  expect(
+    (await test.db.collection<MongoRow>('customers').findOne({ _id: created.id }))
+      ?.government_id_number,
+  ).toBe('NEWGOVID9999');
 });
 it('reconciles all purchases/reservations using only verified money; filters and pages before output', async () => {
   const created = customerSchema.parse((await call('POST', '', input('two'))).body);
