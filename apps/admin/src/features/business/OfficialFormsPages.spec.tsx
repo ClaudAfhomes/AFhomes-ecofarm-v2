@@ -869,6 +869,20 @@ describe('application private ID intake', () => {
     // The create path belongs to a picked customer only.
     expect(vi.mocked(createCustomerApplication)).not.toHaveBeenCalled();
     expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(vi.mocked(submitCustomerApplication)).toHaveBeenCalledTimes(1));
+    // Regression: the current-document refresh used to fire with this render's
+    // stale (empty) customerId, which the server refuses with "A valid
+    // subject is required" - the new customer's own id must be used instead.
+    expect(getCurrentDocument).not.toHaveBeenCalledWith(
+      expect.objectContaining({ subjectId: '' }),
+    );
+    // Regression: a brand-new application has no route `id` yet (this page
+    // is about to navigate to one), so the post-submit cache refresh used to
+    // call these with `undefined` and get "Official form endpoint not
+    // found", repeatedly, from the server.
+    expect(getCustomerApplication).not.toHaveBeenCalled();
+    expect(getPurchaseTermsProposal).not.toHaveBeenCalledWith(undefined);
   });
 });
 

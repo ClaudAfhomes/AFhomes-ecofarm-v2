@@ -1,8 +1,13 @@
-import { beforeAll, afterAll, expect, it } from 'vitest';
+import { beforeAll, afterAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { customerSchema, isAfId } from '@afhomes/contracts';
 import { createTestReplica } from './testing/mongo-replica.js';
-import { createMongoCustomersHandler, setupMongoCustomers, ensureMongoCustomerVipNumber } from './customers.mongo.js';
+import {
+  createMongoCustomersHandler,
+  describeUnexpectedError,
+  setupMongoCustomers,
+  ensureMongoCustomerVipNumber,
+} from './customers.mongo.js';
 import { makeRes } from './testing/supabase-fake.js';
 import type { authorizeAfHomes } from './afhomes-access.js';
 import type { VercelRequest } from './http.js';
@@ -285,4 +290,60 @@ it('denies reactivation to a caller without customer-update permission', async (
       .collection('audit_events')
       .countDocuments({ entity_id: created.id, action: 'CUSTOMER_REACTIVATED' }),
   ).toBe(0);
+});
+
+it('never surfaces a sensitive error message/path/value in the server-side diagnostic text', () => {
+  const sensitive = [
+    'juan.delacruz@example.invalid',
+    'PRIVATE-GOV-ID-998877',
+    'afhomes-customer-ids/some-customer/scan.png',
+    'mongodb+srv://app:S3cr3tPass@cluster0.mongodb.net/afhomes',
+  ];
+  // A real duplicate-key error literally quotes the offending field value.
+  const dup = new Error(
+    `E11000 duplicate key error collection: afhomes_dev.customers index: email_1 dup key: { email: "${sensitive[0]}" }`,
+  );
+  (dup as unknown as { code: number }).code = 11000;
+  // A schema/validation error can print its whole multi-line issue list,
+  // including input values, with no "at ..." stack-frame prefix at all.
+  const multiline = new Error(
+    [
+      'ValidationError: 2 issues',
+      `  government_id_number: "${sensitive[1]}"`,
+      `  storage_path: "${sensitive[2]}"`,
+      `  connection: "${sensitive[3]}"`,
+    ].join('\n'),
+  );
+  for (const error of [dup, multiline]) {
+    const described = describeUnexpectedError(error);
+    for (const value of sensitive) expect(described).not.toContain(value);
+    expect(described).not.toContain(error.message);
+  }
+  // Still diagnosable: the error's own type/name survives.
+  expect(describeUnexpectedError(dup)).toContain('Error');
+  expect(describeUnexpectedError(new TypeError('x'))).toContain('TypeError');
+});
+
+it('logs only the sanitized diagnostic - never the raw message - when a request fails unexpectedly', async () => {
+  const created = customerSchema.parse((await call('POST', '', input('log-sanitize'))).body);
+  const throwingAuthorize: typeof authorizeAfHomes = async () => {
+    throw new Error(`Unexpected failure for ${created.email ?? 'synthetic@example.invalid'}`);
+  };
+  const throwingHandler = createMongoCustomersHandler(test.db, test.client, throwingAuthorize);
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const res = makeRes();
+    await throwingHandler(
+      { method: 'GET', headers: {}, query: { familyPath: created.id } } as VercelRequest,
+      res.res,
+    );
+    expect(res.state.status).toBe(503);
+    expect(JSON.stringify(res.state.body)).not.toContain('synthetic');
+    expect(spy).toHaveBeenCalledTimes(1);
+    const logged = spy.mock.calls[0]!.join(' ');
+    expect(logged).not.toContain('Unexpected failure for');
+    expect(logged).not.toContain(created.email ?? 'synthetic@example.invalid');
+  } finally {
+    spy.mockRestore();
+  }
 });

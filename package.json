@@ -33,6 +33,8 @@
     "test:db:local": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-local.mjs",
     "test:db:harness": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-harness.mjs",
     "test:security:db": "node packages/db-testing/scripts/test-security-remediation.mjs --full",
+    "test:mongodb:local": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-mongodb-local.mjs",
+    "test:mongodb:harness": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-mongodb-harness.mjs",
     "test:mongodb:recovery": "pnpm --filter api exec vitest run _lib/testing/mongo-recovery.spec.ts --maxWorkers=1",
     "mongodb:ping": "tsx scripts/ping-mongodb.ts",
     "mongodb:validators": "tsx api/scripts/check-mongodb-validators.ts",

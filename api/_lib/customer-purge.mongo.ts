@@ -195,7 +195,19 @@ export async function purgeMongoCustomer(
               field === 'proof_path' && !value.startsWith('afhomes-payment-receipts/')
                 ? `afhomes-payment-receipts/${value}`
                 : value;
-            checkKey(key);
+            // A pre-conversion or manually-entered record can carry a key the
+            // current strict generator would never produce (spaces, a raw
+            // filename, an absolute URL). `checkKey` throws a plain `Error`
+            // for that, which must never escape as an unexplained 503 - it is
+            // a specific, reviewable data problem, not a crash.
+            try {
+              checkKey(key);
+            } catch {
+              return refuse(
+                409,
+                `A private file reference on this customer (${name}.${field}) does not match the expected format and requires review before permanent deletion`,
+              );
+            }
             // Shared files remain for their other owners; remove only this customer's references.
             let shared = false;
             for (const [other, property] of FILE_FIELDS) {
@@ -264,7 +276,16 @@ export async function purgeMongoCustomer(
         await col('mutation_requests').insertOne(completed, { session });
         return completed;
       },
-      { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } },
+      // The shared client sets a 15s client-side operation timeout (CSOT),
+      // which `withTransaction` treats as the deadline for the WHOLE
+      // transaction, not per operation. A purge can walk 30+ collections plus
+      // nested shared-file lookups for each private file field, easily
+      // exceeding 15s on a real (non-loopback) connection - the transaction
+      // then aborts with `MongoOperationTimeoutError`, which (before this)
+      // surfaced as an unexplained generic 503. Same override pattern as the
+      // other heavy multi-collection transaction in this codebase
+      // (`admin-bootstrap.mongo.ts`).
+      { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, timeoutMS: 60_000 },
     );
   } finally {
     await session.endSession();
