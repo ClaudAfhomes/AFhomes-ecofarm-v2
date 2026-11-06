@@ -101,6 +101,7 @@ import { filterGovernmentIdInput } from '../../lib/normalize';
 import {
   today,
   emptyHolder,
+  customerProfileToHolder,
   HolderFields,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
@@ -775,6 +776,25 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerById(customerId),
     enabled: Boolean(customerId),
   });
+  // Base prefill from the customer's own profile - available for every
+  // customer, imported or manually created. Runs once per distinct selection
+  // so it never clobbers edits already made for that same customer; picking
+  // a different customer re-primes it. A committed workbook import (the
+  // button below) layers richer fields on top when one exists; it is never
+  // required to get here. Skipped for an import-row continuation, which has
+  // its own dedicated prefill further below.
+  const profilePrefilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isNew || importRowId) return;
+    if (!customerId || !linkedCustomer.data) return;
+    if (profilePrefilledFor.current === customerId) return;
+    profilePrefilledFor.current = customerId;
+    setPrimary((current) => ({
+      ...current,
+      ...customerProfileToHolder(linkedCustomer.data),
+      holderType: 'PRIMARY',
+    }));
+  }, [isNew, importRowId, customerId, linkedCustomer.data]);
   const importPrefill = useMutation({
     mutationFn: (selectedCustomer: string) => getCustomerImportPrefill(selectedCustomer),
     onSuccess: (data, selectedCustomer) => {
@@ -784,7 +804,10 @@ export function CustomerApplicationEditorPage() {
       setValidId(false);
       setPaymentProof(false);
       setChannels([]);
-      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      // Layer the workbook's richer fields on top of whatever the customer's
+      // own profile already prefilled - never dropped back to a blank holder,
+      // so a field the workbook doesn't carry keeps its profile-sourced value.
+      setPrimary((current) => ({ ...current, ...data.primary, holderType: 'PRIMARY' }));
       setRaNumberMode(data.primary?.raNumber ? 'manual' : 'automatic');
       setSecondary(
         data.secondary
@@ -811,8 +834,20 @@ export function CustomerApplicationEditorPage() {
           '.',
       );
     },
-    onError: (error) =>
-      setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
+    onError: (error) => {
+      // Missing workbook data is normal, not a failure (the customer's own
+      // profile already prefilled the form above) - never show it as a
+      // warning. Anything else is a genuine failure and keeps the warning.
+      if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+        notifySuccess({
+          title: 'No workbook import found',
+          message:
+            'This customer has no committed workbook import on file. Their existing profile details are already filled in - continue the application by hand.',
+        });
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : 'Could not load imported details.');
+    },
   });
   const loadedImport = useRef<string | null>(null);
   useEffect(() => {
@@ -1037,7 +1072,13 @@ export function CustomerApplicationEditorPage() {
             setPickerVersion((version) => version + 1);
             setValidId(true);
             setCustomerId(created.customerId);
-            await currentDocument.refetch();
+            // `currentDocument`'s queryFn is still closed over this render's
+            // (empty) `customerId` - refetching it here would ask the server
+            // for the current document of no one ("A valid subject is
+            // required"). Nothing below reads its result, and the next
+            // render's `enabled`/query-key change (now that `customerId` is
+            // set) fetches the right one on its own, so there is nothing to
+            // wait for here.
           }
         } else {
           if (importRowId && (!importIntake.data || importIntake.isError))
@@ -1074,7 +1115,9 @@ export function CustomerApplicationEditorPage() {
               setIdFile(null);
               setPickerVersion((version) => version + 1);
               setValidId(true);
-              await currentDocument.refetch();
+              // A UI-display refresh only; nothing below reads it, so it must
+              // not hold up the save.
+              void currentDocument.refetch();
             }
             await updateCustomerApplication(id, checkedForSubmit.data);
             appId = id;
@@ -1085,7 +1128,9 @@ export function CustomerApplicationEditorPage() {
               setIdFile(null);
               setPickerVersion((version) => version + 1);
               setValidId(true);
-              await currentDocument.refetch();
+              // A UI-display refresh only; nothing below reads it, so it must
+              // not hold up the save.
+              void currentDocument.refetch();
             }
             const created = await createCustomerApplication({
               ...checkedForSubmit.data,
@@ -1117,15 +1162,9 @@ export function CustomerApplicationEditorPage() {
           expectedProposalHash: offer.expectedProposalHash,
         });
       }),
-    onSuccess: async (app) => {
+    onSuccess: (app) => {
       notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
-      await existing.refetch();
-      await proposal.refetch();
-      await client.invalidateQueries({ queryKey: applicationKeys.scope });
-      await client.invalidateQueries({ queryKey: reservationKeys.scope });
-      await client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
-      await client.invalidateQueries({ queryKey: sharedScopes.reports });
       setSubmissionSuccess(true);
       try {
         sessionStorage.removeItem(DRAFT_KEY);
@@ -1134,6 +1173,22 @@ export function CustomerApplicationEditorPage() {
       }
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
       if (isEditRoute) navigate(`/admin/customers/applications/${id}`, { replace: true });
+      // Cache refresh is bookkeeping, not part of "did this succeed" - it runs
+      // in the background so the success state and redirect above never wait
+      // on it. A brand-new application has no route `id` yet (this page is
+      // about to navigate away to one), so `existing`/`proposal` would only
+      // ever refetch with an undefined id and 404 ("Official form endpoint
+      // not found") - only refresh them when editing an existing application.
+      void Promise.all([
+        id ? existing.refetch() : Promise.resolve(),
+        id ? proposal.refetch() : Promise.resolve(),
+        client.invalidateQueries({ queryKey: applicationKeys.scope }),
+        client.invalidateQueries({ queryKey: reservationKeys.scope }),
+        client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope }),
+        client.invalidateQueries({ queryKey: sharedScopes.reports }),
+      ]).catch(() => {
+        /* best-effort cache refresh; a stale list self-heals on next visit */
+      });
     },
     onError: (e) => {
       setSubmissionSuccess(false);

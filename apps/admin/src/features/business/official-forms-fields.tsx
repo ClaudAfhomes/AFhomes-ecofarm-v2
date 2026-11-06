@@ -11,7 +11,7 @@
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
+import type { ApplicationHolder, Customer, GenealogyNode } from '@afhomes/contracts';
 import {
   birthDateSchema,
   holderBirthDateSchema,
@@ -55,6 +55,67 @@ export const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHol
   raNumber: '',
   printedName: '',
 });
+
+const text = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined;
+
+/** Case/punctuation-insensitive match against a closed option list; `undefined`
+ * when nothing matches, rather than guessing or crashing an unmatched <option>. */
+function matchOption<T extends string>(
+  value: string | null | undefined,
+  options: readonly T[],
+): T | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase().replace(/\.$/, '');
+  return options.find((option) => option.toLowerCase().replace(/\.$/, '') === normalized);
+}
+
+/**
+ * Base holder prefill from the customer's OWN profile - available for every
+ * customer, imported or manually created. A committed workbook import (see
+ * `getCustomerImportPrefill`) layers richer/additional fields on top of this
+ * when one exists; this function never requires one. Anything ambiguous
+ * (free-text gender/civil status that doesn't match this form's closed
+ * options) is left out rather than guessed, per the "never invent
+ * information" rule - the field just stays blank and editable.
+ */
+export function customerProfileToHolder(customer: Customer): Partial<ApplicationHolder> {
+  const address =
+    customer.address && typeof customer.address === 'object'
+      ? (customer.address as Record<string, unknown>)
+      : {};
+  const printedName = [customer.firstName, customer.middleName, customer.lastName, customer.suffix]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' ');
+  const entries: Partial<ApplicationHolder> = {
+    firstName: text(customer.firstName),
+    middleName: text(customer.middleName),
+    lastName: text(customer.lastName),
+    suffix: matchOption(customer.suffix, SUFFIX_OPTIONS),
+    birthDate: text(customer.dateOfBirth),
+    sex: matchOption(customer.gender, SEX_OPTIONS),
+    citizenship: text(customer.citizenship),
+    civilStatus: matchOption(customer.civilStatus, CIVIL_STATUS_OPTIONS),
+    permanentAddressLine1: text(address.line1),
+    permanentAddressLine2: text(address.line2),
+    cityMunicipality: text(address.city),
+    province: text(address.province),
+    barangay: text(address.barangay),
+    postalCode: text(address.postalCode),
+    landline: text(customer.landline),
+    mobile: text(customer.phone),
+    email: text(customer.email),
+    tinNumber: text(customer.tinNumber),
+    raNumber: text(customer.raNumber),
+    occupationBusinessName: text(customer.occupationBusinessName),
+    officeBusinessAddress: text(customer.officeBusinessAddress),
+    employedPosition: text(customer.employedPosition),
+    printedName: printedName || undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, value]) => value !== undefined),
+  ) as Partial<ApplicationHolder>;
+}
 export const asBase64 = async (file: File) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
