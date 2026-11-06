@@ -10,6 +10,7 @@ import { formatPaymentType, humanizeCode } from '../business/format';
 import { businessKeys, membershipKeys } from '../business/queryKeys';
 import { sharedScopes } from '../business/queryKeys';
 import { formatDateTime } from '../../lib/format';
+import { Disclosure } from './Disclosure';
 import styles from './MembershipActivity.module.css';
 
 /**
@@ -75,8 +76,7 @@ export function MembershipActivity({
   return (
     <div className={styles.stack}>
       {pointsAllowed ? (
-        <details className={styles.group} onToggle={(e) => setPointsOpen(e.currentTarget.open)}>
-          <summary className={styles.groupTitle}>Points</summary>
+        <Disclosure title="Points" open={pointsOpen} onOpenChange={setPointsOpen}>
           {account.isPending ? (
             <div role="status">
               <Skeleton style={{ height: 64 }} />
@@ -136,11 +136,10 @@ export function MembershipActivity({
               <p className={styles.groupNote}>No points entries.</p>
             )
           ) : null}
-        </details>
+        </Disclosure>
       ) : null}
       {paymentsAllowed ? (
-        <details className={styles.group} onToggle={(e) => setPaymentsOpen(e.currentTarget.open)}>
-          <summary className={styles.groupTitle}>Payments</summary>
+        <Disclosure title="Payments" open={paymentsOpen} onOpenChange={setPaymentsOpen}>
           {membership.isError ? (
             <ErrorState
               error={membership.error}
@@ -175,14 +174,10 @@ export function MembershipActivity({
           ) : (
             <p className={styles.groupNote}>No payments recorded.</p>
           )}
-        </details>
+        </Disclosure>
       ) : null}
       {transactionsAllowed ? (
-        <details
-          className={styles.group}
-          onToggle={(e) => setTransactionsOpen(e.currentTarget.open)}
-        >
-          <summary className={styles.groupTitle}>Transactions</summary>
+        <Disclosure title="Transactions" open={transactionsOpen} onOpenChange={setTransactionsOpen}>
           {transactions.isPending ? (
             <div role="status">
               <Skeleton style={{ height: 48 }} />
@@ -212,7 +207,7 @@ export function MembershipActivity({
               </ul>
             </>
           )}
-        </details>
+        </Disclosure>
       ) : null}
       {!pointsAllowed && !paymentsAllowed && !transactionsAllowed ? (
         <Alert variant="info" title="No activity access">

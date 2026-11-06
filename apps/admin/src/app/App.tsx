@@ -214,7 +214,7 @@ import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
-import { NotFound } from '@afhomes/ui';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
 import {
   AdminForgotPasswordPage,
   StaffForgotPasswordPage,
@@ -249,6 +249,7 @@ export default function App() {
     return <Navigate replace to={`${canonical}${location.search}${location.hash}`} />;
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <Routes>
         {roleRoutes(
           <>

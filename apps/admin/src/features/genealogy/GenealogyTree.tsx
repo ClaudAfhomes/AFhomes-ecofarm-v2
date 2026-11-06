@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { StatusChip } from '@afhomes/ui';
+import { Icon, StatusChip } from '@afhomes/ui';
 import { humanizeCode } from '../business/format';
 import { getGenealogyDownline, getGenealogyNode } from './services';
 import { useQuery } from '@tanstack/react-query';
@@ -52,22 +52,24 @@ export function GenealogyTree({ rootStaffId, viewerRole, viewerId, onMemberClick
     });
   };
 
-  const renderNode = (node: GenealogyNode, depth: number) => {
+  // Each level nests inside its parent, so indentation is one step per level (CSS), never depth-multiplied.
+  const renderNode = (node: GenealogyNode) => {
     const kids = childrenMap.get(node.staffId) ?? [];
     const isExpanded = expanded.has(node.staffId);
     const hasChildren = kids.length > 0;
     const clickable = viewerId === node.staffId || (onMemberClick && viewerRole !== 'ost');
 
     return (
-      <div key={node.staffId} className={styles.nodeWrapper} style={{ paddingLeft: depth * 24 }}>
+      <div key={node.staffId} className={styles.nodeWrapper}>
         <div
           className={`${styles.nodeRow} ${clickable ? styles.clickable : ''}`}
           onClick={() => {
             if (clickable) onMemberClick?.(node);
           }}
         >
-          {hasChildren && (
+          {hasChildren ? (
             <button
+              type="button"
               className={styles.expandBtn}
               onClick={(e) => {
                 e.stopPropagation();
@@ -76,20 +78,24 @@ export function GenealogyTree({ rootStaffId, viewerRole, viewerId, onMemberClick
               aria-expanded={isExpanded}
               aria-label={isExpanded ? `Collapse ${node.fullName}` : `Expand ${node.fullName}`}
             >
-              {isExpanded ? '▼' : '▶'}
+              <Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} size={18} />
             </button>
+          ) : (
+            <span className={styles.expandSpacer} aria-hidden="true" />
           )}
           <span className={styles.avatar} aria-hidden="true">
             {node.fullName.trim().charAt(0).toUpperCase() || '•'}
           </span>
-          <span className={styles.name}>{node.fullName}</span>
-          <StatusChip label={humanizeCode(node.role)} tone="neutral" />
-          <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+          <span className={styles.body}>
+            <span className={styles.name}>{node.fullName}</span>
+            <span className={styles.chips}>
+              <StatusChip label={humanizeCode(node.role)} tone="neutral" />
+              <StatusChip label={humanizeCode(node.ostStatus ?? node.status)} />
+            </span>
+          </span>
         </div>
         {isExpanded && hasChildren && (
-          <div className={styles.children}>
-            {kids.map((kid) => renderNode(kid, depth + 1))}
-          </div>
+          <div className={styles.children}>{kids.map((kid) => renderNode(kid))}</div>
         )}
       </div>
     );
@@ -104,11 +110,11 @@ export function GenealogyTree({ rootStaffId, viewerRole, viewerId, onMemberClick
   if (descendants.length === 0) {
     return (
       <div className={styles.tree}>
-        {renderNode(rootNode, 0)}
+        {renderNode(rootNode)}
         <div className={styles.emptyState}>No downline yet</div>
       </div>
     );
   }
 
-  return <div className={styles.tree}>{renderNode(rootNode, 0)}</div>;
+  return <div className={styles.tree}>{renderNode(rootNode)}</div>;
 }

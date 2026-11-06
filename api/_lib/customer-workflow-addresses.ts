@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { resolvePostalCode } from './postal-reference.js';
+import { readRuntimeTextAsset } from './runtime-assets.js';
 
 type AddressSnapshot = {
   source: string;
@@ -8,10 +8,7 @@ type AddressSnapshot = {
   localities: { province: string; name: string; barangays: string[] }[];
 };
 const snapshot = JSON.parse(
-  readFileSync(
-    new URL('../../packages/contracts/assets/customer-workflow-addresses.json', import.meta.url),
-    'utf8',
-  ),
+  readRuntimeTextAsset('customer-workflow-addresses.json'),
 ) as AddressSnapshot;
 const column = (n: number): string =>
   n > 26

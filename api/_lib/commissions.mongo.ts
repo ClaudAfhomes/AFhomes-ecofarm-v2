@@ -2,13 +2,21 @@ import { randomUUID } from 'node:crypto';
 import type { ClientSession, Db, MongoClient } from 'mongodb';
 import { z } from 'zod';
 import {
+  bulkCommissionRuleSchema,
+  commissionRosterQuerySchema,
   createCommissionRuleSchema,
   updateCommissionRuleSchema,
   qualifyCommissionSchema,
   markCommissionPaidSchema,
 } from '@afhomes/contracts';
 import type { authorizeAfHomes } from './afhomes-access.js';
-import { toCommission, toRule, commissionListQuerySchema } from './commission-model.js';
+import { SELLING_ROLES } from './commerce.js';
+import {
+  toCommission,
+  toRule,
+  commissionListQuerySchema,
+  resolveCommissionRule,
+} from './commission-model.js';
 import { CustomerActivationError, type MongoRow } from './customer-activation.mongo.js';
 import { deny, fail, list, method, subPath, isoOrNull } from './handler-kit.js';
 import { matchesSearch } from './list-search.js';
@@ -16,6 +24,13 @@ import type { VercelRequest, VercelResponse } from './http.js';
 const refuse = (status: number, message: string): never => {
   throw new CustomerActivationError(status, message);
 };
+const isRealDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+};
+const dayBefore = (value: string) =>
+  new Date(Date.parse(`${value}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
 export function createMongoCommissionsHandler(
   db: Db,
   client: MongoClient,
@@ -42,6 +57,118 @@ export function createMongoCommissionsHandler(
       beneficiary_staff: staff,
       beneficiary_ost: ost,
     });
+  }
+  /** Readable names for rule targets, so the rules list never shows a bare UUID. */
+  async function targetNames(rows: MongoRow[]) {
+    const tables = {
+      role: ['roles', 'name'],
+      staff: ['staff_users', 'full_name'],
+      ost: ['ost_members', 'full_name'],
+    } as const;
+    const names = new Map<string, string>();
+    for (const [type, [table, field]] of Object.entries(tables)) {
+      const ids = rows.filter((row) => row.target_type === type).map((row) => String(row.target_id));
+      if (!ids.length) continue;
+      for (const found of await col(table)
+        .find({ _id: { $in: ids } })
+        .toArray())
+        names.set(`${type}:${found._id}`, String(found[field] ?? ''));
+    }
+    return names;
+  }
+  /**
+   * Every active seller with sales activity and the rate their next sale would get.
+   * Uses the same resolver as sale creation, so what is shown is what is applied.
+   */
+  async function roster(query: z.infer<typeof commissionRosterQuerySchema>) {
+    const roles = (
+      await col('roles')
+        .find({ slug: { $in: [...SELLING_ROLES] } })
+        .toArray()
+    ).sort((a, b) => SELLING_ROLES.indexOf(String(a.slug)) - SELLING_ROLES.indexOf(String(b.slug)));
+    const roleById = new Map(roles.map((role) => [String(role._id), role]));
+    const assignments = await col('staff_role_assignments')
+      .find({ role_id: { $in: [...roleById.keys()] } })
+      .toArray();
+    const roleOfStaff = new Map<string, string>();
+    for (const row of assignments)
+      if (!roleOfStaff.has(String(row.staff_id)))
+        roleOfStaff.set(String(row.staff_id), String(row.role_id));
+    const staffIds = [...roleOfStaff.keys()];
+    const [staff, rules, sales] = await Promise.all([
+      col('staff_users')
+        .find({ _id: { $in: staffIds }, status: 'active' })
+        .toArray(),
+      col('commission_rules').find({ is_active: true }).toArray(),
+      col('card_sales')
+        .aggregate<{ _id: string; count: number; last: unknown }>([
+          { $match: { seller_staff_id: { $in: staffIds }, status: { $ne: 'cancelled' } } },
+          { $group: { _id: '$seller_staff_id', count: { $sum: 1 }, last: { $max: '$created_at' } } },
+        ])
+        .toArray(),
+    ]);
+    const salesBySeller = new Map(sales.map((row) => [String(row._id), row]));
+    const today = new Date().toISOString().slice(0, 10);
+    const everyone = staff.map((person) => {
+      const role = roleById.get(roleOfStaff.get(String(person._id))!)!;
+      const rule = resolveCommissionRule(rules, {
+        staffId: String(person._id),
+        roleId: String(role._id),
+        date: today,
+        accredited: String(person.activated_at ?? person.created_at ?? '').slice(0, 10),
+      });
+      const activity = salesBySeller.get(String(person._id));
+      return {
+        id: String(person._id),
+        name: String(person.full_name ?? ''),
+        positionSlug: String(role.slug),
+        positionName: String(role.name ?? role.slug),
+        salesCount: activity?.count ?? 0,
+        lastSaleAt: isoOrNull(activity?.last),
+        rate: String(rule?.rate ?? '0'),
+        source: !rule
+          ? ('none' as const)
+          : rule.target_type === 'staff'
+            ? ('custom' as const)
+            : ('position' as const),
+        ruleId: rule ? String(rule._id) : null,
+      };
+    });
+    const needsRate = (member: (typeof everyone)[number]) =>
+      member.salesCount > 0 && member.source === 'none';
+    const matching = everyone
+      .filter(
+        (member) =>
+          (!query.position || member.positionSlug === query.position) &&
+          (query.sales === 'all' || (query.sales === 'with') === member.salesCount > 0) &&
+          (query.needsRate !== 'true' || needsRate(member)) &&
+          matchesSearch(query.search, [member.name, member.positionName]),
+      )
+      .sort((a, b) => b.salesCount - a.salesCount || a.name.localeCompare(b.name));
+    return {
+      positions: roles.map((role) => {
+        // Accreditation is ignored here: this is the headline default, not one person's rate.
+        const fallback = resolveCommissionRule(rules, {
+          staffId: '',
+          roleId: String(role._id),
+          date: today,
+          accredited: '9999-12-31',
+        });
+        return {
+          roleId: String(role._id),
+          slug: String(role.slug),
+          name: String(role.name ?? role.slug),
+          memberCount: everyone.filter((member) => member.positionSlug === role.slug).length,
+          defaultRuleId: fallback ? String(fallback._id) : null,
+          defaultRate: fallback ? String(fallback.rate) : null,
+        };
+      }),
+      members: matching.slice(query.offset, query.offset + query.limit),
+      total: matching.length,
+      limit: query.limit,
+      offset: query.offset,
+      needsRateCount: everyone.filter(needsRate).length,
+    };
   }
   async function audit(
     actor: string,
@@ -73,9 +200,11 @@ export function createMongoCommissionsHandler(
     try {
       const path = subPath(req),
         verb = method(req),
+        special = /^rules\/(roster|bulk)$/.exec(path),
         rule = /^rules(?:\/([a-f0-9-]{36}))?(?:\/(history))?$/.exec(path),
         commission = /^([a-f0-9-]{36})(?:\/(qualify|pay))?$/.exec(path);
       if (!(
+        (special && verb === (special[1] === 'roster' ? 'GET' : 'POST')) ||
         (rule &&
           ((verb === 'GET' && (!rule[1] || rule[2] === 'history')) ||
             (verb === 'POST' && !rule[1]) ||
@@ -87,10 +216,12 @@ export function createMongoCommissionsHandler(
       const auth = await authorize(
         req,
         'network.commissions',
-        rule || verb !== 'GET' ? 'update' : 'view',
+        rule || special || verb !== 'GET' ? 'update' : 'view',
       );
       if ('error' in auth) return deny(res, auth);
       if (verb === 'GET') {
+        if (special)
+          return res.status(200).json(await roster(commissionRosterQuerySchema.parse(req.query)));
         if (rule) {
           if (rule[2] === 'history') {
             const rows = await col('audit_events')
@@ -110,11 +241,17 @@ export function createMongoCommissionsHandler(
               })),
             );
           }
+          const rows = await col('commission_rules')
+              .find()
+              .sort({ effective_from: -1, _id: -1 })
+              .toArray(),
+            names = await targetNames(rows);
           return list(
             res,
-            (
-              await col('commission_rules').find().sort({ effective_from: -1, _id: -1 }).toArray()
-            ).map((row) => toRule({ ...row, id: row._id })),
+            rows.map((row) => ({
+              ...toRule({ ...row, id: row._id }),
+              targetName: names.get(`${row.target_type}:${row.target_id}`) || null,
+            })),
           );
         }
         const finance = await authorize(req, 'finance.payment_verification'),
@@ -171,6 +308,90 @@ export function createMongoCommissionsHandler(
           const fresh = await authorize(req, 'network.commissions', 'update');
           if ('error' in fresh) refuse(fresh.error.status, fresh.error.error.message);
           const now = new Date().toISOString();
+          if (special) {
+            const input = bulkCommissionRuleSchema.parse(req.body);
+            if (!isRealDate(input.effectiveFrom)) refuse(400, 'Invalid commission rule date');
+            const staff = await col('staff_users')
+                .find({ _id: { $in: input.memberIds }, status: 'active' }, { session })
+                .toArray(),
+              sellingRoles = await col('roles')
+                .find({ slug: { $in: [...SELLING_ROLES] } }, { session })
+                .toArray(),
+              assigned = await col('staff_role_assignments')
+                .find(
+                  {
+                    staff_id: { $in: input.memberIds },
+                    role_id: { $in: sellingRoles.map((role) => String(role._id)) },
+                  },
+                  { session },
+                )
+                .toArray();
+            const eligible = new Set(staff.map((row) => String(row._id)));
+            for (const id of input.memberIds)
+              if (!eligible.has(id) || !assigned.some((row) => row.staff_id === id))
+                refuse(409, 'Only active sellers can receive a rate');
+            const existing = await col('commission_rules')
+              .find(
+                { target_type: 'staff', target_id: { $in: input.memberIds }, is_active: true },
+                { session },
+              )
+              .toArray();
+            let created = 0,
+              replaced = 0;
+            for (const memberId of input.memberIds) {
+              for (const old of existing.filter((row) => row.target_id === memberId)) {
+                // The new rule is open-ended, so any rule not already over overlaps it.
+                if (old.effective_until && String(old.effective_until) < input.effectiveFrom)
+                  continue;
+                const next: MongoRow =
+                  String(old.effective_from) < input.effectiveFrom
+                    ? { ...old, effective_until: dayBefore(input.effectiveFrom) }
+                    : { ...old, is_active: false };
+                next.updated_by = auth.userId;
+                next.updated_at = now;
+                await col('commission_rules').replaceOne({ _id: old._id }, next, { session });
+                await audit(
+                  auth.userId,
+                  next.is_active ? 'COMMISSION_RULE_UPDATED' : 'COMMISSION_RULE_DISABLED',
+                  'commission_rule',
+                  String(old._id),
+                  toRule({ ...old, id: old._id }),
+                  toRule({ ...next, id: old._id }),
+                  session,
+                  'Replaced by bulk rate',
+                );
+                replaced++;
+              }
+              const id = randomUUID(),
+                row: MongoRow = {
+                  _id: id,
+                  target_type: 'staff',
+                  target_id: memberId,
+                  rate: input.rate,
+                  effective_from: input.effectiveFrom,
+                  effective_until: null,
+                  accredited_on_or_after: null,
+                  is_active: true,
+                  created_by: auth.userId,
+                  updated_by: auth.userId,
+                  created_at: now,
+                  updated_at: now,
+                };
+              await col('commission_rules').insertOne(row, { session });
+              await audit(
+                auth.userId,
+                'COMMISSION_RULE_CREATED',
+                'commission_rule',
+                id,
+                null,
+                toRule({ ...row, id }),
+                session,
+                'Bulk rate',
+              );
+              created++;
+            }
+            return { created, replaced };
+          }
           if (rule) {
             const id = rule[1] ?? randomUUID(),
               before = rule[1]
@@ -213,11 +434,8 @@ export function createMongoCommissionsHandler(
             }
             for (const field of ['effective_from', 'effective_until', 'accredited_on_or_after']) {
               const value = row[field];
-              if (value !== null && value !== undefined) {
-                const date = new Date(`${String(value)}T00:00:00Z`);
-                if (!Number.isFinite(date.valueOf()) || date.toISOString().slice(0, 10) !== value)
-                  refuse(400, 'Invalid commission rule date');
-              }
+              if (value !== null && value !== undefined && !isRealDate(String(value)))
+                refuse(400, 'Invalid commission rule date');
             }
             if (row.effective_until && String(row.effective_until) < String(row.effective_from))
               refuse(400, 'Effective until cannot precede effective from');

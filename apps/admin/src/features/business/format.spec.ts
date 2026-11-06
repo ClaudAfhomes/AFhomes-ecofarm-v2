@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatPoints, settlementStatus } from './format';
+import { formatPoints, percentToRate, rateToPercent, settlementStatus } from './format';
 
 describe('settlementStatus', () => {
   it('reads Fully Paid when Total equals Paid and Balance is zero', () => {
@@ -37,5 +37,25 @@ describe('formatPoints', () => {
   it('renders an em dash for missing counts', () => {
     expect(formatPoints(null)).toBe('—');
     expect(formatPoints(undefined)).toBe('—');
+  });
+});
+
+describe('percentToRate', () => {
+  it('converts percent text to an exact four-decimal rate', () => {
+    expect(percentToRate('4')).toBe('0.0400');
+    expect(percentToRate('4.5')).toBe('0.0450');
+    expect(percentToRate('12.25')).toBe('0.1225');
+    expect(percentToRate('0')).toBe('0.0000');
+    expect(percentToRate('100')).toBe('1.0000');
+  });
+
+  it('refuses anything outside 0 to 100 with two decimals', () => {
+    for (const bad of ['', 'abc', '-1', '100.01', '101', '1.234', '4%'])
+      expect(percentToRate(bad)).toBeNull();
+  });
+
+  it('round-trips with the stored rate', () => {
+    expect(rateToPercent('0.0400')).toBe('4.00');
+    expect(percentToRate(rateToPercent('0.1225'))).toBe('0.1225');
   });
 });

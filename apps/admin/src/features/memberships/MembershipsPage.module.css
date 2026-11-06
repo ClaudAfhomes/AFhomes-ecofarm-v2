@@ -1,203 +1,59 @@
-/* Memberships directory: page-scoped shell plus the shared responsive
-   table grammar (desktop scrolls, phones collapse to labelled cards). */
+/* Memberships directory. The page is a size container, so the list switches
+   between a table and a card grid from the width it actually gets (sidebar
+   open or not), not from the viewport. Applied alongside the global
+   `table-scroll` class; other tables are unaffected. */
 
 .page {
+  container: memberships / inline-size;
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
   align-content: start;
   min-width: 0;
   max-width: 100%;
 }
 
+/* Phones: this page never scrolls sideways. `clip` (not `hidden`) keeps
+   fixed descendants (the overflow menu) working. */
 @media (max-width: 639px) {
   .page {
     overflow-x: clip;
   }
-
-  .tableWrap.tableWrap {
-    overflow-x: clip;
-  }
 }
 
-.summary {
+/* ---------- Loading ---------- */
+
+.skeleton,
+.skeletonRows {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeleton {
+  gap: var(--space-5);
+}
+
+.skeletonHead {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* ---------- Summary ---------- */
+
+.badges {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.tableWrap {
-  margin-top: var(--space-2);
+.badges > li {
   min-width: 0;
-  max-width: 100%;
 }
 
-@media (min-width: 640px) {
-  .tableWrap > table {
-    min-width: 960px;
-  }
-}
-
-.tableWrap tbody tr.clickable {
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-@media (hover: hover) {
-  .tableWrap tbody tr.clickable:hover {
-    background-color: var(--color-state-hover);
-  }
-}
-
-.tableWrap tbody tr.clickable:focus-visible {
-  background-color: var(--color-state-hover);
-  outline: 2px solid var(--color-brand-primary);
-  outline-offset: -2px;
-}
-
-.identityCell {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  max-width: 100%;
-}
-
-.identityAvatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.identityName {
-  min-width: 0;
-  font-weight: 700;
-  color: var(--color-brand-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-@media (max-width: 639px) {
-  div.tableWrap.tableWrap > table {
-    min-width: 0;
-  }
-
-  .tableWrap > table {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .tableWrap thead {
-    display: none;
-  }
-
-  .tableWrap tbody {
-    display: block;
-  }
-
-  .tableWrap tbody > tr {
-    display: block;
-    position: relative;
-    max-width: 100%;
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-md);
-    background-color: var(--color-bg-surface-raised);
-    margin-bottom: var(--space-3);
-    padding: var(--space-2);
-  }
-
-  .tableWrap tbody > tr:last-child {
-    margin-bottom: 0;
-  }
-
-  .tableWrap tbody > tr > td {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    text-align: right;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .tableWrap tbody > tr > td > * {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .tableWrap tbody > tr > td::before {
-    content: attr(data-label);
-    font-weight: 600;
-    font-size: var(--text-caption);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-text-muted);
-    text-align: left;
-    flex-shrink: 0;
-    max-width: 45%;
-    overflow-wrap: anywhere;
-  }
-
-  .tableWrap tbody > tr > td:not([data-label])::before,
-  .tableWrap tbody > tr > td[data-label='']::before {
-    display: none;
-  }
-
-  .tableWrap tbody > tr > td[data-label=''] {
-    justify-content: flex-end;
-  }
-
-  .tableWrap tbody > tr > td[data-label='Member'] {
-    justify-content: flex-start;
-    padding-bottom: var(--space-1);
-    padding-right: 48px;
-  }
-
-  .tableWrap tbody > tr > td[data-label='Member']::before {
-    display: none;
-  }
-
-  .tableWrap tbody > tr > td[data-label='Actions'] {
-    position: absolute;
-    top: var(--space-2);
-    right: var(--space-2);
-    padding: 0;
-    min-width: 0;
-    border-bottom: 0;
-  }
-
-  .tableWrap tbody > tr > td[data-label='Actions']::before {
-    display: none;
-  }
-
-  .tableWrap tbody > tr > td[data-label='Member'] .identityName {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    font-size: 0.95rem;
-    line-height: 1.35;
-  }
-}
+/* ---------- Filters ---------- */
 
 .filterLabel {
   display: grid;
@@ -212,4 +68,309 @@
 .filterLabel input {
   min-width: 0;
   max-width: 100%;
+}
+
+/* ---------- Results ---------- */
+
+.resultsHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: calc(var(--space-2) * -1);
+}
+
+.resultsTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.updating,
+.muted {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.tableWrap {
+  min-width: 0;
+  max-width: 100%;
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.table {
+  width: 100%;
+  min-width: 64rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-body-s);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-3) var(--space-2);
+  background: var(--color-bg-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-align: left;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--color-border-default);
+}
+
+.table td {
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--color-border-default);
+  vertical-align: middle;
+  background-color: var(--color-bg-surface-raised);
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: var(--space-3);
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: var(--space-3);
+}
+
+/* Chips allow wrapping anywhere, so without this the auto table layout
+   squeezes them to one letter per line. */
+.table td[data-label='Status'] > *,
+.table td[data-label='Tier'] > * {
+  min-width: max-content;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr.clickable {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .table tbody tr.clickable:hover td {
+    background-color: var(--color-bg-subtle);
+  }
+}
+
+.table tbody tr.clickable:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: -3px;
+}
+
+.table tbody tr.clickable:focus-visible td {
+  background-color: var(--color-bg-subtle);
+}
+
+/* ---------- Cells ---------- */
+
+.identityCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Decorative; the wide table needs the room, so only cards show it. */
+.identityAvatar {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.identityName {
+  min-width: 0;
+  max-width: 9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.numberRef {
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  white-space: nowrap;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table thead th.numeric {
+  text-align: right;
+}
+
+.points {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.dateCell {
+  display: grid;
+  gap: 1px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Narrow: rows become cards ---------- */
+
+@container memberships (max-width: 65.99rem) {
+  /* Doubled class beats the global `.table-scroll` rules regardless of
+     bundle order. Cards carry their own surface, so the wrapper goes flat. */
+  .tableWrap.tableWrap {
+    overflow: visible;
+    overflow-x: clip;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  div.tableWrap.tableWrap > table {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+    gap: var(--space-3);
+  }
+
+  .table tbody > tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+    min-width: 0;
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+  }
+
+  .table tbody > tr > td,
+  .table tbody > tr.clickable:hover > td,
+  .table tbody > tr.clickable:focus-visible > td {
+    display: grid;
+    gap: 2px;
+    align-content: start;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .table tbody > tr > td:first-child,
+  .table tbody > tr > td:last-child {
+    padding: 0;
+  }
+
+  /* Identity block first (name, number, tier, status), then the facts. */
+  .table tbody > tr > td {
+    order: 2;
+  }
+
+  .table tbody > tr > td[data-label='Member'],
+  .table tbody > tr > td[data-label='Number'],
+  .table tbody > tr > td[data-label='Tier'],
+  .table tbody > tr > td[data-label='Status'] {
+    order: 1;
+  }
+
+  .table td[data-label='Status'] > *,
+  .table td[data-label='Tier'] > * {
+    min-width: 0;
+  }
+
+  /* Small field label above each value. */
+  .table tbody > tr > td::before {
+    content: attr(data-label);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  /* Card head: member across the top, overflow menu in the corner. */
+  .table tbody > tr > td[data-label='Member'] {
+    grid-column: 1 / -1;
+    padding-right: 44px;
+  }
+
+  .table tbody > tr > td[data-label='Member']::before,
+  .table tbody > tr > td[data-label='Number']::before,
+  .table tbody > tr > td[data-label='Tier']::before,
+  .table tbody > tr > td[data-label='Status']::before,
+  .table tbody > tr > td[data-label='Actions']::before {
+    display: none;
+  }
+
+  .identityAvatar {
+    display: inline-flex;
+  }
+
+  .table tbody > tr > td[data-label='Member'] .identityName {
+    max-width: none;
+    white-space: normal;
+    font-size: var(--text-body);
+  }
+
+  /* Number under the name, then tier and status side by side. */
+  .table tbody > tr > td[data-label='Number'] {
+    grid-column: 1 / -1;
+  }
+
+  .table tbody > tr > td[data-label='Tier'],
+  .table tbody > tr > td[data-label='Status'] {
+    display: block;
+  }
+
+  .table tbody > tr > td[data-label='Category'] {
+    grid-column: 1 / -1;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .table tbody > tr > td[data-label='Actions'] {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+  }
+
+  .dateCell {
+    white-space: normal;
+  }
 }

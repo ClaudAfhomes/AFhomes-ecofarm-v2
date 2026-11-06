@@ -12,9 +12,12 @@ launcher only. An explicit `s3` configuration is validated, never silently repla
 Files survive application restarts. Downloads use short-lived signed links;
 the existing server authentication secret derives a separate signing key.
 The directory is outside the repository and Vite's served files. Back it up
-alongside MongoDB; deleting it loses uploaded files. Only converted upload
-workflows (currently profile photos) use it; ID/receipt document workflows
-still need their MongoDB conversion. Hosted runtimes cannot select local storage.
+alongside MongoDB; deleting it loses uploaded files. Hosted production also
+supports persistent local disk with
+`AFHOMES_PRIVATE_STORAGE_PROVIDER=local` and
+`AFHOMES_PRIVATE_STORAGE_ROOT`; see
+[PRIVATE-FILE-STORAGE-OPERATIONS.md](PRIVATE-FILE-STORAGE-OPERATIONS.md) for
+backup, restore, capacity and audit procedures.
 
 `pnpm dev` preserves the explicit business-write gate. After the approved core
 setup, enable converted core routes using the command for your terminal.

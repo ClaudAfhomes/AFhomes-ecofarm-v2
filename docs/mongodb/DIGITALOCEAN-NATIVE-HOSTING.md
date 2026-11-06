@@ -10,7 +10,7 @@ Nginx terminates HTTPS, serves the built public/admin React applications, and
 proxies `/api/` to a Node API bound only to `127.0.0.1:3084`. systemd supervises
 Node. Private files use `/var/lib/afhomes/private-files`, outside the release and
 static directory, through the existing signed-download API. S3 is optional and
-requires explicit configuration; no paid bucket is needed for filesystem mode.
+requires explicit configuration; no paid bucket is needed for local-disk mode.
 
 The default MongoDB/authentication scope remains **afhomes_dev**. The reviewed
 runtime selector also permits **afhomes_prod** only when all four server settings
@@ -98,7 +98,7 @@ Verify that the unit's `/usr/bin/node` points to the reviewed Node 24 binary.
    VITE_TURNSTILE_SITE_KEY=<matching public login widget site key>
    AFHOMES_AUTH_TURNSTILE_SECRET=<matching widget secret; enter privately>
    PORT=3084
-   AFHOMES_PRIVATE_STORAGE_PROVIDER=filesystem
+   AFHOMES_PRIVATE_STORAGE_PROVIDER=local
    AFHOMES_PRIVATE_STORAGE_ROOT=/var/lib/afhomes/private-files
    AFHOMES_MONGODB_ENABLE_CORE_WRITES=false
    AFHOMES_HOSTED_SEARCH_MAINTENANCE=false

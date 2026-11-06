@@ -5,6 +5,7 @@
 
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-content: start;
   min-width: 0;
@@ -322,6 +323,13 @@
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
   font-weight: 700;
+}
+
+/* Inline, not flex: a wrapped name keeps the badge after its last word. */
+.nameRow svg {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 /* Name left, tier badge right on one row; wraps gracefully on narrow cards. */

@@ -30,6 +30,21 @@ describe('profile photo editor', () => {
     await user.upload(input, file);
     expect(save).toHaveBeenCalledTimes(2);
   });
+  it('removes an existing photo only when the owner action is provided', async () => {
+    const remove = vi.fn(async () => photo);
+    render(
+      <ProfilePhotoEditor
+        photo={{ ...photo, url: 'https://portal.afhomes.com.ph/api/v1/private-files?token=x' }}
+        loading={false}
+        onRefresh={vi.fn()}
+        onUpload={vi.fn()}
+        onRemove={remove}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Remove photo' }));
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Profile photo removed.')).toBeInTheDocument();
+  });
   it('disables upload during account verification but leaves refresh available', () => {
     render(
       <ProfilePhotoEditor

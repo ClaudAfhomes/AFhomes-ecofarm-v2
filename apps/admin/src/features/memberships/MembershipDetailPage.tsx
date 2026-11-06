@@ -8,11 +8,13 @@ import {
   ConfirmDialog,
   Dialog,
   ErrorState,
+  Icon,
   PageHeader,
   QrCode,
   Skeleton,
   StatusChip,
   TextAreaField,
+  type StatusTone,
 } from '@afhomes/ui';
 import type { ReissuedMembershipCard } from '@afhomes/contracts';
 import { formatCountOrDash, isFeaturePathEnabled } from '@afhomes/shared';
@@ -25,8 +27,16 @@ import { membershipKeys } from '../business/queryKeys';
 import { TierBadge } from '../business/TierBadge';
 import { getAudit } from '../reports/services';
 import { getMembershipCard, markMembershipPrinted, reissueMembershipCard } from './services';
+import { Disclosure } from './Disclosure';
 import { MembershipActivity } from './MembershipActivity';
 import styles from './MembershipDetailPage.module.css';
+
+const STATUS_TONE: Record<string, StatusTone> = {
+  active: 'success',
+  expired: 'warning',
+  suspended: 'warning',
+  cancelled: 'danger',
+};
 
 /**
  * One membership's card operations.
@@ -57,6 +67,7 @@ export function MembershipDetailPage() {
   const [issued, setIssued] = useState<ReissuedMembershipCard | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [confirmReissue, setConfirmReissue] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   const canReissue =
     user?.afHomesPermissions.some(
@@ -105,21 +116,19 @@ export function MembershipDetailPage() {
   // reach this branch. The sr-only line keeps the exact pending copy.
   if (card.isPending)
     return (
-      <section>
-        <div
-          style={{ display: 'grid', gap: 'var(--space-4)' }}
-          role="status"
-          aria-label="Loading card"
-        >
+      <section className={styles.page}>
+        <div className={styles.skeleton} role="status" aria-label="Loading card">
           <span className="sr-only">Loading card…</span>
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+          <div className={styles.skeletonHead}>
             <Skeleton style={{ height: 32, maxWidth: 280 }} />
-            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+            <Skeleton style={{ height: 16, maxWidth: 320 }} />
           </div>
-          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+          <div className={styles.layout}>
+            <Skeleton style={{ height: 220 }} />
+            <div className={styles.aside}>
+              <Skeleton style={{ height: 260 }} />
+            </div>
             <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 120 }} />
-            <Skeleton style={{ height: 200 }} />
           </div>
         </div>
       </section>
@@ -149,200 +158,221 @@ export function MembershipDetailPage() {
 
   return (
     <section className={styles.page}>
+      <Link to="/admin/memberships" className={styles.backLink}>
+        <Icon name="chevron-left" size={16} aria-hidden="true" />
+        Back to memberships
+      </Link>
       <PageHeader
         title="Membership Card"
-        description={`Card ${data.membershipNumber} · ${data.tierName}`}
+        description={`Card ${data.membershipNumber}, ${data.tierName} tier`}
         actions={
-          <Button variant="secondary" onClick={() => navigate(`/admin/memberships/${id}/card`)}>
+          <Button onClick={() => navigate(`/admin/memberships/${id}/card`)}>
             Open printable card
           </Button>
         }
       />
-      <p className={styles.backRow}>
-        <Link to="/admin/memberships">← Back to memberships</Link>
-      </p>
 
-      <section className={styles.panel} aria-label="Membership summary">
-        <h2 className={styles.panelTitle}>{data.memberName}</h2>
-        <div className={styles.summary}>
-          <StatusChip
-            label={`Points balance: ${formatCountOrDash(data.pointsBalance)}`}
-            tone="neutral"
-            icon="grid"
-          />
-          <StatusChip
-            label={`Yearly entitlement: ${formatCountOrDash(data.yearlyPointsAllocated)}`}
-            tone="neutral"
-            icon="file-text"
-          />
-          <StatusChip label={humanizeCode(data.status)} />
-        </div>
-        <dl className={styles.facts}>
-          <div>
-            <dt>Tier</dt>
-            <dd>
-              <TierBadge tier={tierCode || null} /> {data.tierName}
-              {data.tierCode ? ` (${data.tierCode})` : ''}
-            </dd>
+      <div className={styles.layout}>
+        <section className={`${styles.panel} ${styles.hero}`} aria-label="Membership summary">
+          <div className={styles.heroHead}>
+            <div className={styles.heroIdentity}>
+              <span className={styles.heroNumber}>{data.membershipNumber}</span>
+              <h2 className={styles.heroName}>{data.memberName}</h2>
+              <span className={styles.heroTier}>
+                <TierBadge tier={tierCode || null} />
+                <span>
+                  {data.tierName}
+                  {data.tierCode ? ` (${data.tierCode})` : ''}
+                </span>
+              </span>
+            </div>
+            <StatusChip label={humanizeCode(data.status)} tone={STATUS_TONE[data.status]} />
           </div>
-          <div>
-            <dt>Category</dt>
-            <dd>{data.categoryName ?? '—'}</dd>
-          </div>
-          <div>
-            <dt>Customer account</dt>
-            <dd>{data.customerStatus ? humanizeCode(data.customerStatus) : '—'}</dd>
-          </div>
-          <div>
-            <dt>Valid until</dt>
-            <dd>{data.expiresAt ? formatDateTime(data.expiresAt) : '—'}</dd>
-          </div>
-          <div>
-            <dt>Activated</dt>
-            <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
-          </div>
-          <div>
-            <dt>Validity</dt>
-            <dd>
-              {data.validityYears
-                ? `Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}`
-                : '—'}
-            </dd>
-          </div>
-        </dl>
-      </section>
+          <dl className={styles.figures}>
+            <div>
+              <dt>Points balance</dt>
+              <dd>{formatCountOrDash(data.pointsBalance)}</dd>
+            </div>
+            <div>
+              <dt>Yearly entitlement</dt>
+              <dd>{formatCountOrDash(data.yearlyPointsAllocated)}</dd>
+            </div>
+          </dl>
+          <dl className={styles.facts}>
+            <div>
+              <dt>Category</dt>
+              <dd>{data.categoryName ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Customer account</dt>
+              <dd>{data.customerStatus ? humanizeCode(data.customerStatus) : '—'}</dd>
+            </div>
+            <div>
+              <dt>Activated</dt>
+              <dd>{data.activatedAt ? formatDateTime(data.activatedAt) : '—'}</dd>
+            </div>
+            <div>
+              <dt>Valid until</dt>
+              <dd>{data.expiresAt ? formatDateTime(data.expiresAt) : '—'}</dd>
+            </div>
+            <div>
+              <dt>Validity</dt>
+              <dd>
+                {data.validityYears
+                  ? `Valid for ${data.validityYears} year${data.validityYears === 1 ? '' : 's'}`
+                  : '—'}
+              </dd>
+            </div>
+          </dl>
+        </section>
 
-      <MembershipActivity
-        id={id}
-        number={data.membershipNumber}
-        permissions={user?.afHomesPermissions ?? []}
-      />
-
-      <section className={styles.panel} aria-label="Card and credentials">
-        <h2 className={styles.panelTitle}>Card / Credentials</h2>
-        <p className={styles.panelNote}>
-          Recording a print changes no credential. Rotating issues a new QR and fallback code and
-          invalidates the previous pair immediately.
-        </p>
-        <dl className={styles.facts}>
-          <div>
-            <dt>Card issued</dt>
-            <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
-          </div>
-          <div>
-            <dt>Issued by</dt>
-            <dd>{data.issuedBy ?? '—'}</dd>
-          </div>
-          <div>
-            <dt>Prints</dt>
-            <dd>
-              {formatCountOrDash(data.printCount)}{' '}
-              {data.lastPrintedAt
-                ? `(last ${formatDateTime(data.lastPrintedAt)})`
-                : '(never printed)'}
-            </dd>
-          </div>
-        </dl>
-        <div className={styles.actions}>
-          <Button variant="secondary" onClick={() => navigate(`/admin/memberships/${id}/card`)}>
-            Open printable card
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setOutcome(null);
-              markPrinted.mutate();
-            }}
-            disabled={markPrinted.isPending}
-          >
-            {markPrinted.isPending ? 'Recording…' : 'Record a print (no code change)'}
-          </Button>
-        </div>
-
-        <details>
-          <summary>Security: credential recovery</summary>
-          {canReissue ? (
-            <div style={{ marginTop: 24, display: 'grid', gap: 12, maxWidth: 560 }}>
-              <h3>Rotate credentials</h3>
-              <p>
-                Issues a new QR and fallback code and invalidates the previous pair immediately.
-                Balances and identity are unchanged. Do this for a lost, damaged or compromised card
-                — not for a reprint.
-              </p>
-              <TextAreaField
-                id="membership-rotate-reason"
-                name="rotateReason"
-                label="Reason (required, min 5 characters)"
-                optional
-                value={reason}
-                onChange={setReason}
-                rows={3}
-              />
+        <aside className={styles.aside}>
+          <section className={styles.panel} aria-label="Card and credentials">
+            <h2 className={styles.panelTitle}>Card and credentials</h2>
+            <p className={styles.panelNote}>
+              Printing never changes codes. Rotating replaces both codes.
+            </p>
+            <dl className={`${styles.facts} ${styles.factsTight}`}>
+              <div>
+                <dt>Card issued</dt>
+                <dd>{data.cardIssuedAt ? formatDateTime(data.cardIssuedAt) : 'Not recorded'}</dd>
+              </div>
+              <div>
+                <dt>Issued by</dt>
+                <dd>{data.issuedBy ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Prints</dt>
+                <dd>
+                  {formatCountOrDash(data.printCount)}{' '}
+                  <span className={styles.ddNote}>
+                    {data.lastPrintedAt
+                      ? `(last ${formatDateTime(data.lastPrintedAt)})`
+                      : '(never printed)'}
+                  </span>
+                </dd>
+              </div>
+            </dl>
+            <div className={styles.actions}>
               <Button
+                variant="secondary"
                 onClick={() => {
                   setOutcome(null);
-                  setConfirmReissue(true);
+                  markPrinted.mutate();
                 }}
-                disabled={reissue.isPending || reason.trim().length < 5}
+                disabled={markPrinted.isPending}
               >
-                {reissue.isPending ? 'Rotating…' : 'Reissue credentials'}
+                {markPrinted.isPending ? 'Recording…' : 'Record a print (no code change)'}
               </Button>
-              <ConfirmDialog
-                open={confirmReissue}
-                onCancel={() => setConfirmReissue(false)}
-                onConfirm={() => {
-                  setConfirmReissue(false);
-                  reissue.mutate();
-                }}
-                title="Reissue credentials?"
-                message="Rotate the credentials for this card? The previous codes stop working immediately."
-                confirmLabel="Reissue"
-                cancelLabel="Cancel"
-                confirmLoading={reissue.isPending}
-              />
             </div>
-          ) : (
-            <p style={{ marginTop: 24 }}>
-              Credential rotation requires the card-activation update permission, which this account
-              does not hold.
-            </p>
-          )}
-        </details>
-      </section>
-      {outcome ? (
-        <p role="status" style={{ marginTop: 16 }}>
-          {outcome}
-        </p>
-      ) : null}
+            {outcome ? (
+              <p role="status" className={styles.outcome}>
+                {outcome}
+              </p>
+            ) : null}
 
-      {canSeeAudit ? (
-        <section className={styles.panel} aria-label="Card history">
-          <h2 className={styles.panelTitle}>History</h2>
-          {history.isPending ? (
-            <div role="status">
-              <Skeleton style={{ height: 48 }} />
-              <span className="sr-only">Loading history…</span>
-            </div>
-          ) : history.isError ? (
-            <ErrorState
-              error={history.error}
-              title="Card history is unavailable right now"
-              onRetry={() => void history.refetch()}
-            />
-          ) : history.data.data.length === 0 ? (
-            <p className={styles.panelNote}>No card events recorded yet.</p>
-          ) : (
-            <ul className={styles.historyList}>
-              {history.data.data.map((event) => (
-                <li key={String(event.id)}>
-                  {event.action} · {event.summary} ·{' '}
-                  {event.createdAt ? formatDateTime(event.createdAt) : '—'}
-                </li>
-              ))}
-            </ul>
-          )}
+            <Disclosure
+              tone="caution"
+              open={securityOpen}
+              onOpenChange={setSecurityOpen}
+              title={
+                <>
+                  <Icon name="alert" size={16} aria-hidden="true" />
+                  Security: credential recovery
+                </>
+              }
+            >
+              {canReissue ? (
+                <div className={styles.securityBody}>
+                  <h3 className={styles.securityTitle}>Rotate credentials</h3>
+                  <p className={styles.panelNote}>
+                    Use for lost or damaged cards. Not for reprints. Old codes stop working
+                    immediately. Balances stay unchanged.
+                  </p>
+                  <TextAreaField
+                    id="membership-rotate-reason"
+                    name="rotateReason"
+                    label="Reason"
+                    hint="At least 5 characters."
+                    value={reason}
+                    onChange={setReason}
+                    rows={3}
+                  />
+                  <Button
+                    onClick={() => {
+                      setOutcome(null);
+                      setConfirmReissue(true);
+                    }}
+                    disabled={reissue.isPending || reason.trim().length < 5}
+                  >
+                    {reissue.isPending ? 'Rotating…' : 'Reissue credentials'}
+                  </Button>
+                  <ConfirmDialog
+                    open={confirmReissue}
+                    onCancel={() => setConfirmReissue(false)}
+                    onConfirm={() => {
+                      setConfirmReissue(false);
+                      reissue.mutate();
+                    }}
+                    title="Reissue credentials?"
+                    message="Rotate the credentials for this card? The previous codes stop working immediately."
+                    confirmLabel="Reissue"
+                    cancelLabel="Cancel"
+                    confirmLoading={reissue.isPending}
+                  />
+                </div>
+              ) : (
+                <p className={styles.panelNote}>
+                  Rotation needs card-activation update access.
+                </p>
+              )}
+            </Disclosure>
+          </section>
+        </aside>
+
+        <section className={styles.section} aria-label="Card activity">
+          <h2 className={styles.sectionTitle}>Activity</h2>
+          <MembershipActivity
+            id={id}
+            number={data.membershipNumber}
+            permissions={user?.afHomesPermissions ?? []}
+          />
         </section>
-      ) : null}
+
+        {canSeeAudit ? (
+          <section className={styles.panel} aria-label="Card history">
+            <h2 className={styles.panelTitle}>History</h2>
+            {history.isPending ? (
+              <div role="status">
+                <Skeleton style={{ height: 48 }} />
+                <span className="sr-only">Loading history…</span>
+              </div>
+            ) : history.isError ? (
+              <ErrorState
+                error={history.error}
+                title="Card history is unavailable right now"
+                onRetry={() => void history.refetch()}
+              />
+            ) : history.data.data.length === 0 ? (
+              <p className={styles.panelNote}>No card events recorded yet.</p>
+            ) : (
+              <ol className={styles.historyList}>
+                {history.data.data.map((event) => (
+                  <li key={String(event.id)}>
+                    <span className={styles.historySummary}>{event.summary}</span>
+                    <code className={styles.historyAction}>{event.action}</code>
+                    {event.createdAt ? (
+                      <time dateTime={event.createdAt} className={styles.historyTime}>
+                        {formatDateTime(event.createdAt)}
+                      </time>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        ) : null}
+      </div>
 
       <Dialog
         open={issued !== null}

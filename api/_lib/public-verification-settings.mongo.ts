@@ -33,17 +33,23 @@ function initialSettings() {
   });
 }
 
+const readCleanupJobs = (db: Db, session?: ClientSession) =>
+  db
+    .collection<MongoRow>('background_jobs')
+    .find({ name: SEARCH_CLEANUP_JOB }, { session })
+    .limit(2)
+    .toArray();
+
 /** Health comes from a single live server-owned lease and completed sweep, never from a browser flag. */
 export async function mongoSearchCleanupReady(
   db: Db,
   retentionDays: number,
   session?: ClientSession,
 ) {
-  const jobs = await db
-    .collection<MongoRow>('background_jobs')
-    .find({ name: SEARCH_CLEANUP_JOB }, { session })
-    .limit(2)
-    .toArray();
+  return cleanupJobsReady(db, await readCleanupJobs(db, session), retentionDays);
+}
+
+function cleanupJobsReady(db: Db, jobs: MongoRow[], retentionDays: number) {
   if (jobs.length !== 1) return false;
   const job = jobs[0]!,
     now = Date.now(),
@@ -66,15 +72,31 @@ export async function mongoSearchCleanupReady(
   );
 }
 
-export async function readMongoPublicVerificationSettings(db: Db, session?: ClientSession) {
-  const saved = await db
-    .collection<MongoRow>('public_verification_settings')
-    .findOne({ _id: 'public' }, { session });
+async function readSettings(db: Db, session?: ClientSession) {
+  const readSaved = () =>
+    db.collection<MongoRow>('public_verification_settings').findOne({ _id: 'public' }, { session });
+  // A transaction cannot overlap operations on one session, so only plain reads run together.
+  const [saved, jobs] = session
+    ? [await readSaved(), await readCleanupJobs(db, session)]
+    : await Promise.all([readSaved(), readCleanupJobs(db)]);
   const settings = publicVerificationSettingsSchema.parse(saved ?? initialSettings());
   return {
-    ...settings,
-    cleanupReady: await mongoSearchCleanupReady(db, settings.retentionDays, session),
+    saved: saved !== null,
+    settings: {
+      ...settings,
+      cleanupReady: cleanupJobsReady(db, jobs, settings.retentionDays),
+    },
   };
+}
+
+export async function readMongoPublicVerificationSettings(db: Db, session?: ClientSession) {
+  return (await readSettings(db, session)).settings;
+}
+
+/** The public search's view: null until an administrator has saved settings. One round trip. */
+export async function readSavedMongoPublicVerificationSettings(db: Db) {
+  const { saved, settings } = await readSettings(db);
+  return saved ? settings : null;
 }
 
 export function createMongoPublicVerificationSettingsHandler(

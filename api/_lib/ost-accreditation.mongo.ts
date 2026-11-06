@@ -45,6 +45,10 @@ export async function setupMongoOstAccreditation(db: Db) {
   await db
     .collection('ost_accreditation_terms')
     .createIndex({ ost_id: 1 }, { unique: true, partialFilterExpression: { status: 'active' } });
+  // Latest-term reads include revoked terms, which the partial unique index above cannot serve.
+  await db
+    .collection('ost_accreditation_terms')
+    .createIndex({ ost_id: 1, approved_at: -1, _id: -1 });
   for (const field of ['application_id', 'renewal_id'])
     await db
       .collection('ost_accreditation_terms')

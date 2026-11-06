@@ -513,8 +513,19 @@
     padding: var(--space-2) var(--space-3);
     text-align: right;
     min-width: 0;
+    /* Bare text is an anonymous flex item the `> *` rule cannot reach. */
+    overflow-wrap: anywhere;
     background-color: var(--color-bg-surface-raised);
     border-bottom: 0;
+  }
+
+  /* Cards drop the desktop column widths, centring and zebra stripe: each
+     outranks the generic card rule above, which squeezed cells to 9-12% of the
+     card (reference pills collapsed, chips stacked one letter per line). */
+  .tableWrap > table.queueTable tbody > tr > td {
+    width: auto;
+    text-align: right;
+    background-color: var(--color-bg-surface-raised);
   }
 
   .tableWrap tbody > tr > td > * {
@@ -732,6 +743,29 @@
 
   .stickyFooterActions > * {
     width: 100%;
+  }
+
+  /* Phones: a wrapped multi-row bar pinned to the bottom hid a quarter of the
+     screen while scrolling the form. It sits at the form's end instead, with
+     the actions as an even grid of full-width tap targets. */
+  .stickyFooter {
+    position: static;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .stickyFooter .buttonRow {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  }
+
+  .stickyFooter .buttonRow > .spacer {
+    display: none;
+  }
+
+  .stickyFooter .buttonRow > * {
+    width: 100%;
+    min-height: 40px;
   }
 }
 
@@ -1745,6 +1779,7 @@ button.stepperLink:disabled {
     padding: var(--space-2) var(--space-3);
     text-align: right;
     min-width: 0;
+    overflow-wrap: anywhere;
     border-bottom: 0;
   }
 
@@ -1786,9 +1821,20 @@ button.stepperLink:disabled {
     display: none;
   }
 
-  /* Money keeps its tabular figures; wrap the action buttons instead. */
+  /* Receipt actions stack as full-width tap targets under their label, so a
+     second receipt never wraps to a stray left-aligned line. */
   .ledgerWrap tbody > tr > td[data-label='Actions'] {
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .ledgerWrap tbody > tr > td[data-label='Actions'] > button {
+    margin: 0;
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+    border: 1px solid var(--color-border-default);
   }
 }
 

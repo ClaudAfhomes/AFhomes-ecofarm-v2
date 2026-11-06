@@ -4,6 +4,7 @@ import { addMoney, compareMoney } from '@afhomes/shared';
 import type { MongoRow } from './customer-activation.mongo.js';
 import { PLAN_BENEFIT_DEFAULTS } from './catalog-model.js';
 import { calculateCommission, resolveSchemeEconomics } from './commerce.js';
+import { resolveCommissionRule } from './commission-model.js';
 import { isoOrNull } from './handler-kit.mongo.js';
 export async function getStaffRoleSlug(
   db: MongoDb,
@@ -96,46 +97,31 @@ export async function purchaseTermsForApplication(
   } = result.economics;
   // Get commission rule
   const date = new Date().toISOString().split('T')[0];
-  const rules = await col('commission_rules')
-    .find(
-      {
-        is_active: true,
-        effective_from: { $lte: date },
-        $and: [
-          { $or: [{ effective_until: null }, { effective_until: { $gte: date } }] },
-          {
-            $or: [
-              { accredited_on_or_after: null },
-              {
-                accredited_on_or_after: {
-                  $lte: String(
-                    (await col('staff_users').findOne({ _id: sellerId }, { session }))
-                      ?.activated_at ?? '',
-                  ).split('T')[0],
-                },
-              },
-            ],
-          },
-          {
-            $or: [
-              { target_type: 'staff', target_id: sellerId },
-              {
-                target_type: 'role',
-                target_id: (
-                  await col('roles').findOne(
-                    { slug: await getStaffRoleSlug(db, sellerId, session) },
-                    { projection: { _id: 1 }, session },
-                  )
-                )?._id,
-              },
-            ],
-          },
-        ],
-      },
-      { session },
-    )
-    .toArray();
-  const rule = rules.find((r) => r.target_type === 'staff') ?? rules[0];
+  const staff = await col('staff_users').findOne({ _id: sellerId }, { session });
+  const role = await col('roles').findOne(
+    { slug: await getStaffRoleSlug(db, sellerId, session) },
+    { projection: { _id: 1 }, session },
+  );
+  const rule = resolveCommissionRule(
+    await col('commission_rules')
+      .find(
+        {
+          is_active: true,
+          $or: [
+            { target_type: 'staff', target_id: sellerId },
+            { target_type: 'role', target_id: role?._id },
+          ],
+        },
+        { session },
+      )
+      .toArray(),
+    {
+      staffId: sellerId,
+      roleId: role?._id as string | undefined,
+      date,
+      accredited: String(staff?.activated_at ?? '').split('T')[0] ?? '',
+    },
+  );
   const rate = String(rule?.rate ?? '0');
   const commission = calculateCommission(total, rate);
 

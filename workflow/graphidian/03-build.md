@@ -36,7 +36,7 @@ This repo uses pnpm + Turbo (per `AGENTS.md`); the commands above are the docume
 Gate on `pnpm typecheck` + `pnpm lint` + tests. Do not reformat files you did not
 touch, and never rewrite pre-existing formatting to make a diff look tidy.
 Prettier config (`semi`, `singleQuote`, `printWidth: 100`, `trailingComma: all`)
-lives in `AGENTS.md` → Conventions; any deviation rule is stated in `SESSION.md`.
+lives in `AGENTS.md` → Conventions; any deviation rule is stated in `CLAUDE.md` → Standing User Preferences (Prettier is not a gate).
 
 Focused runs (workspace-scoped):
 

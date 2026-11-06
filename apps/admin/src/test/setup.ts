@@ -18,6 +18,10 @@ beforeAll(() => {
       dispatchEvent: () => false,
     })) as unknown as typeof window.matchMedia;
   }
+
+  // jsdom logs "Not implemented" for window.scrollTo; ScrollToTop calls it on
+  // every route change. Specs that assert scrolling replace this stub.
+  window.scrollTo = (() => {}) as typeof window.scrollTo;
 });
 
 afterEach(() => {

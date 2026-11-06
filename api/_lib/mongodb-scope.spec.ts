@@ -18,6 +18,8 @@ const production = {
   AFHOMES_WEB_URL: 'https://scope.example.invalid',
   AFHOMES_ADMIN_URL: 'https://scope.example.invalid/admin',
   AFHOMES_PRIVATE_STORAGE_PROVIDER: 's3',
+  AFHOMES_AUTH_TURNSTILE_SECRET: 'synthetic-scope-captcha-secret',
+  VITE_TURNSTILE_SITE_KEY: 'synthetic-scope-public-key',
 };
 
 it('keeps the development default and requires paired explicit production opt-ins', () => {

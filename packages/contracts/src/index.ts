@@ -339,6 +339,12 @@ export {
   commissionRuleSchema,
   createCommissionRuleSchema,
   updateCommissionRuleSchema,
+  commissionRosterQuerySchema,
+  commissionRosterMemberSchema,
+  commissionRosterPositionSchema,
+  commissionRosterSchema,
+  bulkCommissionRuleSchema,
+  bulkCommissionRuleResultSchema,
   qualifyCommissionSchema,
   markCommissionPaidSchema,
   issueOnboardingTokenSchema,
@@ -361,6 +367,12 @@ export type {
   CommissionRule,
   CreateCommissionRuleRequest,
   UpdateCommissionRuleRequest,
+  CommissionRosterQuery,
+  CommissionRosterMember,
+  CommissionRosterPosition,
+  CommissionRoster,
+  BulkCommissionRuleRequest,
+  BulkCommissionRuleResult,
   QualifyCommissionRequest,
   MarkCommissionPaidRequest,
   IssueOnboardingTokenRequest,
@@ -793,3 +805,4 @@ export * from './schemas/ist-portal.js';
 export * from './schemas/imported-sales.js';
 
 export * from './schemas/cms-content.js';
+export * from './schemas/media.js';

@@ -306,6 +306,10 @@
   line-height: 1;
 }
 
+.identityText {
+  min-width: 0;
+}
+
 .identityName {
   min-width: 0;
   font-weight: 700;
@@ -483,5 +487,13 @@
   .tableWrap tbody > tr > td:not([data-label])::before,
   .tableWrap tbody > tr > td[data-label='']::before {
     display: none;
+  }
+
+  /* Cards have no sideways room: the full name and email wrap instead of
+     being cut at the card edge. */
+  .identityName {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }

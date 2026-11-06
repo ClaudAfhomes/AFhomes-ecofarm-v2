@@ -232,6 +232,7 @@ export function StaffEntryPage({ portal }: { portal: StaffEntryPortal }) {
 
             <div className={styles.submitRow}>
               <TurnstileChallenge
+                action="login"
                 siteKey={env.VITE_TURNSTILE_SITE_KEY}
                 onToken={setCaptchaToken}
                 resetVersion={captchaVersion}

@@ -13,6 +13,7 @@ import { createMongoDevelopmentHandler } from '../_lib/mongo-development-access.
 import { inspectMongoCoreSetup } from '../_lib/mongo-core-setup.js';
 import { createDevelopmentPrivateObjectStore } from '../_lib/private-object-store.js';
 import { createMongoSearchMaintenance } from '../_lib/search-maintenance.mongo.js';
+import { safeStartupDetail } from '../_lib/startup-diagnostics.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const frontends: ChildProcess[] = [];
@@ -124,9 +125,9 @@ try {
       ? '[mongodb] Connected to afhomes_dev. Approved native core workflows and search retention worker enabled. No startup seeds, bootstrap or Supabase fallback.'
       : '[mongodb] Connected to afhomes_dev. Converted reads and account settings enabled; business writes remain off. No seeds, bootstrap or Supabase fallback.',
   );
-} catch {
+} catch (error) {
   console.error(
-    `MongoDB localhost could not start at ${startupStage}. Check server configuration and approved initialization. No credentials or raw errors are printed.`,
+    `MongoDB localhost could not start at ${startupStage}.${safeStartupDetail(startupStage, error)} Check server configuration and approved initialization. No credentials or raw errors are printed.`,
   );
   await close(1);
 }

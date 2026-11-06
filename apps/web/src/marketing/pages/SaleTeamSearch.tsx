@@ -324,11 +324,8 @@ export default function SaleTeamSearch() {
             onChange={(e) => setAcknowledged(e.target.checked)}
           />
           <span>
-            I acknowledge that I have read the AFHomes IST/OST Accreditation Verification Privacy
-            Notice and understand how my personal information may be processed for the purposes
-            described in the notice. I understand that the verification service is intended to help
-            confirm an individual's current accreditation status and that AFHomes may apply security
-            measures to prevent misuse of the service.
+            I acknowledge that I have read and understood the AFHomes Privacy Notice and agree to the
+            processing of my personal information for accreditation verification and security purposes.
           </span>
         </label>
         {dialogError}
