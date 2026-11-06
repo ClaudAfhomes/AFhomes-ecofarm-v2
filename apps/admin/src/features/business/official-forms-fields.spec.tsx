@@ -299,6 +299,80 @@ describe('recommender loading states', () => {
   });
 });
 
+describe('recommender contact/email loading states', () => {
+  it('spins and disables both dropdowns while contact lookup is in flight, never offering empty options early', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockReturnValue(new Promise(() => {}));
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    // The VIP Recommender name only resolves to a staff id - and the contact
+    // lookup only starts - once the genealogy chain itself has loaded.
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('ANA SANTOS'));
+    const contactSelect = screen.getByLabelText('Recommender Contact');
+    const emailSelect = screen.getByLabelText('Recommender Email');
+    await waitFor(() => {
+      expect(contactSelect).toHaveAttribute('aria-busy', 'true');
+      expect(emailSelect).toHaveAttribute('aria-busy', 'true');
+    });
+    expect(contactSelect).toBeDisabled();
+    expect(emailSelect).toBeDisabled();
+    expect(contactSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(emailSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(within(contactSelect).queryByRole('option', { name: 'No contact available' })).not.toBeInTheDocument();
+    expect(within(emailSelect).queryByRole('option', { name: 'No email available' })).not.toBeInTheDocument();
+  });
+
+  it('enables both dropdowns and populates real options once the fetch resolves', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    expect(
+      await within(screen.getByLabelText('Recommender Contact')).findByRole('option', { name: /09171234567/ }),
+    ).toBeInTheDocument();
+    expect(
+      await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+  });
+
+  it('shows an empty-state message, not "No contact"/"No email" prematurely, once loading finishes with nothing to offer', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({ 'ost-1': { phone: null, email: '' } });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    await waitFor(() =>
+      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'No contact available' })).toBeInTheDocument(),
+    );
+    expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'No email available' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+  });
+
+  it('recovers from a failed contact lookup with a retry, instead of spinning forever', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockRejectedValue(new Error('offline'));
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    const retry = await screen.findByRole('button', { name: 'Retry contact lookup' });
+    await waitFor(() => {
+      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'Unable to load contact numbers' })).toBeInTheDocument();
+      expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'Unable to load email' })).toBeInTheDocument();
+    });
+    // Settled on error, not stuck spinning - and still interactive.
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry contact lookup' })).not.toBeInTheDocument(),
+    );
+    expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+  });
+});
+
 describe('VIP recommender', () => {
   it('is a dropdown of active OST members, not a typed name', async () => {
     vi.mocked(getGenealogy).mockResolvedValue([

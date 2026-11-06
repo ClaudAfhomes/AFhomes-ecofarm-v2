@@ -103,8 +103,10 @@ export const VIP_TIER_FIELD_OPTIONS = [
 export const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' =>
   value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
 
-/** Live filter for contact numbers: strip letters outright. */
-export const filterContactInput = (value: string): string => value.replace(/\p{L}/gu, '');
+/** Live filter for contact numbers: digits only, capped at the 11-digit
+ * 09XXXXXXXXX mobile format (`contactNumber` is a required mobile field). */
+export const filterContactInput = (value: string): string =>
+  value.replace(/\D/g, '').slice(0, 11);
 
 /** One message for every way a holder birth date can be wrong. */
 const BIRTH_DATE_MESSAGE = `Enter a real past birth date, and an age of ${OLDEST_HOLDER_AGE} or less.`;
@@ -717,6 +719,15 @@ export function RecommenderFields({
     refetchOnWindowFocus: false,
     retry: false,
   });
+  // Both dropdowns ultimately depend on the genealogy chain too: the VIP
+  // recommender's staff id (and so their email) only resolves once `nodes`
+  // has loaded, so a chain still in flight must count as loading here as
+  // well - otherwise the email dropdown would flash "No email available"
+  // while genealogy is still resolving who the recommender even is.
+  // `isFetching` (not `isPending`) is used for the contacts query itself:
+  // `isPending` stays true even while it sits disabled with no recommender
+  // chosen yet, which would spin the dropdowns forever with nothing to fetch.
+  const contactsLoading = chain.isPending || contactsQuery.isFetching;
 
   // Build contact options from selected recommenders
   const contactOptions = contactsQuery.data
@@ -739,6 +750,23 @@ export function RecommenderFields({
           email ? [{ value: email.toLowerCase(), label: email.toLowerCase() }] : []
         )
     : [];
+
+  // The dropdown must never offer "No contact"/"No email" while the fetch is
+  // still in flight - only once it has actually settled, one way or another.
+  const contactSelectOptions = contactsLoading
+    ? [{ value: '', label: 'Loading contact numbers…' }]
+    : contactsQuery.isError
+      ? [{ value: '', label: 'Unable to load contact numbers' }]
+      : contactOptions.length > 0
+        ? [{ value: '', label: 'Select contact' }, ...contactOptions]
+        : [{ value: '', label: 'No contact available' }];
+  const emailSelectOptions = contactsLoading
+    ? [{ value: '', label: 'Loading email…' }]
+    : contactsQuery.isError
+      ? [{ value: '', label: 'Unable to load email' }]
+      : emailOptions.length > 0
+        ? [{ value: '', label: 'Select email' }, ...emailOptions]
+        : [{ value: '', label: 'No email available' }];
 
   return (
     <>
@@ -792,11 +820,10 @@ export function RecommenderFields({
         <Select
           aria-label="Recommender Contact"
           value={meta.recommenderContact}
+          disabled={contactsLoading}
+          loading={contactsLoading}
           onChange={(event) => onChange('recommenderContact', event.target.value)}
-          options={[
-            { value: '', label: 'Select contact' },
-            ...contactOptions.map((opt) => ({ value: opt.value, label: opt.label })),
-          ]}
+          options={contactSelectOptions}
         />
       </label>
       {/* Recommender Email - dropdown from selected recommenders */}
@@ -805,13 +832,24 @@ export function RecommenderFields({
         <Select
           aria-label="Recommender Email"
           value={meta.recommenderEmail}
+          disabled={contactsLoading}
+          loading={contactsLoading}
           onChange={(event) => onChange('recommenderEmail', event.target.value)}
-          options={[
-            { value: '', label: 'Select email' },
-            ...emailOptions.map((opt) => ({ value: opt.value, label: opt.label })),
-          ]}
+          options={emailSelectOptions}
         />
       </label>
+      {contactsQuery.isError ? (
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Button
+            variant="secondary"
+            loading={contactsQuery.isFetching}
+            loadingLabel="Retrying…"
+            onClick={() => void contactsQuery.refetch()}
+          >
+            Retry contact lookup
+          </Button>
+        </div>
+      ) : null}
       {/* Acknowledged At - keep as date field */}
       <label className={styles.filterLabel}>
         <span>Acknowledged At</span>
