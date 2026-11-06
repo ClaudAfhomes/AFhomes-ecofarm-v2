@@ -132,18 +132,26 @@ export function createMongoCustomersHandler(
     try {
       const path = subPath(req),
         verb = method(req),
-        deactivate = /^([a-f0-9-]{36})\/deactivate$/.exec(path);
+        deactivate = /^([a-f0-9-]{36})\/deactivate$/.exec(path),
+        reactivate = /^([a-f0-9-]{36})\/reactivate$/.exec(path);
       if (!(
         (['', 'filter-options'].includes(path) && verb === 'GET') ||
         (path === '' && verb === 'POST') ||
         (/^[a-f0-9-]{36}$/.test(path) && ['GET', 'PATCH', 'DELETE'].includes(verb)) ||
-        (deactivate && verb === 'POST')
+        (deactivate && verb === 'POST') ||
+        (reactivate && verb === 'POST')
       ))
         return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);
       const auth = await authorize(
         req,
         'sales.customers',
-        verb === 'DELETE' ? 'delete' : deactivate || verb === 'PATCH' ? 'update' : verb === 'POST' ? 'create' : 'view',
+        verb === 'DELETE'
+          ? 'delete'
+          : deactivate || reactivate || verb === 'PATCH'
+            ? 'update'
+            : verb === 'POST'
+              ? 'create'
+              : 'view',
       );
       if ('error' in auth) return deny(res, auth);
       if (verb === 'DELETE') {
@@ -220,6 +228,31 @@ export function createMongoCustomersHandler(
         } finally {
           await session.endSession();
         }
+      }
+      if (reactivate) {
+        const id = reactivate[1]!,
+          before = await collection.findOne({ _id: id });
+        if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+        if (before.status !== 'suspended')
+          return fail(res, 'CONFLICT', 'Only a suspended customer can be reactivated', 409);
+        const now = new Date().toISOString(),
+          update = await collection.updateOne(
+            { _id: id, status: 'suspended' },
+            { $set: { status: 'active', updated_at: now } },
+          );
+        if (update.matchedCount !== 1)
+          return fail(res, 'CONFLICT', 'Only a suspended customer can be reactivated', 409);
+        await db.collection<MongoRow>('audit_events').insertOne({
+          _id: randomUUID(),
+          actor_id: auth.userId,
+          action: 'CUSTOMER_REACTIVATED',
+          entity_type: 'customer',
+          entity_id: id,
+          before_data: { status: before.status },
+          after_data: { status: 'active' },
+          created_at: now,
+        });
+        return res.status(200).json({ reactivated: true });
       }
       if (path === 'filter-options') {
         const staff = await db

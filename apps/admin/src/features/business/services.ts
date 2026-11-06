@@ -230,9 +230,12 @@ export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnbo
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
 
 const customerDeactivationSchema = z.object({ deactivated: z.literal(true) });
+const customerReactivationSchema = z.object({ reactivated: z.literal(true) });
 const customerDeletionSchema = z.object({ deleted: z.literal(true) });
 export const deactivateCustomer = (id: string) =>
   post(`/customers/${id}/deactivate`, customerDeactivationSchema, {});
+export const reactivateCustomer = (id: string) =>
+  post(`/customers/${id}/reactivate`, customerReactivationSchema, {});
 export const deleteCustomer = (id: string) =>
   request(`/customers/${id}`, customerDeletionSchema, { method: 'DELETE' });
 

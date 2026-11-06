@@ -7,11 +7,12 @@ import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
-import { deleteCustomer, getCardProducts, getCustomersPage, issueCustomerAccountActivation } from './services';
+import { deleteCustomer, getCardProducts, getCustomersPage, issueCustomerAccountActivation, reactivateCustomer } from './services';
 
 vi.mock('./services', () => ({
   createCustomer: vi.fn(),
   deactivateCustomer: vi.fn(),
+  reactivateCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
   getCardProducts: vi.fn(),
   getCustomers: vi.fn(),
@@ -221,13 +222,42 @@ describe('BusinessCustomersPage row actions', () => {
     expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeInTheDocument();
   });
 
-  it('hides deactivation for non-active customers inside the menu', async () => {
+  it('hides deactivation for non-active customers inside the menu and offers activation instead', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     expect(screen.queryByRole('menuitem', { name: 'Deactivate account' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Activate account' })).toBeInTheDocument();
+  });
+
+  it('hides activation for an active customer inside the menu', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    expect(screen.queryByRole('menuitem', { name: 'Activate account' })).not.toBeInTheDocument();
+  });
+
+  it('reactivates a suspended customer and refreshes the directory', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
+    vi.mocked(reactivateCustomer).mockResolvedValue({ reactivated: true } as never);
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Activate account' }));
+    const dialog = screen.getByRole('dialog', { name: 'Activate Customer Account' });
+    // Admins must be told up front that login access is not restored automatically.
+    expect(within(dialog).getByText(/issue a new activation link/i)).toBeInTheDocument();
+    const callsBefore = vi.mocked(getCustomersPage).mock.calls.length;
+    await user.click(within(dialog).getByRole('button', { name: 'Activate account' }));
+    await waitFor(() => expect(reactivateCustomer).toHaveBeenCalledExactlyOnceWith('c-1'));
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.length).toBeGreaterThan(callsBefore),
+    );
   });
 
   it('reports an empty directory with the canonical copy', async () => {
