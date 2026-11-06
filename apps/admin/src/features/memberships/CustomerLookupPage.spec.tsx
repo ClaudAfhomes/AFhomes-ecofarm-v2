@@ -45,6 +45,18 @@ async function pickOption(name: RegExp) {
 beforeEach(() => {
   vi.mocked(requestList).mockReset();
   vi.mocked(protectedRequest).mockReset();
+  vi.mocked(protectedRequest).mockRejectedValue(new Error('FORBIDDEN: customer master access'));
+});
+
+it('shows a picked lookup result without requesting the protected customer master record', async () => {
+  vi.mocked(requestList).mockResolvedValue([JUAN]);
+  renderWithProviders(<CustomerLookupPage />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Find customer' }), {
+    target: { value: 'JUA' },
+  });
+  await pickOption(/Juan Dela Cruz/);
+  expect(await screen.findByRole('heading', { name: /Juan Dela Cruz/ })).toBeInTheDocument();
+  expect(protectedRequest).not.toHaveBeenCalled();
 });
 
 it('shows an active VIP customer with the approved staff display fields', async () => {

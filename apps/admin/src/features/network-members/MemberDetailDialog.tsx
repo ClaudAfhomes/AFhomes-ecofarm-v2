@@ -291,6 +291,9 @@ export function MemberDetailDialog({
         title={member.fullName}
         footer={
           <>
+            <Button variant="secondary" onClick={onClose}>
+              Close
+            </Button>
             {canViewRenewal ? (
               <Button
                 variant="secondary"
