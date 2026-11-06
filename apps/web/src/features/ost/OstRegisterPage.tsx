@@ -226,6 +226,7 @@ export function OstRegisterPage() {
             className={authStyles.input}
             value={form.phone}
             onChange={set('phone')}
+            normalize={(value) => value.replace(/\D/g, '').slice(0, 11)}
             required
             autoComplete="tel"
             placeholder="+639171234567"

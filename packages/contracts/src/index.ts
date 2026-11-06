@@ -93,6 +93,7 @@ export {
   normalizeGeographicName,
   normalizePostalCode,
   normalizePhilippinePhone,
+  philippineLandlineDigitCount,
   normalizeEmail,
   normalizeMoneyString,
   isPlausibleBirthDate,

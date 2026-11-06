@@ -9,8 +9,11 @@ import { z } from 'zod';
  *
  *   NAMES    Unicode letters, spaces, apostrophes and hyphens only. No digits,
  *            ever. Entered capitalization is preserved (`normalizePersonName`).
- *   PHONES   No alphabetic characters, ever. Philippine mobile forms collapse
- *            to the canonical `+63XXXXXXXXXX` (`normalizePhilippinePhone`).
+ *   PHONES   No alphabetic characters, ever. Mobile numbers must be the local
+ *            `09XXXXXXXXX` form (exactly 11 digits) and collapse to the
+ *            canonical `+63XXXXXXXXXX` (`normalizePhilippinePhone`). Landlines
+ *            allow a 1-3 digit area code plus a 7-8 digit subscriber number,
+ *            7-11 digits combined (`philippineLandlineDigitCount`).
  *   EMAIL    Trimmed + lowercased (existing convention, kept).
  *   MONEY    Exact-decimal strings only (see `./money.js`): no alpha, no
  *            scientific notation, no floats. Validated server-side, always.
@@ -71,9 +74,12 @@ export function normalizePostalCode(value: string): string {
 }
 
 /**
- * Canonical Philippine phone normalization. Returns the canonical form or
- * null when the input is not a phone number at all. Alphabetic characters
- * are never stripped - they fail the value outright.
+ * Canonical Philippine MOBILE normalization. Accepts only the standard local
+ * `09XXXXXXXXX` form (exactly 11 digits, always starting "09") or its already
+ * -canonical `+63`/`63` equivalent (so a stored value round-trips through an
+ * edit form unchanged) - collapsing either to `+63XXXXXXXXXX`. Everything
+ * else, including any other digit length, is rejected: there is no generic
+ * fallback. Alphabetic characters are never stripped - they fail outright.
  */
 export function normalizePhilippinePhone(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
@@ -85,8 +91,25 @@ export function normalizePhilippinePhone(raw: unknown): string | null {
   const digits = hasPlus ? stripped.slice(1) : stripped;
   if (/^09\d{9}$/.test(digits)) return `+63${digits.slice(1)}`;
   if (/^63\d{10}$/.test(digits)) return `+${digits}`;
-  if (digits.length >= 7 && digits.length <= 15) return hasPlus ? `+${digits}` : digits;
   return null;
+}
+
+/**
+ * Philippine landline digit-count rule: a subscriber number is 7-8 digits and
+ * an area code, when present, is 1-3 digits, so the combined total (minus any
+ * `+63`/`63` country-code prefix) is always 7-11 digits. Returns the bare
+ * digit count used for validation, or null when the input isn't number-like.
+ */
+export function philippineLandlineDigitCount(raw: unknown): number | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (value.length === 0 || /[a-zA-Z]/.test(value)) return null;
+  const stripped = value.replace(/[\s\-.()]/g, '');
+  if (!/^\+?\d+$/.test(stripped)) return null;
+  const hasPlus = stripped.startsWith('+');
+  const digits = hasPlus ? stripped.slice(1) : stripped;
+  const withoutCountryCode = digits.startsWith('63') ? digits.slice(2) : digits;
+  return withoutCountryCode.length;
 }
 
 /** Existing convention: emails are trimmed and lowercased, never uppercased. */
@@ -154,7 +177,7 @@ export const optionalPhoneSchema = z
   .trim()
   .optional()
   .refine((value) => value === undefined || normalizePhilippinePhone(value) !== null, {
-    message: 'Phone must be 7-15 digits (Philippine mobile stored as +63…), no letters',
+    message: 'Mobile number must start with 09 and have exactly 11 digits (e.g. 09171234567)',
   });
 
 /** Phone input: rejects alpha, stores the canonical form. */
@@ -163,7 +186,7 @@ export const phoneSchema = z
   .trim()
   .transform((value) => normalizePhilippinePhone(value))
   .refine((value): value is string => value !== null, {
-    message: 'Phone must be 7-15 digits (Philippine mobile stored as +63…), no letters',
+    message: 'Mobile number must start with 09 and have exactly 11 digits (e.g. 09171234567)',
   });
 
 /** Optional contact number: missing/blank/null means absent; supplied values
@@ -188,12 +211,15 @@ export const optionalLandlineSchema = z.preprocess(
     .max(30)
     .regex(/^\+?[0-9() .-]+$/, 'Enter a valid landline number')
     .refine((value) => {
-      const count = value.replace(/\D/g, '').length;
-      return count >= 7 && count <= 15;
-    }, 'Enter 7 to 15 landline digits')
+      const count = philippineLandlineDigitCount(value);
+      return count !== null && count >= 7 && count <= 11;
+    }, 'Enter a 7-8 digit subscriber number, plus a 1-3 digit area code if any (7-11 digits total)')
     .transform((value) => {
       const mobile = phoneSchema.safeParse(value);
-      return mobile.success ? mobile.data : value;
+      // A mobile number typed into the landline field still canonicalizes to
+      // +63…; any genuine landline is stored as bare digits (punctuation and
+      // whitespace dropped, "+" country-code prefix kept if entered).
+      return mobile.success ? mobile.data : value.replace(/[\s\-.()]/g, '');
     })
     .optional(),
 );
