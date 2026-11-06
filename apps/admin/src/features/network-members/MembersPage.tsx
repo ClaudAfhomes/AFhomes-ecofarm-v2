@@ -259,7 +259,7 @@ export function MembersPage() {
                           <span className={styles.identityAvatar} aria-hidden="true">
                             {(member.fullName.trim().charAt(0) || '-').toUpperCase()}
                           </span>
-                          <span>
+                          <span className={styles.identityText}>
                             <span className={styles.identityName}>{member.fullName}</span>
                             <small className={styles.identityMeta}>{member.email}</small>
                           </span>

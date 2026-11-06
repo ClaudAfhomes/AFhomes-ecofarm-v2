@@ -21,8 +21,18 @@ export type AuthDelivery = {
 export function requireAuthTurnstile(env: NodeJS.ProcessEnv) {
   const siteKey = env.VITE_TURNSTILE_SITE_KEY;
   const secretKey = env.AFHOMES_AUTH_TURNSTILE_SECRET;
-  if (!siteKey || !secretKey || siteKey !== siteKey.trim() || secretKey !== secretKey.trim() || secretKey.length < 16)
-    throw new Error('Login requires VITE_TURNSTILE_SITE_KEY and server-only AFHOMES_AUTH_TURNSTILE_SECRET.');
+  if (!siteKey) throw new Error('Login requires VITE_TURNSTILE_SITE_KEY.');
+  if (!secretKey) throw new Error('Login requires server-only AFHOMES_AUTH_TURNSTILE_SECRET.');
+  if (secretKey === siteKey)
+    throw new Error(
+      'AFHOMES_AUTH_TURNSTILE_SECRET must be the server secret, not the public VITE_TURNSTILE_SITE_KEY.',
+    );
+  if (siteKey !== siteKey.trim())
+    throw new Error('VITE_TURNSTILE_SITE_KEY must not have surrounding whitespace.');
+  if (secretKey !== secretKey.trim())
+    throw new Error('AFHOMES_AUTH_TURNSTILE_SECRET must not have surrounding whitespace.');
+  if (secretKey.length < 16)
+    throw new Error('AFHOMES_AUTH_TURNSTILE_SECRET must be at least 16 characters.');
   return { siteKey, secretKey };
 }
 

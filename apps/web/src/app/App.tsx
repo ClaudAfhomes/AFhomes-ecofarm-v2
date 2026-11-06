@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
-import { NotFound } from '@afhomes/ui';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
 import { FEATURE_FLAGS } from '@afhomes/shared';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
@@ -66,6 +66,8 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
  */
 export default function App() {
   return (
+    <>
+    <ScrollToTop />
     <Routes>
       <Route
         element={
@@ -147,5 +149,6 @@ export default function App() {
 
       <Route path="*" element={<MarketingNotFoundPage />} />
     </Routes>
+    </>
   );
 }

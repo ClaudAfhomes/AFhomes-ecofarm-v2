@@ -13,6 +13,8 @@ import {
   cardProductSchema,
   commissionSchema,
   commissionRuleSchema,
+  commissionRosterSchema,
+  bulkCommissionRuleResultSchema,
   customerImportCommitResponseSchema,
   customerImportJobSchema,
   customerImportParseResponseSchema,
@@ -52,6 +54,9 @@ import {
   type CardProduct,
   type Commission,
   type CommissionRule,
+  type CommissionRoster,
+  type BulkCommissionRuleRequest,
+  type BulkCommissionRuleResult,
   type CreateCommissionRuleRequest,
   type UpdateCommissionRuleRequest,
   type CustomerImportCommitResponse,
@@ -737,6 +742,28 @@ const commissionRuleHistorySchema = z.object({
   reason: z.string().nullable(),
   createdAt: z.string(),
 });
+export const getCommissionRoster = (query: {
+  search?: string;
+  position?: string;
+  sales?: 'all' | 'with' | 'without';
+  needsRate?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<CommissionRoster> => {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.position) params.set('position', query.position);
+  if (query.sales && query.sales !== 'all') params.set('sales', query.sales);
+  if (query.needsRate) params.set('needsRate', 'true');
+  if (query.limit) params.set('limit', String(query.limit));
+  if (query.offset) params.set('offset', String(query.offset));
+  const suffix = params.size ? `?${params}` : '';
+  return request(`/commissions/rules/roster${suffix}`, commissionRosterSchema);
+};
+export const bulkSetCommissionRate = (
+  input: BulkCommissionRuleRequest,
+): Promise<BulkCommissionRuleResult> =>
+  post('/commissions/rules/bulk', bulkCommissionRuleResultSchema, input);
 export type CommissionRuleHistory = z.infer<typeof commissionRuleHistorySchema>;
 export const getCommissionRuleHistory = (id: string): Promise<CommissionRuleHistory[]> =>
   requestList(`/commissions/rules/${id}/history`, commissionRuleHistorySchema);

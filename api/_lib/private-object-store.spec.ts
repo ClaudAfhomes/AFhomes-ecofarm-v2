@@ -3,7 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { createDevelopmentPrivateObjectStore, createS3PrivateObjectStore, LocalPrivateObjectStore } from './private-object-store.js';
+import {
+  createDevelopmentPrivateObjectStore,
+  createHostedPrivateObjectStore,
+  createProductionPrivateObjectStore,
+  createS3PrivateObjectStore,
+  LocalPrivateObjectStore,
+} from './private-object-store.js';
 import { createMongoDevelopmentHandler } from './mongo-development-access.js';
 
 it('selects local storage only in the development launcher with an authenticated loopback configuration', () => {
@@ -158,5 +164,77 @@ it('exercises official S3 SDK operations over loopback HTTP and emits bounded si
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+it('selects local production storage by explicit provider and keeps it outside the application tree', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'afhomes-production-files-'));
+  const env = {
+    NODE_ENV: 'production',
+    AFHOMES_PUBLIC_ORIGIN: 'https://portal.afhomes.com.ph',
+    BETTER_AUTH_SECRET: 'synthetic-production-secret'.repeat(2),
+    AFHOMES_PRIVATE_STORAGE_PROVIDER: 'local',
+    AFHOMES_PRIVATE_STORAGE_ROOT: root,
+  };
+  try {
+    expect(createProductionPrivateObjectStore({})).toBeUndefined();
+    const store = createHostedPrivateObjectStore(env);
+    await store.put('profile-photos/synthetic/photo.jpg', Buffer.from('synthetic'), 'image/jpeg');
+    expect(await store.read('profile-photos/synthetic/photo.jpg', 100)).toMatchObject({
+      contentType: 'image/jpeg',
+    });
+    expect(await store.health?.()).toMatchObject({ provider: 'local', ok: true });
+    expect(() =>
+      createHostedPrivateObjectStore({
+        ...env,
+        AFHOMES_PRIVATE_STORAGE_ROOT: path.resolve('synthetic-private-files'),
+      }),
+    ).toThrow('application directory');
+    expect(() =>
+      createHostedPrivateObjectStore({
+        ...env,
+        AFHOMES_PRIVATE_STORAGE_ROOT: path.dirname(root),
+        AFHOMES_PUBLIC_MEDIA_ROOT: root,
+      }),
+    ).toThrow('must not overlap');
+    expect(() =>
+      createHostedPrivateObjectStore({
+        ...env,
+        AFHOMES_PRIVATE_STORAGE_MIN_FREE_BYTES: String(Number.MAX_SAFE_INTEGER),
+      }),
+    ).toThrow('insufficient free space');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('refuses linked private objects and fails closed when capacity is exhausted', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'afhomes-linked-files-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'afhomes-outside-files-'));
+  const env = {
+    NODE_ENV: 'production',
+    AFHOMES_PUBLIC_ORIGIN: 'https://portal.afhomes.com.ph',
+    BETTER_AUTH_SECRET: 'synthetic-production-secret'.repeat(2),
+    AFHOMES_PRIVATE_STORAGE_PROVIDER: 'local',
+    AFHOMES_PRIVATE_STORAGE_ROOT: root,
+  };
+  try {
+    const store = createHostedPrivateObjectStore(env);
+    await store.put('photos/safe.jpg', Buffer.from('safe'), 'image/jpeg');
+    if (process.platform !== 'win32') {
+      const { symlink } = await import('node:fs/promises');
+      await symlink(path.join(outside, 'secret'), path.join(root, 'photos', 'linked.jpg'));
+      expect(await store.read('photos/linked.jpg', 100)).toBeNull();
+      expect(await store.exists('photos/linked.jpg')).toBe(false);
+    }
+    expect(() =>
+      createHostedPrivateObjectStore({
+        ...env,
+        AFHOMES_PRIVATE_STORAGE_MIN_FREE_BYTES: String(Number.MAX_SAFE_INTEGER),
+      }),
+    ).toThrow('insufficient free space');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });

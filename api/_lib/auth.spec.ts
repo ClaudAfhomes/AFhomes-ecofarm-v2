@@ -19,8 +19,11 @@ describe('unmounted Better Auth foundation', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('requires login key pairs at application startup and refuses test secrets outside HTTP loopback', () => {
-    expect(() => requireAuthTurnstile(env)).toThrow('Login requires');
-    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key' })).toThrow('Login requires');
+    expect(() => requireAuthTurnstile(env)).toThrow('VITE_TURNSTILE_SITE_KEY');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key' })).toThrow('AFHOMES_AUTH_TURNSTILE_SECRET');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: 'public-test-key' })).toThrow('not the public');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: ` ${'s'.repeat(16)}` })).toThrow('surrounding whitespace');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: 'short' })).toThrow('at least 16 characters');
     const challenge = { ...env, VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA', AFHOMES_AUTH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA' };
     expect(getAuthOptions(challenge).plugins[0]?.id).toBe('captcha');
     expect(() => getAuthOptions({ ...challenge, NODE_ENV: 'production', BETTER_AUTH_URL: 'https://app.example.invalid' })).toThrow('test keys');

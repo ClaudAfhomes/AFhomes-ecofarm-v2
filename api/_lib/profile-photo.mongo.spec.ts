@@ -131,6 +131,7 @@ const jpeg = (size = 39, width = 1) => {
 
 it('authenticates profile requests and refuses unconfigured private storage', async () => {
   expect((await request('/profile-photo/staff', undefined, '')).status).toBe(401);
+  expect((await request('/profile-photo/staff', undefined, '', 'DELETE')).status).toBe(401);
   expect((await request('/profile-photo/staff')).status).toBe(503);
   expect((await request('/profile-photo/customer')).status).toBe(403);
 });
@@ -247,6 +248,32 @@ it('keeps the last good photo on metadata failure and supports the existing full
   clock += 301000;
   expect((await fetch(persisted.url!)).status).toBe(403);
 });
+it('removes the owner photo, metadata and stored bytes', async () => {
+  const before = await col('profile_photos').findOne({ owner_id: fixture.staff.id });
+  expect(before).toBeTruthy();
+  const removed = await request('/profile-photo/staff', undefined, cookie, 'DELETE');
+  expect(removed.status).toBe(200);
+  expect(profilePhotoSchema.parse(await removed.json())).toMatchObject({
+    url: null,
+    canUpload: true,
+  });
+  expect(await col('profile_photos').findOne({ owner_id: fixture.staff.id })).toBeNull();
+  expect(await storage.exists(String(before!.object_key))).toBe(false);
+  expect(
+    await col('audit_events').findOne({
+      actor_id: fixture.staff.id,
+      action: 'PROFILE_PHOTO_REMOVED',
+    }),
+  ).toBeTruthy();
+  expect((await request('/profile-photo/staff', undefined, cookie, 'DELETE')).status).toBe(200);
+  const restored = await request(
+    '/profile-photo/staff',
+    { expectedUserId: fixture.staff.id, dataBase64: jpeg().toString('base64') },
+    cookie,
+    'PUT',
+  );
+  expect(restored.status).toBe(200);
+});
 it('requires completion of staff security before upload while allowing its identity-only read', async () => {
   await col('staff_users').updateOne(
     { _id: fixture.staff.id },
@@ -327,5 +354,8 @@ it('keeps customer photos scoped to their own verified identity and denies write
         'PUT',
       )
     ).status,
+  ).toBe(403);
+  expect(
+    (await request('/profile-photo/customer', undefined, customerCookie, 'DELETE')).status,
   ).toBe(403);
 });

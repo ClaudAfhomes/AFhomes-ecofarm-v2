@@ -34,7 +34,11 @@ try {
     }
     let privateStorageConfigured = false;
     try {
-      privateStorageConfigured = !!createS3PrivateObjectStore(process.env);
+      const provider = process.env.AFHOMES_PRIVATE_STORAGE_PROVIDER?.trim();
+      privateStorageConfigured =
+        provider === 'local' || provider === 'filesystem'
+          ? path.isAbsolute(process.env.AFHOMES_PRIVATE_STORAGE_ROOT ?? '')
+          : !!createS3PrivateObjectStore(process.env);
     } catch {
       /* Report configuration readiness without exposing secret values. */
     }

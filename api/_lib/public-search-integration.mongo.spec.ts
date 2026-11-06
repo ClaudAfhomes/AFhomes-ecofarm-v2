@@ -147,6 +147,33 @@ it('requires real server cleanup health and administrator approval, without a pr
   expect(result.result).toMatchObject({ aaNumber: aa, kind: 'IST', status: 'accredited' });
   expect(result.result.maskedName).not.toBe('SYNTHETIC SALES MANAGER');
   expect(await col('sale_team_search_disclosures').countDocuments()).toBe(1);
+  // A delivery retry of the same signed flow is answered again but is not a second disclosure.
+  const retried = await json(await request('/sale-team/search/reveal', reveal));
+  expect(retried.result).toMatchObject({ aaNumber: aa });
+  expect(await col('sale_team_search_disclosures').countDocuments()).toBe(1);
+  expect(await col('sale_team_search_contacts').countDocuments()).toBe(1);
+  // A later search reuses the validated contact through its receipt; a cleaned-up contact is refused.
+  const withReceipt = async () => {
+    const next = await json(
+      await request('/sale-team/search/start', {
+        aaNumber: aa,
+        sessionId,
+        captchaToken: 'synthetic',
+      }),
+    );
+    return request('/sale-team/search/reveal', {
+      sessionId,
+      searchToken: next.searchToken,
+      noticeVersion: config.noticeVersion,
+      acknowledged: true,
+      contactReceipt: result.contactReceipt,
+    });
+  };
+  expect((await json(await withReceipt())).result).toMatchObject({ aaNumber: aa });
+  expect(await col('sale_team_search_disclosures').countDocuments()).toBe(2);
+  await col('sale_team_search_contacts').deleteMany({});
+  await json(await withReceipt(), 400);
+  expect(await col('sale_team_search_disclosures').countDocuments()).toBe(2);
   const changed = await json(
     await request(
       '/admin/afhomes/public-verification-settings',

@@ -269,37 +269,27 @@ export function GenealogyPage() {
 
             {/* Custom date range pickers */}
             <div className={styles.dateRangeInputs}>
-              <div className={styles.dateInputGroup}>
-                <label htmlFor="admin-date-from" className={styles.dateLabel}>
-                  Start Date
-                </label>
-                <DateField
-                  id="admin-date-from"
-                  name="admin-date-from"
-                  label="Start Date"
-                  value={dateFrom}
-                  onChange={setDateFrom}
-                  max={dateTo || todayStr}
-                  hint="Optional — defaults to period start"
-                  optional
-                />
-              </div>
-              <div className={styles.dateInputGroup}>
-                <label htmlFor="admin-date-to" className={styles.dateLabel}>
-                  End Date
-                </label>
-                <DateField
-                  id="admin-date-to"
-                  name="admin-date-to"
-                  label="End Date"
-                  value={dateTo}
-                  onChange={setDateTo}
-                  min={dateFrom || undefined}
-                  max={todayStr}
-                  hint="Optional — defaults to today"
-                  optional
-                />
-              </div>
+              <DateField
+                id="admin-date-from"
+                name="admin-date-from"
+                label="Start Date"
+                value={dateFrom}
+                onChange={setDateFrom}
+                max={dateTo || todayStr}
+                hint="Optional — defaults to period start"
+                optional
+              />
+              <DateField
+                id="admin-date-to"
+                name="admin-date-to"
+                label="End Date"
+                value={dateTo}
+                onChange={setDateTo}
+                min={dateFrom || undefined}
+                max={todayStr}
+                hint="Optional — defaults to today"
+                optional
+              />
             </div>
 
             {/* Validation message */}
@@ -356,7 +346,12 @@ export function GenealogyPage() {
           </div>
 
           {/* Team Comparison Table */}
-          <div className={styles.tableWrap}>
+          <div
+            role="region"
+            aria-label="Team sales by head"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
             <table className={styles.teamTable}>
               <thead>
                 <tr>
@@ -372,17 +367,25 @@ export function GenealogyPage() {
               <tbody>
                 {overviewQuery.data.teams.map((team, index) => (
                   <tr key={team.teamHead.staffId}>
-                    <td className={styles.colNum}>{index + 1}</td>
-                    <td className={styles.colName}>
+                    <td data-label="#" className={styles.colNum}>{index + 1}</td>
+                    <td data-label="Team Head" className={styles.colName}>
                       <Link to={`/admin/genealogy/${team.teamHead.staffId}`} className={styles.teamLink}>
                         {team.teamHead.fullName}
                       </Link>
                     </td>
-                    <td className={styles.colCenter}>{formatCountOrDash(team.memberCount)}</td>
-                    <td className={styles.colCenter}>{formatCountOrDash(team.totalSales)}</td>
-                    <td className={styles.colCenter}>{formatCountOrDash(team.membersWithSales)}</td>
-                    <td className={styles.colCenter}>{formatCountOrDash(team.membersNoSales)}</td>
-                    <td className={styles.colCenter}>
+                    <td data-label="Members" className={styles.colCenter}>
+                      {formatCountOrDash(team.memberCount)}
+                    </td>
+                    <td data-label="Total Sales" className={styles.colCenter}>
+                      {formatCountOrDash(team.totalSales)}
+                    </td>
+                    <td data-label="With Sales" className={styles.colCenter}>
+                      {formatCountOrDash(team.membersWithSales)}
+                    </td>
+                    <td data-label="No Sales" className={styles.colCenter}>
+                      {formatCountOrDash(team.membersNoSales)}
+                    </td>
+                    <td data-label="Actions" className={`${styles.colCenter} ${styles.colAction}`}>
                       <Button
                         size="sm"
                         variant="ghost"

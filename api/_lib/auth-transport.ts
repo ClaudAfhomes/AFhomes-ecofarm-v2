@@ -19,13 +19,17 @@ const BODY_LIMIT = 65_536;
 export function createAuthNodeHandler(
   handler: (request: Request) => Promise<Response>,
   baseURL: string,
-  trustLoopbackProxy: boolean | { clientIp?: (request: IncomingMessage) => string } = false,
+  options: { clientIp?: (req: IncomingMessage) => string; trustLoopbackProxy?: boolean } = {},
 ) {
   const origin = new URL(baseURL).origin;
   return async (req: IncomingMessage, res: ServerResponse) => {
-    req.headers['x-real-ip'] = (typeof trustLoopbackProxy === 'boolean'
-      ? requestClientIp(req, trustLoopbackProxy)
-      : trustLoopbackProxy.clientIp?.(req) ?? requestClientIp(req)) ?? '127.0.0.1';
+    // Only the actual socket peer is trusted by default. A caller may supply an
+    // explicit resolver, or trust X-Real-IP from a loopback proxy (hosted Nginx
+    // overwrites it); direct clients must not choose their rate-limit key.
+    req.headers['x-real-ip'] =
+      options.clientIp?.(req) ||
+      requestClientIp(req, options.trustLoopbackProxy) ||
+      '127.0.0.1';
     const fail = (status: number, message: string) => {
       req.resume();
       const { error } = toErrorEnvelope(status === 404 ? 'NOT_FOUND' : 'INTERNAL', message, status);
@@ -42,7 +46,15 @@ export function createAuthNodeHandler(
       if (Number(req.headers['content-length']) > BODY_LIMIT)
         return fail(413, 'Authentication request is too large');
       // Use the same adapter as Better Auth's Node wrapper, with a bounded raw body.
-      const request = getRequest({ request: req, base: origin, bodySizeLimit: BODY_LIMIT });
+      // Read it fully first: a browser leaving mid-request would otherwise error the
+      // live stream inside Better Auth and be logged as a server error.
+      const streamed = getRequest({ request: req, base: origin, bodySizeLimit: BODY_LIMIT });
+      const body = streamed.body ? await streamed.arrayBuffer() : null;
+      const request = new Request(streamed.url, {
+        method: streamed.method,
+        headers: streamed.headers,
+        body,
+      });
       const response = await handler(request);
       response.headers.set('Cache-Control', 'no-store');
       await setResponse(res, response);

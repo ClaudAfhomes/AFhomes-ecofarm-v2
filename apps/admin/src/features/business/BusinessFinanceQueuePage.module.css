@@ -9,6 +9,9 @@
 /* Page shell: one consistent rhythm between hero, summary, toolbar and table. */
 .pageShell {
   display: grid;
+  /* A bare `auto` track grows to the widest nowrap cell, pushing every
+     section past a phone's edge; minmax(0, 1fr) pins it to the page width. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-content: start;
   min-width: 0;
@@ -617,6 +620,11 @@
     display: none;
   }
 
+  /* Long plan names wrap inside the card instead of running off its edge. */
+  .tableWrap td[data-label='Plan'] * {
+    white-space: normal;
+  }
+
   .facts {
     grid-template-columns: 1fr;
   }
@@ -627,6 +635,7 @@
 
   .actionGroup > * {
     flex: 1 1 auto;
+    min-height: 40px;
   }
 
   .timelineActions > * {

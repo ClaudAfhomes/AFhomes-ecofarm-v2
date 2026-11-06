@@ -49,8 +49,9 @@ This file tells you *how to work* in this repository. It does not tell you
   "not run" are valid, valuable answers.
 - **Never** edit `.opencode/**` — `opencode.json` sets `permission.edit` to
   `deny` for that path (and `.opencode/` is gitignored as local-only).
-- **User-owned files, leave alone:** `SESSION.md`, `docs/security/`,
-  `docs/testing/`. Edit them only if the user asks directly.
+- **User-owned files, leave alone:** `docs/security/`, `docs/testing/`.
+  Edit them only if the user asks directly. The handoff lives in
+  `workflow/claude/update-session.md` (marker region only).
 
 ### How the four things fit together
 
@@ -126,7 +127,7 @@ Fill in these placeholders for the target repository before relying on this pack
 Filled-in values for this repo (see the audit for the full mapping):
 
 - `<vault-root>`: `C:\Users\SSD-ORLANDO\Documents\DevVault`
-- `<session-handoff-file>`: `SESSION.md` (repo root)
+- `<session-handoff-file>`: `workflow/claude/update-session.md` (handoff marker region)
 - `<security-docs-dir>`: `docs/security/`
 - `<testing-docs-dir>`: `docs/testing/`
 - `<contracts-dir>`: `packages/contracts/src/schemas/`

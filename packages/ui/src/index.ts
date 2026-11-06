@@ -47,6 +47,7 @@ export type { ConfirmDialogProps } from './components/ConfirmDialog.js';
 export { notifyConfirm, notifyError, notifySuccess, notifyWarning } from './notify.js';
 export type { NotifyInput } from './notify.js';
 export { Skeleton } from './components/Skeleton.js';
+export { ScrollToTop } from './components/ScrollToTop.js';
 export { Spinner } from './components/Spinner.js';
 export type { SpinnerProps, SpinnerSize } from './components/Spinner.js';
 export { Alert } from './components/Alert.js';
@@ -114,6 +115,7 @@ export type { OverflowMenuItem, OverflowMenuProps } from './components/OverflowM
 export { NormalizedInput } from './components/NormalizedInput.js';
 export { OstOfficialFields } from './components/OstOfficialFields.js';
 export { AccreditationId } from './components/AccreditationId.js';
+export { VerifiedBadge } from './components/VerifiedBadge.js';
 export { IdCapturePicker } from './components/IdCapturePicker.js';
 export { TurnstileChallenge } from './components/TurnstileChallenge.js';
 

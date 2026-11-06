@@ -166,6 +166,8 @@ export const sharedScopes = {
   reports: key('reports'),
   analytics: key('analytics'),
   commissionRules: key('commission-rules'),
+  commissionRoster: key('commission-roster'),
+  commissionRosterPage: (params: unknown) => key('commission-roster', params),
   commissionRuleHistory: (historyId: string | null) => key('commission-rule-history', historyId),
   documentsCustomer: (customerId: string) => key('documents', 'customer', customerId),
   documentsCurrentCustomer: (customerId: string) =>

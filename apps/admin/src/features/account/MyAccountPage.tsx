@@ -83,6 +83,7 @@ export function MyAccountPage() {
               ? photo.upload.mutateAsync({ dataBase64: data, expectedUserId: user.id })
               : Promise.reject(new Error('Sign in again before uploading.'))
           }
+          onRemove={user ? () => photo.remove.mutateAsync() : undefined}
         />
         {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
           user?.roleSlug ?? '',

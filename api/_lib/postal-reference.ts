@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { readRuntimeTextAsset } from './runtime-assets.js';
 
 const rowSchema = z.tuple([
   z.string().min(1),
@@ -9,14 +9,7 @@ const rowSchema = z.tuple([
 ]);
 const rows = z
   .array(rowSchema)
-  .parse(
-    JSON.parse(
-      readFileSync(
-        new URL('../../packages/contracts/assets/postal/national-reference.json', import.meta.url),
-        'utf8',
-      ),
-    ),
-  );
+  .parse(JSON.parse(readRuntimeTextAsset('postal/national-reference.json')));
 const key = (value: string) =>
   value
     .normalize('NFD')

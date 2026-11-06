@@ -1,5 +1,5 @@
 import type { PublicSaleTeamSearchResult, SaleTeamSearchConfig } from '@afhomes/contracts';
-import { AccreditationId } from '@afhomes/ui';
+import { AccreditationId, VerifiedBadge } from '@afhomes/ui';
 import styles from './VerificationResultCard.module.css';
 
 function ContactIcon({ kind }: { kind: 'email' | 'phone' | 'check' }) {
@@ -86,7 +86,10 @@ export function VerificationResultCard({
         <dl className={styles.status} data-testid="accreditation-details">
           <div>
             <dt>Verification Status</dt>
-            <dd>Accredited</dd>
+            <dd className={styles.verified}>
+              <span>Accredited</span>
+              <VerifiedBadge />
+            </dd>
           </div>
         </dl>
       </div>

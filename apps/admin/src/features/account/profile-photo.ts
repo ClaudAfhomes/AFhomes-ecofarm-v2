@@ -31,5 +31,19 @@ export function useProfilePhoto() {
       if (input.expectedUserId === user?.id) void client.invalidateQueries({ queryKey });
     },
   });
-  return { photo, upload };
+  const remove = useMutation({
+    retry: false,
+    mutationFn: () =>
+      request('/profile-photo/staff', profilePhotoSchema, {
+        method: 'DELETE',
+        auth: 'required',
+      }),
+    onSuccess: (data) => {
+      if (client.getQueryState(queryKey)) client.setQueryData(queryKey, data);
+    },
+    onError: () => {
+      void client.invalidateQueries({ queryKey });
+    },
+  });
+  return { photo, upload, remove };
 }

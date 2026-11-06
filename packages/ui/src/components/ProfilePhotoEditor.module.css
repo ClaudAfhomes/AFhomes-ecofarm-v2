@@ -23,8 +23,26 @@
   background: var(--color-surface-muted, #f1f4f2);
   font-size: var(--text-caption);
 }
+/* The native picker stays (keyboard and screen-reader friendly) but gets a
+   comfortable tap height instead of the browser's ~20px default. */
 .card input {
   max-width: 100%;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--text-body-s);
+}
+
+.card input::file-selector-button {
+  min-height: 40px;
+  margin-right: var(--space-3);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 .card button {
   justify-self: start;

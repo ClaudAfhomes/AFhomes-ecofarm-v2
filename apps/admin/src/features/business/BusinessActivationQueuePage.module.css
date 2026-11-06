@@ -5,6 +5,7 @@
 
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-content: start;
   min-width: 0;
@@ -211,6 +212,7 @@
     text-align: right;
     min-width: 0;
     max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .tableWrap tbody > tr > td > * {
@@ -246,6 +248,21 @@
   .tableWrap tbody > tr > td[data-label='Sale']::before {
     display: none;
   }
+
+  /* Card values wrap instead of being cut at the card edge: money pairs and
+     long plan chips are bare text or nowrap pills on desktop. */
+  .tableWrap tbody > tr > td,
+  .tableWrap tbody > tr > td * {
+    white-space: normal;
+  }
+
+  .tableWrap tbody > tr > td .recordRef {
+    white-space: nowrap;
+  }
+
+  .tableWrap tbody > tr > td button {
+    min-height: 40px;
+  }
 }
 
 /* Segmented eligibility filter. */
@@ -268,6 +285,13 @@
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast),
     border-color var(--transition-fast);
+}
+
+@media (pointer: coarse), (max-width: 639px) {
+  .filterChip,
+  .filterChipActive {
+    min-height: 40px;
+  }
 }
 
 .filterChip:hover {

@@ -20,7 +20,7 @@ import { addressHierarchyQuerySchema } from '@afhomes/contracts';
 
 import { addressProvider } from '../_lib/address-source.js';
 import { AddressProviderError } from '../_lib/address-provider.js';
-import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import type { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { deny, fail, list, method, route } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
@@ -41,7 +41,10 @@ function failProvider(res: VercelResponse, error: unknown): void {
   }
 }
 
-export function createAddressHandler(authorize = authorizeAfHomes, provider = addressProvider()) {
+export function createAddressHandler(
+  authorize: typeof authorizeAfHomes,
+  provider = addressProvider(),
+) {
   return async function address(req: VercelRequest, res: VercelResponse): Promise<void> {
     if (method(req) !== 'GET') {
       res.setHeader('Allow', 'GET');
@@ -116,5 +119,3 @@ export function createAddressHandler(authorize = authorizeAfHomes, provider = ad
     }
   };
 }
-
-export default createAddressHandler();
