@@ -3,6 +3,7 @@ import http from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
+import { MongoClient } from 'mongodb';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { createTestReplica } from './testing/mongo-replica.js';
 import { createMongoCustomersHandler } from './customers.mongo.js';
@@ -239,6 +240,69 @@ it('requires configured storage before committing a customer with private files'
   for (const [name, record] of f.records)
     expect(await col(name).findOne({ _id: record._id }), name).toBeTruthy();
 });
+it('refuses a malformed/legacy private-file key with a specific, typed error instead of a generic crash', async () => {
+  const f = await fixture(),
+    objects = store();
+  // A pre-conversion or manually-entered record can carry a key the current
+  // strict generator would never produce (spaces, a raw filename, an absolute
+  // URL). `checkKey` throws a plain `Error` for this, which previously had no
+  // special handling and fell into the generic 503 "Customer service is
+  // unavailable" - indistinguishable from any other unexpected crash.
+  await col('identity_documents').updateOne(
+    { _id: f.records.find(([name]) => name === 'identity_documents')![1]._id },
+    { $set: { storage_path: 'Scanned ID (final).png' } },
+  );
+  const response = await call(f.customer, objects);
+  expect(response.status).toBe(409);
+  expect(response.body).toMatchObject({
+    error: { code: 'CONFLICT', message: expect.stringMatching(/file reference/i) },
+  });
+  expect(objects.remove).not.toHaveBeenCalled();
+  // Refused before commit: nothing was deleted, and no purge marker exists to
+  // short-circuit a later, corrected retry.
+  for (const [name, record] of f.records)
+    expect(await col(name).findOne({ _id: record._id }), name).toBeTruthy();
+  expect(
+    await col('mutation_requests').findOne({ operation: 'customer.permanent-purge', request_id: f.customer }),
+  ).toBeNull();
+});
+it('purges a legitimate legacy file key that uses a different-but-safe naming convention', async () => {
+  const f = await fixture(),
+    objects = store();
+  // Not today's `bucket/scope/subjectId/leaf.ext` shape, but still only the
+  // characters the native key format allows - a real pre-conversion record,
+  // not a corrupted one. Deletion must not treat "differently named" the same
+  // as "unsafe".
+  await col('identity_documents').updateOne(
+    { _id: f.records.find(([name]) => name === 'identity_documents')![1]._id },
+    { $set: { storage_path: 'legacy-scans/LEGACY_SCAN_0001.jpg' } },
+  );
+  const response = await call(f.customer, objects);
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ deleted: true });
+  expect(objects.remove).toHaveBeenCalledWith('legacy-scans/LEGACY_SCAN_0001.jpg');
+  for (const [name, record] of f.records)
+    expect(await col(name).findOne({ _id: record._id }), name).toBeNull();
+});
+it('purges cleanly when a file field is present on the row but no file was ever uploaded', async () => {
+  const f = await fixture(),
+    objects = store();
+  // `payments.receipt_storage_path` genuinely empty/absent (e.g. a cash
+  // payment with no receipt on file) must not be treated as a reference to
+  // clean up, nor block the purge waiting on a file that never existed.
+  await col('payments').updateOne(
+    { _id: f.records.find(([name]) => name === 'payments')![1]._id },
+    { $set: { receipt_storage_path: '' }, $unset: {} },
+  );
+  const response = await call(f.customer, objects);
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ deleted: true });
+  // One fewer real file than the base fixture (the payment receipt no longer
+  // counts), so cleanup only ran for the three that remain.
+  expect(objects.remove).toHaveBeenCalledTimes(3);
+  for (const [name, record] of f.records)
+    expect(await col(name).findOne({ _id: record._id }), name).toBeNull();
+});
 it('retains a shared private object still referenced by another customer', async () => {
   const f = await fixture(),
     objects = store(),
@@ -369,3 +433,57 @@ it('dispatches authenticated DELETE over HTTP, removes real private bytes and re
     await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it(
+  'outlasts the ordinary client-wide operation deadline instead of aborting with MongoOperationTimeoutError',
+  async () => {
+    // The shared production/dev client sets a 15s client-side operation
+    // timeout (CSOT), which `withTransaction` applies to the WHOLE
+    // transaction. A purge walks 30+ collections plus nested shared-file
+    // lookups, so on a real connection it can exceed that budget and abort
+    // with `MongoOperationTimeoutError` - surfacing as an unexplained generic
+    // 503 with no indication a purge was even involved. The fix gives the
+    // purge transaction its own larger `timeoutMS`, the same pattern already
+    // used by `admin-bootstrap.mongo.ts` for its own heavy transaction.
+    //
+    // Proof: connect with a client whose default is tighter than a deliberate
+    // mid-transaction delay. Only an explicit, larger transaction-level
+    // override (not the client default) can make this succeed.
+    const f = await fixture(),
+      objects = store();
+    const host = replica.client.options.hosts[0]!.toString();
+    const tightClient = new MongoClient(
+      `mongodb://${host}/?replicaSet=${replica.client.options.replicaSet}`,
+      { timeoutMS: 200 },
+    );
+    await tightClient.connect();
+    try {
+      let calls = 0;
+      const slowAuthorize: typeof authorizeAfHomes = async () => {
+        // The purge re-authorizes fresh inside the transaction; delay there,
+        // well past the 200ms client default and comfortably under the 60s
+        // transaction override, to prove which deadline actually governs.
+        if (++calls === 1) await new Promise((resolve) => setTimeout(resolve, 500));
+        return principal as never;
+      };
+      const handler = createMongoCustomersHandler(
+        tightClient.db('afhomes_dev'),
+        tightClient,
+        slowAuthorize,
+        objects,
+      );
+      const res = makeRes();
+      await handler(
+        { method: 'DELETE', headers: {}, query: { familyPath: f.customer } } as never,
+        res.res,
+      );
+      expect(res.state.status, JSON.stringify(res.state.body)).toBe(200);
+      expect(res.state.body).toEqual({ deleted: true });
+      for (const [name, record] of f.records)
+        expect(await col(name).findOne({ _id: record._id }), name).toBeNull();
+    } finally {
+      await tightClient.close();
+    }
+  },
+  15_000,
+);

@@ -18,6 +18,30 @@ import { purgeMongoCustomer } from './customer-purge.mongo.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
+/**
+ * A server-log-only (never client-visible) summary of an unexpected error.
+ * Deliberately excludes `error.message`: a MongoDB driver error's free-text
+ * message can embed the offending document or query value (a duplicate-key
+ * error literally quotes the field, a validation error can echo the document),
+ * so only the error's type, a numeric driver error code if present, and the
+ * stack's source-location FRAME lines survive - never the "Name: message"
+ * header line, a file path, a government ID, an email or any other value.
+ */
+export function describeUnexpectedError(error: unknown): string {
+  if (!(error instanceof Error)) return `non-Error throw (${typeof error})`;
+  const name = error.name || error.constructor?.name || 'Error';
+  const code = (error as { code?: unknown }).code;
+  // Only lines matching a real V8 stack frame survive - never the header line
+  // (`Name: message`), and never a multi-line message (e.g. a ZodError can
+  // print its whole issue list, including input values, across several lines
+  // with no "at ..." prefix at all).
+  const frames = (error.stack ?? '')
+    .split('\n')
+    .filter((line) => /^\s*at\s/.test(line))
+    .join('\n');
+  return `${name}${typeof code === 'number' || typeof code === 'string' ? ` (code ${code})` : ''}${frames ? `\n${frames}` : ''}`;
+}
+
 export async function setupMongoCustomers(db: Db) {
   const customers = db.collection('customers');
   for (const field of [
@@ -401,6 +425,15 @@ export function createMongoCustomersHandler(
           'That customer email, government ID or company identifier already exists',
           409,
         );
+      // The client only ever sees the generic message below - log server-side
+      // so an unexpected failure (e.g. a permanent-delete crash) is diagnosable
+      // instead of silently vanishing into a 503 with no trace. A driver error's
+      // free-text `.message` can embed the offending document/query value (a
+      // duplicate-key message literally quotes the field), so only the error's
+      // type, any numeric Mongo error code, and the stack's FRAME lines (source
+      // locations only, never the "Name: message" header line) are logged -
+      // never the message itself, a path, or any field value.
+      console.error('[api] customers:', describeUnexpectedError(error));
       return fail(res, 'INTERNAL', 'Customer service is unavailable', 503);
     }
   };
