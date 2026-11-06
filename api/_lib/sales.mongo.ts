@@ -144,6 +144,9 @@ export function createMongoSalesHandler(
     const payments = await col('payments')
       .find({ sale_id: sale._id }, { session, projection: { amount: 1, status: 1 } })
       .toArray();
+    return totalsFor(sale, payments);
+  }
+  function totalsFor(sale: MongoRow, payments: MongoRow[]) {
     return summarizePayments({
       cashPrice: String(sale.cash_price_snapshot ?? '0.00'),
       minimumDownPayment: String(sale.minimum_down_payment_snapshot ?? '0.00'),
@@ -154,6 +157,28 @@ export function createMongoSalesHandler(
       })),
       spotCashStartedAt: isoOrNull(sale.spot_cash_started_at),
       spotCashDeadline: isoOrNull(sale.spot_cash_deadline),
+    });
+  }
+  async function pageViews(rows: MongoRow[]) {
+    if (!rows.length) return [];
+    const ids = (field: string) => [...new Set(rows.map(row => String(row[field])))];
+    const [customers, products, staff, payments] = await Promise.all([
+      col('customers').find({ _id: { $in: ids('customer_id') } }, { projection: { first_name: 1, middle_name: 1, last_name: 1, suffix: 1 } }).toArray(),
+      col('card_plans').find({ _id: { $in: ids('plan_id') } }, { projection: { name: 1, code: 1 } }).toArray(),
+      col('staff_users').find({ _id: { $in: ids('seller_staff_id') } }, { projection: { full_name: 1 } }).toArray(),
+      col('payments').find({ sale_id: { $in: rows.map(row => row._id) } }, { projection: { sale_id: 1, amount: 1, status: 1 } }).toArray(),
+    ]);
+    const byId = (list: MongoRow[]) => new Map(list.map(row => [String(row._id), row]));
+    const customerById = byId(customers), productById = byId(products), staffById = byId(staff);
+    const paymentsBySale = new Map<unknown, MongoRow[]>();
+    for (const payment of payments) {
+      const group = paymentsBySale.get(payment.sale_id);
+      if (group) group.push(payment);
+      else paymentsBySale.set(payment.sale_id, [payment]);
+    }
+    return rows.map(row => {
+      const totals = totalsFor(row, paymentsBySale.get(row._id) ?? []);
+      return toSale({ ...row, id: row._id, customers: customerById.get(String(row.customer_id)), card_plans: productById.get(String(row.plan_id)), staff_users: staffById.get(String(row.seller_staff_id)) }, { paidAmount: totals.verifiedTotal, balance: totals.remainingBalance });
     });
   }
   async function readScope(req: VercelRequest) {
@@ -268,15 +293,14 @@ export function createMongoSalesHandler(
               .sort({ recorded_at: -1, _id: -1 })
               .toArray(),
             result = [];
+          const actorIds = [...new Set(payments.flatMap(row => [String(row.recorded_by), String(row.verified_by)]))];
+          const actors = payments.length ? await col('staff_users').find(
+            { _id: { $in: actorIds } }, { projection: { full_name: 1 } },
+          ).toArray() : [];
+          const actorById = new Map(actors.map(row => [String(row._id), row]));
           for (const row of payments) {
-            const recorded = await col('staff_users').findOne(
-                { _id: String(row.recorded_by) },
-                { projection: { full_name: 1 } },
-              ),
-              verified = await col('staff_users').findOne(
-                { _id: String(row.verified_by) },
-                { projection: { full_name: 1 } },
-              );
+            const recorded = actorById.get(String(row.recorded_by)),
+              verified = actorById.get(String(row.verified_by));
             result.push({
               id: row._id,
               paymentNumber: row.payment_number ?? null,
@@ -300,8 +324,7 @@ export function createMongoSalesHandler(
           return list(res, result);
         }
         if (id) return res.status(200).json(await view(rows[0]!));
-        const data = [];
-        for (const row of rows) data.push(await view(row));
+        const data = await pageViews(rows);
         return res.status(200).json({
           data,
           meta: {

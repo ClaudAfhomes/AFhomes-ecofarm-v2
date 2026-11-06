@@ -62,7 +62,6 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
           from: 'customers',
           localField: 'customer_id',
           foreignField: '_id',
-          pipeline: [{ $project: { first_name: 1, middle_name: 1, last_name: 1, suffix: 1 } }],
           as: 'customers',
         },
       };
@@ -90,9 +89,13 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
         spot_cash_deadline: 1,
         customer_id: 1,
         plan_id: 1,
-        customers: 1,
-        card_plans: 1,
-        customer_applications: 1,
+        'customers.first_name': 1,
+        'customers.middle_name': 1,
+        'customers.last_name': 1,
+        'customers.suffix': 1,
+        'card_plans.name': 1,
+        'customer_applications.application_number': 1,
+        'customer_applications.status': 1,
       };
       async function sourceRows(table: string, filter: Document, kind: 'sale' | 'reservation') {
         const pipeline: Document[] = [
@@ -107,7 +110,6 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
                 from: 'card_plans',
                 localField: 'plan_id',
                 foreignField: '_id',
-                pipeline: [{ $project: { name: 1 } }],
                 as: 'card_plans',
               },
             },
@@ -120,19 +122,32 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
                 from: 'customer_applications',
                 localField: 'customer_application_id',
                 foreignField: '_id',
-                pipeline: [{ $project: { application_number: 1, status: 1 } }],
                 as: 'customer_applications',
               },
             },
             { $unwind: '$customer_applications' },
           );
-        pipeline.push({ $sort: { spot_cash_started_at: 1, _id: 1 } }, { $project: project });
+        pipeline.push({ $project: project });
+        const ordered: Document[] = [{ $sort: { spot_cash_started_at: 1, _id: 1 } }];
+        if (!query.search && path === 'finance') ordered.push({ $limit: window });
+        // Bound the facet's BSON result; deep pages/search/activation retain streaming reads.
+        if (!query.search && path === 'finance' && window <= 1000) {
+          try {
+            const result = await col(table).aggregate<{ rows: MongoRow[]; count: { total: number }[] }>([
+              ...pipeline, { $facet: { count: [{ $count: 'total' }], rows: ordered } },
+            ]).next();
+            return { rows: result?.rows ?? [], total: Number(result?.count[0]?.total ?? 0) };
+          } catch (error) {
+            // Unexpected oversized legacy fields use the existing streaming path instead.
+            if (!error || typeof error !== 'object' || !('codeName' in error) ||
+              !['BSONObjectTooLarge', 'ExceededMemoryLimit'].includes(String(error.codeName))) throw error;
+          }
+        }
         const total = await col(table)
           .aggregate([...pipeline, { $count: 'total' }])
           .next();
-        if (!query.search && path === 'finance') pipeline.push({ $limit: window });
         return {
-          rows: await col(table).aggregate<MongoRow>(pipeline).toArray(),
+          rows: await col(table).aggregate<MongoRow>([...pipeline, ...ordered]).toArray(),
           total: Number(total?.total ?? 0),
         };
       }
@@ -158,6 +173,19 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
         )
         .toArray();
       const result: Record<string, unknown>[] = [];
+      const paymentsBySale = new Map<unknown, MongoRow[]>(), paymentsByReservation = new Map<unknown, MongoRow[]>();
+      for (const payment of payments) {
+        for (const [map, key] of [[paymentsBySale, payment.sale_id], [paymentsByReservation, payment.reservation_id]] as const) {
+          const group = map.get(key);
+          if (group) group.push(payment);
+          else map.set(key, [payment]);
+        }
+      }
+      const sellers = reservations.rows.length ? await col('staff_users').find(
+        { _id: { $in: [...new Set(reservations.rows.map(row => String(row.seller_staff_id)))] } },
+        { projection: { full_name: 1 } },
+      ).toArray() : [];
+      const sellerById = new Map(sellers.map(row => [String(row._id), row]));
       const name = (row: Record<string, unknown>) =>
         [row.first_name, row.middle_name, row.last_name, row.suffix]
           .filter((value) => typeof value === 'string' && value)
@@ -184,8 +212,7 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
             customer_id: String(row.customer_id),
             customerName: name(customer) || 'Unknown customer',
             productName: String(product.name),
-            payments: payments
-              .filter((payment) => payment.sale_id === row._id)
+            payments: (paymentsBySale.get(row._id) ?? [])
               .map((payment) => ({
                 amount: String(payment.amount),
                 status: payment.status as PaymentStatus,
@@ -212,11 +239,8 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
           ])
         )
           continue;
-        const own = payments.filter((payment) => payment.reservation_id === row._id),
-          seller = await col('staff_users').findOne(
-            { _id: String(row.seller_staff_id) },
-            { projection: { full_name: 1 } },
-          );
+        const own = paymentsByReservation.get(row._id) ?? [],
+          seller = sellerById.get(String(row.seller_staff_id));
         const totals = summarizePayments({
           cashPrice: String(row.total_price_snapshot ?? '0.00'),
           minimumDownPayment: String(row.total_price_snapshot ?? '0.00'),

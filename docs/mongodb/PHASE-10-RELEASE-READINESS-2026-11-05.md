@@ -50,7 +50,13 @@ The reviewed changes preserve opt-in paging and existing unpaged response behavi
 
 No new Phase 9 business-rule/API/security regression was established in the exercised backend paths. This conclusion is bounded by the tests below and does not claim exhaustive correctness or complete browser acceptance.
 
-## Relationship indexes: validated, not installed
+## Relationship indexes: reviewed as pending; subsequent approved installation
+
+**Follow-up after separate owner authorization, 5 November:** both indexes were installed and
+verified in `afhomes_dev`; [apply result](RELATIONSHIP-INDEX-APPLY-2026-11-05.md). Collections and
+relationship records were unchanged, existing indexes were preserved, total indexes increased
+184 to 186, and all 19 plan entries are present. U12's installation gate is closed. The following
+paragraphs describe the original pre-apply review; other NO-GO findings remain open.
 
 Read-only Atlas plan during this review: `afhomes_dev`, **19 entries: 17 present, exactly two missing**, no conflict:
 

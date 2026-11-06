@@ -114,7 +114,7 @@ export async function handlePublicSaleTeamSearchWithStore(
   if (JSON.stringify(req.body ?? '').length > 8192)
     return fail(res, 'VALIDATION_ERROR', 'Search request is too large.', 400);
   try {
-    const ip = searchIp(req, env.VERCEL === '1');
+    const ip = searchIp(req, env.VERCEL === '1', env.AFHOMES_TRUST_PROXY === 'true');
     const ipHash = searchDigest(config.secret, 'search-ip-v1', ip);
     const early = consumeIdentifierAttempt(
       { headers: { 'x-forwarded-for': ip } },

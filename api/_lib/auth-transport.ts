@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isIP } from 'node:net';
 import { getRequest, setResponse } from 'better-call/node';
 import { toErrorEnvelope } from './envelope.js';
+import { requestClientIp } from './request-client-ip.js';
 
 const BASE_PATH = '/api/v1/auth/identity';
 const METHODS: Record<string, readonly string[]> = {
@@ -19,17 +19,13 @@ const BODY_LIMIT = 65_536;
 export function createAuthNodeHandler(
   handler: (request: Request) => Promise<Response>,
   baseURL: string,
-  trustLoopbackProxy = false,
+  trustLoopbackProxy: boolean | { clientIp?: (request: IncomingMessage) => string } = false,
 ) {
   const origin = new URL(baseURL).origin;
   return async (req: IncomingMessage, res: ServerResponse) => {
-    const peer = req.socket.remoteAddress ?? '127.0.0.1';
-    const forwarded = req.headers['x-real-ip'];
-    // Hosted Nginx overwrites this header; direct clients must not choose their rate-limit key.
-    req.headers['x-real-ip'] = trustLoopbackProxy &&
-      ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer) &&
-      typeof forwarded === 'string' && isIP(forwarded) && !forwarded.includes('%')
-      ? forwarded : peer;
+    req.headers['x-real-ip'] = (typeof trustLoopbackProxy === 'boolean'
+      ? requestClientIp(req, trustLoopbackProxy)
+      : trustLoopbackProxy.clientIp?.(req) ?? requestClientIp(req)) ?? '127.0.0.1';
     const fail = (status: number, message: string) => {
       req.resume();
       const { error } = toErrorEnvelope(status === 404 ? 'NOT_FOUND' : 'INTERNAL', message, status);

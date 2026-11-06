@@ -1,9 +1,11 @@
 # Referral relationship index plan - 4 November 2026
 
-Status: **proposal - not installed in Atlas.** Phase 9 (5 Nov): both entries added to the guarded
+Status: **applied to Atlas `afhomes_dev` on 5 November after owner approval**; see
+[installation and verification result](RELATIONSHIP-INDEX-APPLY-2026-11-05.md). The planning and
+pre-apply evidence below is retained for history. Phase 9 (5 Nov): both entries added to the guarded
 plan (`MONGO_PERFORMANCE_INDEXES`, now 19 entries) and the indexed traversal implemented locally
-behind an index-presence gate (see "Phase 9 implementation"). Until the indexes exist, the code
-takes exactly the Phase 8 path. Measured on disposable replicas only; no Atlas change.
+behind an index-presence gate (see "Phase 9 implementation"). Without usable indexes, the code
+takes exactly the Phase 8 path. Historical performance measurements below used disposable replicas.
 
 ## Proposed indexes (`referral_relationships`)
 
@@ -72,7 +74,7 @@ Full ordered edge read with the subject/upline index: 94 -> 72 ms (~15k), 342 ->
 3. Same validity probes and size guards as the scoped read, plus parity fuzz: **met** (an edge
    probe was added because unread edges are no longer parsed; fuzz above).
 
-## Final guarded installation plan (separate approval required; nothing executed)
+## Reviewed installation procedure (subsequently approved and executed 5 November)
 
 Approval scope requested: create **only** these two indexes on Atlas `afhomes_dev`, with no other
 index, validator or document change.
@@ -102,7 +104,7 @@ index, validator or document change.
    still cached fail their first hinted query and fall back immediately. Within 60 s every request
    takes the Phase 8 path again. No data is affected either way.
 
-## Phase 10 validation (5 November; nothing installed)
+## Pre-apply Phase 10 validation (5 November)
 
 - **Disposable dry run of the full procedure** (`afhomes_dev`-named loopback replica with core
   setup and the 17 earlier entries present): 24/24 checks passed.
@@ -125,4 +127,5 @@ index, validator or document change.
     non-`_id_` index maps to an approved setup or plan entry. The difference is one collection the
     running app created implicitly on first write, with its mandatory `_id_` index; the Phase 8
     record kept only totals, so that collection cannot be named.
-- Ready for a separate final confirmation. Installation remains not approved.
+- The owner subsequently gave final approval. Both indexes were installed and independently
+  verified; the [apply result](RELATIONSHIP-INDEX-APPLY-2026-11-05.md) supersedes this pre-apply status.

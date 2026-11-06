@@ -7,7 +7,7 @@ import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
-import { getCardProducts, getCustomersPage, issueCustomerAccountActivation } from './services';
+import { deleteCustomer, getCardProducts, getCustomersPage, issueCustomerAccountActivation } from './services';
 
 vi.mock('./services', () => ({
   createCustomer: vi.fn(),
@@ -140,6 +140,34 @@ describe('BusinessCustomersPage views', () => {
 });
 
 describe('BusinessCustomersPage row actions', () => {
+  it('requires typed DELETE and refreshes business and lookup caches after permanent deletion', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    vi.mocked(deleteCustomer).mockReset().mockResolvedValue({ deleted: true });
+    const { client } = renderWithProviders(<BusinessCustomersPage />, { user: SUPER });
+    client.setQueryData(['business', 'sales'], ['stale']);
+    client.setQueryData(['customer-lookup', 'MARIA'], ['stale']);
+    client.setQueryData(['memberships', 'active'], ['stale']);
+    await screen.findByText('MARIA SANTOS');
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
+    const dialog = screen.getByRole('dialog', { name: 'Permanently Delete Customer Account' });
+    const confirm = within(dialog).getByRole('button', { name: 'Delete permanently' });
+    expect(confirm).toBeDisabled();
+    const input = within(dialog).getByLabelText(/Type DELETE/);
+    await user.type(input, 'DETELE');
+    expect(confirm).toBeDisabled();
+    expect(deleteCustomer).not.toHaveBeenCalled();
+    await user.clear(input);
+    await user.type(input, 'DELETE');
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([], 0));
+    await user.click(confirm);
+    await screen.findByText('No customers found.');
+    expect(deleteCustomer).toHaveBeenCalledExactlyOnceWith('c-1');
+    expect(client.getQueryState(['business', 'sales'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['customer-lookup', 'MARIA'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['memberships', 'active'])?.isInvalidated).toBe(true);
+  });
   it('keeps row actions behind the overflow so the table stays narrow', async () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });

@@ -13,6 +13,11 @@ import {
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
 vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
+vi.mock('../address/services', () => ({
+  getAddressProvinces: async () => [{ code: '0403400000', name: 'Laguna' }],
+  getAddressLocalities: async () => [{ code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000', postalCode: '4012' }],
+  getAddressBarangays: async () => [{ code: '0403406003', name: 'Dayap', localityCode: '0403406000' }],
+}));
 const calls = vi.hoisted(() => ({
   application: vi.fn<(input: CreateCustomerApplicationRequest) => Promise<never>>(),
   reservation: vi.fn<(input: CreateReservationAgreementRequest) => Promise<never>>(),
@@ -185,13 +190,20 @@ async function goToHolders(user: QAUser) {
   await screen.findByLabelText('First name');
 }
 /** Fill the required primary fields so Holders Next unlocks. */
-function fillPrimaryHolders() {
+async function fillPrimaryHolders(user: QAUser) {
   fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ana' } });
   fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
   fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
   fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
   fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
+  fireEvent.change(screen.getByLabelText('Permanent address line 1'), { target: { value: '77 Synthetic Street' } });
+  await user.click(screen.getByRole('combobox', { name: /^Province/ }));
+  await user.click(await screen.findByRole('option', { name: 'Laguna' }));
+  await user.click(screen.getByRole('combobox', { name: /City \/ municipality/ }));
+  await user.click(await screen.findByRole('option', { name: /Calauan/ }));
+  await user.click(screen.getByRole('combobox', { name: /^Barangay/ }));
+  await user.click(await screen.findByRole('option', { name: 'Dayap' }));
 }
 /**
  * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
@@ -379,7 +391,7 @@ it('supplementary landline gets its own frontend error', async () => {
 it('recommender contact accepts only the offered dropdown values', async () => {
   const { user } = mount(true);
   await goToHolders(user);
-  fillPrimaryHolders();
+  await fillPrimaryHolders(user);
   await user.click(screen.getByRole('button', { name: 'Next' }));
   const input = await screen.findByLabelText('Recommender Contact');
   expect(input.tagName).toBe('SELECT');

@@ -144,7 +144,8 @@ export function BusinessCustomersPage() {
       else await deactivateCustomer(accountAction!.customer.id);
     },
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: businessKeys.customersScope });
+      // A permanent purge also changes Sales, Finance, Memberships, imports and Customer Lookup.
+      await client.invalidateQueries(accountAction?.kind === 'delete' ? undefined : { queryKey: businessKeys.customersScope });
       setAccountAction(null);
       setConfirmation('');
     },

@@ -166,7 +166,7 @@ export function createMongoMembersHandler(
     const first = (
       list: MongoRow[],
       key: (row: MongoRow) => unknown,
-      keep = (_: MongoRow) => true,
+      keep: (row: MongoRow) => boolean = () => true,
     ) => {
       const map = new Map<unknown, MongoRow>();
       for (const row of list) {

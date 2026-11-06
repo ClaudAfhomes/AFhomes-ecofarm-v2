@@ -2,6 +2,11 @@
 
 Significant, approved knowledge changes only. Newest first. No secrets, customer data or logs.
 
+## 2026-11-05 — Approved relationship indexes installed
+- D21 / U12: the two reviewed relationship read indexes were approved, applied to `afhomes_dev` and verified; 184 to 186 indexes, 69 collections unchanged.
+- Four relationship documents and all existing index definitions were unchanged. Both hinted lookups use IXSCAN; all 19 reviewed plan entries are present.
+- Added `RELATIONSHIP-INDEX-APPLY-2026-11-05.md`. No account/data changes, deployment, restart, commit or push; live traversal activation and other Phase 10 blockers remain unverified/open.
+
 ## 2026-11-05 — Deployment status correction and authorized checkpoint
 - Owner confirms an existing DigitalOcean deployment and authorizes commit/push to `claud/mongodb-conversion`.
 - Fresh fetch verified production entry point/release tooling on `develop` and `release/v2.0`; old staging branch removed. D20 supersedes the previous undeployed status.

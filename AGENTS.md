@@ -44,6 +44,12 @@ Vercel material is legacy reference only.
   private Better Auth admin handler. `AFHOMES_ENABLE_LEGACY_PASSWORDS` stays default-off.
 - **OST** is created directly and is already accredited; never add a
   registration/endorsement journey.
+- **Customer permanent purge (6 Nov, SSD-5).** The owner explicitly selected the
+  existing dialog's full customer/history purge, overriding the older conversion
+  plan's customer-history blockers for this Super Admin-only action. Preserve
+  staff, unrelated customers, audit evidence and issued-number safeguards.
+  Implementation/testing approval does not authorize a live purge or deployment.
+  See `docs/mongodb/SSD-5-CUSTOMER-PURGE.md`.
 - **CMS last.** Redemption, Services, Reports and CMS are disabled
   (`packages/shared/src/features.ts`) with source preserved. Do not enable them or widen
   the conversion allowlist to bypass UI errors.
@@ -56,7 +62,8 @@ Vercel material is legacy reference only.
 
 These Atlas changes were each separately approved and applied: additive core
 initialization (26 Oct), reference catalog, historical-import collections/indexes
-(29 Oct), six core validators (31 Oct), VIP issuance setup (2 Nov). Each approval
+(29 Oct), six core validators (31 Oct), VIP issuance setup (2 Nov), two relationship
+read indexes (5 Nov, decision D21). Each approval
 covered that action only. The tier-validator and points-ledger-validator proposals
 are **not** approved. Every new database, schema, validator, index, import or cleanup
 action needs its own explicit approval. Dated detail: `docs/agents/mongodb-conversion-log.md`.
