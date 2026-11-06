@@ -14,12 +14,13 @@ let base = '',
   aa = '';
 const originalFetch = globalThis.fetch;
 const col = (name: string) => test.db.collection<MongoRow>(name);
-async function request(path: string, body?: unknown, authenticated = false, method?: string) {
+async function request(path: string, body?: unknown, authenticated = false, method?: string, clientIp?: string) {
   return fetch(base + '/api/v1' + path, {
     method: method ?? (body ? 'POST' : 'GET'),
     headers: {
       Origin: base,
       'Content-Type': 'application/json',
+      ...(clientIp ? { 'X-Real-IP': clientIp } : {}),
       ...(authenticated ? { Cookie: cookie } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -39,6 +40,7 @@ beforeAll(async () => {
     BETTER_AUTH_SECRET: 'synthetic-native-public-readiness-'.repeat(3),
     BETTER_AUTH_URL: base,
     NODE_ENV: 'test',
+    AFHOMES_TRUST_PROXY: 'true',
     MONGODB_URI: 'mongodb://127.0.0.1',
     AFHOMES_SEARCH_LOCAL_PREVIEW: 'false',
     AFHOMES_SEARCH_SECRET: 'synthetic-search-secret-at-least-32-characters',
@@ -73,6 +75,7 @@ beforeAll(async () => {
     )
   ).aaNumber;
 }, 30000);
+
 afterAll(async () => {
   vi.unstubAllGlobals();
   await worker.stop();
@@ -191,4 +194,27 @@ it('requires real server cleanup health and administrator approval, without a pr
     (await json(await request('/admin/afhomes/public-verification-settings', undefined, true)))
       .cleanupReady,
   ).toBe(false);
+}, 30000);
+it('keeps proxy visitors separate and refuses moving a search token to another visitor', async () => {
+  worker = createMongoSearchMaintenance(test.db, test.client);
+  await worker.start();
+  const config = await json(await request('/sale-team/search/config'));
+  expect(config.available).toBe(true);
+  const beforeAttempts = await col('sale_team_search_attempts').countDocuments();
+  const sessionId = randomUUID();
+  const start = await json(await request('/sale-team/search/start', {
+    aaNumber: aa, sessionId, captchaToken: 'synthetic',
+  }, false, undefined, '203.0.113.10'));
+  await json(await request('/sale-team/search/start', {
+    aaNumber: aa, sessionId: randomUUID(), captchaToken: 'synthetic',
+  }, false, undefined, '203.0.113.20'));
+  expect(await col('sale_team_search_attempts').countDocuments()).toBe(beforeAttempts + 2);
+  const reveal = { sessionId, searchToken: start.searchToken, noticeVersion: config.noticeVersion, acknowledged: true,
+    contact: { name: 'Synthetic Proxy Viewer', email: 'proxy-viewer@example.invalid', mobile: '+639170000098' } };
+  const disclosures = await col('sale_team_search_disclosures').countDocuments();
+  await json(await request('/sale-team/search/reveal', reveal, false, undefined, '203.0.113.20'), 400);
+  expect(await col('sale_team_search_disclosures').countDocuments()).toBe(disclosures);
+  await json(await request('/sale-team/search/reveal', reveal, false, undefined, '203.0.113.10'));
+  expect(await col('sale_team_search_disclosures').countDocuments()).toBe(disclosures + 1);
+  await worker.stop();
 }, 30000);

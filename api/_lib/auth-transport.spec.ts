@@ -5,8 +5,16 @@ import { createMemoryAuthFixture } from './testing/auth-fixture.js';
 import { makeRes } from './testing/supabase-fake.js';
 
 const servers: http.Server[] = [];
-async function serve(handler: (request: Request) => Promise<Response>, trustLoopbackProxy = false, peer?: string) {
-  const transport = createAuthNodeHandler(handler, 'http://localhost:3000', { trustLoopbackProxy });
+async function serve(
+  handler: (request: Request) => Promise<Response>,
+  trust: boolean | Parameters<typeof createAuthNodeHandler>[2] = false,
+  peer?: string,
+) {
+  const transport = createAuthNodeHandler(
+    handler,
+    'http://localhost:3000',
+    typeof trust === 'boolean' ? { trustLoopbackProxy: trust } : trust,
+  );
   const server = http.createServer((req, res) => {
     if (peer) Object.defineProperty(req.socket, 'remoteAddress', { value: peer });
     return transport(req, res);
@@ -48,6 +56,13 @@ afterEach(async () => {
 });
 
 describe('unmounted raw auth transport', () => {
+  it('preserves the production clientIp options interface', async () => {
+    const url = await serve(async request => Response.json({ ip: request.headers.get('x-real-ip') }), {
+      clientIp: () => '203.0.113.42',
+    });
+    const response = await fetch(url + '/get-session', { headers: { 'X-Real-IP': '198.51.100.99' } });
+    expect(await response.json()).toEqual({ ip: '203.0.113.42' });
+  });
   it.each([
     [false, undefined, '198.51.100.10', '127.0.0.1'],
     [true, undefined, '198.51.100.10', '198.51.100.10'],

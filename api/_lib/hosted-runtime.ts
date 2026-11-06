@@ -90,9 +90,15 @@ export function hostedMongoConfig(env: NodeJS.ProcessEnv) {
 export function createHostedMongoHandler(db: Db, client: MongoClient, env: NodeJS.ProcessEnv) {
   const config = hostedMongoConfig(env),
     objects = createHostedPrivateObjectStore(env);
-  const runtime = createMongoPhase5Runtime(db, client, env, {}, objects, {
-    trustLoopbackProxy: true,
-  });
+  // Hosted Nginx overwrites X-Real-IP; auth and public search both trust it from loopback only.
+  const runtime = createMongoPhase5Runtime(
+    db,
+    client,
+    { ...env, AFHOMES_TRUST_PROXY: 'true' },
+    {},
+    objects,
+    { trustLoopbackProxy: true },
+  );
   const guarded = createMongoDevelopmentHandler(runtime, {
     coreWritesEnabled: config.coreWritesEnabled,
   });

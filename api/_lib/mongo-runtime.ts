@@ -103,7 +103,7 @@ export function createMongoPhase5Runtime(
   const sessions = createMongoSessionVerifier(db, auth),
     access = createMongoStaffAccess(db, sessions, env);
   const catalog = createMongoCatalogHandlers(db, client, access.authorize);
-  const customers = createMongoCustomersHandler(db, client, access.authorize);
+  const customers = createMongoCustomersHandler(db, client, access.authorize, objects);
   const documents = createMongoDocumentHandlers(db,client,access.authorize,env,objects);
   const organization = createMongoOrganizationHandler(db, client, access.authorize);
   const sales = createMongoSalesHandler(db, client, access.authorize, env);

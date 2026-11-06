@@ -136,15 +136,20 @@ export function projectAnalytics(input: AnalyticsInput) {
   const planNames = new Map((plans as Row[]).map((row) => [String(row.id), String(row.name)]));
   const periodSales = scoped.sales.filter((row) => inWindow(row.created_at, from, to));
   const grouped = new Map<string, Row[]>();
-  for (const sale of periodSales)
-    grouped.set(String(sale.plan_id), [...(grouped.get(String(sale.plan_id)) ?? []), sale]);
+  for (const sale of periodSales) {
+    const key = String(sale.plan_id), group = grouped.get(key);
+    if (group) group.push(sale);
+    else grouped.set(key, [sale]);
+  }
   // VIP Stage 1: partition the same period sales by frozen scheme. Every
   // sale carries exactly one frozen scheme, so the counts partition the
   // period sales; pre-scheme rows read as `spot_cash`.
   const byScheme = new Map<string, Row[]>();
   for (const sale of periodSales) {
     const scheme = String(sale.payment_scheme ?? 'spot_cash');
-    byScheme.set(scheme, [...(byScheme.get(scheme) ?? []), sale]);
+    const group = byScheme.get(scheme);
+    if (group) group.push(sale);
+    else byScheme.set(scheme, [sale]);
   }
   const commissionCounts = Object.fromEntries(
     COMMISSION_STATUSES.map((status) => [

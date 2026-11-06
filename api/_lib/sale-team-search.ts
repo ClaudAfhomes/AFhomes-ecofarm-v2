@@ -9,6 +9,7 @@ import {
 } from '@afhomes/contracts';
 import type { VercelRequest } from './http.js';
 import { DRAFT_SEARCH_NOTICE } from './sale-team-search-notice.js';
+import { requestClientIp } from './request-client-ip.js';
 
 export function maskSearchName(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -32,10 +33,10 @@ export function contactDigest(secret: string, raw: SaleTeamSearchContact): strin
   );
 }
 
-export function searchIp(req: VercelRequest, vercel = process.env.VERCEL === '1'): string {
+export function searchIp(req: VercelRequest, vercel = process.env.VERCEL === '1', trustLoopbackProxy = false): string {
   const raw = vercel
     ? (req.headers['x-vercel-forwarded-for'] ?? req.headers['x-forwarded-for'])
-    : req.socket?.remoteAddress;
+    : requestClientIp(req, trustLoopbackProxy);
   if (typeof raw !== 'string' || !isIP(raw) || raw.includes('%'))
     throw new Error('Trusted IP required');
   const ip = raw.toLowerCase();

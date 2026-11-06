@@ -50,6 +50,18 @@ describe('public search boundaries', () => {
     ).toThrow();
     expect(() => searchIp({ query: {}, headers: {} }, false)).toThrow();
   });
+  it('separates visitors behind an explicitly trusted loopback proxy', () => {
+    const request = (ip: string) => ({ query: {}, headers: { 'x-real-ip': ip }, socket: { remoteAddress: '127.0.0.1' } });
+    expect(searchIp(request('203.0.113.10'), false, true)).toBe('203.0.113.10');
+    expect(searchIp(request('203.0.113.20'), false, true)).toBe('203.0.113.20');
+    expect(searchIp(request('203.0.113.10'), false)).toBe('127.0.0.1');
+  });
+  it('rejects spoofed proxy headers from direct peers and malformed forwarded addresses', () => {
+    const request = (peer: string, header: string | string[]) => ({ query: {}, headers: { 'x-real-ip': header, 'x-forwarded-for': '203.0.113.99' }, socket: { remoteAddress: peer } });
+    expect(searchIp(request('198.51.100.9', '203.0.113.10'), false, true)).toBe('198.51.100.9');
+    for (const header of ['203.0.113.10, 203.0.113.20', 'not-an-ip', 'fe80::1%eth0', ['203.0.113.10']])
+      expect(searchIp(request('::ffff:127.0.0.1', header), false, true)).toBe('127.0.0.1');
+  });
   it('binds a signed flow to purpose, session, IP, notice version and expiry', () => {
     const token = signSearchToken(
       secret,

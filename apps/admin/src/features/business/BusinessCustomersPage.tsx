@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import {
+import {
   Button,
   ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
-  FilterBar,
+  FilterBar,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -25,12 +25,13 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './BusinessCustomersPage.module.css';
 import { TierBadge } from './TierBadge';
-import {
+import {
 
   deactivateCustomer,
   deleteCustomer,
   getCustomersPage,
   issueCustomerAccountActivation,
+  reactivateCustomer,
 } from './services';
 import { businessKeys } from './queryKeys';
 import { CustomerApplicationsPage } from './official-forms-applications';
@@ -130,7 +131,7 @@ export function BusinessCustomersPage() {
     ) === true;
 
   const [accountAction, setAccountAction] = useState<{
-    kind: 'deactivate' | 'delete';
+    kind: 'deactivate' | 'reactivate' | 'delete';
     customer: Customer;
   } | null>(null);
   const [recordPointsCustomer, setRecordPointsCustomer] = useState<Customer | null>(null);
@@ -141,10 +142,13 @@ export function BusinessCustomersPage() {
   const changeAccount = useBusinessMutation({
     mutationFn: async () => {
       if (accountAction?.kind === 'delete') await deleteCustomer(accountAction.customer.id);
+      else if (accountAction?.kind === 'reactivate')
+        await reactivateCustomer(accountAction.customer.id);
       else await deactivateCustomer(accountAction!.customer.id);
     },
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: businessKeys.customersScope });
+      // A permanent purge also changes Sales, Finance, Memberships, imports and Customer Lookup.
+      await client.invalidateQueries(accountAction?.kind === 'delete' ? undefined : { queryKey: businessKeys.customersScope });
       setAccountAction(null);
       setConfirmation('');
     },
@@ -404,6 +408,15 @@ export function BusinessCustomersPage() {
                               },
                             ]
                           : []),
+                        ...(customer.status === 'suspended'
+                          ? [
+                              {
+                                label: 'Activate account',
+                                icon: 'user-check' as const,
+                                onClick: () => setAccountAction({ kind: 'reactivate', customer }),
+                              },
+                            ]
+                          : []),
                         {
                           label: 'Record Points',
                           icon: 'plus' as const,
@@ -511,16 +524,20 @@ export function BusinessCustomersPage() {
         title={
           accountAction?.kind === 'delete'
             ? 'Permanently Delete Customer Account'
-            : 'Deactivate Customer Account'
+            : accountAction?.kind === 'reactivate'
+              ? 'Activate Customer Account'
+              : 'Deactivate Customer Account'
         }
         message={
           <div>
             <p>
               {accountAction?.kind === 'delete'
                 ? 'This permanently removes the customer and ALL of their sales, payments, membership, points, redemptions, applications and ID image. This cannot be undone.'
-                : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
+                : accountAction?.kind === 'reactivate'
+                  ? 'The customer status will be restored to active. Their previous login access was removed on deactivation; issue a new activation link if they need to sign in again.'
+                  : 'Customer login access will be removed. Sales, payments, membership, points, and redemption history will remain.'}
             </p>
-            {accountAction?.kind !== 'deactivate' ? (
+            {accountAction?.kind === 'delete' ? (
               <TextField
                 id="customer-account-confirm"
                 name="accountConfirm"
@@ -532,11 +549,15 @@ export function BusinessCustomersPage() {
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>
         }
-        danger
+        danger={accountAction?.kind !== 'reactivate'}
         confirmLabel={
-          accountAction?.kind === 'delete' ? 'Delete permanently' : 'Confirm'
+          accountAction?.kind === 'delete'
+            ? 'Delete permanently'
+            : accountAction?.kind === 'reactivate'
+              ? 'Activate account'
+              : 'Confirm'
         }
-        confirmDisabled={accountAction?.kind !== 'deactivate' && confirmation !== 'DELETE'}
+        confirmDisabled={accountAction?.kind === 'delete' && confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}
       />
     </section>

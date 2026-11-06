@@ -102,6 +102,33 @@ it('preserves all company fields, canonical IDs and safe create/list/detail proj
     phone: '+639175550123',
     vipCardNumber: expect.stringMatching(/^\d{11}B1C01S$/),
   });
+  // Government ID edit: persists to the real document, masks on every read
+  // (including the post-save "refresh" GET) and never reaches audit_events.
+  const idUpdate = await call('PATCH', created.id, {
+    governmentIdType: 'passport',
+    governmentIdNumber: 'NEWGOVID9999',
+  });
+  expect(idUpdate.status).toBe(200);
+  expect(JSON.stringify(idUpdate.body)).not.toContain('NEWGOVID9999');
+  const afterIdUpdate = await call('GET', created.id);
+  expect(afterIdUpdate.body).toMatchObject({
+    governmentIdType: 'passport',
+    governmentIdMasked: '********9999',
+  });
+  expect(JSON.stringify(afterIdUpdate.body)).not.toContain('NEWGOVID9999');
+  const rawRow = await test.db.collection<MongoRow>('customers').findOne({ _id: created.id });
+  expect(rawRow?.government_id_number).toBe('NEWGOVID9999');
+  const idAudits = await test.db
+    .collection('audit_events')
+    .find({ entity_id: created.id })
+    .toArray();
+  expect(JSON.stringify(idAudits)).not.toContain('NEWGOVID9999');
+  // An omitted governmentIdNumber on a later edit must never clear the stored value.
+  expect((await call('PATCH', created.id, { phone: '09175550124' })).status).toBe(200);
+  expect(
+    (await test.db.collection<MongoRow>('customers').findOne({ _id: created.id }))
+      ?.government_id_number,
+  ).toBe('NEWGOVID9999');
 });
 it('reconciles all purchases/reservations using only verified money; filters and pages before output', async () => {
   const created = customerSchema.parse((await call('POST', '', input('two'))).body);
@@ -181,4 +208,81 @@ it('rejects duplicate/invalid registration atomically and does not burn company 
   );
   expect(results.map((value) => value.status)).toEqual([201, 201]);
   expect(new Set(results.map((value) => customerSchema.parse(value.body).raNumber)).size).toBe(2);
+});
+it('reactivates a suspended customer, persists it, audits it, and refuses prospects/active customers', async () => {
+  const created = customerSchema.parse((await call('POST', '', input('reactivate'))).body);
+  // A fresh prospect cannot be "reactivated" - that status was never active/suspended.
+  expect((await call('POST', `${created.id}/reactivate`)).status).toBe(409);
+  expect((await call('POST', `${created.id}/deactivate`)).status).toBe(200);
+  expect((await call('GET', created.id)).body).toMatchObject({ status: 'suspended' });
+  const reactivated = await call('POST', `${created.id}/reactivate`);
+  expect(reactivated.status).toBe(200);
+  expect(reactivated.body).toEqual({ reactivated: true });
+  // Re-reading as a fresh request (simulating a page refresh) must show the persisted flip.
+  expect((await call('GET', created.id)).body).toMatchObject({ status: 'active' });
+  expect(await test.db.collection('customers').findOne({ _id: created.id as never })).toMatchObject(
+    { status: 'active' },
+  );
+  // Already-active cannot be "reactivated" again.
+  expect((await call('POST', `${created.id}/reactivate`)).status).toBe(409);
+  const audits = await test.db
+    .collection('audit_events')
+    .find({ entity_id: created.id, action: 'CUSTOMER_REACTIVATED' })
+    .toArray();
+  expect(audits).toHaveLength(1);
+  expect(audits[0]).toMatchObject({
+    actor_id: actor,
+    entity_type: 'customer',
+    before_data: { status: 'suspended' },
+    after_data: { status: 'active' },
+  });
+  expect((await call('POST', `${randomUUID()}/reactivate`)).status).toBe(404);
+});
+it('refuses to reactivate a cancelled customer', async () => {
+  const id = randomUUID();
+  await test.db.collection<MongoRow>('customers').insertOne({ _id: id, status: 'cancelled' });
+  expect((await call('POST', `${id}/reactivate`)).status).toBe(409);
+  expect(await test.db.collection('customers').findOne({ _id: id as never })).toMatchObject({
+    status: 'cancelled',
+  });
+  expect(
+    await test.db
+      .collection('audit_events')
+      .countDocuments({ entity_id: id, action: 'CUSTOMER_REACTIVATED' }),
+  ).toBe(0);
+});
+it('denies reactivation to a caller without customer-update permission', async () => {
+  const created = customerSchema.parse((await call('POST', '', input('reactivate-denied'))).body);
+  expect((await call('POST', `${created.id}/deactivate`)).status).toBe(200);
+  const denyingAuthorize: typeof authorizeAfHomes = async () => ({
+    error: {
+      status: 403,
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Not permitted',
+        requestId: randomUUID(),
+        timestamp: new Date().toISOString(),
+      },
+    },
+  });
+  const deniedHandler = createMongoCustomersHandler(test.db, test.client, denyingAuthorize);
+  const res = makeRes();
+  await deniedHandler(
+    {
+      method: 'POST',
+      body: {},
+      headers: {},
+      query: { familyPath: `${created.id}/reactivate` },
+    } as VercelRequest,
+    res.res,
+  );
+  expect(res.state.status).toBe(403);
+  expect(await test.db.collection('customers').findOne({ _id: created.id as never })).toMatchObject(
+    { status: 'suspended' },
+  );
+  expect(
+    await test.db
+      .collection('audit_events')
+      .countDocuments({ entity_id: created.id, action: 'CUSTOMER_REACTIVATED' }),
+  ).toBe(0);
 });
