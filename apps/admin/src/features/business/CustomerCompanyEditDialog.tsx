@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Customer, Sale } from '@afhomes/contracts';
@@ -15,7 +15,7 @@ import {
   type GovernmentIdType,
 } from '@afhomes/contracts';
 import { DateField as AppDateField, Field, SelectField, chainOptions } from './official-forms-fields';
-import { Alert, Button, DateField, Dialog, Icon, Select, Tabs, TextField } from '@afhomes/ui';
+import { Alert, Button, DateField, Dialog, FileField, Icon, Select, Tabs, TextField } from '@afhomes/ui';
 import { formatStatedMoney } from '@afhomes/shared';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
@@ -29,11 +29,19 @@ import {
 } from '../../lib/normalize';
 import { formatTin } from '../../lib/format';
 import { GeographicAddressFields } from '../address/GeographicAddressFields';
-import { businessKeys } from './queryKeys';
+import { businessKeys, sharedScopes } from './queryKeys';
 import { withStoredValue } from './official-forms-fields';
 import { getGenealogy } from '../genealogy/services';
 import { updateCustomer } from './services-customers';
 import { getSalePayments } from './services';
+import { CustomerIdImage } from './CustomerIdImage';
+import {
+  ACCEPTED_MIME,
+  MAX_BYTES,
+  completeDocumentUpload,
+  putUploadBytes,
+  requestUploadGrant,
+} from '../documents/services';
 import styles from './CustomerDetailPage.module.css';
 
 type Props = {
@@ -42,6 +50,8 @@ type Props = {
   onClose: () => void;
   onSaved: () => void;
   sales?: Sale[];
+  /** `sales.id_documents` view grant, separate from `sales.customers`. */
+  canViewIdDocuments?: boolean;
 };
 
 type EditSection = 'primary' | 'supplementary' | 'related' | 'package';
@@ -170,7 +180,14 @@ function hasSupplementaryRecord(customer: Customer): boolean {
   ].some((value) => typeof value === 'string' && value.trim() !== '');
 }
 
-export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sales = [] }: Props) {
+export function CustomerCompanyEditDialog({
+  customer,
+  open,
+  onClose,
+  onSaved,
+  sales = [],
+  canViewIdDocuments = false,
+}: Props) {
   const client = useQueryClient();
   const [form, setForm] = useState(() => ({
     firstName: text(customer.firstName),
@@ -239,6 +256,12 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
   const [governmentIdEditable, setGovernmentIdEditable] = useState(false);
   const [supplementaryTinEditable, setSupplementaryTinEditable] = useState(false);
   const [section, setSection] = useState<EditSection>('primary');
+  // Government ID image replacement: a separate, immediate upload - not part
+  // of the Save payload. The previous scan is never deleted; the server just
+  // starts treating this new upload as CURRENT once the bytes are verified.
+  const [idImageFile, setIdImageFile] = useState<File | null>(null);
+  const [idImageError, setIdImageError] = useState<string | null>(null);
+  const [idImageFieldKey, setIdImageFieldKey] = useState(0);
   const set = (key: keyof typeof form) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -394,6 +417,65 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
       onSaved();
       onClose();
     },
+  });
+
+  // Local thumbnail for the not-yet-uploaded selection. Derived during render
+  // (no setState-in-effect); a cleanup-only effect revokes the URL the moment
+  // the selection changes or the component unmounts. PDFs show only the
+  // filename via FileField's own status slot.
+  const idImagePreviewUrl = useMemo(() => {
+    if (!idImageFile || !idImageFile.type.startsWith('image/')) return null;
+    try {
+      return URL.createObjectURL(idImageFile);
+    } catch {
+      return null;
+    }
+  }, [idImageFile]);
+  useEffect(() => {
+    return () => {
+      if (idImagePreviewUrl) {
+        try {
+          URL.revokeObjectURL(idImagePreviewUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [idImagePreviewUrl]);
+
+  const uploadIdImage = useBusinessMutation({
+    mutationFn: async () => {
+      setIdImageError(null);
+      if (!idImageFile) throw new Error('Choose a replacement file first.');
+      if (!ACCEPTED_MIME.includes(idImageFile.type as (typeof ACCEPTED_MIME)[number])) {
+        throw new Error('Only JPEG, PNG or PDF files are accepted.');
+      }
+      if (idImageFile.size === 0 || idImageFile.size > MAX_BYTES) {
+        throw new Error('The file must be non-empty and at most 10 MiB.');
+      }
+      const grant = await requestUploadGrant({
+        subjectType: 'customer',
+        subjectId: customer.id,
+        idType: form.governmentIdType
+          ? governmentIdTypeSchema.parse(form.governmentIdType)
+          : undefined,
+        mime: idImageFile.type as (typeof ACCEPTED_MIME)[number],
+        sizeBytes: idImageFile.size,
+        originalFilename: idImageFile.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, idImageFile);
+      const document = await completeDocumentUpload(grant.documentId);
+      if (!document.hasFile) throw new Error('Upload verification is still pending.');
+      return document;
+    },
+    onSuccess: async () => {
+      setIdImageFile(null);
+      setIdImageFieldKey((v) => v + 1);
+      await client.invalidateQueries({
+        queryKey: sharedScopes.documentsCurrentCustomer(customer.id),
+      });
+    },
+    onError: (cause) => setIdImageError(cause instanceof Error ? cause.message : 'Upload failed.'),
   });
 
   /** One mounted tab panel per section, hidden while inactive. */
@@ -556,6 +638,59 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved, sa
             Edit Government ID Number
           </label>
         </div>
+        {canViewIdDocuments ? (
+          <div className={`${styles.editFieldWide} ${styles.idImageField}`}>
+            <span className={styles.idImageLabel}>Government ID Image</span>
+            <CustomerIdImage customerId={customer.id} canView={canViewIdDocuments} />
+            <FileField
+              key={idImageFieldKey}
+              id="ce-gov-id-image"
+              name="governmentIdImage"
+              label="Replace Government ID image"
+              optional
+              hint="JPEG, PNG or PDF, max 10 MiB. Uploads immediately; Save is not required."
+              accept={ACCEPTED_MIME.join(',')}
+              status={
+                idImageFile ? (
+                  <div className={styles.idImagePreview}>
+                    {idImagePreviewUrl ? (
+                      <img
+                        className={styles.idImagePreviewThumb}
+                        src={idImagePreviewUrl}
+                        alt={`Preview of ${idImageFile.name}`}
+                      />
+                    ) : null}
+                    <span>Selected: {idImageFile.name}</span>
+                  </div>
+                ) : null
+              }
+              onSelect={(file) => {
+                setIdImageError(null);
+                setIdImageFile(file);
+              }}
+            />
+            <div className={styles.idImageActions}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => uploadIdImage.mutate()}
+                loading={uploadIdImage.isPending}
+                loadingLabel="Uploading…"
+                disabled={!idImageFile}
+              >
+                Upload replacement
+              </Button>
+            </div>
+            {idImageError ? (
+              <Alert variant="danger" title="Upload failed">
+                {idImageError}
+              </Alert>
+            ) : null}
+            {uploadIdImage.isSuccess && !idImageFile ? (
+              <Alert variant="success">Government ID image updated.</Alert>
+            ) : null}
+          </div>
+        ) : null}
         <TextField
           id="ce-addr1"
           name="addressLine1"

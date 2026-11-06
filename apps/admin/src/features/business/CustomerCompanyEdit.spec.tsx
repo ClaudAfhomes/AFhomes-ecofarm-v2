@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -10,6 +10,13 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { getCustomerById, getSales } from './services';
 import { updateCustomer } from './services-customers';
+import {
+  completeDocumentUpload,
+  getCurrentDocument,
+  getDocumentAccessUrl,
+  putUploadBytes,
+  requestUploadGrant,
+} from '../documents/services';
 
 vi.mock('./services', () => ({
   getCustomerById: vi.fn(),
@@ -23,6 +30,17 @@ vi.mock('./services', () => ({
 
 vi.mock('./services-customers', () => ({
   updateCustomer: vi.fn(async (_id: string, input: unknown) => ({ id: _id, ...(input as object) })),
+}));
+
+// The ID image/upload lives on the documents API, not the customers one.
+vi.mock('../documents/services', () => ({
+  getCurrentDocument: vi.fn(async () => null),
+  getDocumentAccessUrl: vi.fn(),
+  requestUploadGrant: vi.fn(),
+  putUploadBytes: vi.fn(),
+  completeDocumentUpload: vi.fn(),
+  ACCEPTED_MIME: ['image/jpeg', 'image/png', 'application/pdf'],
+  MAX_BYTES: 10 * 1024 * 1024,
 }));
 
 const STAFF: SessionUser = {
@@ -98,6 +116,11 @@ beforeEach(() => {
   vi.mocked(getSales).mockResolvedValue([]);
   vi.mocked(getCustomerById).mockResolvedValue(RECORD);
   vi.mocked(updateCustomer).mockClear();
+  vi.mocked(getCurrentDocument).mockReset().mockResolvedValue(null);
+  vi.mocked(getDocumentAccessUrl).mockReset();
+  vi.mocked(requestUploadGrant).mockReset();
+  vi.mocked(putUploadBytes).mockReset();
+  vi.mocked(completeDocumentUpload).mockReset();
 });
 
 describe('Customer company edit', () => {
@@ -259,5 +282,85 @@ describe('Customer company edit', () => {
     expect(vip.selectedOptions[0]?.textContent).toBe('Not Recorded');
     const terms = screen.getByLabelText('Payment Terms') as HTMLSelectElement;
     expect(terms.selectedOptions[0]?.textContent).toBe('Not Recorded');
+  });
+
+  describe('Government ID image replacement', () => {
+    it('hides the image block without the separate id_documents grant', () => {
+      renderWithProviders(
+        <CustomerCompanyEditDialog customer={RECORD} open onClose={() => {}} onSaved={() => {}} />,
+        { user: STAFF, route: '/admin/customers/c-1' },
+      );
+      expect(screen.queryByLabelText(/Replace Government ID image/)).not.toBeInTheDocument();
+    });
+
+    it('shows the current scan and uploads a replacement through the existing document pipeline', async () => {
+      vi.mocked(requestUploadGrant).mockResolvedValue({
+        documentId: 'd-99',
+        uploadUrl: 'https://storage.test/upload/d-99',
+      } as never);
+      vi.mocked(putUploadBytes).mockResolvedValue(undefined);
+      vi.mocked(completeDocumentUpload).mockResolvedValue({
+        id: 'd-99',
+        hasFile: true,
+      } as never);
+
+      renderWithProviders(
+        <CustomerCompanyEditDialog
+          customer={RECORD}
+          open
+          onClose={() => {}}
+          onSaved={() => {}}
+          canViewIdDocuments
+        />,
+        { user: STAFF, route: '/admin/customers/c-1' },
+      );
+
+      const picker = await screen.findByLabelText(/Replace Government ID image/);
+      const uploadButton = screen.getByRole('button', { name: 'Upload replacement' });
+      expect(uploadButton).toBeDisabled();
+
+      const file = new File(['scan'], 'new-id.png', { type: 'image/png' });
+      fireEvent.change(picker, { target: { files: [file] } });
+      expect(uploadButton).toBeEnabled();
+
+      const user = userEvent.setup();
+      await user.click(uploadButton);
+
+      await waitFor(() => expect(completeDocumentUpload).toHaveBeenCalledWith('d-99'));
+      expect(requestUploadGrant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subjectType: 'customer',
+          subjectId: 'c-1',
+          idType: 'passport',
+          mime: 'image/png',
+          originalFilename: 'new-id.png',
+        }),
+      );
+      expect(putUploadBytes).toHaveBeenCalledWith('https://storage.test/upload/d-99', file);
+      await screen.findByText('Government ID image updated.');
+      // The replacement never touches the Save payload for the stated record.
+      expect(updateCustomer).not.toHaveBeenCalled();
+    });
+
+    it('reports an upload failure without clearing the selection', async () => {
+      vi.mocked(requestUploadGrant).mockRejectedValue(new Error('Network down'));
+      renderWithProviders(
+        <CustomerCompanyEditDialog
+          customer={RECORD}
+          open
+          onClose={() => {}}
+          onSaved={() => {}}
+          canViewIdDocuments
+        />,
+        { user: STAFF, route: '/admin/customers/c-1' },
+      );
+      const picker = await screen.findByLabelText(/Replace Government ID image/);
+      const file = new File(['scan'], 'new-id.png', { type: 'image/png' });
+      fireEvent.change(picker, { target: { files: [file] } });
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'Upload replacement' }));
+      await screen.findByText('Network down');
+      expect(putUploadBytes).not.toHaveBeenCalled();
+    });
   });
 });
