@@ -342,13 +342,13 @@ describe('GeographicAddressFields legacy records', () => {
   it('says plainly that the stored address is not code-verified', () => {
     setup({ province: 'LAGUNA' });
 
-    expect(screen.getAllByText(/not linked to an official code/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Stored value unverified/i).length).toBeGreaterThan(0);
   });
 
   it('does not claim a legacy address is verified', () => {
     setup({ province: 'LAGUNA', provinceCode: undefined });
 
-    expect(screen.queryByText(/verified/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^verified$/i)).not.toBeInTheDocument();
   });
 
   it('lets a legacy record be upgraded by choosing an official province', async () => {
@@ -359,6 +359,7 @@ describe('GeographicAddressFields legacy records', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ province: 'Laguna', provinceCode: '0403400000' }),
     );
+    expect(screen.queryByText(/Stored value unverified/i)).not.toBeInTheDocument();
   });
 
   it('does not force a legacy record to gain codes in order to save', () => {

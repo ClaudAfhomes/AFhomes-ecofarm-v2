@@ -19,6 +19,10 @@ const toApprovalRow = (row: Record<string, unknown>) => {
       tierDiscountRate:
         line.tier_discount_rate == null ? null : Number(line.tier_discount_rate),
     })),
+    serviceDates: snapshot.serviceDates,
+    allowanceType: snapshot.allowanceType,
+    weekdayPoints: snapshot.weekdayPoints,
+    weekendPoints: snapshot.weekendPoints,
     pesoValuePerPoint: String(snapshot.rate),
     pointsRequested: Number(row.points_requested),
     pesoValue: String(row.peso_value),

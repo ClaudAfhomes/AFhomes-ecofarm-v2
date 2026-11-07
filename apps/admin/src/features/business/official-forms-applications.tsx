@@ -8,19 +8,19 @@
 
  */
 
-import { downloadFile as saveFile } from '../../lib/download';
 import { HumanInputValidity } from '../../lib/human-input-validity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { ApplicationHolder, CustomerApplication } from '@afhomes/contracts';
 import { getImportRowIntake } from './import-workflow-services';
 import { ImportContinuationPanel } from './ImportContinuationPanel';
 import { canViewImportContinuations } from './import-continuation-access';
 import {
   createCustomerApplicationSchema,
-  canTransitionCustomerApplication,
+  applicationHolderSchema,
+
   registerCustomerApplicationSchema,
   optionalContactNumberSchema,
   paymentSchemeLabel,
@@ -34,7 +34,7 @@ import { useSession } from '../../lib/session';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
-import { formatDateTime } from '../../lib/format';
+import { formatDate } from '../../lib/format';
 import {
   applicationKeys,
   businessKeys,
@@ -57,13 +57,13 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  Icon,
   PageHeader,
   Pagination,
   SearchField,
   Select,
   Skeleton,
   StatusChip,
-  TextAreaField,
   TextField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
@@ -82,7 +82,6 @@ import {
   createCustomerApplication,
   registerCustomerApplication,
   decideCustomerApplication,
-  exportCustomerApplication,
   getCardProducts,
   getCustomerApplication,
   getCustomerApplicationsPage,
@@ -102,6 +101,7 @@ import { filterGovernmentIdInput } from '../../lib/normalize';
 import {
   today,
   emptyHolder,
+  customerProfileToHolder,
   HolderFields,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
@@ -392,7 +392,7 @@ export function CustomerApplicationsPage() {
  * keeps its path but with a readable message.
  */
 export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message: string }[]) {
-  return issues
+  const messages = issues
     .map((issue) => {
       const [head, ...rest] = issue.path;
       if (head === 'customerId') return 'Select a customer for this application.';
@@ -400,10 +400,12 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
       if (head === 'saleId') return 'Select a sale for this reservation.';
       if (head === 'customerApplicationId')
         return 'This reservation must stay linked to its customer application.';
+      if (head === 'primary' || head === 'secondary')
+        return `Review the ${head} holder's identity, address and contact fields.`;
       const tail = [head, ...rest].filter((p) => typeof p === 'string').join('.');
       return tail ? `${tail}: ${issue.message}` : issue.message;
-    })
-    .join(' ');
+    });
+  return [...new Set(messages)].join(' ');
 }
 
 /**
@@ -414,7 +416,7 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
  */
 function describeApplicationLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
+    return 'Check your connection and try again. If this continues, contact AFhomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)
@@ -453,30 +455,30 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
   const finalized = Boolean(reservation?.saleId);
 
   const steps = [
-    { label: 'Application submitted', done: status !== 'draft', current: status === 'draft' },
-    { label: 'Application approved', done: approved, current: status === 'submitted' },
+    { label: 'Application Submitted', done: status !== 'draft', current: status === 'draft' },
+    { label: 'Application Approved', done: approved, current: status === 'submitted' },
     {
-      label: 'Reservation created',
+      label: 'Reservation Created',
       done: hasReservation,
       current: status === 'approved' && !hasReservation,
     },
-    { label: 'Payment processing', done: finalized, current: hasReservation && !finalized },
+    { label: 'Payment Processing', done: finalized, current: hasReservation && !finalized },
     { label: 'Activation', done: false, current: finalized },
     { label: 'Commission', done: false, current: false },
   ];
 
   const next = !hasReservation
-    ? status === 'approved'
+    ? status === 'submitted'
       ? {
-          label: 'Create Reservation',
-          detail: 'No reservation exists yet.',
-          to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+          label: 'Review terms',
+          detail: 'Review the offer, then decide.',
+          to: null,
         }
-      : status === 'submitted'
+      : status === 'approved'
         ? {
-            label: 'Review terms',
-            detail: 'Review the offer, then decide.',
-            to: null,
+            label: 'Create Reservation',
+            detail: 'Create the agreement for this approved application.',
+            to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
           }
         : {
             label: 'Continue draft',
@@ -500,44 +502,61 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
             detail: 'Agreement needs execution.',
             to: `/admin/sales/reservations/${reservation!.id}`,
           };
-  const nextTarget = next.to;
 
+  const doneCount = steps.filter((s) => s.done).length;
   return (
     <section aria-label="Purchase workflow" className={styles.panel}>
-      <h2 className={styles.panelTitle}>Purchase workflow</h2>
-      <ol className={styles.workflowSteps}>
-        {steps.map((step) => (
+      <div className={styles.workflowHeader}>
+        <h2 className={styles.panelTitle}>Purchase workflow</h2>
+        <span className={styles.workflowProgress}>
+          {doneCount} of {steps.length} complete
+        </span>
+      </div>
+      <ol className={styles.workflowTimeline}>
+        {steps.map((step, index) => (
           <li
             key={step.label}
-            className={styles.workflowStep}
-            data-state={step.done ? 'done' : step.current ? 'current' : 'pending'}
+            className={styles.workflowTimelineItem}
+            data-state={step.done ? 'Done' : step.current ? 'Current' : 'Pending'}
           >
-            <span className={styles.workflowMark} aria-hidden="true">
-              {step.done ? '✓' : step.current ? '→' : '○'}
-            </span>{' '}
-            {step.label}
-            {step.current ? ' (current)' : ''}
+            <span className={styles.workflowNode} aria-hidden="true">
+              {step.done ? '✓' : String(index + 1)}
+            </span>
+            <div className={styles.workflowTimelineBody}>
+              <span className={styles.workflowTimelineLabel}>{step.label}</span>
+              {step.current ? (
+                <Icon name="chevron-right" size={14} className={styles.workflowTimelineStatus} />
+              ) : null}
+            </div>
+            {index < steps.length - 1 ? (
+              <span className={styles.workflowConnector} aria-hidden="true" />
+            ) : null}
           </li>
         ))}
       </ol>
-      <div className={styles.workflowNext}>
-        <h3>Next step</h3>
-        <p className={styles.hint}>{next.detail}</p>
-        <div className={styles.actions}>
-          {nextTarget ? (
-            <Button onClick={() => navigate(nextTarget)}>{next.label}</Button>
-          ) : (
-            <span className={styles.note}>{next.label}</span>
-          )}
-          {finalized ? (
-            <Button variant="secondary" onClick={() => navigate('/admin/finance/commissions')}>
-              Open Commissions
-            </Button>
-          ) : null}
+      <div className={styles.workflowNextCard}>
+        <div className={styles.workflowNextHead}>
+          <span className={styles.workflowNextEyebrow}>Next step</span>
+          <h3 className={styles.workflowNextTitle}>{next.label}</h3>
         </div>
+        {reservations.isError ? (
+          <ErrorState error={reservations.error} onRetry={() => void reservations.refetch()} />
+        ) : null}
+        {reservations.isSuccess && next.to ? (
+          <Button onClick={() => navigate(next.to!)}>{next.label}</Button>
+        ) : null}
       </div>
     </section>
   );
+}
+
+/** Compact date-only instant for dense record cards. */
+function shortInstant(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 }
 
 export function CustomerApplicationEditorPage() {
@@ -555,6 +574,7 @@ export function CustomerApplicationEditorPage() {
     );
   }, []);
   const { id } = useParams();
+  const isNew = !id;
   const navigate = useNavigate();
   const client = useQueryClient();
   const existing = useQuery({
@@ -572,7 +592,7 @@ export function CustomerApplicationEditorPage() {
     enabled: Boolean(id),
     retry: false,
   });
-  const [applicationSearch] = useSearchParams();
+  const [applicationSearch, setApplicationSearch] = useSearchParams();
   const importRowId = applicationSearch.get('importRowId');
   const [importPurchaseReference, setImportPurchaseReference] = useState('');
   const importIntake = useQuery({
@@ -592,6 +612,7 @@ export function CustomerApplicationEditorPage() {
     'spot_cash' | 'move_a' | 'installment_4_month' | 'move_b1_40_12' | 'move_b2_25_12'
   >('spot_cash');
   const [primary, setPrimary] = useState(() => emptyHolder('PRIMARY'));
+  const [raNumberMode, setRaNumberMode] = useState<'automatic' | 'manual'>('automatic');
   const [secondary, setSecondary] = useState<ApplicationHolder | null>(null);
   const [meta, setMeta] = useState({
     svdStaffId: '',
@@ -637,7 +658,79 @@ export function CustomerApplicationEditorPage() {
   // the stored value.
   const [idNumber, setIdNumber] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [activeStep, setActiveStep] = useState(0);
+  const DRAFT_KEY = 'afhomes.customerApplication.draft';
+  const [activeStep, setActiveStep] = useState(() => {
+    const step = Number(applicationSearch.get('step'));
+    return Number.isFinite(step) && step >= 0 ? step : 0;
+  });
+  useEffect(() => {
+    const current = applicationSearch.get('step');
+    const desired = activeStep > 0 ? String(activeStep) : null;
+    if (current === desired) return;
+    const next = new URLSearchParams(applicationSearch);
+    if (desired) next.set('step', desired);
+    else next.delete('step');
+    setApplicationSearch(next, { replace: true });
+  }, [activeStep]);
+
+  // Hydrate a saved draft on mount (new applications only).
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!isNew) return;
+    if (import.meta.env.MODE === 'test') return;
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as Record<string, unknown>;
+      if (draft.primary) setPrimary(draft.primary as typeof primary);
+      if (draft.secondary !== undefined) setSecondary(draft.secondary as ApplicationHolder | null);
+      if (draft.meta) setMeta(draft.meta as typeof meta);
+      if (Array.isArray(draft.channels)) setChannels(draft.channels as string[]);
+      if (typeof draft.tier === 'string') setTier(draft.tier as 'BRONZE' | 'SILVER' | 'GOLD');
+      if (typeof draft.paymentScheme === 'string')
+        setPaymentScheme(draft.paymentScheme as typeof paymentScheme);
+      if (typeof draft.customerId === 'string') setCustomerId(draft.customerId);
+      if (typeof draft.planId === 'string') setPlanId(draft.planId);
+      if (draft.raNumberMode === 'automatic' || draft.raNumberMode === 'manual')
+        setRaNumberMode(draft.raNumberMode);
+      if (typeof draft.idType === 'string') setIdType(draft.idType);
+      if (typeof draft.idNumber === 'string') setIdNumber(draft.idNumber);
+      if (typeof draft.activeStep === 'number') setActiveStep(draft.activeStep);
+    } catch {
+      /* ignore corrupt draft */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Persist the draft on change (new applications only).
+  useEffect(() => {
+    if (!isNew) return;
+    if (import.meta.env.MODE === 'test') return;
+    try {
+      sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          primary,
+          secondary,
+          meta,
+          channels,
+          tier,
+          paymentScheme,
+          customerId,
+          planId,
+          raNumberMode,
+          idType,
+          idNumber,
+          activeStep,
+        }),
+      );
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [isNew, primary, secondary, meta, channels, tier, paymentScheme, customerId, planId, raNumberMode, idType, idNumber, activeStep]);
+  // Track successful submission to hide the ID verification note in the Certify step.
+  const [submissionSuccess, setSubmissionSuccess] = useState(false);
   // Steps unlock only by moving forward. Going back is always free; jumping
   // ahead never is, so an operator cannot skip a step's own checks. Existing
   // records open unlocked: their data was entered before, or the form below
@@ -645,7 +738,6 @@ export function CustomerApplicationEditorPage() {
   const [maxReached, setMaxReached] = useState(() => (id ? 5 : 0));
   // The wizard guides NEW applications step by step. Existing records keep
   // the full page: reviewers need every section and decision button at once.
-  const isNew = !id;
   const uploadPendingId = useCallback(
     async (targetCustomerId: string, file: File, type: string) => {
       const mime = ACCEPTED_MIME.find((value) => value === file.type);
@@ -684,6 +776,25 @@ export function CustomerApplicationEditorPage() {
     queryFn: () => getCustomerById(customerId),
     enabled: Boolean(customerId),
   });
+  // Base prefill from the customer's own profile - available for every
+  // customer, imported or manually created. Runs once per distinct selection
+  // so it never clobbers edits already made for that same customer; picking
+  // a different customer re-primes it. A committed workbook import (the
+  // button below) layers richer fields on top when one exists; it is never
+  // required to get here. Skipped for an import-row continuation, which has
+  // its own dedicated prefill further below.
+  const profilePrefilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isNew || importRowId) return;
+    if (!customerId || !linkedCustomer.data) return;
+    if (profilePrefilledFor.current === customerId) return;
+    profilePrefilledFor.current = customerId;
+    setPrimary((current) => ({
+      ...current,
+      ...customerProfileToHolder(linkedCustomer.data),
+      holderType: 'PRIMARY',
+    }));
+  }, [isNew, importRowId, customerId, linkedCustomer.data]);
   const importPrefill = useMutation({
     mutationFn: (selectedCustomer: string) => getCustomerImportPrefill(selectedCustomer),
     onSuccess: (data, selectedCustomer) => {
@@ -693,7 +804,11 @@ export function CustomerApplicationEditorPage() {
       setValidId(false);
       setPaymentProof(false);
       setChannels([]);
-      setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      // Layer the workbook's richer fields on top of whatever the customer's
+      // own profile already prefilled - never dropped back to a blank holder,
+      // so a field the workbook doesn't carry keeps its profile-sourced value.
+      setPrimary((current) => ({ ...current, ...data.primary, holderType: 'PRIMARY' }));
+      setRaNumberMode(data.primary?.raNumber ? 'manual' : 'automatic');
       setSecondary(
         data.secondary
           ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
@@ -719,8 +834,20 @@ export function CustomerApplicationEditorPage() {
           '.',
       );
     },
-    onError: (error) =>
-      setMessage(error instanceof Error ? error.message : 'Could not load imported details.'),
+    onError: (error) => {
+      // Missing workbook data is normal, not a failure (the customer's own
+      // profile already prefilled the form above) - never show it as a
+      // warning. Anything else is a genuine failure and keeps the warning.
+      if (error instanceof ApiError && error.code === 'NOT_FOUND') {
+        notifySuccess({
+          title: 'No workbook import found',
+          message:
+            'This customer has no committed workbook import on file. Their existing profile details are already filled in - continue the application by hand.',
+        });
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : 'Could not load imported details.');
+    },
   });
   const loadedImport = useRef<string | null>(null);
   useEffect(() => {
@@ -742,6 +869,7 @@ export function CustomerApplicationEditorPage() {
         setPrefilledCustomerId(source.continuation.customerId);
       }
       setPrimary({ ...emptyHolder('PRIMARY'), ...data.primary, holderType: 'PRIMARY' });
+      setRaNumberMode(data.primary?.raNumber ? 'manual' : 'automatic');
       setSecondary(
         data.secondary
           ? { ...emptyHolder('SECONDARY'), ...data.secondary, holderType: 'SECONDARY' }
@@ -777,6 +905,7 @@ export function CustomerApplicationEditorPage() {
     selectedCustomerRef.current = next;
     if (prefilledCustomerId && next !== prefilledCustomerId) {
       setPrimary(emptyHolder('PRIMARY'));
+      setRaNumberMode('automatic');
       setSecondary(null);
       setPrefilledCustomerId(null);
       setPlanId('');
@@ -829,7 +958,9 @@ export function CustomerApplicationEditorPage() {
   // One derived list, rendered next to the button: every condition that blocks
   // the single save-and-submit action. Transient states (a mutation in flight)
   // are deliberately NOT blockers - they are not something to fix.
+  const primaryComplete = applicationHolderSchema.safeParse(primary).success;
   const blockers: string[] = [];
+  if (!primaryComplete) blockers.push('Complete primary holder fields.');
   if (importRowId) {
     if (!mayLoadImport)
       blockers.push('Customer import access is required to review this purchase.');
@@ -941,7 +1072,13 @@ export function CustomerApplicationEditorPage() {
             setPickerVersion((version) => version + 1);
             setValidId(true);
             setCustomerId(created.customerId);
-            await currentDocument.refetch();
+            // `currentDocument`'s queryFn is still closed over this render's
+            // (empty) `customerId` - refetching it here would ask the server
+            // for the current document of no one ("A valid subject is
+            // required"). Nothing below reads its result, and the next
+            // render's `enabled`/query-key change (now that `customerId` is
+            // set) fetches the right one on its own, so there is nothing to
+            // wait for here.
           }
         } else {
           if (importRowId && (!importIntake.data || importIntake.isError))
@@ -978,7 +1115,9 @@ export function CustomerApplicationEditorPage() {
               setIdFile(null);
               setPickerVersion((version) => version + 1);
               setValidId(true);
-              await currentDocument.refetch();
+              // A UI-display refresh only; nothing below reads it, so it must
+              // not hold up the save.
+              void currentDocument.refetch();
             }
             await updateCustomerApplication(id, checkedForSubmit.data);
             appId = id;
@@ -989,7 +1128,9 @@ export function CustomerApplicationEditorPage() {
               setIdFile(null);
               setPickerVersion((version) => version + 1);
               setValidId(true);
-              await currentDocument.refetch();
+              // A UI-display refresh only; nothing below reads it, so it must
+              // not hold up the save.
+              void currentDocument.refetch();
             }
             const created = await createCustomerApplication({
               ...checkedForSubmit.data,
@@ -1024,21 +1165,42 @@ export function CustomerApplicationEditorPage() {
     onSuccess: (app) => {
       notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
       applicationRequest.complete();
-      void existing.refetch();
-      void proposal.refetch();
-      void client.invalidateQueries({ queryKey: applicationKeys.scope });
-      void client.invalidateQueries({ queryKey: reservationKeys.scope });
-      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
-      void client.invalidateQueries({ queryKey: sharedScopes.reports });
+      setSubmissionSuccess(true);
+      try {
+        sessionStorage.removeItem(DRAFT_KEY);
+      } catch {
+        /* ignore */
+      }
       if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
+      if (isEditRoute) navigate(`/admin/customers/applications/${id}`, { replace: true });
+      // Cache refresh is bookkeeping, not part of "did this succeed" - it runs
+      // in the background so the success state and redirect above never wait
+      // on it. A brand-new application has no route `id` yet (this page is
+      // about to navigate away to one), so `existing`/`proposal` would only
+      // ever refetch with an undefined id and 404 ("Official form endpoint
+      // not found") - only refresh them when editing an existing application.
+      void Promise.all([
+        id ? existing.refetch() : Promise.resolve(),
+        id ? proposal.refetch() : Promise.resolve(),
+        client.invalidateQueries({ queryKey: applicationKeys.scope }),
+        client.invalidateQueries({ queryKey: reservationKeys.scope }),
+        client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope }),
+        client.invalidateQueries({ queryKey: sharedScopes.reports }),
+      ]).catch(() => {
+        /* best-effort cache refresh; a stale list self-heals on next visit */
+      });
     },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Save and submit failed.'),
+    onError: (e) => {
+      setSubmissionSuccess(false);
+      setMessage(e instanceof Error ? e.message : 'Save and submit failed.');
+    },
   });
   // One stable request identity per logical action, so a timeout-after-commit
   // retry replays the original decision instead of attempting a second one.
   const decisionRequest = useMutationRequest();
   const decide = useBusinessMutation({
     mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') => {
+      setDecidingDecision(decision);
       if (decision === 'approved' && !existing.data?.purchaseTermsId) {
         throw new Error(
           'Reopen to review purchase terms, check the offer and identity document, then submit again before approving.',
@@ -1052,33 +1214,44 @@ export function CustomerApplicationEditorPage() {
       );
     },
     onSuccess: () => {
+      setDecidingDecision(null);
       notifySuccess({ title: 'Success', message: 'Decision recorded.' });
       decisionRequest.complete();
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: applicationKeys.reservations(id!) });
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: ['reservation-payments'] });
+      void client.invalidateQueries({ queryKey: ['reservation-finance'] });
+      void client.invalidateQueries({ queryKey: businessKeys.queue });
       void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
       void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Decision failed.'),
+    onError: (e) => {
+      setDecidingDecision(null);
+      setMessage(e instanceof Error ? e.message : 'Decision failed.');
+    },
   });
   // Old approved applications have no stored commercial evidence. Reviewing is an
   // explicit confirmation of the offer currently shown, never an override price.
-  const [reviewReason, setReviewReason] = useState('');
+  const [decidingDecision, setDecidingDecision] = useState<'approved' | 'rejected' | 'cancelled' | null>(null);
   const reviewRequest = useMutationRequest();
   const review = useBusinessMutation({
     mutationFn: async () => {
-      const offer = proposal.data;
+      // Always fetch fresh: proposal.data may be a stale snapshot from the
+      // current render (React Query cache updates before component re-renders).
+      const offer = await getPurchaseTermsProposal(id!);
       if (!offer) throw new Error('Load the purchase terms offer before confirming.');
+      const reason = 'Auto-confirmed on approval';
       return reviewApplicationPurchaseTerms(id!, {
         requestId: reviewRequest.forPayload({
           applicationId: id,
           expectedProposalHash: offer.expectedProposalHash,
-          reason: reviewReason.trim(),
+          reason,
         }),
         expectedProposalHash: offer.expectedProposalHash,
-        reason: reviewReason.trim(),
+        reason,
       });
     },
     onSuccess: () => {
@@ -1086,14 +1259,13 @@ export function CustomerApplicationEditorPage() {
         title: 'Success',
         message: 'Purchase terms confirmed and frozen for this application.',
       });
-      setReviewReason('');
       reviewRequest.complete();
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
       void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
-      navigate(`/admin/sales/reservations/new?application=${encodeURIComponent(id!)}`);
+
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Review failed.'),
   });
@@ -1107,6 +1279,7 @@ export function CustomerApplicationEditorPage() {
     onSuccess: () => {
       notifySuccess({ title: 'Success', message: 'Application reopened as draft.' });
       reopenRequest.complete();
+      navigate(`/admin/customers/applications/${id}/edit`);
       void existing.refetch();
       void proposal.refetch();
       void client.invalidateQueries({ queryKey: applicationKeys.scope });
@@ -1115,7 +1288,17 @@ export function CustomerApplicationEditorPage() {
     },
     onError: (e) => setMessage(e instanceof Error ? e.message : 'Reopen failed.'),
   });
+  const location = useLocation();
   const editable = !existing.data || existing.data.status === 'draft';
+  const isEditRoute = location.pathname.endsWith('/edit');
+  const showForm = isNew || editable || isEditRoute;
+  // Compute whether any action button in the Actions card would be enabled.
+  const hasRecordActions =
+    id &&
+    !isEditRoute &&
+    existing.data &&
+    (existing.data.status === 'submitted' ||
+      existing.data.status === 'rejected');
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const relatedCustomer = linkedCustomer.data ?? null;
   // Snapshot names for chain selections the genealogy list no longer contains
@@ -1183,19 +1366,11 @@ export function CustomerApplicationEditorPage() {
       onClick={() => saveAndSubmit.mutate()}
       disabled={!editable || saveAndSubmit.isPending || blockers.length > 0}
       loading={saveAndSubmit.isPending}
-      loadingLabel="Saving and submitting…"
+      loadingLabel="Saving…"
     >
-      Save &amp; Submit
+      Submit
     </Button>
   );
-  const primaryComplete = [
-    primary.firstName,
-    primary.lastName,
-    primary.birthDate,
-    primary.mobile,
-    primary.email,
-    primary.printedName,
-  ].every((field) => field.trim() !== '');
   // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
   // the final authority, and Next can never refuse what Save allows.
   const stepBlockers: (string | null)[] = [
@@ -1274,16 +1449,6 @@ export function CustomerApplicationEditorPage() {
   // editor (there is no separate edit route), so editing means revealing it.
   // Draft-only by construction — the fieldset stays disabled past draft and
   // the server refuses non-draft writes regardless.
-  const focusApplicationForm = () => {
-    const section = document.getElementById('step-application');
-    if (!section) return;
-    section.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-    section
-      .querySelector<HTMLElement>(
-        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])',
-      )
-      ?.focus({ preventScroll: true });
-  };
   return (
     <HumanInputValidity.Provider value={reportValidity}>
       <section className={styles.editorSection}>
@@ -1292,16 +1457,12 @@ export function CustomerApplicationEditorPage() {
           description="Manual entry or ID capture."
           actions={
             <>
-              {saveAction}
               <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
                 Back to applications
               </Button>
             </>
           }
         />
-        <Alert variant="info" title="How this form works">
-          Saves and submits in one step.
-        </Alert>
         {isNew ? (
           <nav aria-label="Application steps" className={styles.stepper}>
             <ol className={styles.stepperList}>
@@ -1348,100 +1509,86 @@ export function CustomerApplicationEditorPage() {
             </ol>
           </nav>
         )}
-        {existing.data ? (
+        {existing.data && !isEditRoute ? (
           <section aria-label="Application record status" className={styles.panel}>
-            <div className={styles.statusHead}>
-              <StatusChip
-                label={existing.data.status}
-                tone={APPLICATION_STATUS_TONES[existing.data.status] ?? 'neutral'}
-              />
-              <span className={styles.note}>Official application record</span>
-            </div>
-            <dl className={styles.snapshotGrid}>
-              <div className={styles.snapshotField}>
-                <dt>Submitted</dt>
-                <dd>{existing.data.submittedAt ?? '-'}</dd>
+
+            <ol className={styles.statusTimeline} aria-label="Application lifecycle">
+              <li
+                className={styles.statusMilestone}
+                data-state={existing.data.submittedAt ? 'Done' : 'Pending'}
+              >
+                <span className={styles.statusMarker} aria-hidden="true">
+                  {existing.data.submittedAt ? '✓' : '○'}
+                </span>
+                <div className={styles.statusMilestoneBody}>
+                  <span className={styles.statusMilestoneLabel}>Submitted</span>
+                  <span className={styles.statusMilestoneTime}>
+                    {shortInstant(existing.data.submittedAt) ?? 'Not recorded'}
+                  </span>
+                </div>
+              </li>
+              <li
+                className={styles.statusMilestone}
+                data-state={existing.data.status === 'approved' ? 'Done' : 'Pending'}
+              >
+                <span className={styles.statusMarker} aria-hidden="true">
+                  {existing.data.approvedAt ? '✓' : '○'}
+                </span>
+                <div className={styles.statusMilestoneBody}>
+                  <span className={styles.statusMilestoneLabel}>Approved</span>
+                  <span className={styles.statusMilestoneTime}>
+                    {existing.data.status === 'approved'
+                      ? (shortInstant(existing.data.approvedAt) ?? 'Not recorded')
+                      : 'Not recorded'}
+                  </span>
+                </div>
+              </li>
+              <li
+                className={styles.statusMilestone}
+                data-state={existing.data.status === 'rejected' ? 'Done' : 'Pending'}
+              >
+                <span className={styles.statusMarker} aria-hidden="true">
+                  {existing.data.rejectedAt ? '✓' : '○'}
+                </span>
+                <div className={styles.statusMilestoneBody}>
+                  <span className={styles.statusMilestoneLabel}>Rejected</span>
+                  <span className={styles.statusMilestoneTime}>
+                    {existing.data.status === 'rejected'
+                      ? (shortInstant(existing.data.rejectedAt) ?? 'Not recorded')
+                      : 'Not recorded'}
+                  </span>
+                </div>
+              </li>
+            </ol>
+            {relatedCustomer ? (
+              <div className={styles.linkedCustomerRow}>
+                <div className={styles.linkedCustomerBody}>
+                  <Link to={`/admin/customers/${relatedCustomer.id}`} className={styles.linkedCustomerName}>
+                    {relatedCustomer.fullName}
+                  </Link>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  style={{ backgroundColor: 'var(--color-success)', borderColor: 'var(--color-success)', color: '#fff' }}
+                  onClick={() => navigate(`/admin/customers/${relatedCustomer.id}`)}
+                >
+                  Open customer
+                </Button>
               </div>
-              <div className={styles.snapshotField}>
-                <dt>Approved</dt>
-                <dd>{existing.data.approvedAt ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>Rejected</dt>
-                <dd>{existing.data.rejectedAt ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>Customer</dt>
-                <dd>
-                  {relatedCustomer ? (
-                    <Link to={`/admin/customers/${relatedCustomer.id}`}>
-                      {relatedCustomer.fullName}
-                    </Link>
-                  ) : (
-                    existing.data.customerId
-                  )}
-                </dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>Sale</dt>
-                <dd>{existing.data.saleId ?? '-'}</dd>
-              </div>
-            </dl>
+            ) : (
+              <dl className={styles.snapshotGrid}>
+                <div className={styles.snapshotField}>
+                  <dt>Customer</dt>
+                  <dd>{existing.data.customerId ?? 'Not recorded'}</dd>
+                </div>
+              </dl>
+            )}
           </section>
         ) : null}
         {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
-        {relatedCustomer ? (
-          <section aria-label="Linked company record" className={styles.panel}>
-            <h2 className={styles.panelTitle}>Linked company record (read-only)</h2>
-            <p className={styles.hint}>
-              Company record for {relatedCustomer.fullName} ({relatedCustomer.customerNumber}). Edit
-              on the customer page. Stated figures never change the offer.
-            </p>
-            <dl className={styles.snapshotGrid}>
-              <div className={styles.snapshotField}>
-                <dt>RA NO</dt>
-                <dd>{relatedCustomer.raNumber ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>STATUS (company)</dt>
-                <dd>{relatedCustomer.companyStatus ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>CITIZENSHIP</dt>
-                <dd>{relatedCustomer.citizenship ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>SUPPLEMENTARY</dt>
-                <dd>{relatedCustomer.supplementaryFullName ?? '-'}</dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>RELATED</dt>
-                <dd>
-                  {[
-                    relatedCustomer.svdName,
-                    relatedCustomer.ssmName,
-                    relatedCustomer.smName,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ') || '-'}
-                </dd>
-              </div>
-              <div className={styles.snapshotField}>
-                <dt>STATED PACKAGE</dt>
-                <dd>{relatedCustomer.statedVipPackage ?? '-'}</dd>
-              </div>
-            </dl>
-            <div className={styles.actions}>
-              <Button
-                variant="secondary"
-                onClick={() => navigate(`/admin/customers/${relatedCustomer.id}`)}
-              >
-                Open Customer
-              </Button>
-            </div>
-          </section>
-        ) : null}
-        {proposal.data ? (
+
+        {proposal.data && !isEditRoute ? (
           <section aria-label="Purchase terms offer" className={styles.panel}>
             <h2 className={styles.panelTitle}>
               {proposal.data.offerKind === 'newly_confirmed_offer'
@@ -1456,14 +1603,14 @@ export function CustomerApplicationEditorPage() {
               </div>
               <div className={styles.snapshotField}>
                 <dt>Payment scheme</dt>
-                <dd>{proposal.data.terms.paymentScheme}</dd>
+                <dd>{paymentSchemeLabel(proposal.data.terms.paymentScheme)}</dd>
               </div>
               <div className={styles.snapshotField}>
-                <dt>Total purchase amount</dt>
+                <dt>Total amount</dt>
                 <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
               </div>
               <div className={styles.snapshotField}>
-                <dt>Included reservation amount</dt>
+                <dt>Reservation amount</dt>
                 <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
               </div>
               <div className={styles.snapshotField}>
@@ -1481,11 +1628,11 @@ export function CustomerApplicationEditorPage() {
               ) : null}
               <div className={styles.snapshotField}>
                 <dt>Spot-cash window</dt>
-                <dd>{proposal.data.terms.spotCashDays} days from first payment</dd>
+                <dd>{proposal.data.terms.spotCashDays} days</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Yearly points</dt>
-                <dd>{proposal.data.terms.yearlyPoints}</dd>
+                <dd>{formatCountOrDash(proposal.data.terms.yearlyPoints)}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Validity</dt>
@@ -1493,15 +1640,11 @@ export function CustomerApplicationEditorPage() {
               </div>
               <div className={styles.snapshotField}>
                 <dt>Commission</dt>
-                <dd>
-                  {proposal.data.terms.commissionRate} on{' '}
-                  {formatMoneyOrDash(proposal.data.terms.commissionBase)} ={' '}
-                  {formatMoneyOrDash(proposal.data.terms.expectedCommission)}
-                </dd>
+                <dd>{formatMoneyOrDash(proposal.data.terms.expectedCommission)}</dd>
               </div>
               <div className={styles.snapshotField}>
                 <dt>Offer as of</dt>
-                <dd>{formatDateTime(proposal.data.asOf)}</dd>
+                <dd>{formatDate(proposal.data.asOf)}</dd>
               </div>
             </dl>
             {proposal.data.offerKind === 'newly_confirmed_offer' ? (
@@ -1512,38 +1655,39 @@ export function CustomerApplicationEditorPage() {
             ) : null}
           </section>
         ) : null}
-        {selectedPlan ? (
-          <DetailCard
-            className={`${styles.planBenefits} ${styles[`plan${selectedPlan.code}`] ?? ''}`}
-          >
-            <div className={styles.planBenefitsHead}>
-              <div>
-                <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
-              </div>
-              <TierBadge tier={selectedPlan.code} />
-            </div>
-            {['GOLD', 'SILVER', 'BRONZE'].includes(selectedPlan.code.trim().toUpperCase()) ? (
-              <div className={styles.planArt}>
-                <img {...tierArtwork(selectedPlan.code)} className={styles.planArtImage} />
-              </div>
-            ) : null}
-            <DetailFieldGrid className={styles.planGrid}>
-              <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
-              <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
-              <DetailField label="Yearly points">
-                {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
-              </DetailField>
-              <DetailField label="Validity">
-                {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
-              </DetailField>
-              <DetailField label="Total value">
-                {formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}
-              </DetailField>
-            </DetailFieldGrid>
-            <p className={styles.hint}>Frozen at submit. Later edits change nothing.</p>
-          </DetailCard>
-        ) : null}
+        {showForm ? (
         <fieldset disabled={!editable} className={styles.formRoot}>
+          {selectedPlan ? (
+            <DetailCard
+              className={`${styles.planBenefits} ${styles[`plan${selectedPlan.code}`] ?? ''}`}
+            >
+              <div className={styles.planBenefitsHead}>
+                <div>
+                  <DetailCardTitle className={styles.planTitle}>{selectedPlan.name}</DetailCardTitle>
+                </div>
+                <TierBadge tier={selectedPlan.code} />
+              </div>
+              {['GOLD', 'SILVER', 'BRONZE'].includes(selectedPlan.code.trim().toUpperCase()) ? (
+                <div className={styles.planArt}>
+                  <img {...tierArtwork(selectedPlan.code)} className={styles.planArtImage} />
+                </div>
+              ) : null}
+              <DetailFieldGrid className={styles.planGrid}>
+                <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
+                <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
+                <DetailField label="Yearly points">
+                  {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
+                </DetailField>
+                <DetailField label="Validity">
+                  {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
+                </DetailField>
+                <DetailField label="Total value">
+                  {formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}
+                </DetailField>
+              </DetailFieldGrid>
+              <p className={styles.hint}>Frozen at submit. Later edits change nothing.</p>
+            </DetailCard>
+          ) : null}
           {(!isNew || activeStep === 0) && (
             <section
               id="step-application"
@@ -1776,6 +1920,35 @@ export function CustomerApplicationEditorPage() {
           {(!isNew || activeStep === 2) && (
             <div id="step-holders">
               <HolderFields title="Primary holder" value={primary} onChange={setPrimary} />
+              <label className={styles.filterLabel}>
+                RA Number (Customer ID)
+                <Select
+                  id="app-primary-ra-mode"
+                  name="primaryRaNumberMode"
+                  aria-label="RA Number (Customer ID) mode"
+                  value={raNumberMode}
+                  onChange={(e) => {
+                    const next = e.target.value as 'automatic' | 'manual';
+                    setRaNumberMode(next);
+                    if (next === 'automatic') setPrimary((current) => ({ ...current, raNumber: '' }));
+                  }}
+                  options={[
+                    { value: 'automatic', label: 'Automatic' },
+                    { value: 'manual', label: 'Manual' },
+                  ]}
+                />
+              </label>
+              {raNumberMode === 'manual' ? (
+                <div style={{ marginTop: 8 }}>
+                  <TextField
+                    id="app-primary-ra"
+                    name="primaryRaNumber"
+                    label="RA Number (Customer ID)"
+                    value={primary.raNumber ?? ''}
+                    onChange={(value) => setPrimary((current) => ({ ...current, raNumber: value }))}
+                  />
+                </div>
+              ) : null}
               <label className={styles.checkRow}>
                 <input
                   type="checkbox"
@@ -1848,17 +2021,24 @@ export function CustomerApplicationEditorPage() {
                 />{' '}
                 I certify the information and consent to verification and processing under RA 10173.
               </label>
-              <label className={styles.checkRow}>
-                <input
-                  type="checkbox"
-                  checked={validId}
-                  onChange={(e) => setValidId(e.target.checked)}
-                />{' '}
-                Valid government ID with specimen signatures received
-              </label>
+              {submissionSuccess ? (
+                <p className={styles.hint} style={{ color: 'var(--color-success)' }}>
+                  ✓ Valid government ID with specimen signatures received — verified on submission.
+                </p>
+              ) : (
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={validId}
+                    onChange={(e) => setValidId(e.target.checked)}
+                  />{' '}
+                  Valid government ID with specimen signatures received
+                </label>
+              )}
             </fieldset>
           )}
         </fieldset>
+        ) : null}
         {blockers.length > 0 ? (
           <Alert variant="warning" title="Cannot save and submit yet:">
             <ul>
@@ -1868,8 +2048,9 @@ export function CustomerApplicationEditorPage() {
             </ul>
           </Alert>
         ) : null}
+        {showForm ? (
         <div className={styles.stickyFooter}>
-          <div className={styles.stickyFooterActions}>
+          <div className={styles.stickyFooterInner}>
             {isNew && activeStep > 0 ? (
               <Button variant="secondary" onClick={() => goStep(activeStep - 1)}>
                 Back
@@ -1884,182 +2065,54 @@ export function CustomerApplicationEditorPage() {
                 Next
               </Button>
             ) : null}
-            {saveAction}
+            {!(isNew && activeStep < steps.length - 1) ? saveAction : null}
           </div>
         </div>
-        {id ? (
+        ) : null}
+        {hasRecordActions ? (
           <section aria-label="Record actions" className={styles.panel}>
-            <h2 className={styles.panelTitle}>Record actions</h2>
             <div className={styles.recordGroups}>
-              {id && existing.data?.status === 'submitted' ? (
-                <div className={styles.actionGroup}>
-                  <h3 className={styles.actionGroupTitle}>Decision</h3>
-                  <div className={styles.actions}>
-                    <Button
-                      onClick={() => decide.mutate('approved')}
-                      loading={decide.isPending}
-                      loadingLabel="Approving…"
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() => decide.mutate('rejected')}
-                      loading={decide.isPending}
-                      loadingLabel="Rejecting…"
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => reopen.mutate()}
-                      loading={reopen.isPending}
-                      loadingLabel="Reopening…"
-                    >
-                      {existing.data.purchaseTermsId
-                        ? 'Reopen to draft'
-                        : 'Reopen to review purchase terms'}
-                    </Button>
-                  </div>
-                  <p className={styles.hint}>
-                    Approval needs reviewed purchase terms; reopening returns the record to draft
-                    for corrections.
-                  </p>
-                </div>
-              ) : null}
-              <div className={styles.actionGroup}>
-                <h3 className={styles.actionGroupTitle}>Application data</h3>
-                <div className={styles.actions}>
-                  {editable ? (
-                    <Button variant="secondary" type="button" onClick={focusApplicationForm}>
-                      Edit application
-                    </Button>
-                  ) : null}
-                </div>
-                {!editable ? (
-                  <p className={styles.hint}>
-                    {existing.data && ['submitted', 'rejected'].includes(existing.data.status)
-                      ? 'Data is read-only once submitted. Reopen to draft to edit it.'
-                      : 'Data is read-only in this status.'}
-                  </p>
-                ) : null}
-              </div>
-              {id && existing.data?.status === 'rejected' ? (
-                <div className={styles.actionGroup}>
-                  <h3 className={styles.actionGroupTitle}>Lifecycle</h3>
-                  <div className={styles.actions}>
-                    <Button
-                      variant="secondary"
-                      onClick={() => reopen.mutate()}
-                      loading={reopen.isPending}
-                      loadingLabel="Reopening…"
-                    >
-                      Reopen to draft
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              {id && existing.data?.status === 'approved' && !proposal.data ? (
-                <div className={styles.actionGroup}>
-                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
-                  <div className={styles.actions}>
-                    <Button
-                      variant="secondary"
-                      onClick={() => void proposal.refetch()}
-                      loading={proposal.isFetching}
-                      loadingLabel="Loading offer…"
-                      type="button"
-                    >
-                      Load purchase terms offer
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              {id && existing.data?.status === 'approved' && proposal.data ? (
-                <div className={styles.actionGroup}>
-                  <h3 className={styles.actionGroupTitle}>Purchase terms</h3>
-                  <TextAreaField
-                    id="application-review-reason"
-                    name="reviewReason"
-                    label="Review reason"
-                    optional
-                    rows={2}
-                    value={reviewReason}
-                    onChange={setReviewReason}
-                  />
-                  <div className={styles.actions}>
-                    <Button
-                      onClick={() => review.mutate()}
-                      disabled={reviewReason.trim().length < 5}
-                      loading={review.isPending}
-                      loadingLabel="Confirming…"
-                    >
-                      Confirm purchase terms
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-              {id &&
-              existing.data &&
-              canTransitionCustomerApplication(existing.data.status, 'cancelled') ? (
-                <div className={styles.actionGroup}>
-                  <h3 className={styles.actionGroupTitle}>Cancel</h3>
-                  <div className={styles.actions}>
-                    <Button
-                      variant="secondary"
-                      onClick={() => decide.mutate('cancelled')}
-                      loading={decide.isPending}
-                      loadingLabel="Cancelling…"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                  <p className={styles.hint}>
-                    Cancelling ends this application. This cannot be undone.
-                  </p>
-                </div>
-              ) : null}
-              <div className={styles.actionGroup}>
-                <h3 className={styles.actionGroupTitle}>Next step</h3>
-                <div className={styles.actions}>
-                  {existing.data && ['submitted', 'approved'].includes(existing.data.status) && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => navigate(`/admin/sales/reservations/new?application=${id}`)}
-                    >
-                      Create Reservation
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <div className={styles.actionGroup}>
-                <h3 className={styles.actionGroupTitle}>Exports</h3>
-                <div className={styles.actions}>
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      void exportCustomerApplication(id, 'xlsx')
-                        .then(saveFile)
-                        .catch((e: unknown) =>
-                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                        )
+              <div className={styles.actions}>
+                <Button
+                  onClick={async () => {
+                    try {
+                      await decide.mutateAsync('approved');
+                      const reservations = await getReservationAgreements({ application: id! }).catch((error: unknown) => {
+                        setMessage(error instanceof Error ? error.message : 'Reservation status could not be loaded.');
+                        throw error;
+                      });
+                      if (!reservations.some((reservation) => reservation.status !== 'cancelled')) {
+                        await proposal.refetch();
+                        await review.mutateAsync();
+                      }
+                    } catch {
+                      // Each mutation reports its own failure; the reservation lookup reports above.
                     }
-                  >
-                    Export XLSX
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      void exportCustomerApplication(id, 'pdf')
-                        .then(saveFile)
-                        .catch((e: unknown) =>
-                          setMessage(e instanceof Error ? e.message : 'Export failed.'),
-                        )
-                    }
-                  >
-                    Export PDF
-                  </Button>
-                </div>
+                  }}
+                  disabled={decide.isPending || review.isPending || existing.data?.status !== 'submitted'}
+                  loading={(decide.isPending && decidingDecision === 'approved') || review.isPending}
+                  loadingLabel="Approving…"
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => decide.mutate('rejected')}
+                  disabled={decide.isPending || existing.data?.status !== 'submitted'}
+                  loading={decide.isPending && decidingDecision === 'rejected'}
+                  loadingLabel="Rejecting…"
+                >
+                  Reject
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => reopen.mutate()}
+                  disabled={reopen.isPending || !(existing.data?.status === 'submitted' || existing.data?.status === 'rejected')}
+                  loading={reopen.isPending}
+                  loadingLabel="Reopening…"
+                >
+                  Reopen
+                </Button>
               </div>
             </div>
           </section>

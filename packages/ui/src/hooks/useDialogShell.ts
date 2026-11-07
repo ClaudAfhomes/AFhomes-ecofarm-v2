@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
+let scrollLocks = 0;
+let unlockedOverflow = '';
+
 const FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
@@ -53,10 +56,12 @@ export function useDialogShell({
       return restore;
     }
 
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (scrollLocks++ === 0) {
+      unlockedOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
     return () => {
-      document.body.style.overflow = originalOverflow;
+      if (--scrollLocks === 0) document.body.style.overflow = unlockedOverflow;
       restore();
     };
   }, [open, panelRef, restoreFocus, lockScroll]);

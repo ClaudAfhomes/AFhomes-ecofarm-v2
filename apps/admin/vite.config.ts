@@ -15,9 +15,9 @@ export default defineConfig(({ mode }) => ({
   // Tests stay hermetic: under `vitest` (mode === 'test') the app-local dir is
   // used, so a developer's real `.env.local` can never leak into assertions.
   envDir:
-    mode === 'test'
+    process.env.AFHOMES_DEV_ENV_DIR ?? (mode === 'test'
       ? fileURLToPath(new URL('./', import.meta.url))
-      : fileURLToPath(new URL('../../', import.meta.url)),
+      : fileURLToPath(new URL('../../', import.meta.url))),
   plugins: [react()],
   resolve: {
     alias: {
@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => ({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.AFHOMES_DEV_API_TARGET ?? 'http://localhost:3000',
         changeOrigin: true,
       },
     },

@@ -24,6 +24,10 @@ const quote = {
   finalAmountPayable: '500.00',
   expiresAt: '2099-01-01T00:00:00.000Z',
   status: 'pending' as const,
+  serviceDates: {checkInDate:'2026-10-24',checkOutDate:'2026-10-26'},
+  allowanceType: 'weekend' as const,
+  weekdayPoints: 0,
+  weekendPoints: 1000,
 };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -64,6 +68,13 @@ describe('customer spending approval', () => {
     expect(notifyConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('AF-TXN-TEST') }),
     );
+  });
+  it('blocks approval when a legacy request has no actual service dates', async () => {
+    vi.mocked(getPointApprovals).mockResolvedValue([{...quote,serviceDates:undefined,allowanceType:null}]);
+    renderWithProviders(<PointRedemptionApprovals />);
+    expect(await screen.findByRole('button',{name:'Authorize points'})).toBeDisabled();
+    expect(screen.getByText(/Missing dates/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Reject'})).toBeEnabled();
   });
   it('rejection does not invoke a spending or credit action', async () => {
     vi.mocked(decidePointApproval).mockResolvedValue({ status: 'rejected' });

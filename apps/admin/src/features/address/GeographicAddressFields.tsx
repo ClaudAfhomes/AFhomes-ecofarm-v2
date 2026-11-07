@@ -100,6 +100,11 @@ export function GeographicAddressFields({
 
   return (
     <>
+      {((value.province && !value.provinceCode) ||
+        (value.cityMunicipality && !value.cityMunicipalityCode) ||
+        (value.barangay && !value.barangayCode)) && (
+        <p role="status">Stored value unverified. Select official geographic entries to verify it.</p>
+      )}
       <Combobox
         id={`${idPrefix}-province`}
         label="Province"
@@ -123,7 +128,6 @@ export function GeographicAddressFields({
           })
         }
       />
-      {value.province && !value.provinceCode ? <Unverified /> : null}
 
       <Combobox
         id={`${idPrefix}-locality`}
@@ -155,7 +159,6 @@ export function GeographicAddressFields({
           });
         }}
       />
-      {value.cityMunicipality && !value.cityMunicipalityCode ? <Unverified /> : null}
 
       <Combobox
         id={`${idPrefix}-barangay`}
@@ -183,20 +186,8 @@ export function GeographicAddressFields({
           })
         }
       />
-      {value.barangay && !value.barangayCode ? <Unverified /> : null}
     </>
   );
 }
 
-/**
- * Says why a stored address is not code-verified. Absence is expected for every
- * application created before the structured selectors existed, so this is
- * information, not an error - it must not block saving.
- */
-function Unverified() {
-  return (
-    <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)', margin: 0 }}>
-      Stored value unverified. Pick from list.
-    </p>
-  );
-}
+

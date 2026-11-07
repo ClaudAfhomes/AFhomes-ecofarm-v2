@@ -87,9 +87,14 @@
   color: var(--color-text-primary);
 }
 
-.mastheadAction {
+.mastheadActions {
+  display: flex;
+  gap: var(--space-2);
   justify-self: end;
   align-self: start;
+}
+
+.mastheadAction {
   white-space: nowrap;
 }
 
@@ -785,6 +790,43 @@
   min-width: 0;
 }
 
+/* Government ID image replacement block: current scan, picker, preview. */
+.idImageField {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageLabel {
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.idImagePreview {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.idImagePreviewThumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .editEmpty {
   margin: 0;
   padding: var(--space-4);
@@ -831,14 +873,42 @@
   flex: 0 0 auto;
 }
 
+/* Phones: a sideways-scrolling strip hid every action past the first with no
+   visible cue, so the actions stack as full-width tap targets instead. */
+@media (max-width: 639px) {
+  .actionButtons {
+    flex-direction: column;
+    align-items: stretch;
+    overflow-x: visible;
+  }
+
+  .actionButtons > * {
+    width: 100%;
+    min-height: 40px;
+  }
+}
+
 /* Field grid: as many comfortable columns as fit, filled in reading order.
    The previous fixed-row column flow packed the 24-field company block into six
    implicit columns, so every label wrapped to two or three lines. */
 .topGrid .fields {
   display: grid;
   gap: var(--space-3) var(--space-5);
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
   margin: 0;
+}
+
+/* A long unbroken value (an email, a reference) must wrap inside its field:
+   the shared field grid sizes its column to the value's min-content, which
+   pushed the whole card past a phone screen. */
+.topGrid .fields > * {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.topGrid .fields dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* The Government ID field carries the scan when no number is recorded, so it
@@ -1038,6 +1108,7 @@
     padding: var(--space-2) var(--space-3);
     text-align: right;
     min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .history tbody > tr > td > * {

@@ -388,7 +388,7 @@ function installPointsPosition(overrides: Record<string, unknown> = {}) {
   install({
     rpcs: [
       {
-        fn: 'customer_points_position',
+        fn: 'customer_points_position_with_allowances',
         result: () => [
           {
             membership_id: MEMBERSHIP_ID,
@@ -1164,7 +1164,7 @@ describe('customer points', () => {
   });
 
   it('shows zeroes rather than an error for a card with no points account yet', async () => {
-    install({ rpcErrors: { customer_points_position: { message: 'POINTS_ACCOUNT_NOT_FOUND' } } });
+    install({ rpcErrors: { customer_points_position_with_allowances: { message: 'POINTS_ACCOUNT_NOT_FOUND' } } });
     const s = await callPortal('points/position');
     expect(s.status).toBe(200);
     expect(body(s)).toMatchObject({ balance: 0, spendable: 0, reversalDebt: 0 });
@@ -1362,7 +1362,7 @@ describe('customer and staff authorisation never mix', () => {
       // ONE customer's points and no staff capability.
       rpcs: [
         {
-          fn: 'customer_points_position',
+          fn: 'customer_points_position_with_allowances',
           result: () => [
             {
               membership_id: MEMBERSHIP_ID,

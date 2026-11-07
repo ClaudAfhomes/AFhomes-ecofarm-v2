@@ -40,10 +40,10 @@ try {
       "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-BEFORE-IMPORT','Before','Import','before-company-import@example.invalid','09123456789','prospect') returning ra_number",
     )
   ).rows[0];
-  assert.equal(beforeImport.ra_number, `AF-CUS-${issueYear}-000001`);
+  assert.equal(beforeImport.ra_number, `${issueYear}-0001`);
   await db.query(
     "insert into public.customers(customer_number,ra_number,first_name,last_name,email,phone,status) values('SYNTHETIC-COMPANY-SEED',$1,'Company','Seed','company-counter-seed@example.invalid','09123456789','prospect')",
-    [`AF-CUS-${issueYear}-000100`],
+    [`${issueYear}-000100`],
   );
   const raw = {
     workbook_format: 'company_v2',
@@ -735,7 +735,7 @@ try {
     applicationCount,
   );
   console.log('PASS conflicting existing reservation terms are held before any history is created');
-  const companyId = `AF-CUS-${issueYear}-900001`;
+  const companyId = `${issueYear}-900001`;
   const companyRaw = {
     ...raw,
     purchase_reference: 'SYNTHETIC PRE-SYSTEM PURCHASE',
@@ -802,7 +802,7 @@ try {
   console.log(
     'PASS pre-system company Customer ID preserved, internal reference separate, retries/search work and conflicting ID reuse is rejected',
   );
-  const raceId = `AF-CUS-${issueYear}-900002`;
+  const raceId = `${issueYear}-900002`;
   const raceRows = [];
   for (let i = 0; i < 2; i++) {
     const email = `company-id-race-${i}@example.invalid`;
@@ -853,7 +853,7 @@ try {
   ).rows[0];
   assert.equal(
     generated.ra_number,
-    `AF-CUS-${issueYear}-900003`,
+    `${issueYear}-900003`,
     'general creation continues after the highest imported number',
   );
   await db.query('delete from public.customers where id=$1', [generated.id]);
@@ -864,7 +864,7 @@ try {
   ).rows[0];
   assert.equal(
     retained.ra_number,
-    `AF-CUS-${issueYear}-900004`,
+    `${issueYear}-900004`,
     'deleting a test record must not reissue its ID',
   );
   await assert.rejects(
@@ -880,7 +880,7 @@ try {
   ).rows[0];
   assert.equal(
     afterFailure.ra_number,
-    `AF-CUS-${issueYear}-900005`,
+    `${issueYear}-900005`,
     'a failed insert rolls its company-number allocation back',
   );
   const generalClients = [
@@ -898,8 +898,8 @@ try {
       ),
     );
     assert.deepEqual(rows.map((r) => r.rows[0].ra_number).sort(), [
-      `AF-CUS-${issueYear}-900006`,
-      `AF-CUS-${issueYear}-900007`,
+      `${issueYear}-900006`,
+      `${issueYear}-900007`,
     ]);
   } finally {
     await Promise.all(generalClients.map((c) => c.end()));
@@ -926,14 +926,14 @@ try {
   }
   await db.query(
     "insert into public.customers(customer_number,ra_number,first_name,last_name,email,phone,status) values('SYNTHETIC-LOWER-ID',$1,'Lower','Example','lower-id@example.invalid','09123456789','prospect')",
-    [`af-cus-${issueYear}-900008`],
+    [`${issueYear}-900008`],
   );
   const afterLower = (
     await db.query(
       "insert into public.customers(customer_number,first_name,last_name,email,phone,status) values('SYNTHETIC-AFTER-LOWER','Next','Example','after-lower-id@example.invalid','09123456789','prospect') returning ra_number",
     )
   ).rows[0];
-  assert.equal(afterLower.ra_number, `AF-CUS-${issueYear}-900009`);
+  assert.equal(afterLower.ra_number, `${issueYear}-900009`);
   await db.query('begin');
   await db.query(
     'update private.company_customer_id_counters set last_issued=999999 where issue_year=$1',

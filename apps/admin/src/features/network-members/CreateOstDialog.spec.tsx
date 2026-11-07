@@ -11,6 +11,16 @@ import { expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { CreateOstDialog } from './CreateOstDialog';
 import { createOstMember } from './services';
+vi.mock('../../../../../packages/ui/src/components/compress-profile-photo.js', () => ({
+  profilePhotoBase64: vi.fn(async () => 'cGhvdG8='),
+}));
+
+it('requires a profile photo before creating an OST account', async () => {
+  renderWithProviders(<CreateOstDialog open onClose={vi.fn()} onCreated={vi.fn()} />);
+  expect(screen.getByRole('button', { name: 'Create and accredit' })).toBeDisabled();
+  expect(screen.getByLabelText('Choose profile photo')).toBeEnabled();
+  expect(screen.getByText(/Choose a photo before creating the account/)).toBeInTheDocument();
+});
 
 it('places ID type and an editable ID number together in a named identification section', () => {
   renderWithProviders(<CreateOstDialog open onClose={vi.fn()} onCreated={vi.fn()} />);
@@ -94,6 +104,7 @@ it('submits a password-based manual AA creation with verified geography and an S
     status: 'approved',
   });
   renderWithProviders(<CreateOstDialog open onClose={vi.fn()} onCreated={onCreated} />);
+  await user.upload(screen.getByLabelText('Choose profile photo'), new File(['photo'], 'profile.jpg', { type: 'image/jpeg' }));
   for (const [label, value] of [
     ['First Name', 'Test'],
     ['Last Name', 'Person'],
@@ -136,6 +147,7 @@ it('submits a password-based manual AA creation with verified geography and an S
   await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
   expect(vi.mocked(createOstMember).mock.calls.at(-1)?.[0]).toEqual(
     expect.objectContaining({
+      profilePhotoBase64: 'cGhvdG8=',
       temporaryPassword: 'SyntheticPass123!',
       aaNumberMode: 'manual',
       aaNumber: 'AAO26100001',

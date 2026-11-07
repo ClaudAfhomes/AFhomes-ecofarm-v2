@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MembersPage } from './MembersPage';
 import { renderWithProviders } from '../../test/utils';
 import { ApiError } from '../../lib/api/errors';
+vi.mock('../../../../../packages/ui/src/components/compress-profile-photo.js', () => ({
+  profilePhotoBase64: vi.fn(async () => 'cGhvdG8='),
+}));
 
 vi.mock('./services', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./services')>();
@@ -107,6 +110,7 @@ const ROW = {
   tinMasked: '•••-•••-789',
   governmentIdMasked: '•••4321',
   createdAt: '2026-09-01T00:00:00.000Z',
+  detailAuthorized: true,
 };
 
 const SALES_DEPT = {
@@ -149,11 +153,18 @@ const OST_ROW = {
   positionLabel: 'OST',
   referrerName: 'SM ONE',
   aaNumber: 'AAO20010001',
+  detailAuthorized: true,
 };
 
 function showList() {
   vi.mocked(getMembers).mockResolvedValue([ROW] as never);
   renderWithProviders(<MembersPage />);
+}
+
+async function openMemberEdit() {
+  const edit = await screen.findByRole('button', { name: 'Edit' });
+  await waitFor(() => expect(edit).toBeEnabled());
+  fireEvent.click(edit);
 }
 
 function showCreate() {
@@ -171,7 +182,29 @@ const openCreate = async () => {
   await screen.findByRole('option', { name: 'Sales' });
 };
 
+it('opens each new OST creation with blank identity, credentials and manual AA fields', async () => {
+  showCreate();
+  fireEvent.click(await screen.findByRole('button', { name: 'Create OST' }));
+  fireEvent.change(await screen.findByLabelText(/^First Name/), { target: { value: 'Previous' } });
+  fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'previous@example.invalid' } });
+  fireEvent.change(screen.getByLabelText(/^Temporary password/), { target: { value: 'SyntheticPrevious123!' } });
+  fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: 'SyntheticPrevious123!' } });
+  fireEvent.change(screen.getByLabelText(/^AA number mode/), { target: { value: 'manual' } });
+  fireEvent.change(screen.getByLabelText(/^AA number$/), { target: { value: 'AAO26100001' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByLabelText(/^First Name/)).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'Create OST' }));
+  expect(await screen.findByLabelText(/^First Name/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Email/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Temporary password/)).toHaveValue('');
+  expect(screen.getByLabelText(/^Confirm password/)).toHaveValue('');
+  expect(screen.getByLabelText(/^AA number mode/)).toHaveValue('auto');
+  expect(screen.queryByLabelText(/^AA number$/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create and accredit' })).toBeDisabled();
+});
+
 const fillRequired = () => {
+  fireEvent.change(screen.getByLabelText('Choose profile photo'), { target: { files: [new File(['photo'], 'profile.jpg', { type: 'image/jpeg' })] } });
   fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New Member' } });
   fireEvent.change(screen.getByLabelText('Date of Birth'), { target: { value: '1992-05-06' } });
   fireEvent.change(screen.getByLabelText('Sex'), { target: { value: 'Male' } });
@@ -315,7 +348,7 @@ describe('Members page', () => {
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'ost' } });
     await waitFor(() => expect(screen.queryByLabelText('OST Referrer')).toBeNull());
     fireEvent.change(screen.getByLabelText('Position'), { target: { value: 'vice_director' } });
-    expect(await screen.findByText('Vice Directors have no head.')).toBeInTheDocument();
+    expect(await screen.findByText('SVDs have no head.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Head')).toBeNull();
   });
 
@@ -507,7 +540,7 @@ describe('Members page', () => {
     vi.mocked(updateMember).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // New fields mirror creation, prefilled from the record.
     expect(screen.getByLabelText('Full Name')).toHaveValue('SALES MANAGER');
     expect(screen.getByLabelText('Date of Birth')).toHaveValue('1990-02-02');
@@ -538,7 +571,7 @@ describe('Members page', () => {
     vi.mocked(getMemberUplines).mockResolvedValue([SSM_UPLINE] as never);
     await screen.findByText('SALES MANAGER');
     fireEvent.click(screen.getByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // The same sections creation renders, in the same order.
     for (const section of [
       'Assignment',
@@ -578,7 +611,7 @@ describe('Members page', () => {
     vi.mocked(updateMember).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     // Moving the position clears the head; the new level asks for its own.
     fireEvent.change(screen.getByLabelText('Position'), {
       target: { value: 'senior_sales_manager' },
@@ -623,11 +656,12 @@ describe('Members page', () => {
 
   it('issues a missing AA number from the Edit form too', async () => {
     vi.mocked(getMembers).mockResolvedValue([{ ...ROW, aaNumber: null }] as never);
+    vi.mocked(getMember).mockResolvedValue({ ...DETAIL, aaNumber: null } as never);
     const { issueMemberAccreditation } = await import('./services');
     vi.mocked(issueMemberAccreditation).mockResolvedValue(ROW as never);
     renderWithProviders(<MembersPage />);
     fireEvent.click(await screen.findByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     expect(await screen.findByLabelText('AA Number Source')).toHaveValue('auto');
     fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
     await waitFor(() =>
@@ -651,7 +685,7 @@ describe('Members page', () => {
     );
     await screen.findByText('SALES MANAGER');
     fireEvent.click(screen.getByText('SALES MANAGER'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    await openMemberEdit();
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'taken@afhomes.test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     // Impossible to miss: a centered modal plus the inline alert. While the

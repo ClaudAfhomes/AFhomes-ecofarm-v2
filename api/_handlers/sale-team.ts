@@ -10,16 +10,22 @@ import { deny, fail, jsonBody, method, singleRpcRow, subPath } from '../_lib/han
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
+import { handlePublicSaleTeamSearch } from '../_lib/sale-team-public-search.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
   const db = serviceClient();
   if (!db) return fail(res, 'INTERNAL', 'Verification is unavailable. Please retry.', 503);
   const path = subPath(req);
+  if (path.startsWith('search/')) return handlePublicSaleTeamSearch(req, res, db, path);
   try {
     let result;
     let historical = false;
     if (path === 'search' && method(req) === 'GET') {
+      if (process.env.AFHOMES_SEARCH_ENABLED === 'true') {
+        const access = await authorizeAfHomes(req, 'network.members');
+        if ('error' in access) return deny(res, access);
+      }
       // shortcut: per-instance IP limit only; use platform edge limits before broad public rollout.
       const verdict = consumeIdentifierAttempt(req, 'public-sale-team');
       if (!verdict.allowed) {

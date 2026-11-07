@@ -206,6 +206,7 @@ describe('company membership template', () => {
       'Reference Lists',
       'Address Lists',
       'Postal Codes',
+      'Examples Guide',
     ]);
     const sheets = [
       ...readWorkbook(

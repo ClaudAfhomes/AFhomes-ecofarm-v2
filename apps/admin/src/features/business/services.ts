@@ -13,6 +13,8 @@ import {
   cardProductSchema,
   commissionSchema,
   commissionRuleSchema,
+  commissionRosterSchema,
+  bulkCommissionRuleResultSchema,
   customerImportCommitResponseSchema,
   customerImportJobSchema,
   customerImportParseResponseSchema,
@@ -52,6 +54,9 @@ import {
   type CardProduct,
   type Commission,
   type CommissionRule,
+  type CommissionRoster,
+  type BulkCommissionRuleRequest,
+  type BulkCommissionRuleResult,
   type CreateCommissionRuleRequest,
   type UpdateCommissionRuleRequest,
   type CustomerImportCommitResponse,
@@ -189,12 +194,6 @@ export const getCustomerById = (id: string): Promise<Customer> =>
 export const updateCustomer = (id: string, input: UpdateCustomerRequest): Promise<Customer> =>
   patch(`/customers/${id}`, customerSchema, updateCustomerSchema.parse(input));
 
-/** Change a customer's lifecycle status. Audited server-side as CUSTOMER_EDITED. */
-export const updateCustomerStatus = (
-  id: string,
-  status: 'prospect' | 'active' | 'suspended',
-): Promise<Customer> => patch(`/customers/${id}`, customerSchema, { status });
-
 /**
  * One server-paginated customer page. The list endpoint already accepts
  * `limit`/`offset` and returns `meta.total`; this helper keeps the envelope
@@ -236,12 +235,12 @@ export const issueCustomerAccountActivation = (id: string): Promise<CustomerOnbo
   post(`/customers/${id}/onboarding-token`, customerOnboardingRecoverySchema, {});
 
 const customerDeactivationSchema = z.object({ deactivated: z.literal(true) });
-const customerAnonymizationSchema = z.object({ anonymized: z.literal(true) });
+const customerReactivationSchema = z.object({ reactivated: z.literal(true) });
 const customerDeletionSchema = z.object({ deleted: z.literal(true) });
 export const deactivateCustomer = (id: string) =>
   post(`/customers/${id}/deactivate`, customerDeactivationSchema, {});
-export const anonymizeCustomer = (id: string) =>
-  post(`/customers/${id}/anonymize`, customerAnonymizationSchema, {});
+export const reactivateCustomer = (id: string) =>
+  post(`/customers/${id}/reactivate`, customerReactivationSchema, {});
 export const deleteCustomer = (id: string) =>
   request(`/customers/${id}`, customerDeletionSchema, { method: 'DELETE' });
 
@@ -743,6 +742,28 @@ const commissionRuleHistorySchema = z.object({
   reason: z.string().nullable(),
   createdAt: z.string(),
 });
+export const getCommissionRoster = (query: {
+  search?: string;
+  position?: string;
+  sales?: 'all' | 'with' | 'without';
+  needsRate?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<CommissionRoster> => {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.position) params.set('position', query.position);
+  if (query.sales && query.sales !== 'all') params.set('sales', query.sales);
+  if (query.needsRate) params.set('needsRate', 'true');
+  if (query.limit) params.set('limit', String(query.limit));
+  if (query.offset) params.set('offset', String(query.offset));
+  const suffix = params.size ? `?${params}` : '';
+  return request(`/commissions/rules/roster${suffix}`, commissionRosterSchema);
+};
+export const bulkSetCommissionRate = (
+  input: BulkCommissionRuleRequest,
+): Promise<BulkCommissionRuleResult> =>
+  post('/commissions/rules/bulk', bulkCommissionRuleResultSchema, input);
 export type CommissionRuleHistory = z.infer<typeof commissionRuleHistorySchema>;
 export const getCommissionRuleHistory = (id: string): Promise<CommissionRuleHistory[]> =>
   requestList(`/commissions/rules/${id}/history`, commissionRuleHistorySchema);
@@ -762,6 +783,7 @@ export const getCustomerImportTemplate = (format: 'xlsx' | 'csv'): Promise<Gener
   request(`/customer-imports/template/${format}`, generatedImportFileSchema);
 
 export const parseCustomerImport = (input: {
+  resumeJobId?: string;
   externalVerificationReason?: string;
   source: 'excel' | 'csv' | 'google_sheets';
   contentBase64?: string;

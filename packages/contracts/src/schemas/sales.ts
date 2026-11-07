@@ -451,6 +451,7 @@ export const updateCustomerSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'statedPaymentDate must be YYYY-MM-DD')
       .nullable()
       .optional(),
+    vipCardNumber: z.string().trim().max(20).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 export type UpdateCustomerRequest = z.infer<typeof updateCustomerSchema>;
@@ -535,6 +536,8 @@ export const customerSchema = z.object({
    * are transaction credentials and stay off this read model.
    */
   tier: z.string().nullable().optional(),
+  /** Official VIP card number (YYMMDDNNNNNVTPMMS), issued server-side. */
+  vipCardNumber: z.string().nullable().optional(),
   /** Membership status when a membership exists, else null. Never a code. */
   membershipStatus: z.string().nullable().optional(),
   membershipExpiresAt: z.string().nullable().optional(),
@@ -677,6 +680,16 @@ export const referralRelationshipSchema = z.object({
   assignedAt: z.string(),
 });
 export type ReferralRelationship = z.infer<typeof referralRelationshipSchema>;
+
+/**
+ * GET /referrals query. Opt-in pagination: sending `limit` or `cursor` returns one page (newest
+ * assignment first, then id) plus `meta.total` and `meta.nextCursor`; without them the full list.
+ */
+export const referralListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().min(1).max(4096).optional(),
+});
+export type ReferralListQuery = z.infer<typeof referralListQuerySchema>;
 
 export const createReferralSchema = z.object({
   subjectStaffId: z.string().uuid(),

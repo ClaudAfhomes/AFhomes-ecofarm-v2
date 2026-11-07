@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
 import { CUSTOMER_WORKBOOK_SHEETS } from '@afhomes/contracts';
 import { readWorkbookParts } from './customer-xlsx.js';
 import { WORKBOOK_FIELDS } from './customer-workbook.js';
 import { zipStored } from './report-export.js';
+import { readRuntimeAsset } from './runtime-assets.js';
 
 export function companyTemplate(): Uint8Array {
-  return readFileSync(
-    new URL('../../packages/contracts/assets/customer-company-template.xlsx', import.meta.url),
-  );
+  return readRuntimeAsset('customer-company-template.xlsx');
 }
 const escape = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

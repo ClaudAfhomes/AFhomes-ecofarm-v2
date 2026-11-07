@@ -241,7 +241,7 @@ describe('Phase 29 role dashboard', () => {
     expect(await screen.findByLabelText('Loading dashboard')).toBeInTheDocument();
     // Even static headings stay skeleton until the data arrives.
     expect(screen.queryByRole('heading', { name: 'Operations Overview' })).toBeNull();
-    expect(screen.queryByText('AFHomes · Staff console')).toBeNull();
+    expect(screen.queryByText('AFhomes · Staff console')).toBeNull();
     expect(screen.queryByText('Key metrics')).toBeNull();
     expect(screen.queryByText('Sales Overview')).toBeNull();
     expect(screen.queryByText(/Loading trend/)).toBeNull();

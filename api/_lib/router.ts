@@ -12,6 +12,7 @@
  * loaded on first use (cold-start win); shared libs stay imported eagerly.
  */
 import { toErrorEnvelope } from './envelope.js';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 type HandlerFn = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
@@ -53,6 +54,7 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * `route-coverage` can still prove every handler is reachable.
  */
 export const BUSINESS_FAMILIES = [
+  { prefix: 'ist-portal', module: 'ist-portal', load: () => import('../_handlers/ist-portal.js') },
   {
     prefix: 'profile-photo',
     module: 'profile-photo',
@@ -190,7 +192,7 @@ export const BUSINESS_FAMILIES = [
   {
     prefix: 'address',
     module: 'sales.customers',
-    load: () => import('../_handlers/address.js'),
+    load: () => import('../_handlers/_address-supabase.js'),
   },
 ] as const;
 
@@ -198,6 +200,7 @@ export function selectHandler(
   pathname: string,
   query: Record<string, string | string[] | undefined>,
 ): RouteMatch | null {
+  if (!isFeaturePathEnabled(pathname)) return null;
   const afHomesMatch = pathname.match(/^\/api(?:\/v1)?\/admin\/afhomes\/(.+)$/);
   if (afHomesMatch) {
     query.afPath = decodeURIComponent(afHomesMatch[1] ?? '');

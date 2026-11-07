@@ -250,7 +250,7 @@ function tables(): Record<string, Record<string, unknown>[]> {
 }
 
 function install() {
-  const db = new FakeSupabase({
+  const db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }],
     tables: phase2World(tables() as never),
     tokens: {
       ...phase2WorldTokens(),

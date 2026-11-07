@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { resolvePostalCode } from './postal-reference.js';
+import { readRuntimeTextAsset } from './runtime-assets.js';
 
 type AddressSnapshot = {
   source: string;
@@ -8,10 +8,7 @@ type AddressSnapshot = {
   localities: { province: string; name: string; barangays: string[] }[];
 };
 const snapshot = JSON.parse(
-  readFileSync(
-    new URL('../../packages/contracts/assets/customer-workflow-addresses.json', import.meta.url),
-    'utf8',
-  ),
+  readRuntimeTextAsset('customer-workflow-addresses.json'),
 ) as AddressSnapshot;
 const column = (n: number): string =>
   n > 26
@@ -43,6 +40,7 @@ export function workflowAddressLists() {
     ),
   );
   const provinceEnd = rows.length;
+  definedNames.push({ name: 'AFHomesProvinceLookup', formula: `'Address Lists'!$A$2:$B$${provinceEnd}` });
   const postalRows: string[][] = [['Address', 'Verified postal code']];
   snapshot.localities.forEach((city, i) => {
     append(`${city.province}|${city.name}`, `AFHomesBarangays${i}`, city.barangays);
@@ -58,6 +56,7 @@ export function workflowAddressLists() {
         postalRows.push([`${city.province}|${city.name}|${barangay}`, exact.postalCode]);
     }
   });
+  definedNames.push({ name: 'AFHomesLocalityLookup', formula: `'Address Lists'!$A$${provinceEnd + 1}:$B$${rows.length}` });
   return {
     rows,
     postalRows,

@@ -11,8 +11,8 @@ import {
   agreementPaymentInputSchema,
   createReservationAgreementSchema,
   reservationHolderSchema,
-  signatureStatusSchema,
   vipTierSchema,
+  signatureStatusSchema,
   reservationAgreementSchema,
 } from './official-forms.js';
 import {
@@ -206,7 +206,7 @@ const proposalConfirmation = {
 };
 export const reviewPurchaseTermsSchema = z.strictObject({
   ...proposalConfirmation,
-  reason: z.string().trim().min(5).max(500),
+  reason: z.string().trim().min(5).max(500).optional(),
 });
 export type ReviewPurchaseTermsRequest = z.infer<typeof reviewPurchaseTermsSchema>;
 export const submitPurchaseApplicationSchema = z.strictObject(proposalConfirmation);
@@ -219,8 +219,6 @@ const mutableAgreement = {
   monthlyAmortizationStart: agreement.monthlyAmortizationStart,
   monthlyAmortizationEnd: agreement.monthlyAmortizationEnd,
   paymentDueDay: agreement.paymentDueDay,
-  primarySignatureStatus: signatureStatusSchema.optional(),
-  secondarySignatureStatus: signatureStatusSchema.optional(),
   scheduleNotes: z.array(agreementPaymentInputSchema.strict()).max(24).optional(),
 };
 const applicationCreate = z.strictObject({
@@ -231,7 +229,6 @@ const applicationCreate = z.strictObject({
   ...mutableAgreement,
   reservationDate: agreement.reservationDate,
   agreementDate: agreement.agreementDate,
-  primarySignatureStatus: signatureStatusSchema,
   scheduleNotes: z.array(agreementPaymentInputSchema.strict()).max(24).default([]),
 });
 const saleCreate = createReservationAgreementSchema
@@ -444,6 +441,9 @@ const commercialFields = {
   inclusions: z.array(z.string().min(1).max(300)).max(30),
 };
 const agreementDocumentFields = {
+  // Read historical evidence without restoring signature inputs on new reservations.
+  primarySignatureStatus: signatureStatusSchema.optional(),
+  secondarySignatureStatus: signatureStatusSchema.nullable().optional(),
   secondaryAddress: z.string().nullable(),
   schedule: z.array(
     z.strictObject({
@@ -451,7 +451,6 @@ const agreementDocumentFields = {
       particular: z.string(),
       amount: money,
       paymentDate: z.string().date().nullable(),
-      remarks: z.string().nullable(),
     }),
   ),
   reservationDate: z.string().date(),
@@ -460,8 +459,6 @@ const agreementDocumentFields = {
   monthlyAmortizationStart: z.string().date().nullable(),
   monthlyAmortizationEnd: z.string().date().nullable(),
   paymentDueDay: z.number().int().min(1).max(31).nullable(),
-  primarySignatureStatus: signatureStatusSchema,
-  secondarySignatureStatus: signatureStatusSchema.nullable(),
 };
 export const purchaseDocumentEvidenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -507,6 +504,8 @@ export const purchaseDocumentEvidenceSchema = z.discriminatedUnion('kind', [
     fields: z.strictObject({
       ...identityFields,
       membershipNumber: z.string().min(1),
+      tier: vipTierSchema.optional(),
+      activatedAt: timestamp.optional(),
       status: z.literal('active'),
       yearlyPoints: z.number().int().nonnegative(),
       pointsAllocated: z.number().int().nonnegative(),

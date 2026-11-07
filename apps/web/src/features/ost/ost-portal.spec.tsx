@@ -60,11 +60,34 @@ const OST_ME = {
   approvedAt: '2026-09-01T00:00:00.000Z',
 };
 
+const OST_DASHBOARD = {
+  head: {
+    headId: '22222222-2222-4222-8222-222222222222',
+    headName: 'Sam Manager',
+    headRole: 'sales_manager',
+    headStatus: 'active',
+    relationship: 'Direct Sponsor',
+  },
+  sales: {
+    totalSales: 0,
+    periodSales: 0,
+    qualifyingSaleStatus: 'active',
+  },
+  commissions: {
+    toEarn: { count: 0, amount: '0.00' },
+    earned: { count: 0, amount: '0.00' },
+    paid: { count: 0, amount: '0.00' },
+    cancelled: { count: 0, amount: '0.00' },
+  },
+  commissionHistory: [],
+};
+
 function installFetch() {
   routes.clear();
   // Read the current probe result lazily: tests reassign it per case.
   routes.set('/auth/portals', () => ok(portalsBody.current)());
   routes.set('/ost/me', ok(OST_ME));
+  routes.set('/ost/me/dashboard', ok(OST_DASHBOARD));
   routes.set(
     '/profile-photo/staff',
     ok({ url: null, expiresAt: null, canUpload: true, notice: null }),
@@ -203,7 +226,8 @@ describe('OST login', () => {
     await user.clear(screen.getByLabelText('Confirm new password'));
     await user.type(screen.getByLabelText('Confirm new password'), 'OwnPassword123');
     await user.click(screen.getByRole('button', { name: 'Save password' }));
-    expect(await screen.findByText(/Sign in with your new password/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'OST Login' })).toBeInTheDocument();
+    expect(authMock.signOut).toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/admin/afhomes/session/password'),
       expect.objectContaining({
@@ -220,10 +244,10 @@ describe('OST login', () => {
     await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-    expect(await screen.findByText('OST-000007')).toBeInTheDocument();
+    expect((await screen.findAllByText('OST-000007')).length).toBeGreaterThan(0);
     expect(await screen.findByText('AA-J6P3N8V5C2S0')).toBeInTheDocument();
     expect(screen.getByText('2027-09-01')).toBeInTheDocument();
-    expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
+    expect(await screen.findByText('Ollie Seller')).toBeInTheDocument();
   });
 
   it('lands on dashboard after login prompted by a protected feature route', async () => {
@@ -240,8 +264,8 @@ describe('OST login', () => {
     await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
-    expect(await screen.findByText('OST-000007')).toBeInTheDocument();
-    expect(screen.getByText('Ollie Seller')).toBeInTheDocument();
+    expect((await screen.findAllByText('OST-000007')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Ollie Seller')).toBeInTheDocument();
   });
 
   it('explains a non-approved record instead of entering', async () => {

@@ -496,29 +496,6 @@ export async function runReservationPurchaseChecks({
   );
   await move('submit');
   check('draft -> submitted', (await statusNow()) === 'submitted');
-  // The signature guard is proven inside a rolled-back transaction: a submitted
-  // agreement whose primary signature is pending must not execute, and the
-  // rollback restores the received signature for the real execution below.
-  check(
-    'execution is refused without the primary signature',
-    await (async () => {
-      await db.query('begin');
-      await db.query(
-        `update public.reservation_agreements set primary_signature_status='pending' where id=$1`,
-        [reservationId],
-      );
-      let refused = false;
-      try {
-        await move('execute');
-      } catch (error) {
-        refused = /PRIMARY_SIGNATURE_REQUIRED/.test(
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-      await db.query('rollback');
-      return refused;
-    })(),
-  );
   await fails('a non-draft save is refused', /AGREEMENT_NOT_EDITABLE/, () =>
     move('save', { revisionNumber: 'R9' }),
   );

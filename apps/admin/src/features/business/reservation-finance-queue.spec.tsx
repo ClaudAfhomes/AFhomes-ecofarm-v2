@@ -170,7 +170,7 @@ describe('Finance queue with an application-origin reservation', () => {
     renderQueue();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();
     expect(screen.getByText('₱54,000.00')).toBeInTheDocument();
-    expect(screen.getByText('Executed')).toBeInTheDocument();
+    expect(screen.getByText('Pending')).toBeInTheDocument();
     expect(screen.queryByText('executed')).toBeNull();
   });
 
@@ -267,14 +267,13 @@ describe('Finance queue with an application-origin reservation', () => {
     });
   });
 
-  it('opens Record payment by clicking the reservation row', async () => {
+  it('opens the reservation details by clicking the row', async () => {
     renderQueue();
     await screen.findByText('AF-RES-ZZZZZ');
     fireEvent.click(
       screen.getByRole('link', { name: 'Record a reservation payment for AF-RES-ZZZZZ' }),
     );
-    expect(await screen.findByText('Record a payment')).toBeInTheDocument();
-    expect(await screen.findByLabelText('Amount')).toBeInTheDocument();
+    expect(await screen.findByText('Reservation figures')).toBeInTheDocument();
   });
 
   it('opens the full reservation details from the row menu, never Verify', async () => {

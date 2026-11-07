@@ -83,6 +83,32 @@ it('requires an explicit external-history selection and carries it into the revi
   expect(screen.getByRole('checkbox', { name: /already verified outside/ })).toBeDisabled();
 });
 
+it('links an archived job to a fresh workbook review without exposing confirm or cancel on the archive', async () => {
+  const user = userEvent.setup();
+  const archived = { ...previewFixture().job, migrationRevalidationRequired: true };
+  vi.mocked(getCustomerImportJobs).mockResolvedValue([archived]);
+  vi.mocked(parseCustomerImport).mockResolvedValue(previewFixture());
+  renderWithProviders(<CustomerImportExportPage />, { user: { ...IMPORTER,
+    afHomesPermissions: IMPORTER.afHomesPermissions.map(permission => ({ ...permission, canUpdate: true })),
+  } });
+  await user.click(screen.getByRole('tab', { name: 'Job history' }));
+  expect(await screen.findByText(/Archived import: fresh validation/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Revalidate workbook' }));
+  expect(screen.getByText(/Upload the original or corrected workbook/)).toBeInTheDocument();
+  await user.upload(screen.getByLabelText('Import Excel (.xlsx or .xlsm)'), new File(['synthetic'], 'review.xlsx'));
+  await waitFor(() => expect(parseCustomerImport).toHaveBeenCalledWith(expect.objectContaining({ resumeJobId: archived.id })));
+});
+
+it('does not offer archived job revalidation to an importer without update permission', async () => {
+  const user = userEvent.setup();
+  vi.mocked(getCustomerImportJobs).mockResolvedValue([{ ...previewFixture().job, migrationRevalidationRequired: true }]);
+  renderWithProviders(<CustomerImportExportPage />, { user: IMPORTER });
+  await user.click(screen.getByRole('tab', { name: 'Job history' }));
+  await screen.findByText(/Archived import: fresh validation/);
+  expect(screen.queryByRole('button', { name: 'Revalidate workbook' })).not.toBeInTheDocument();
+});
+
 const previewFixture = (total = 1) =>
   customerImportParseResponseSchema.parse({
     job: {
@@ -364,4 +390,13 @@ describe('CustomerImportExportPage job history', () => {
     expect(screen.getByText('Needs attention').closest('div')).not.toHaveAttribute('data-alert');
     expect(screen.getByText('Failed').closest('div')).not.toHaveAttribute('data-alert');
   });
+});
+
+it('offers the complete annotated review workbook after upload',async()=>{
+ const result={...previewFixture(),reviewFile:{filename:'customer-import-review.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' as const,content:'UEs='}};
+ vi.mocked(parseCustomerImport).mockResolvedValue(result);
+ renderWithProviders(<CustomerImportExportPage/>,{user:IMPORTER});
+ const user=userEvent.setup();await user.upload(screen.getByLabelText('Import Excel (.xlsx or .xlsm)'),new File(['local'],'customers.xlsx'));
+ expect(await screen.findByRole('button',{name:'Download Review Workbook'})).toBeEnabled();
+ expect(screen.getByText(/All original rows and values are retained/)).toBeInTheDocument();
 });

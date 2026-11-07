@@ -1,4 +1,5 @@
 import { ostAnnualExpiry } from './ost-accreditation.js';
+import { profilePhotoInputSchema } from './profile-photo.js';
 import { z } from 'zod';
 
 import {
@@ -189,6 +190,8 @@ export type MemberProfile = z.infer<typeof memberProfileSchema>;
  */
 export const createMemberSchema = memberProfileSchema
   .extend({
+    // Optional for existing workbook/API callers; manual account forms require a photo.
+    profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
     fullName: memberFullNameSchema,
     email: emailSchema,
     temporaryPassword: z.string().min(8).max(128),
@@ -318,6 +321,8 @@ export const memberSchema = z.object({
   tinMasked: z.string().nullable(),
   governmentIdMasked: z.string().nullable(),
   createdAt: z.string(),
+  /** Whether the current user is authorized to view this member's full detail. */
+  detailAuthorized: z.boolean().optional(),
 });
 export type Member = z.infer<typeof memberSchema>;
 
@@ -336,6 +341,9 @@ export type MemberDetail = z.infer<typeof memberDetailSchema>;
 export const memberListQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   position: memberPositionSchema.optional(),
+  /** Opt-in pagination: sending `limit` or `cursor` returns one page plus `meta.nextCursor`. */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().min(1).max(4096).optional(),
 });
 export type MemberListQuery = z.infer<typeof memberListQuerySchema>;
 
@@ -358,6 +366,7 @@ export const manualOstAaNumberSchema = z
 
 export const createOstMemberSchema = z
   .object({
+    profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
     mode: createOstMemberModeSchema,
     temporaryPassword: z.string().min(8).max(128).optional(),
     aaNumberMode: z.enum(['auto', 'manual']).default('auto'),

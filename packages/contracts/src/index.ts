@@ -53,7 +53,7 @@ export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
 /* ---- Cross-portal identity (portal routing + OST self-service) ----
    `GET /auth/portals` answers which AFHomes identities the bearer's own
    Auth user holds. Login screens route on it; it authorizes nothing. */
-export { authPortalsSchema, ostMeSchema } from './schemas/auth.js';
+export { authPortalsSchema, ostMeSchema, cookieAuthSessionSchema, cookieAuthSignInSchema } from './schemas/auth.js';
 export type { AuthPortals, OstMe } from './schemas/auth.js';
 
 export {
@@ -93,6 +93,7 @@ export {
   normalizeGeographicName,
   normalizePostalCode,
   normalizePhilippinePhone,
+  philippineLandlineDigitCount,
   normalizeEmail,
   normalizeMoneyString,
   isPlausibleBirthDate,
@@ -142,6 +143,7 @@ export {
   serviceCatalogPatchSchema,
   servicePhotoInputSchema,
   quotePointDiscountSchema,
+  redemptionServiceDatesSchema,
   purchaseReceiptInputSchema,
   purchaseReceiptDecisionSchema,
   purchaseReceiptSchema,
@@ -175,6 +177,7 @@ export {
 } from './schemas/points.js';
 export type {
   ClaimEarningPointsRequest,
+  RedemptionServiceDates,
   ClaimEarningPointsResult,
   CreateEarningClaimRequest,
   CreatePurchaseInput,
@@ -282,6 +285,7 @@ export {
   saleSchema,
   saleFinancialSummarySchema,
   referralRelationshipSchema,
+  referralListQuerySchema,
   createReferralSchema,
   correctReferralSchema,
 } from './schemas/sales.js';
@@ -301,6 +305,7 @@ export type {
   Sale,
   SaleFinancialSummary,
   ReferralRelationship,
+  ReferralListQuery,
   CreateReferralRequest,
   CorrectReferralRequest,
 } from './schemas/sales.js';
@@ -334,6 +339,12 @@ export {
   commissionRuleSchema,
   createCommissionRuleSchema,
   updateCommissionRuleSchema,
+  commissionRosterQuerySchema,
+  commissionRosterMemberSchema,
+  commissionRosterPositionSchema,
+  commissionRosterSchema,
+  bulkCommissionRuleSchema,
+  bulkCommissionRuleResultSchema,
   qualifyCommissionSchema,
   markCommissionPaidSchema,
   issueOnboardingTokenSchema,
@@ -356,6 +367,12 @@ export type {
   CommissionRule,
   CreateCommissionRuleRequest,
   UpdateCommissionRuleRequest,
+  CommissionRosterQuery,
+  CommissionRosterMember,
+  CommissionRosterPosition,
+  CommissionRoster,
+  BulkCommissionRuleRequest,
+  BulkCommissionRuleResult,
   QualifyCommissionRequest,
   MarkCommissionPaidRequest,
   IssueOnboardingTokenRequest,
@@ -468,6 +485,7 @@ export {
   reservationAgreementDecisionSchema,
   formImportPreviewSchema,
   officialFormListQuerySchema,
+  SCHEDULE_PARTICULAR_OPTIONS,
 } from './schemas/official-forms.js';
 export type {
   ApplicationHolder,
@@ -546,6 +564,11 @@ export {
   salesTrendGranularitySchema,
   salesTrendPeriodSchema,
   salesTrendReportSchema,
+  teamSalesActivitySchema,
+  teamSalesAnalyticsSchema,
+  teamSalesMemberSchema,
+  teamSalesOverviewSchema,
+  teamSalesTeamSchema,
 } from './schemas/analytics.js';
 export type {
   AnalyticsOverview,
@@ -553,6 +576,11 @@ export type {
   SalesTrendGranularity,
   SalesTrendPeriod,
   SalesTrendReport,
+  TeamSalesActivity,
+  TeamSalesAnalytics,
+  TeamSalesMember,
+  TeamSalesOverview,
+  TeamSalesTeam,
 } from './schemas/analytics.js';
 
 /* ---- Phase 2B: operational dashboard queue cards (AFHomes queue-card pattern) ----
@@ -615,6 +643,15 @@ export {
   createOstReferralCodeSchema,
   ostReferralCodeIssuedSchema,
   ostReferralCodeRecordSchema,
+  ostHeadInfoSchema,
+  ostPersonalSalesSchema,
+  ostPersonalCommissionsSchema,
+  ostCommissionRecordSchema,
+  ostDashboardSchema,
+  ostSalesRecordSchema,
+  ostCommissionListRecordSchema,
+  ostSalesListSchema,
+  ostCommissionsListSchema,
 } from './schemas/ost.js';
 export type {
   OstApplicationStatus,
@@ -630,6 +667,15 @@ export type {
   CreateOstReferralCodeRequest,
   OstReferralCodeIssued,
   OstReferralCodeRecord,
+  OstHeadInfo,
+  OstPersonalSales,
+  OstPersonalCommissions,
+  OstCommissionRecord,
+  OstDashboard,
+  OstSalesRecord,
+  OstCommissionListRecord,
+  OstSalesList,
+  OstCommissionsList,
 } from './schemas/ost.js';
 
 /* ---- Phase 10: membership card management ----
@@ -726,6 +772,8 @@ export {
   type MemberLookup,
   customerLookupSchema,
   type CustomerLookup,
+  gsdActiveVipLookupSchema,
+  type GsdActiveVipLookup,
 } from './schemas/customer-import.js';
 
 export { customerSellerOptionSchema } from './schemas/customer-import.js';
@@ -752,3 +800,9 @@ export * from './schemas/customer-import-continuation.js';
 
 export { servicePolicyManagementResultSchema } from './schemas/points.js';
 export * from './schemas/member-workbook.js';
+export * from './schemas/public-verification-settings.js';
+export * from './schemas/ist-portal.js';
+export * from './schemas/imported-sales.js';
+
+export * from './schemas/cms-content.js';
+export * from './schemas/media.js';

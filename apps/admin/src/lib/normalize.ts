@@ -91,9 +91,22 @@ export const filterMemberTinInput = (value: string): string =>
 export const filterMobileInput = (value: string): string =>
   value.replace(/\D/g, '').slice(0, 11);
 
-/** Live filter for landline input: digits and dialing punctuation only. */
-export const filterLandlineInput = (value: string): string =>
-  value.replace(/[^0-9+().\- ]/g, '').slice(0, 20);
+/** Live filter for landline input: digits and dialing punctuation only, capped
+ * at 13 significant digits (an optional +63/63 country code plus the 7-11
+ * digit area-code+subscriber number). Exact range is enforced on save. */
+export const filterLandlineInput = (value: string): string => {
+  const allowed = value.replace(/[^0-9+().\- ]/g, '');
+  let digits = 0;
+  let result = '';
+  for (const ch of allowed) {
+    if (/[0-9]/.test(ch)) {
+      if (digits >= 13) continue;
+      digits += 1;
+    }
+    result += ch;
+  }
+  return result;
+};
 
 /** Live filter for government ID numbers: letters, digits and dashes, max 16. */
 export const filterGovernmentIdInput = (value: string): string =>

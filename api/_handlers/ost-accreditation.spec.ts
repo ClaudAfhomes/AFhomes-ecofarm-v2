@@ -12,6 +12,8 @@ import { ostFileSchema } from '@afhomes/contracts';
 import { OST_IMPORT_COLUMNS } from '../_lib/ost-import.js';
 import { toCsv } from '../_lib/report-export.js';
 const holder = vi.hoisted(() => ({ db: null as FakeSupabase | null }));
+const photos = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+vi.mock('../_lib/storage.js', () => ({ storageClient: () => ({ from: () => photos }) }));
 const provider = vi.hoisted(() => ({
   provinces: vi.fn(),
   provincesInRegion: vi.fn(),
@@ -41,6 +43,8 @@ const identity = {
   address: { line1: 'QA STREET', city: 'QA CITY', province: 'QA PROVINCE', countryCode: 'PH' },
 };
 beforeEach(() => {
+  photos.upload.mockReset().mockResolvedValue({ error: null });
+  photos.remove.mockReset().mockResolvedValue({ error: null });
   const tables = phase2World({});
   tables.modules = [
     ...(tables.modules ?? []),
@@ -115,11 +119,12 @@ describe('official OST handler boundary', () => {
       expect(db.createdAuthUsers).toHaveLength(0);
       const result = await call(
         path,
-        { startsOn: '2026-01-01', expiresOn: '2027-01-01', temporaryPassword: 'TempPass123' },
+        { startsOn: '2026-01-01', expiresOn: '2027-01-01', temporaryPassword: 'TempPass123', profilePhotoBase64: Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64') },
         TOKEN.superAdmin,
       );
       expect(result.status).toBe(activationFails ? 500 : 201);
       const created = db.createdAuthUsers[0]!;
+      expect(photos.upload).toHaveBeenCalledWith(`${created.id}/profile.jpg`, expect.any(Buffer), expect.objectContaining({ upsert: true }));
       expect(db.rows('staff_users').find((r) => r.id === created.id)).toMatchObject({
         status: activationFails ? 'invited' : 'active',
       });

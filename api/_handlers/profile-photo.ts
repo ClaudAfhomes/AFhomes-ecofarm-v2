@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import {
-  PROFILE_PHOTO_MAX_BYTES,
   PROFILE_PHOTO_MAX_EDGE,
   profilePhotoInputSchema,
 } from '@afhomes/contracts';
@@ -8,7 +7,7 @@ import { resolveAfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { resolveCustomerPrincipal } from '../_lib/customer-access.js';
 import { deny, fail, jsonBody, method, subPath } from '../_lib/handler-kit.js';
 import { storageClient } from '../_lib/storage.js';
-import { PROFILE_PHOTO_BUCKET, profilePhotoPath, isProfileJpeg } from '../_lib/profile-photo.js';
+import { PROFILE_PHOTO_BUCKET, profilePhotoPath, decodeProfilePhoto } from '../_lib/profile-photo.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -55,12 +54,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Your signed-in account changed. Reload before uploading.',
           409,
         );
-      const bytes = Buffer.from(input.data.dataBase64, 'base64');
-      if (
-        bytes.length > PROFILE_PHOTO_MAX_BYTES ||
-        bytes.toString('base64') !== input.data.dataBase64 ||
-        !isProfileJpeg(bytes)
-      )
+      const bytes = decodeProfilePhoto(input.data.dataBase64);
+      if (!bytes)
         return fail(
           res,
           'VALIDATION_ERROR',

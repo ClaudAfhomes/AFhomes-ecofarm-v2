@@ -827,6 +827,41 @@ describe('Phase 26 seller commission scoping', () => {
     });
     expect(filtered.status).toBe(200);
     expect(data(filtered.body)).toEqual([]);
+    const historical = db
+      .rows('commissions')
+      .find((c) => c.id === '99990000-0000-4000-8000-000000002602')!;
+    historical.settled_before_system = true;
+    expect(data((await callCommissions({ path: '', token: TOKEN2.salesManager })).body)).toEqual(
+      [],
+    );
+    expect(
+      (await callCommissions({ path: String(historical.id), token: TOKEN2.salesManager })).status,
+    ).toBe(404);
+    expect(
+      (await callCommissions({ path: String(historical.id), token: TOKEN2.finance })).status,
+    ).toBe(200);
+    const snapshot = structuredClone(historical);
+    expect(
+      (
+        await callCommissions({
+          path: `${historical.id}/qualify`,
+          method: 'POST',
+          token: TOKEN2.finance,
+          body: { decision: 'earned', notes: 'Historical commission was already settled.' },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await callCommissions({
+          path: `${historical.id}/pay`,
+          method: 'POST',
+          token: TOKEN2.finance,
+          body: { reference: 'PAID-BEFORE-SYSTEM' },
+        })
+      ).status,
+    ).toBe(409);
+    expect(historical).toEqual(snapshot);
     void installScoped;
   });
 

@@ -120,19 +120,20 @@ const server = http.createServer(async (req, res) => {
     query,
     headers: toVercelHeaders(req.headers),
     body,
+    socket: { remoteAddress: req.socket.remoteAddress },
     url: pathname + url.search,
   };
 
   // Adapt Node ServerResponse to the VercelResponse shape handlers expect.
-  const headersOut: Record<string, string> = {};
+  const headersOut: Record<string, string | string[]> = {};
   let statusCode = 200;
   const vercelRes: Record<string, unknown> & {
-    setHeader: (n: string, v: string) => void;
+    setHeader: (n: string, v: string | string[]) => void;
     status: (c: number) => typeof vercelRes;
     json: (b: unknown) => void;
     end: () => void;
   } = {
-    setHeader: (n: string, v: string) => {
+    setHeader: (n: string, v: string | string[]) => {
       headersOut[n.toLowerCase()] = v;
     },
     status: (code: number) => {
@@ -231,7 +232,7 @@ void (async () => {
   }
 })();
 
-server.listen(port, () => {
+server.listen(port, process.env.AFHOMES_DEV_HOST ?? '::', () => {
   // eslint-disable-next-line no-console
   console.log(`[dev-server] API listening on http://localhost:${port} (api/v1/*)`);
   // eslint-disable-next-line no-console

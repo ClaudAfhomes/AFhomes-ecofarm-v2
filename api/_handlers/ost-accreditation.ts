@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
 import {
   approveOstAccreditationSchema,
   manualOstAccreditationSchema,
@@ -299,6 +300,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Provide management-approved start and expiry dates.',
         400,
       );
+    if (parsed.data.profilePhotoBase64 && !decodeProfilePhoto(parsed.data.profilePhotoBase64))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
     // Verify the private official workflow before any GoTrue invitation.
     const records = await db.rpc('ost_accreditation_records', {
       p_actor_id: principal.userId,
@@ -375,6 +378,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           409,
         );
       const authId = created.data.user.id;
+      if (parsed.data.profilePhotoBase64) {
+        try {
+          await saveProfilePhoto(authId, parsed.data.profilePhotoBase64);
+        } catch {
+          const removed = await db.auth.admin.deleteUser(authId);
+          let cleanupFailed = !!removed.error;
+          try {
+            await removeProfilePhoto(authId);
+          } catch {
+            cleanupFailed = true;
+          }
+          return fail(
+            res,
+            'INTERNAL',
+            cleanupFailed
+              ? 'Account cleanup needs administrator review before retrying.'
+              : 'Could not save the profile photo. Please retry.',
+            503,
+          );
+        }
+      }
       const installed = await db.rpc('install_ost_accreditation_identity', {
         p_application_id: id,
         p_actor_id: principal.userId,

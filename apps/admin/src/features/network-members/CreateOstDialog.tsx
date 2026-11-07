@@ -23,6 +23,7 @@ import {
   createOstMemberSchema,
   officialOstFormDefaults,
   ostAnnualExpiry,
+  ostToday as today,
   parseOfficialOstFields,
 } from '@afhomes/contracts';
 import {
@@ -31,6 +32,7 @@ import {
   DateField,
   Dialog,
   PasswordField,
+  ProfilePhotoEditor,
   OstOfficialFields,
   Select,
   TextField,
@@ -38,6 +40,7 @@ import {
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { filterHolderNameInput, filterMobileInput } from '../../lib/normalize';
 import { createOstMember } from './services';
+import { isMongoAuth } from '../../lib/cookie-auth';
 import styles from './MembersPage.module.css';
 
 const IDENTITY_FIELDS = [
@@ -49,10 +52,6 @@ const IDENTITY_FIELDS = [
 
 type IdentityField = (typeof IDENTITY_FIELDS)[number]['name'] | 'birthDate' | 'email' | 'line1';
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function CreateOstDialog({
   open,
   onClose,
@@ -63,6 +62,7 @@ export function CreateOstDialog({
   onCreated: () => void;
 }) {
   const [mode, setMode] = useState<'complete' | 'pending'>('complete');
+  const [profilePhotoBase64, setProfilePhotoBase64] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [geography, setGeography] = useState(emptyOstAddress);
   const addressOptions = useOstAddress(geography, false);
@@ -100,6 +100,10 @@ export function CreateOstDialog({
   };
 
   const submit = () => {
+    if (mode === 'complete' && !profilePhotoBase64) {
+      setError('Choose a profile photo.');
+      return;
+    }
     if (mode === 'complete' && temporaryPassword !== confirmPassword) {
       setError('Passwords must match.');
       return;
@@ -112,7 +116,12 @@ export function CreateOstDialog({
     const parsed = createOstMemberSchema.safeParse({
       mode,
       ...(mode === 'complete'
-        ? { temporaryPassword, aaNumberMode, ...(aaNumberMode === 'manual' ? { aaNumber } : {}) }
+        ? {
+            temporaryPassword,
+            aaNumberMode,
+            profilePhotoBase64,
+            ...(aaNumberMode === 'manual' ? { aaNumber } : {}),
+          }
         : {}),
       requestId,
       sponsorStaffId,
@@ -169,6 +178,7 @@ export function CreateOstDialog({
           <Button
             type="submit"
             form="create-ost-form"
+            disabled={mode === 'complete' && !profilePhotoBase64}
             loading={create.isPending}
             loadingLabel="Creating…"
           >
@@ -186,6 +196,22 @@ export function CreateOstDialog({
         }}
         aria-busy={create.isPending}
       >
+        {mode === 'complete' ? (
+          <ProfilePhotoEditor
+            staged
+            photo={{
+              url: profilePhotoBase64 ? `data:image/jpeg;base64,${profilePhotoBase64}` : null,
+              expiresAt: null,
+              canUpload: !create.isPending,
+              notice: null,
+            }}
+            loading={false}
+            onRefresh={() => {}}
+            onUpload={async (value) => {
+              setProfilePhotoBase64(value);
+            }}
+          />
+        ) : null}
         {error ? (
           <div ref={errorRef} tabIndex={-1}>
             <Alert variant="danger" title="Review the form">
@@ -324,7 +350,7 @@ export function CreateOstDialog({
             Accreditation and completion
           </h2>
           <div className={styles.formFields}>
-            <label className={styles.fieldLabel}>
+            {!isMongoAuth && <label className={styles.fieldLabel}>
               Outcome
               <Select
                 value={mode}
@@ -337,7 +363,7 @@ export function CreateOstDialog({
                   },
                 ]}
               />
-            </label>
+            </label>}
             {mode === 'complete' ? (
               <>
                 <label className={styles.fieldLabel}>

@@ -80,8 +80,12 @@
 /* ── Mobile: hide text/chevron, show only avatar ────────────────── */
 
 @media (max-width: 639px) {
+  /* The phone topbar re-points --color-brand-primary to white, which would
+     paint white initials on a white disc; use a token it leaves alone. */
   .avatar {
     display: flex;
+    background: var(--color-brand-secondary, #1f6b4f);
+    border-color: rgba(255, 255, 255, 0.6);
   }
 
   .userInfo,

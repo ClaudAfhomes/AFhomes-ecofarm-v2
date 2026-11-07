@@ -1,5 +1,6 @@
 import type { AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
 import type { BreadcrumbItem, SidebarItem } from '@afhomes/ui';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 
 export type NavLink = { to: string; label: string; module: AfHomesModuleKey };
 export type AdminNavItem = {
@@ -150,6 +151,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
       { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
       { to: '/admin/roles', label: 'Roles', module: 'organization.roles' },
+      { to: '/admin/settings/public-verification', label: 'Verification Settings', module: 'governance.config' },
     ],
   },
   // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`
@@ -173,10 +175,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
     icon: 'image',
     module: 'cms.pages',
     dropdown: [
-      { to: '/admin/cms/pages', label: 'Pages', module: 'cms.pages' },
-      { to: '/admin/cms/media', label: 'Media', module: 'cms.media' },
+      { to: '/admin/cms/pages', label: 'Website Pages', module: 'cms.pages' },
+      { to: '/admin/cms/media', label: 'Media Library', module: 'cms.media' },
       { to: '/admin/cms/stories', label: 'Stories', module: 'cms.pages' },
       { to: '/admin/cms/experiences', label: 'Experiences', module: 'cms.pages' },
+      { to: '/admin/cms/faq', label: 'FAQ', module: 'cms.pages' },
+      { to: '/admin/cms/vip', label: 'VIP Website Content', module: 'cms.pages' },
       { to: '/admin/cms/site-settings', label: 'Site Settings', module: 'cms.settings' },
       { to: '/admin/cms/seo', label: 'SEO', module: 'cms.settings' },
       { to: '/admin/cms/history', label: 'History', module: 'cms.history' },
@@ -207,8 +211,12 @@ const REPORT_MODULES: readonly AfHomesModuleKey[] = [
 const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
   REPORT_MODULES.some((key) => canViewModule(permissions, key));
 
-export function navItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
-  return ADMIN_NAV_ITEMS.flatMap((item) => {
+export function navItemsForPermissions(
+  permissions?: readonly AfHomesPermission[],
+  items = ADMIN_NAV_ITEMS,
+): SidebarItem[] {
+  return items.flatMap((item) => {
+    if (!isFeaturePathEnabled(item.to)) return [];
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
@@ -221,6 +229,28 @@ export function navItemsForPermissions(permissions?: readonly AfHomesPermission[
     if (!canViewParent && !dropdown?.length) return [];
     return [{ to: item.to, label: item.label, icon: item.icon, end: item.end, dropdown }];
   });
+}
+
+export function istNavItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
+  return navItemsForPermissions(permissions, [
+    ADMIN_NAV_ITEMS[0]!,
+    {
+      to: '/admin/ist/my-sales', label: 'Sales', icon: 'file-text', module: 'sales.card_sales',
+      dropdown: [
+        { to: '/admin/ist/my-sales', label: 'My Sales', module: 'sales.card_sales' },
+        { to: '/admin/ist/team-sales', label: 'Team Sales', module: 'sales.card_sales' },
+      ],
+    },
+    {
+      to: '/admin/ist/my-commissions', label: 'Commissions', icon: 'wallet', module: 'network.commissions',
+      dropdown: [
+        { to: '/admin/ist/my-commissions', label: 'My Commissions', module: 'network.commissions' },
+        { to: '/admin/ist/team-commissions', label: 'Team Commissions', module: 'network.commissions' },
+      ],
+    },
+    ADMIN_NAV_ITEMS.find((item) => item.to === '/admin/genealogy')!,
+    { to: '/admin/profile', label: 'Profile', icon: 'user', module: 'dashboard.view' },
+  ]);
 }
 
 /**
@@ -237,6 +267,11 @@ export const EXTRA_GATED_ROUTES: readonly {
   pathPrefix: string;
   module: AfHomesModuleKey;
 }[] = [
+  { pathPrefix: '/admin/ist/my-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/team-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/my-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/team-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/accreditation', module: 'dashboard.view' },
   { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
   { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
   // `/admin/documents` list/review route removed; the scan travels with the
@@ -252,6 +287,7 @@ export function canAccessNavTarget(
   permissions: readonly AfHomesPermission[] | undefined,
   pathname: string,
 ): boolean {
+  if (!isFeaturePathEnabled(pathname)) return false;
   // `/admin/reports` is visible on ANY report permission, not one key: the
   // screen then offers only the reports the session allows.
   if (pathname === '/admin/reports') return canViewReports(permissions);

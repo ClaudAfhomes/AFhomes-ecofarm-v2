@@ -3,10 +3,12 @@ import {
   LEGACY_WORKFLOW_COLUMNS as WORKFLOW_COLUMNS,
   type WorkflowSheet,
 } from '@afhomes/contracts';
-import { WORKFLOW_COLUMNS as SIMPLE_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
+import { WORKFLOW_COLUMNS as CURRENT_COLUMNS, WORKFLOW_V6_COLUMNS, WORKFLOW_V3_COLUMNS as SIMPLE_COLUMNS, WORKFLOW_V4_COLUMNS, WORKFLOW_V5_COLUMNS, PREVIOUS_WORKFLOW_COLUMNS } from '@afhomes/contracts';
 import { validateImportRow } from './customer-import.js';
 import { zipStored } from './report-export.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
+import { annotateCustomerWorkbook } from './customer-workflow-review.js';
+import { readWorkbookParts } from './customer-xlsx.js';
 
 const escape = (s: string) =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -21,6 +23,7 @@ function book(
 ) {
   const sheets = Object.keys(WORKFLOW_COLUMNS) as WorkflowSheet[];
   const parts: Record<string, string> = {
+    'xl/styles.xml':'<styleSheet><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>',
     'xl/workbook.xml': `<workbook xmlns:r="urn:r"><sheets>${sheets.map((s, i) => `<sheet name="${s}" r:id="r${i}"/>`).join('')}</sheets></workbook>`,
     'xl/_rels/workbook.xml.rels': `<Relationships>${sheets.map((s, i) => `<Relationship Id="r${i}" Type="urn:/worksheet" Target="worksheets/s${i}.xml"/>`).join('')}</Relationships>`,
     'docProps/custom.xml':
@@ -32,7 +35,7 @@ function book(
         ? WORKFLOW_COLUMNS[s]
         : mapping === '2'
           ? PREVIOUS_WORKFLOW_COLUMNS[s]
-          : SIMPLE_COLUMNS[s];
+          : mapping === '3' ? SIMPLE_COLUMNS[s] : mapping === '4' ? WORKFLOW_V4_COLUMNS[s] : mapping === '5' ? WORKFLOW_V5_COLUMNS[s] : mapping === '6' ? WORKFLOW_V6_COLUMNS[s] : CURRENT_COLUMNS[s];
     const table = [Object.fromEntries(columns.map((c) => [c.key, c.header])), ...(rows[s] ?? [])];
     parts[`xl/worksheets/s${i}.xml`] = `<worksheet><sheetData>${table
       .map(
@@ -81,6 +84,47 @@ const payment = (key = 'Person 1', claim = 'Receipt 1') => ({
 });
 
 describe('workflow workbook v2', () => {
+  it('rejects an unknown VIP ID suffix in the previous historical workbook mapping', () => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{
+      ...customer(), existing_vip_control_number: '26101400003G1C01X',
+    }] }, {}, '4'))).toThrow('official 17-character');
+  });
+  it.each(['1','2','3','4','5'])('retains immutable mapping %s without requiring new columns', mapping => {
+    expect(parseCustomerWorkbookV2(book({Customers:[mapping === '5' ? { ...customer(), purchase_reference: '' } : customer()]},{},mapping))!.rows).toHaveLength(1);
+  });
+  it.each(['S', 'N'])('preserves contract classification suffix %s in current VIP references', suffix => {
+    const vip = `26101400003G1C01${suffix}`;
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: vip, contract_classification: suffix === 'N' ? 'Non-Standard' : 'Standard' }] }, {}, '6'))!.rows[0]!;
+    expect(parsed.fields.existing_vip_control_number).toBe(vip);
+    expect(parsed.purchaseReference).toBe(vip);
+  });
+  it('refuses a supplied VIP ID whose classification contradicts its suffix', () => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: '26101400003G1C01N', contract_classification: 'Standard' }] }, {}, '6'))).toThrow('classification must match');
+  });
+  it('uses the official VIP card ID as purchase reference independently of Customer ID', () => {
+    const vip = '26101400003G1C01S';
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), customer_id: 'CUS2026000001', purchase_reference: vip }] }, {}, '5'))!.rows[0]!;
+    expect(parsed.purchaseReference).toBe(vip);
+    expect(parsed.customerId).toBe('CUS2026000001');
+    expect(parsed.fields.existing_vip_control_number).toBe(vip);
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [customer()] }, {}, '5'))).toThrow('official 17-character');
+  });
+  it('keeps a stable internal source key for blank VIP IDs until confirmation', () => {
+    const input = { ...customer(), purchase_reference: '' };
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [input] }, {}, '5'))!.rows[0]!;
+    expect(parsed.purchaseReference).toMatch(/^AUTO-VIP-[a-f0-9]{64}$/);
+    expect(parseCustomerWorkbookV2(book({ Customers: [{ ...input, existing_stay_points_total: '0' }] }, {}, '5'))!.rows[0]!.purchaseReference).toBe(parsed.purchaseReference);
+    expect(parsed.fields.existing_vip_control_number).toBe('');
+  });
+  it.each(['1.5', '12abc', '0', '37'])('rejects invalid VIP term %s without truncation', (months) => {
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [{ ...customer(), purchase_reference: '26101400003G1C01S', payment_term_months: months }] }, {}, '5'))).toThrow('integer');
+  });
+  it('links Sales Team and Payments by email while a blank VIP ID awaits generation', () => {
+    const input = { ...customer(), purchase_reference: '' };
+    const parsed = parseCustomerWorkbookV2(book({ Customers: [input], 'Sales Team': [{ customer_key: input.email, referrer_name: 'Registered Seller' }], Payments: [payment(input.email)] }, {}, '5'))!.rows[0]!;
+    expect(parsed.fields.referrer_name).toBe('Registered Seller');
+    expect(parsed.payments[0]!.customerKey).toBe(parsed.customerKey);
+  });
   it('preserves supplied Customer ID for existing-identity matching instead of dropping it', () => {
     const id = 'AF-CUS-2026-000001';
     const record = parseCustomerWorkbookV2(
@@ -642,4 +686,34 @@ describe('workflow workbook v2', () => {
       /incorrect or unmapped required headers|Unknown worksheet/,
     );
   });
+});
+
+it('collects several bad guided values with original source-cell provenance for review',()=>{
+ const input=book({Customers:[{...customer(),purchase_reference:'BAD-ID',vip_tier:'Platinum',contract_date:'not-a-date',existing_stay_points_total:'-3'}]}, {}, '7');
+ const result=parseCustomerWorkbookV2(input,{collectErrors:true})!;
+ expect(result.rows).toHaveLength(1);
+ expect(result.issues.map(i=>i.field)).toEqual(expect.arrayContaining(['purchase_reference','vip_tier','contract_date','existing_stay_points_total']));
+ expect(result.issues.every(i=>i.sheet==='Customers'&&i.row===2)).toBe(true);
+ expect(result.sources[0]![0]!.fields.purchase_reference).toBe('BAD-ID');
+});
+
+it('retains good and bad cells, annotates every source row, and accepts the corrected review workbook',()=>{
+ const bytes=book({Customers:[{...customer(),purchase_reference:'BAD-ID',vip_tier:'Gold',contract_date:'not-a-date',mobile:'09ABC'}, {...customer(),first_name:'Maria',email:'maria@example.invalid',purchase_reference:'',contract_date:'2026-10-14'}]}, {}, '7');
+ const workflow=parseCustomerWorkbookV2(bytes,{collectErrors:true})!;
+ const file=annotateCustomerWorkbook(bytes,workflow,[{errors:[{field:'mobile',message:'Use a valid Philippine mobile number'}],warnings:[]},{errors:[],warnings:[]}]);
+ const again=parseCustomerWorkbookV2(file,{collectErrors:true})!;
+ expect(again.rows).toHaveLength(2);
+ expect(again.sources[0]![0]!.fields.mobile).toBe('09ABC');
+ expect(again.sources[1]![0]!.fields.first_name).toBe('Maria');
+ const text=new TextDecoder().decode(readWorkbookParts(file).get('xl/worksheets/s0.xml'));
+ expect(text).toContain('Needs correction');
+ expect(text).toContain('Use a valid Philippine mobile number');
+ expect(text).toContain('BAD-ID');
+});
+
+it('reports an excessive discount without producing negative derived totals or aborting review',()=>{
+ const bytes=book({Customers:[{...customer(),purchase_reference:'',contract_date:'2026-10-14',stated_regular_price:'10000',stated_discount:'20000'}]}, {}, '7');
+ const result=parseCustomerWorkbookV2(bytes,{collectErrors:true})!;
+ expect(result.issues.map(i=>i.field)).toContain('stated_discount');
+ expect(result.rows[0]!.fields.stated_total).toBe('');
 });

@@ -37,6 +37,7 @@ import {
   subPath,
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
+import { storageClient } from '../_lib/storage.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const fullName = (row: Record<string, unknown>) =>
@@ -129,6 +130,7 @@ const toCustomer = (
   statedPaymentType: isoOrNull(row.stated_payment_type),
   statedRefNo: isoOrNull(row.stated_ref_no),
   statedPaymentDate: isoOrNull(row.stated_payment_date),
+  vipCardNumber: typeof row.vip_card_number === 'string' ? row.vip_card_number : null,
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
   // Membership facts mirrored from general Customer Lookup. The directory RPC
@@ -202,42 +204,6 @@ export function validateCustomerSaleReferrer(roleSlug: string): string | null {
     'Customer registration requires a selling role ' +
     '(Vice Director, Senior Sales Manager, Sales Manager, OST, Admin or Super Admin).'
   );
-}
-
-async function hasReference(db: Db, table: string, column: string, id: string) {
-  const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
-  if (error) throw error;
-  return (data ?? []).length > 0;
-}
-
-async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
-  // Every table with a RESTRICT (or NO ACTION) foreign key to customers(id).
-  // customer_onboarding_tokens is deliberately absent: those ephemeral rows
-  // are removed by the delete handler itself before the customer row goes.
-  // An incomplete list fails loudly as a raw 23503 instead of the 409 below,
-  // which is why this list must track every inbound customer FK in
-  // supabase/migrations.
-  const checks: Array<[string, string, string]> = [
-    ['sales', 'card_sales', 'customer_id'],
-    ['payments', 'payments', 'customer_id'],
-    ['memberships', 'memberships', 'customer_id'],
-    ['redemptions', 'redemptions', 'customer_id'],
-    ['documents', 'identity_documents', 'customer_id'],
-    ['applications', 'customer_applications', 'customer_id'],
-    ['purchase_terms', 'customer_application_purchase_terms', 'customer_id'],
-    ['reservations', 'reservation_agreements', 'customer_id'],
-    ['imports', 'customer_import_rows', 'customer_id'],
-    ['purchases', 'purchases', 'customer_id'],
-    ['earning_claims', 'earning_claims', 'customer_id'],
-    ['redemption_approvals', 'redemption_quotes', 'approval_customer_id'],
-  ];
-  const results = await Promise.all(
-    checks.map(async ([label, table, column]) => ({
-      label,
-      blocked: await hasReference(db, table, column, id),
-    })),
-  );
-  return results.filter((result) => result.blocked).map((result) => result.label);
 }
 
 async function removeCustomerAuth(db: Db, authUserId: string | null | undefined) {
@@ -493,6 +459,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
 
       const p = parsed.data;
+      if (p.vipCardNumber !== undefined && p.vipCardNumber !== (before.vip_card_number ?? null))
+        return fail(res, 'CONFLICT', 'VIP card numbers are server-issued and cannot be edited. Use certified import to preserve an existing historical number.', 409);
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (p.firstName !== undefined) patch.first_name = p.firstName;
       if (p.middleName !== undefined)
@@ -501,7 +469,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.suffix !== undefined)
         patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
-      if (p.dateOfBirth !== undefined) patch.date_of_birth = p.dateOfBirth;
+      if (p.dateOfBirth !== undefined) patch.birth_date = p.dateOfBirth;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
       if (p.landline !== undefined) patch.landline = p.landline;
@@ -572,6 +540,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.statedPaymentType !== undefined) patch.stated_payment_type = p.statedPaymentType;
       if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
       if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
+      if (p.vipCardNumber !== undefined) patch.vip_card_number = p.vipCardNumber;
+      // Auto-generate a VIP card number when none exists and none was supplied.
+      if (p.vipCardNumber === undefined) {
+        const { data: existing } = await db.from('customers').select('vip_card_number,tier,stated_vip_package').eq('id', id).single();
+        if (!existing?.vip_card_number) {
+          const tier = (typeof existing?.stated_vip_package === 'string' ? existing.stated_vip_package : (typeof existing?.tier === 'string' ? existing.tier : 'BRONZE')).toUpperCase();
+          const { data: gen } = await db.rpc('generate_vip_card_number', { p_tier: tier });
+          if (typeof gen === 'string') patch.vip_card_number = gen;
+        }
+      }
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 
@@ -754,104 +732,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ deactivated: true });
     }
 
-    const anonymize = route(req, 'POST', /^([0-9a-f-]+)\/anonymize$/);
-    if (anonymize) {
-      const auth = await authorizeAfHomes(req, 'sales.customers', 'delete');
-      if ('error' in auth) return deny(res, auth);
-      if (auth.roleSlug !== 'super_admin')
-        return fail(res, 'FORBIDDEN', 'Only Super Admin can anonymize customers', 403);
-      const id = anonymize[1]!;
-      const { data: before, error: readError } = await db
-        .from('customers')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-      if (readError) throw readError;
-      if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      const suffix = id.replace(/-/g, '').slice(0, 20);
-      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
-      const { error } = await db
-        .from('customers')
-        .update({
-          first_name: 'Deleted',
-          middle_name: null,
-          last_name: 'Customer',
-          suffix: null,
-          email: `deleted+${suffix}@invalid.local`,
-          phone: '0000000',
-          landline: null,
-          birth_date: null,
-          gender: null,
-          address: {},
-          government_id_type: null,
-          government_id_number: null,
-          notes: null,
-          // Company-stated fields are customer PII too: anonymize clears them
-          // so an anonymized record cannot keep a TIN, a related-person
-          // contact or stated figures behind.
-          ra_number: null,
-          company_status: null,
-          citizenship: null,
-          civil_status: null,
-          tin_number: null,
-          occupation_business_name: null,
-          office_business_address: null,
-          employed_position: null,
-          supplementary_full_name: null,
-          supplementary_address: null,
-          supplementary_birthday: null,
-          supplementary_gender: null,
-          supplementary_citizenship: null,
-          supplementary_civil_status: null,
-          supplementary_tin_number: null,
-          supplementary_mobile: null,
-          supplementary_email: null,
-          supplementary_landline: null,
-          supplementary_occupation_business_name: null,
-          supplementary_office_address: null,
-          supplementary_position: null,
-          svd_name: null,
-          ssm_name: null,
-          sm_name: null,
-          referrer_name: null,
-          vip_recommender_name: null,
-          related_contact_no: null,
-          related_email: null,
-          stated_vip_package: null,
-          stated_payment_terms: null,
-          stated_regular_price: null,
-          stated_discount: null,
-          stated_total_amount: null,
-          stated_rf: null,
-          stated_payment_type: null,
-          stated_ref_no: null,
-          stated_payment_date: null,
-          auth_user_id: null,
-          status: 'cancelled',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-      if (error) throw error;
-      await removeCustomerAuth(db, before.auth_user_id);
-      await audit(
-        db,
-        auth.userId,
-        'CUSTOMER_ANONYMIZED',
-        'customer',
-        id,
-        {
-          status: before.status,
-        },
-        {
-          status: 'cancelled',
-          directProfilePiiRemoved: true,
-          companyStatedFieldsRemoved: true,
-          identityDocumentsRetainedPendingPolicy: true,
-        },
-      );
-      return res.status(200).json({ anonymized: true });
-    }
-
     const remove = route(req, 'DELETE', /^([0-9a-f-]+)$/);
     if (remove) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'delete');
@@ -866,19 +746,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      const blockers = await customerDeleteBlockers(db, id);
-      if (blockers.length)
-        return res.status(409).json({
-          error: {
-            code: 'PROTECTED_HISTORY',
-            message:
-              'This customer has historical business records and cannot be permanently deleted. Deactivate or anonymize the account instead.',
-            details: { canDelete: false, blockers },
-          },
-        });
-      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
-      const { error: deleteError } = await db.from('customers').delete().eq('id', id);
-      if (deleteError) throw deleteError;
+      // Collect storage paths before any deletion so files can be purged even
+      // after the DB rows are gone. Identity documents and payment receipts
+      // are both removed; storage removal runs first so a failure leaves the
+      // database intact and the purge can be retried.
+      const { data: identityDocs, error: identityDocsReadError } = await db
+        .from('identity_documents')
+        .select('storage_path')
+        .eq('customer_id', id);
+      if (identityDocsReadError) throw identityDocsReadError;
+      const { data: customerPayments, error: paymentsReadError } = await db
+        .from('payments')
+        .select('receipt_storage_path')
+        .eq('customer_id', id);
+      if (paymentsReadError) throw paymentsReadError;
+      const pathsByBucket = new Map<string, string[]>();
+      const collectPath = (storagePath: unknown) => {
+        const value = String(storagePath ?? '');
+        const slash = value.indexOf('/');
+        if (slash <= 0) return;
+        const bucket = value.slice(0, slash);
+        const objectPath = value.slice(slash + 1);
+        const bucketPaths = pathsByBucket.get(bucket) ?? [];
+        bucketPaths.push(objectPath);
+        pathsByBucket.set(bucket, bucketPaths);
+      };
+      for (const row of (identityDocs ?? []) as Array<{ storage_path?: unknown }>)
+        collectPath(row.storage_path);
+      for (const row of (customerPayments ?? []) as Array<{ receipt_storage_path?: unknown }>)
+        collectPath(row.receipt_storage_path);
+      const storage = storageClient();
+      let identityDocumentsPurged = (identityDocs ?? []).length;
+      let receiptsPurged = 0;
+      if (storage && pathsByBucket.size > 0) {
+        for (const [bucket, paths] of pathsByBucket) {
+          const removed = await storage.from(bucket).remove(paths);
+          if (removed.error) throw removed.error;
+        }
+        receiptsPurged = (customerPayments ?? []).filter(
+          (row: { receipt_storage_path?: unknown }) => row.receipt_storage_path,
+        ).length;
+      }
+      // Transactional cascade of every dependent record. The SECURITY DEFINER
+      // function runs as service role and deletes in dependency order; a
+      // failure rolls back the whole purge so no half-deleted customer remains.
+      const { error: purgeError } = await db.rpc('purge_customer', {
+        p_customer_id: id,
+      });
+      if (purgeError) throw purgeError;
       await removeCustomerAuth(db, before.auth_user_id);
       await audit(
         db,
@@ -889,7 +804,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         {
           customerNumber: before.customer_number,
         },
-        { deleted: true },
+        {
+          deleted: true,
+          identityDocumentsPurged,
+          receiptsPurged,
+        },
       );
       return res.status(200).json({ deleted: true });
     }

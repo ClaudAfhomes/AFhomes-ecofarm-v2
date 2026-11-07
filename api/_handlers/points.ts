@@ -77,6 +77,9 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 /** A database refusal -> a stable, safe client message. */
 const REFUSALS: Record<string, [string, string, number]> = {
+  STAY_SERVICE_DATES_REQUIRED: ['VALIDATION_ERROR', 'Enter the actual service date or overnight stay dates. Processing time cannot be used.', 400],
+  LEGACY_REDEMPTION_DATES_REQUIRED: ['CONFLICT', 'Prepare a fresh quote with the actual service dates; an older request has no dated allowance.', 409],
+  INSUFFICIENT_DAY_ALLOWANCE: ['CONFLICT', 'Insufficient points in the weekday or weekend allowance for these service dates. The allowances cannot be exchanged.', 409],
   APPROVAL_REQUIRED: [
     'CONFLICT',
     'Customer portal approval is required before completing this points purchase.',
@@ -161,7 +164,7 @@ const REFUSALS: Record<string, [string, string, number]> = {
     409,
   ],
   DISCOUNT_EXCEEDS_GROSS: ['CONFLICT', 'That discount is larger than the purchase.', 409],
-  POINTS_AMOUNT_REQUIRED: ['VALIDATION_ERROR', 'Enter how many points to use.', 400],
+  POINTS_AMOUNT_REQUIRED: ['VALIDATION_ERROR', 'Enter points and the actual service date, or check-in and check-out dates.', 400],
   PAYMENT_METHOD_REQUIRED: ['VALIDATION_ERROR', 'Choose a payment method.', 400],
   PAYMENT_AMOUNT_INVALID: ['VALIDATION_ERROR', 'Enter a valid amount, greater than zero.', 400],
   PAYMENT_DECISION_INVALID: ['VALIDATION_ERROR', 'Choose verify or reject.', 400],
@@ -938,16 +941,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const parsed = quotePointDiscountSchema.safeParse(jsonBody(req));
       if (!parsed.success) {
-        return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
+        return fail(res, 'VALIDATION_ERROR', 'Enter points and the actual service date, or check-in and check-out dates.', 400);
       }
       const { data, error } = keyless
         ? await db.rpc('preview_staff_prepare_quote', {
             p_purchase_id: quoteRoute[1],
             p_points_requested: parsed.data.pointsRequested,
+            p_service_dates: parsed.data.serviceDates,
           })
         : await db.rpc('prepare_customer_point_redemption', {
         p_purchase_id: quoteRoute[1],
         p_points_requested: parsed.data.pointsRequested,
+            p_service_dates: parsed.data.serviceDates,
         p_actor_id: auth.userId,
       });
       if (error) return refuse(res, error);
@@ -1567,7 +1572,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in write) return deny(res, write);
       const parsed = applyPointsDiscountInputSchema.safeParse(jsonBody(req));
       if (!parsed.success) {
-        return fail(res, 'VALIDATION_ERROR', 'Enter how many points to use.', 400);
+        return fail(res, 'VALIDATION_ERROR', 'Enter points and the actual service date, or check-in and check-out dates.', 400);
       }
       return fail(
         res,

@@ -11,7 +11,7 @@
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
 import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
+import type { ApplicationHolder, Customer, GenealogyNode } from '@afhomes/contracts';
 import {
   birthDateSchema,
   holderBirthDateSchema,
@@ -20,6 +20,7 @@ import {
   SEX_OPTIONS,
   SUFFIX_OPTIONS,
   tinNumberSchema,
+  optionalContactNumberSchema,
 } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
 import { Button, Select } from '@afhomes/ui';
@@ -32,7 +33,7 @@ import {
   normalizeLiveHumanField,
 } from '../../lib/normalize';
 import { GeographicAddressFields } from '../address/GeographicAddressFields';
-import { getGenealogy } from '../genealogy/services';
+import { getGenealogy, getOstMemberContacts } from '../genealogy/services';
 
 export const today = () => {
   const now = new Date();
@@ -51,8 +52,70 @@ export const emptyHolder = (holderType: 'PRIMARY' | 'SECONDARY'): ApplicationHol
   province: '',
   mobile: '',
   email: '',
+  raNumber: '',
   printedName: '',
 });
+
+const text = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined;
+
+/** Case/punctuation-insensitive match against a closed option list; `undefined`
+ * when nothing matches, rather than guessing or crashing an unmatched <option>. */
+function matchOption<T extends string>(
+  value: string | null | undefined,
+  options: readonly T[],
+): T | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase().replace(/\.$/, '');
+  return options.find((option) => option.toLowerCase().replace(/\.$/, '') === normalized);
+}
+
+/**
+ * Base holder prefill from the customer's OWN profile - available for every
+ * customer, imported or manually created. A committed workbook import (see
+ * `getCustomerImportPrefill`) layers richer/additional fields on top of this
+ * when one exists; this function never requires one. Anything ambiguous
+ * (free-text gender/civil status that doesn't match this form's closed
+ * options) is left out rather than guessed, per the "never invent
+ * information" rule - the field just stays blank and editable.
+ */
+export function customerProfileToHolder(customer: Customer): Partial<ApplicationHolder> {
+  const address =
+    customer.address && typeof customer.address === 'object'
+      ? (customer.address as Record<string, unknown>)
+      : {};
+  const printedName = [customer.firstName, customer.middleName, customer.lastName, customer.suffix]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' ');
+  const entries: Partial<ApplicationHolder> = {
+    firstName: text(customer.firstName),
+    middleName: text(customer.middleName),
+    lastName: text(customer.lastName),
+    suffix: matchOption(customer.suffix, SUFFIX_OPTIONS),
+    birthDate: text(customer.dateOfBirth),
+    sex: matchOption(customer.gender, SEX_OPTIONS),
+    citizenship: text(customer.citizenship),
+    civilStatus: matchOption(customer.civilStatus, CIVIL_STATUS_OPTIONS),
+    permanentAddressLine1: text(address.line1),
+    permanentAddressLine2: text(address.line2),
+    cityMunicipality: text(address.city),
+    province: text(address.province),
+    barangay: text(address.barangay),
+    postalCode: text(address.postalCode),
+    landline: text(customer.landline),
+    mobile: text(customer.phone),
+    email: text(customer.email),
+    tinNumber: text(customer.tinNumber),
+    raNumber: text(customer.raNumber),
+    occupationBusinessName: text(customer.occupationBusinessName),
+    officeBusinessAddress: text(customer.officeBusinessAddress),
+    employedPosition: text(customer.employedPosition),
+    printedName: printedName || undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, value]) => value !== undefined),
+  ) as Partial<ApplicationHolder>;
+}
 export const asBase64 = async (file: File) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
@@ -101,8 +164,10 @@ export const VIP_TIER_FIELD_OPTIONS = [
 export const isVipTier = (value: string): value is 'BRONZE' | 'SILVER' | 'GOLD' =>
   value === 'BRONZE' || value === 'SILVER' || value === 'GOLD';
 
-/** Live filter for contact numbers: strip letters outright. */
-export const filterContactInput = (value: string): string => value.replace(/\p{L}/gu, '');
+/** Live filter for contact numbers: digits only, capped at the 11-digit
+ * 09XXXXXXXXX mobile format (`contactNumber` is a required mobile field). */
+export const filterContactInput = (value: string): string =>
+  value.replace(/\D/g, '').slice(0, 11);
 
 /** One message for every way a holder birth date can be wrong. */
 const BIRTH_DATE_MESSAGE = `Enter a real past birth date, and an age of ${OLDEST_HOLDER_AGE} or less.`;
@@ -442,7 +507,7 @@ export function HolderFields({
             onFocus={(event) => event.currentTarget.select()}
           />
           {value.cityMunicipalityCode && !value.postalCode ? (
-            <small>No published code. Leave blank.</small>
+            <small>Postal reference needs review for this location.</small>
           ) : null}
         </label>
         <Field
@@ -615,6 +680,7 @@ export function RecommenderFields({
     retry: false,
   });
   const nodes = chain.data ?? [];
+
   // The nearest selected level above each dropdown: gaps stay selectable, so
   // an SM under an SVD with no SSM named still lists that SVD's downline.
   const aboveFor = (index: number): string | null => {
@@ -625,12 +691,27 @@ export function RecommenderFields({
     }
     return null;
   };
+
+  // Build options for a chain level, excluding the other recommender if set.
   const optionsFor = (index: number) => {
     const level = CHAIN_LEVELS[index]!;
-    const options = chainOptions(nodes, level.role, aboveFor(index)).map((node) => ({
+    let options = chainOptions(nodes, level.role, aboveFor(index)).map((node) => ({
       value: node.staffId,
       label: node.fullName,
     }));
+
+    // Mutual exclusion: Referrer (index 3) and VIP Recommender cannot be the same person.
+    // When building Referrer options, exclude the VIP Recommender's staff ID if we can find it.
+    const isReferrerLevel = level.key === 'referrerStaffId';
+
+    if (isReferrerLevel && meta.vipRecommenderName) {
+      // Find the staff ID for the selected VIP recommender by name
+      const vipNode = nodes.find((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost');
+      if (vipNode) {
+        options = options.filter((opt) => opt.value !== vipNode.staffId);
+      }
+    }
+
     // A stored selection the list no longer contains (a departure, or a chain
     // outside the viewer's own scope) stays visible and submittable; the
     // server refuses it at write time if the staff is no longer eligible.
@@ -642,6 +723,29 @@ export function RecommenderFields({
       });
     return [{ value: '', label: 'Not specified' }, ...options];
   };
+
+  // Build VIP recommender options, excluding the selected Referrer
+  const vipRecommenderOptions = (() => {
+    const baseOptions = [
+      { value: '', label: 'Not specified' },
+      ...chainOptions(nodes, 'ost', null).map((node) => ({
+        value: node.fullName,
+        label: node.fullName,
+      })),
+    ];
+    // Exclude the selected Referrer if it's an OST staff member
+    if (meta.referrerStaffId) {
+      const referrerNode = nodes.find((n) => n.staffId === meta.referrerStaffId && n.role === 'ost');
+      if (referrerNode) {
+        return withStoredValue(
+          baseOptions.filter((opt) => opt.value !== referrerNode.fullName),
+          meta.vipRecommenderName,
+        );
+      }
+    }
+    return withStoredValue(baseOptions, meta.vipRecommenderName);
+  })();
+
   const setChain = (key: keyof ReferralChainIds, next: string) => {
     const order: (keyof ReferralChainIds)[] = [
       'svdStaffId',
@@ -655,25 +759,76 @@ export function RecommenderFields({
     for (const later of order.slice(order.indexOf(key) + 1)) cleared[later] = '';
     onChain({ ...pickChain(meta), [key]: next, ...cleared });
   };
-  const fields = [
-    { key: 'recommenderContact', label: 'Recommender Contact', optionalPhone: true },
-    { key: 'recommenderEmail', label: 'Recommender Email', optionalPhone: false },
-    { key: 'acknowledgedAt', label: 'Acknowledged At', optionalPhone: false },
-  ] as const;
-  // The VIP recommender is an OST member, chosen from the same genealogy list
-  // the Referrer level reads - NOT narrowed to the selected upline's downline,
-  // because a recommender is not in the applicant's reporting chain. The stored
-  // column is the recommender's NAME, so the choice writes the name.
-  const vipRecommenderOptions = withStoredValue(
-    [
-      { value: '', label: 'Not specified' },
-      ...chainOptions(nodes, 'ost', null).map((node) => ({
-        value: node.fullName,
-        label: node.fullName,
-      })),
-    ],
-    meta.vipRecommenderName,
-  );
+
+  // Fetch contact info for all 5 recommenders (SVD, SSM, SM, Referrer, VIP Recommender)
+  const selectedOstStaffIds = [
+    meta.svdStaffId,
+    meta.ssmStaffId,
+    meta.smStaffId,
+    meta.referrerStaffId,
+    // Find VIP recommender's staff ID by name
+    ...(meta.vipRecommenderName
+      ? nodes.filter((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost').map((n) => n.staffId)
+      : []),
+  ].filter(Boolean);
+
+  const contactsQuery = useQuery({
+    queryKey: ['ost-member-contacts', selectedOstStaffIds.sort().join(',')],
+    queryFn: () => getOstMemberContacts(selectedOstStaffIds),
+    enabled: selectedOstStaffIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  // Both dropdowns ultimately depend on the genealogy chain too: the VIP
+  // recommender's staff id (and so their email) only resolves once `nodes`
+  // has loaded, so a chain still in flight must count as loading here as
+  // well - otherwise the email dropdown would flash "No email available"
+  // while genealogy is still resolving who the recommender even is.
+  // `isFetching` (not `isPending`) is used for the contacts query itself:
+  // `isPending` stays true even while it sits disabled with no recommender
+  // chosen yet, which would spin the dropdowns forever with nothing to fetch.
+  const contactsLoading = chain.isPending || contactsQuery.isFetching;
+
+  // Build contact options from selected recommenders
+  const contactOptions = contactsQuery.data
+    ? Object.entries(contactsQuery.data).flatMap(([staffId, { phone }]) => {
+        const opts: { value: string; label: string }[] = [];
+        if (phone && optionalContactNumberSchema.safeParse(phone).success)
+          opts.push({ value: phone, label: `${phone} (${chainNames[staffId] ?? 'Recommender'})` });
+        return opts;
+      })
+    : [];
+
+  // Recommender Email shows only the selected VIP recommender's email.
+  const vipRecommenderStaffId = meta.vipRecommenderName
+    ? nodes.find((n) => n.fullName === meta.vipRecommenderName && n.role === 'ost')?.staffId
+    : undefined;
+  const emailOptions = contactsQuery.data && vipRecommenderStaffId
+    ? Object.entries(contactsQuery.data)
+        .filter(([staffId]) => staffId === vipRecommenderStaffId)
+        .flatMap(([, { email }]) =>
+          email ? [{ value: email.toLowerCase(), label: email.toLowerCase() }] : []
+        )
+    : [];
+
+  // The dropdown must never offer "No contact"/"No email" while the fetch is
+  // still in flight - only once it has actually settled, one way or another.
+  const contactSelectOptions = contactsLoading
+    ? [{ value: '', label: 'Loading contact numbers…' }]
+    : contactsQuery.isError
+      ? [{ value: '', label: 'Unable to load contact numbers' }]
+      : contactOptions.length > 0
+        ? [{ value: '', label: 'Select contact' }, ...contactOptions]
+        : [{ value: '', label: 'No contact available' }];
+  const emailSelectOptions = contactsLoading
+    ? [{ value: '', label: 'Loading email…' }]
+    : contactsQuery.isError
+      ? [{ value: '', label: 'Unable to load email' }]
+      : emailOptions.length > 0
+        ? [{ value: '', label: 'Select email' }, ...emailOptions]
+        : [{ value: '', label: 'No email available' }];
+
   return (
     <>
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
@@ -707,7 +862,7 @@ export function RecommenderFields({
       ) : null}
       <div className={styles.subGroup} style={{ gridColumn: '1 / -1' }}>
         <p className={styles.subGroupTitle}>VIP recommender</p>
-        <p className={styles.hint}>Recommender is active OST staff. Contact and email are typed.</p>
+        <p className={styles.hint}>Recommender is active OST staff. Select contact and email from the dropdowns below.</p>
       </div>
       <label className={styles.filterLabel}>
         <span>VIP Recommender</span>
@@ -720,21 +875,52 @@ export function RecommenderFields({
           options={vipRecommenderOptions}
         />
       </label>
-      {fields.map(({ key, label, optionalPhone }) => (
-        <Field
-          key={key}
-          label={label}
-          value={meta[key]}
-          type={key === 'acknowledgedAt' ? 'date' : 'text'}
-          normalize={
-            key === 'recommenderEmail'
-              ? (v) => v.toLowerCase()
-              : (v) => normalizeLiveHumanField(key, v)
-          }
-          optionalPhone={optionalPhone}
-          onChange={(v) => onChange(key, v)}
+      {/* Recommender Contact - dropdown from selected recommenders */}
+      <label className={styles.filterLabel}>
+        <span>Recommender Contact</span>
+        <Select
+          aria-label="Recommender Contact"
+          value={meta.recommenderContact}
+          disabled={contactsLoading}
+          loading={contactsLoading}
+          onChange={(event) => onChange('recommenderContact', event.target.value)}
+          options={contactSelectOptions}
         />
-      ))}
+      </label>
+      {/* Recommender Email - dropdown from selected recommenders */}
+      <label className={styles.filterLabel}>
+        <span>Recommender Email</span>
+        <Select
+          aria-label="Recommender Email"
+          value={meta.recommenderEmail}
+          disabled={contactsLoading}
+          loading={contactsLoading}
+          onChange={(event) => onChange('recommenderEmail', event.target.value)}
+          options={emailSelectOptions}
+        />
+      </label>
+      {contactsQuery.isError ? (
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Button
+            variant="secondary"
+            loading={contactsQuery.isFetching}
+            loadingLabel="Retrying…"
+            onClick={() => void contactsQuery.refetch()}
+          >
+            Retry contact lookup
+          </Button>
+        </div>
+      ) : null}
+      {/* Acknowledged At - keep as date field */}
+      <label className={styles.filterLabel}>
+        <span>Acknowledged At</span>
+        <input
+          type="date"
+          value={meta.acknowledgedAt}
+          onChange={(event) => onChange('acknowledgedAt', event.target.value)}
+          className="input-date"
+        />
+      </label>
     </>
   );
 }

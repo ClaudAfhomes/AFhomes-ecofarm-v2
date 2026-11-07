@@ -523,88 +523,18 @@ describe('customers', () => {
     expect(state.status).toBe(403);
   });
 
-  it.each([
-    ['sales', 'card_sales', 'customer_id'],
-    ['payments', 'payments', 'customer_id'],
-    ['memberships', 'memberships', 'customer_id'],
-    ['redemptions', 'redemptions', 'customer_id'],
-    ['documents', 'identity_documents', 'customer_id'],
-    // Every inbound RESTRICT/NO ACTION customer FK must refuse with a 409 that
-    // names the blocker — never a raw 23503. Regression: an application alone
-    // used to slip through this list and fail the delete with INTERNAL.
-    ['applications', 'customer_applications', 'customer_id'],
-    ['purchase_terms', 'customer_application_purchase_terms', 'customer_id'],
-    ['reservations', 'reservation_agreements', 'customer_id'],
-    ['imports', 'customer_import_rows', 'customer_id'],
-    ['purchases', 'purchases', 'customer_id'],
-    ['earning_claims', 'earning_claims', 'customer_id'],
-    ['redemption_approvals', 'redemption_quotes', 'approval_customer_id'],
-  ])('blocks customer deletion when protected %s exist', async (label, table, column) => {
-    const id = 'aaaaaaaa-0000-4000-8000-000000000098';
-    install({
-      tables: {
-        customers: [
-          {
-            id,
-            auth_user_id: null,
-            customer_number: 'CUS-PROTECTED',
-            first_name: 'Protected',
-            middle_name: null,
-            last_name: 'Customer',
-            email: 'protected@example.test',
-            phone: '09170000001',
-            address: {},
-            status: 'active',
-          },
-        ],
-        card_sales: [],
-        payments: [],
-        memberships: [],
-        redemptions: [],
-        identity_documents: [],
-        [table]: [{ id: `${label}-protected`, [column]: id }],
-      },
-    });
-    const state = await call('customers', {
-      method: 'DELETE',
-      path: id,
-      token: TOKEN.superAdmin,
-    });
-    expect(state.status).toBe(409);
-    expect(
-      (state.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
-    ).toContain(label);
-  });
 
-  it('blocks deletion but permits anonymization when customer history exists', async () => {
+  it('purges a customer together with their history', async () => {
     const db = install();
-    const blocked = await call('customers', {
+    const purged = await call('customers', {
       method: 'DELETE',
       path: CUSTOMER.active,
       token: TOKEN.superAdmin,
     });
-    expect(blocked.status).toBe(409);
-    expect(
-      (blocked.body as { error: { details: { blockers: string[] } } }).error.details.blockers,
-    ).toContain('memberships');
-
-    const anonymized = await call('customers', {
-      method: 'POST',
-      path: `${CUSTOMER.active}/anonymize`,
-      token: TOKEN.superAdmin,
-    });
-    expect(anonymized.status).toBe(200);
-    const row = db.rows('customers').find((customer) => customer.id === CUSTOMER.active)!;
-    expect(row).toMatchObject({
-      first_name: 'Deleted',
-      last_name: 'Customer',
-      auth_user_id: null,
-      status: 'cancelled',
-    });
-    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(true);
-    expect(db.rows('audit_events').some((event) => event.action === 'CUSTOMER_ANONYMIZED')).toBe(
-      true,
-    );
+    expect(purged.status).toBe(200);
+    expect(db.rows('customers').some((row) => row.id === CUSTOMER.active)).toBe(false);
+    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(false);
+    expect(db.rows('memberships').some((m) => m.customer_id === CUSTOMER.active)).toBe(false);
   });
 });
 

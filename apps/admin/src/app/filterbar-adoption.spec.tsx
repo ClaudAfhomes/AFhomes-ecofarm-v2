@@ -84,8 +84,10 @@ vi.mock('../features/memberships/services', () => ({
   reissueMembershipCard: vi.fn(),
   markMembershipPrinted: vi.fn(),
 }));
-vi.mock('../features/genealogy/services', () => ({
+vi.mock('../features/genealogy/services', async (original) => ({
+  ...(await original<typeof import('../features/genealogy/services')>()),
   getGenealogy: vi.fn(async () => []),
+  getTeamSalesOverview: vi.fn(async () => null),
 }));
 vi.mock('../features/reports/services', () => ({
   getReport: vi.fn(async () => ({

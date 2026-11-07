@@ -39,7 +39,7 @@ function renderLayout() {
 describe('AdminLayout sidebar sign-out', () => {
   it('pins a Log Out action inside the sidebar, after the nav', () => {
     renderLayout();
-    const sidebar = screen.getByRole('complementary', { name: 'AFHomes administration' });
+    const sidebar = screen.getByRole('complementary', { name: 'AFhomes administration' });
     const logout = within(sidebar).getByRole('button', { name: 'Log Out' });
     const nav = sidebar.querySelector('nav');
     expect(nav).not.toBeNull();
@@ -50,7 +50,7 @@ describe('AdminLayout sidebar sign-out', () => {
 
   it('opens the sign-out confirmation and closes it on cancel', () => {
     renderLayout();
-    const sidebar = screen.getByRole('complementary', { name: 'AFHomes administration' });
+    const sidebar = screen.getByRole('complementary', { name: 'AFhomes administration' });
     fireEvent.click(within(sidebar).getByRole('button', { name: 'Log Out' }));
     expect(screen.getByText('Sign out?')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -68,7 +68,7 @@ describe('AdminLayout sidebar sign-out', () => {
     );
     expect(screen.getByRole('heading', { name: 'Access denied' })).toBeInTheDocument();
     expect(
-      screen.queryByRole('complementary', { name: 'AFHomes administration' }),
+      screen.queryByRole('complementary', { name: 'AFhomes administration' }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Go back' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();

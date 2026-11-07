@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,23 +8,16 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { CustomerRecordActions } from './CustomerRecordActions';
 import {
-  anonymizeCustomer,
-  deactivateCustomer,
-  deleteCustomer,
   getSaleSummary,
   issueCustomerAccountActivation,
-  updateCustomerStatus,
 } from './services';
 
 vi.mock('./services', () => ({
-  anonymizeCustomer: vi.fn(),
-  deactivateCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   getCustomerApplications: vi.fn(),
   getSaleSummary: vi.fn(),
   cancelSale: vi.fn(),
-  updateCustomerStatus: vi.fn(),
 }));
 
 const grant = (
@@ -50,7 +43,6 @@ const STAFF: SessionUser = {
   afHomesPermissions: [grant('sales.customers', { canCreate: true, canUpdate: true })],
 };
 
-const SUPER: SessionUser = { ...STAFF, id: 'u-super', roleSlug: 'super_admin' };
 
 const FULLSTAFF: SessionUser = {
   ...STAFF,
@@ -109,7 +101,7 @@ function renderActions(user: SessionUser = STAFF, sales: Sale[] = []) {
     <Routes>
       <Route
         path="/admin/customers/:id"
-        element={<CustomerRecordActions customer={RECORD} sales={sales} onChanged={() => {}} />}
+        element={<CustomerRecordActions customer={RECORD} sales={sales} />}
       />
       <Route path="/admin/customers/applications/new" element={<p>new application</p>} />
       <Route path="/admin/customers" element={<p>directory</p>} />
@@ -124,7 +116,6 @@ describe('CustomerRecordActions', () => {
     expect(
       await screen.findByRole('button', { name: 'Issue / Reissue activation link' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Deactivate account' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New application' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Anonymize' })).not.toBeInTheDocument();
   });
@@ -133,9 +124,6 @@ describe('CustomerRecordActions', () => {
     renderActions({ ...FULLSTAFF, roleSlug: 'super_admin' }, [SALE]);
     const names = [
       'Issue / Reissue activation link',
-      'Anonymize',
-      'Delete permanently',
-      'Deactivate account',
       'Record payment',
       'Verify payment',
     ];
@@ -144,32 +132,6 @@ describe('CustomerRecordActions', () => {
     }
     const treatments = names.map((name) => screen.getByRole('button', { name }).className);
     expect(new Set(treatments).size).toBe(names.length);
-  });
-
-  it('changes the membership status through the dropdown', async () => {
-    vi.mocked(updateCustomerStatus).mockResolvedValue({ ...RECORD, status: 'suspended' });
-    renderActions(FULLSTAFF, [SALE]);
-    await screen.findByRole('button', { name: 'Record payment' });
-    const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Membership status'), 'suspended');
-    await waitFor(() =>
-      expect(vi.mocked(updateCustomerStatus)).toHaveBeenCalledWith('c-1', 'suspended'),
-    );
-  });
-
-  it('surfaces a refused status change', async () => {
-    vi.mocked(updateCustomerStatus).mockRejectedValue(new Error('Status move not allowed'));
-    renderActions(FULLSTAFF, [SALE]);
-    await screen.findByRole('button', { name: 'Record payment' });
-    const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Membership status'), 'suspended');
-    expect(await screen.findByText('Status move not allowed')).toBeInTheDocument();
-  });
-
-  it('hides the status dropdown without the update grant', async () => {
-    renderActions({ ...STAFF, afHomesPermissions: [grant('sales.customers', {})] }, [SALE]);
-    await screen.findByRole('button', { name: 'Deactivate account' });
-    expect(screen.queryByLabelText('Membership status')).not.toBeInTheDocument();
   });
 
   it('issues the one-time activation link in place', async () => {
@@ -187,53 +149,9 @@ describe('CustomerRecordActions', () => {
     expect(vi.mocked(issueCustomerAccountActivation)).toHaveBeenCalledWith('c-1');
   });
 
-  it('deactivates behind a direct confirmation', async () => {
-    vi.mocked(deactivateCustomer).mockResolvedValue({ deactivated: true } as never);
-    renderActions();
-    await screen.findByRole('button', { name: 'Deactivate account' });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Deactivate account' }));
-    expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Confirm' }));
-    await waitFor(() => expect(vi.mocked(deactivateCustomer)).toHaveBeenCalledWith('c-1'));
-  });
-
-  it('offers anonymize and permanent delete to the super admin only', async () => {
-    vi.mocked(deleteCustomer).mockResolvedValue({ deleted: true } as never);
-    renderActions(SUPER);
-    await screen.findByRole('button', { name: 'Anonymize' });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
-    const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText('Permanently Delete Customer Account');
-    await user.type(
-      within(dialog).getByLabelText('Type DELETE to confirm customer action'),
-      'DELETE',
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Delete permanently' }));
-    await waitFor(() => expect(vi.mocked(deleteCustomer)).toHaveBeenCalledWith('c-1'));
-    expect(await screen.findByText('directory')).toBeInTheDocument();
-  });
-
-  it('anonymizes behind a typed confirmation for the super admin', async () => {
-    vi.mocked(anonymizeCustomer).mockResolvedValue({ anonymized: true } as never);
-    renderActions(SUPER);
-    await screen.findByRole('button', { name: 'Anonymize' });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Anonymize' }));
-    const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText('Anonymize Customer Account');
-    await user.type(
-      within(dialog).getByLabelText('Type DELETE to confirm customer action'),
-      'DELETE',
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Anonymize' }));
-    await waitFor(() => expect(vi.mocked(anonymizeCustomer)).toHaveBeenCalledWith('c-1'));
-  });
-
   it('hides sale buttons without sale grants or sales', async () => {
     renderActions(STAFF, []);
-    await screen.findByRole('button', { name: 'Deactivate account' });
+    await screen.findByText('Actions');
     expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
   });
 
@@ -249,10 +167,9 @@ describe('CustomerRecordActions', () => {
     expect(vi.mocked(getSaleSummary)).toHaveBeenCalledWith('s-2');
   });
 
-  it('keeps anonymize away from ordinary staff', async () => {
+  it('keeps permanent delete away from ordinary staff', async () => {
     renderActions();
-    await screen.findByRole('button', { name: 'Deactivate account' });
-    expect(screen.queryByRole('button', { name: 'Anonymize' })).not.toBeInTheDocument();
+    await screen.findByText('Actions');
     expect(screen.queryByRole('button', { name: 'Delete permanently' })).not.toBeInTheDocument();
   });
 });

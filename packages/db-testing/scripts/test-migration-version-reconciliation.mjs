@@ -85,7 +85,7 @@ for (const skipped of originals) {
       [customer],
     );
     await db.query(
-      "insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AA-SYNTHETIC','SYNTHETIC STAFF','IST','active',current_date-1,current_date+10,$1)",
+      "insert into private.sale_team_accreditations(staff_id,aa_number,public_name,kind,status,starts_on,expires_on,approved_by) values($1,'AA-A1B2C3D4E5F6','SYNTHETIC STAFF','IST','active',current_date-1,current_date+10,$1)",
       [staff],
     );
     const snapshot = async () =>
@@ -160,7 +160,7 @@ for (const skipped of originals) {
         'select jsonb_build_object(''preserved_seven_argument_rpc'',true,''aaNumber'',p_aa_number)';
       revoke all on function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date,text) from public,anon,authenticated;
       grant execute on function public.manage_sale_team_accreditation(uuid,uuid,text,text,date,date,text) to service_role;
-      create function private.next_sale_team_aa_number(p_kind text,p_accredited_on date)
+      create or replace function private.next_sale_team_aa_number(p_kind text,p_accredited_on date)
       returns text language sql set search_path=pg_catalog,pg_temp as 'select ''PRESERVED_FIXTURE''::text';
       revoke all on function private.next_sale_team_aa_number(text,date) from public,anon,authenticated,service_role;
     `);

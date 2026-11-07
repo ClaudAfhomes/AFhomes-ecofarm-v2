@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Alert, ErrorState, Skeleton, StatusChip } from '@afhomes/ui';
 import type { AfHomesPermission } from '@afhomes/contracts';
-import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { formatCountOrDash, formatMoneyOrDash, isFeaturePathEnabled } from '@afhomes/shared';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
 import { getReport } from '../reports/services';
@@ -10,6 +10,7 @@ import { formatPaymentType, humanizeCode } from '../business/format';
 import { businessKeys, membershipKeys } from '../business/queryKeys';
 import { sharedScopes } from '../business/queryKeys';
 import { formatDateTime } from '../../lib/format';
+import { Disclosure } from './Disclosure';
 import styles from './MembershipActivity.module.css';
 
 /**
@@ -35,7 +36,8 @@ export function MembershipActivity({
     permissions.some((permission) => permission.moduleKey === key && permission.canView);
   const pointsAllowed = can('finance.points');
   const paymentsAllowed = can('finance.payment_verification');
-  const transactionsAllowed = can('operations.redemption');
+  const transactionsAllowed =
+    isFeaturePathEnabled('/api/v1/reports/redemptions') && can('operations.redemption');
   const membership = useQuery({
     queryKey: membershipKeys.record(id),
     queryFn: () => getMembership(id),
@@ -74,13 +76,12 @@ export function MembershipActivity({
   return (
     <div className={styles.stack}>
       {pointsAllowed ? (
-        <details className={styles.group} onToggle={(e) => setPointsOpen(e.currentTarget.open)}>
-          <summary className={styles.groupTitle}>Points</summary>
+        <Disclosure title="Points" open={pointsOpen} onOpenChange={setPointsOpen}>
           {account.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 64 }} />
               <span className="sr-only">Loading points…</span>
-            </p>
+            </div>
           ) : account.isError ? (
             <ErrorState
               error={account.error}
@@ -110,10 +111,10 @@ export function MembershipActivity({
           )}
           {account.data ? (
             ledger.isPending ? (
-              <p role="status">
+              <div role="status">
                 <Skeleton style={{ height: 48 }} />
                 <span className="sr-only">Loading points history…</span>
-              </p>
+              </div>
             ) : ledger.isError ? (
               <ErrorState
                 error={ledger.error}
@@ -135,11 +136,10 @@ export function MembershipActivity({
               <p className={styles.groupNote}>No points entries.</p>
             )
           ) : null}
-        </details>
+        </Disclosure>
       ) : null}
       {paymentsAllowed ? (
-        <details className={styles.group} onToggle={(e) => setPaymentsOpen(e.currentTarget.open)}>
-          <summary className={styles.groupTitle}>Payments</summary>
+        <Disclosure title="Payments" open={paymentsOpen} onOpenChange={setPaymentsOpen}>
           {membership.isError ? (
             <ErrorState
               error={membership.error}
@@ -147,10 +147,10 @@ export function MembershipActivity({
               onRetry={() => void membership.refetch()}
             />
           ) : payments.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 48 }} />
               <span className="sr-only">Loading membership payments…</span>
-            </p>
+            </div>
           ) : payments.isError ? (
             <ErrorState
               error={payments.error}
@@ -174,19 +174,15 @@ export function MembershipActivity({
           ) : (
             <p className={styles.groupNote}>No payments recorded.</p>
           )}
-        </details>
+        </Disclosure>
       ) : null}
       {transactionsAllowed ? (
-        <details
-          className={styles.group}
-          onToggle={(e) => setTransactionsOpen(e.currentTarget.open)}
-        >
-          <summary className={styles.groupTitle}>Transactions</summary>
+        <Disclosure title="Transactions" open={transactionsOpen} onOpenChange={setTransactionsOpen}>
           {transactions.isPending ? (
-            <p role="status">
+            <div role="status">
               <Skeleton style={{ height: 48 }} />
               <span className="sr-only">Loading service transactions…</span>
-            </p>
+            </div>
           ) : transactions.isError ? (
             <ErrorState
               error={transactions.error}
@@ -211,7 +207,7 @@ export function MembershipActivity({
               </ul>
             </>
           )}
-        </details>
+        </Disclosure>
       ) : null}
       {!pointsAllowed && !paymentsAllowed && !transactionsAllowed ? (
         <Alert variant="info" title="No activity access">

@@ -56,7 +56,6 @@ const agreement = (over: Record<string, unknown> = {}) => ({
   holderLimit: 1,
   reservationDate: '2026-10-07',
   agreementDate: '2026-10-07',
-  primarySignatureStatus: 'received',
   primary: {
     holderType: 'PRIMARY',
     name: 'ANA CRUZ',
@@ -235,7 +234,7 @@ describe('Application-origin reservation detail', () => {
     renderDetail();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();
     expect(
-      await screen.findByText('Not created — created when the purchase is finalized'),
+      await screen.findByText('Not created'),
     ).toBeTruthy();
   });
 
@@ -359,7 +358,7 @@ it('shows the linked sale business number and labels existing draft saves correc
   finance = { ...finance, saleId: SALE_ID, saleNumber: 'AF-CSALE-QATEST' };
   renderDetail();
   expect(await screen.findByText('AF-CSALE-QATEST')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Save draft' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
 });
 it('loads the persisted membership and confirmation after reopening the reservation', async () => {
   current = agreement({ saleId: SALE_ID });
@@ -407,7 +406,6 @@ describe('reservation detail field labels', () => {
       'Particular',
       'Amount',
       'Payment Date',
-      'Remarks',
       'Imported Tier',
     ]) {
       expect(await screen.findByLabelText(label)).toBeTruthy();
@@ -416,6 +414,7 @@ describe('reservation detail field labels', () => {
 
   it('never leaks a raw camelCase key as a visible label', async () => {
     renderDetail();
+    await screen.findByRole('heading', { name: 'AF-RES-ZZZZZ' });
     const labels = screen
       .getAllByRole('textbox')
       .map((input) => input.getAttribute('aria-label') ?? '')

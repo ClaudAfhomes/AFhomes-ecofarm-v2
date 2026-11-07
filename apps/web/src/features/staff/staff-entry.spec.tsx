@@ -1,9 +1,10 @@
-import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import type { AuthPortals } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+import { env } from '../../lib/env';
 import { decideStaffEntry, isAdminOriginMismatch } from '../../lib/staff-entry';
 
 const portals = (overrides: Partial<AuthPortals> = {}): AuthPortals => ({
@@ -104,5 +105,29 @@ describe('staff entry routes', () => {
     // Topmost inside the card: the heading follows the breadcrumb.
     const heading = screen.getByRole('heading', { name: current });
     expect(nav.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});
+
+describe('staff entry CAPTCHA', () => {
+  it.each([
+    ['/admin/login', 'Admin Login'],
+    ['/staff/login', 'Staff Login'],
+  ])('binds the %s challenge to the server-checked login action', async (route, title) => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    const widget = {
+      render: vi.fn<NonNullable<Window['turnstile']>['render']>(() => 'synthetic-widget'),
+      remove: vi.fn(),
+    };
+    window.turnstile = widget;
+    try {
+      renderWithProviders(<App />, { route });
+      await screen.findByRole('heading', { name: title });
+      await waitFor(() => expect(widget.render).toHaveBeenCalled());
+      expect(widget.render.mock.calls[0]?.[1]).toMatchObject({ action: 'login' });
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+      delete window.turnstile;
+    }
   });
 });

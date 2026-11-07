@@ -20,6 +20,7 @@ import styles from './MyAccountPage.module.css';
 import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
 import { ProfilePhotoEditor } from '@afhomes/ui';
 import { useProfilePhoto } from './profile-photo';
+import { logoutPathForRole } from '../../lib/portal';
 
 /**
  * My Account (AFHomes pattern, `/admin/profile`): the signed-in staff
@@ -31,7 +32,7 @@ import { useProfilePhoto } from './profile-photo';
 export function MyAccountPage() {
   const photo = useProfilePhoto();
   const navigate = useNavigate();
-  const { user, revalidate } = useSession();
+  const { user, revalidate, logout } = useSession();
   const mustChangePassword = user?.mustChangePassword === true;
   const [name, setName] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -51,16 +52,14 @@ export function MyAccountPage() {
   const password = useBusinessMutation({
     mutationFn: () => changeAfHomesStaffPassword({ currentPassword, newPassword }),
     onSuccess: async () => {
-      // Capture the gate BEFORE the refresh: a forced change that cleared the
-      // server flag must leave this screen. Navigating to the dashboard is
-      // safe either way - if the flag were somehow still set, the guard
-      // parks the session right back here instead of stranding it.
       const wasForced = mustChangePassword;
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      await revalidate();
-      if (wasForced) navigate('/admin', { replace: true });
+      if (wasForced) {
+        const login = logoutPathForRole(user?.roleSlug);
+        try { await logout(); } finally { navigate(login, { replace: true }); }
+      } else await revalidate();
     },
   });
 
@@ -84,6 +83,7 @@ export function MyAccountPage() {
               ? photo.upload.mutateAsync({ dataBase64: data, expectedUserId: user.id })
               : Promise.reject(new Error('Sign in again before uploading.'))
           }
+          onRemove={user ? () => photo.remove.mutateAsync() : undefined}
         />
         {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
           user?.roleSlug ?? '',

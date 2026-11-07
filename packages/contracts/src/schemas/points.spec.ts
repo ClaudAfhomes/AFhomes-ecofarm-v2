@@ -9,6 +9,7 @@ import {
   pointsAmountSchema,
   purchaseSchema,
   resolvedMemberSchema,
+  quotePointDiscountSchema,
 } from './points.js';
 
 const summary = {
@@ -187,3 +188,13 @@ describe('points contracts', () => {
     expect(adjustPointsInputSchema.safeParse({ ...base, reason: 'good reason' }).success).toBe(true);
   });
 });
+
+ it('requires actual dates and rejects manual allowance or audit timestamps', () => {
+  expect(quotePointDiscountSchema.safeParse({pointsRequested:100}).success).toBe(false);
+  for(const serviceDates of [{serviceDate:'2026-10-24'}, {checkInDate:'2026-10-23',checkOutDate:'2026-10-26'}])
+    expect(quotePointDiscountSchema.safeParse({pointsRequested:100,serviceDates}).success).toBe(true);
+  for(const serviceDates of [{serviceDate:'2026-02-30'}, {checkInDate:'2026-10-24',checkOutDate:'2026-10-23'}, {serviceDate:'2026-10-24',checkInDate:'2026-10-24',checkOutDate:'2026-10-25'}])
+    expect(quotePointDiscountSchema.safeParse({pointsRequested:100,serviceDates}).success).toBe(false);
+  expect(quotePointDiscountSchema.safeParse({pointsRequested:100,serviceDates:{serviceDate:'2026-10-24'}, allowanceType:'weekday'}).success).toBe(false);
+  expect(quotePointDiscountSchema.safeParse({pointsRequested:100,serviceDates:{serviceDate:'2026-10-24'}, redemptionDate:'2026-10-26'}).success).toBe(false);
+ });

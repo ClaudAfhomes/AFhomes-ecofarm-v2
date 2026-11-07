@@ -28,7 +28,7 @@ export function CustomerRedemptionsPage() {
         title="Redemptions unavailable"
         message={
           isForbidden(ledger.error)
-            ? 'Your account is not active, so redemptions are not available. Contact AFHomes Ecofarm to restore access.'
+            ? 'Your account is not active, so redemptions are not available. Contact AFhomes Ecofarm to restore access.'
             : 'We could not load your redemptions. Please try again in a moment.'
         }
       />
@@ -41,7 +41,7 @@ export function CustomerRedemptionsPage() {
     <Card title="Redemption history">
       {rows.length === 0 ? (
         <p className={styles.notice}>
-          No redemptions yet. Points are spent with AFHomes Ecofarm staff.
+          No redemptions yet. Points are spent with AFhomes Ecofarm staff.
         </p>
       ) : (
         <>

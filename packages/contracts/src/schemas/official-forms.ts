@@ -177,6 +177,7 @@ export const applicationHolderSchema = z.object({
   mobile: phoneSchema,
   email: emailSchema,
   tinNumber: tinNumberSchema,
+  raNumber: z.string().trim().max(40).optional(),
   occupationBusinessName: z.string().trim().max(160).transform(normalizeAddressField).optional(),
   officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
@@ -277,7 +278,7 @@ const customerApplicationInputSchema = z.object({
   acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
   consentAcknowledged: z.boolean(),
   acknowledgedAt: dateSchema,
-  primarySignatureStatus: signatureStatusSchema,
+  primarySignatureStatus: signatureStatusSchema.optional(),
   secondarySignatureStatus: signatureStatusSchema.optional(),
   validIdReceived: z.boolean(),
   reservationPaymentProofReceived: z.boolean(),
@@ -363,6 +364,7 @@ export const storedApplicationHolderSchema = applicationHolderSchema.extend({
   citizenship: z.string().max(80).optional(),
   civilStatus: z.string().max(40).optional(),
   tinNumber: z.string().max(40).optional(),
+  raNumber: z.string().max(40).optional(),
 });
 
 export const customerApplicationSchema = customerApplicationInputSchema
@@ -405,11 +407,20 @@ export const customerApplicationDecisionSchema = z.object({
   notes: z.string().trim().min(5).max(500).optional(),
 });
 
+export const SCHEDULE_PARTICULAR_OPTIONS = [
+  'Reservation fee',
+  'Down payment',
+  'Installment',
+  'Balance',
+  'Spot cash',
+  'Monthly amortization',
+] as const;
+export type ScheduleParticular = (typeof SCHEDULE_PARTICULAR_OPTIONS)[number];
+
 export const agreementPaymentInputSchema = z.object({
-  particular: z.string().trim().min(1).max(120),
+  particular: z.enum(SCHEDULE_PARTICULAR_OPTIONS),
   amount: exactDecimalStringSchema,
   paymentDate: dateSchema.optional(),
-  remarks: z.string().trim().max(300).optional(),
 });
 
 export const reservationHolderSchema = z.object({
@@ -460,19 +471,9 @@ export const createReservationAgreementSchema = z
     monthlyAmortizationStart: dateSchema.optional(),
     monthlyAmortizationEnd: dateSchema.optional(),
     paymentDueDay: z.number().int().min(1).max(31).optional(),
-    primarySignatureStatus: signatureStatusSchema,
-    secondarySignatureStatus: signatureStatusSchema.optional(),
     primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
     secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
     scheduleNotes: z.array(agreementPaymentInputSchema).max(24).default([]),
-  })
-  .superRefine((value, ctx) => {
-    if (!value.secondary && value.secondarySignatureStatus)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['secondarySignatureStatus'],
-        message: 'Secondary signature requires a secondary holder',
-      });
   });
 
 export const reservationAgreementSchema = z.object({
@@ -509,8 +510,6 @@ export const reservationAgreementSchema = z.object({
   monthlyAmortizationStart: dateSchema.optional(),
   monthlyAmortizationEnd: dateSchema.optional(),
   paymentDueDay: z.number().int().min(1).max(31).optional(),
-  primarySignatureStatus: signatureStatusSchema,
-  secondarySignatureStatus: signatureStatusSchema.optional(),
   primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
   schedule: z.array(
@@ -601,10 +600,11 @@ export const reservationAgreementListItemSchema = z
     sale_id: z.string().uuid().nullable(),
     payment_scheme_snapshot: paymentSchemeSchema,
     total_price_snapshot: exactDecimalStringSchema,
-    primary_signature_status: signatureStatusSchema,
-    secondary_signature_status: signatureStatusSchema.nullable(),
     has_secondary_holder: z.boolean(),
     status: reservationAgreementStatusSchema,
+    payment_status: z.string().nullable().optional(),
+    verified_total: exactDecimalStringSchema.optional(),
+    fully_paid: z.boolean().optional(),
   })
   .transform((row) => ({
     id: row.id,
@@ -612,8 +612,8 @@ export const reservationAgreementListItemSchema = z
     saleId: row.sale_id,
     paymentScheme: row.payment_scheme_snapshot,
     totalPrice: row.total_price_snapshot,
-    primarySignatureStatus: row.primary_signature_status,
-    secondarySignatureStatus: row.secondary_signature_status,
+    verifiedTotal: row.verified_total ?? null,
+    fullyPaid: row.fully_paid ?? false,
     hasSecondaryHolder: row.has_secondary_holder,
     tier: row.tier_snapshot,
     applicantName: row.applicant_name,
@@ -621,6 +621,7 @@ export const reservationAgreementListItemSchema = z
     createdAt: row.created_at,
     submittedAt: row.submitted_at,
     status: row.status,
+    paymentStatus: row.payment_status ?? null,
   }));
 export type CustomerApplicationListItem = z.infer<typeof customerApplicationListItemSchema>;
 export type ReservationAgreementListItem = z.infer<typeof reservationAgreementListItemSchema>;

@@ -171,31 +171,36 @@ function CategoryItem({
           style={open ? { transform: 'rotate(0deg)' } : { transform: 'rotate(-90deg)' }}
         />
       </button>
-      {open ? (
-        <ul className={styles.subList}>
-          {item.dropdown?.map((sub) => {
-            if ('divider' in sub) {
+      {collapsed ? null : (
+        <div
+          className={`${styles.subListWrap} ${open ? styles.subListWrapOpen : ''}`}
+          aria-hidden={!open}
+        >
+          <ul className={styles.subList}>
+            {item.dropdown?.map((sub) => {
+              if ('divider' in sub) {
+                return (
+                  <li key="divider" className={styles.subDivider} aria-hidden="true">
+                    <hr className={styles.subDividerHr} />
+                  </li>
+                );
+              }
+              const isActive = sub.to === activeSubTo;
               return (
-                <li key="divider" className={styles.subDivider} aria-hidden="true">
-                  <hr className={styles.subDividerHr} />
+                <li key={sub.to}>
+                  <Link
+                    to={sub.to}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`${styles.subLink} ${isActive ? styles.activeSubLink : ''}`}
+                  >
+                    <span className={styles.subLabel}>{sub.label}</span>
+                  </Link>
                 </li>
               );
-            }
-            const isActive = sub.to === activeSubTo;
-            return (
-              <li key={sub.to}>
-                <Link
-                  to={sub.to}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`${styles.subLink} ${isActive ? styles.activeSubLink : ''}`}
-                >
-                  <span className={styles.subLabel}>{sub.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+            })}
+          </ul>
+        </div>
+      )}
     </li>
   );
 }

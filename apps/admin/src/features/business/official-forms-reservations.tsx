@@ -20,7 +20,7 @@ import type {
   PurchaseReservation,
   ReservationFinanceSummary,
 } from '@afhomes/contracts';
-import { createReservationAgreementSchema, paymentSchemeLabel } from '@afhomes/contracts';
+import { createReservationAgreementSchema, paymentSchemeLabel, SCHEDULE_PARTICULAR_OPTIONS } from '@afhomes/contracts';
 import { formatDateTime } from '../../lib/format';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
@@ -42,10 +42,10 @@ import {
   Select,
   Skeleton,
   StatusChip,
+  TextField,
 } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
-import { ReservationStatusBadge } from './ReservationStatusBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
   createReservationAgreement,
@@ -73,25 +73,45 @@ import { RecordPaymentDialog } from './BusinessFinanceQueuePage';
 
 import { humanizeApplicationIssues } from './official-forms-applications';
 
-import {
+import {
   today,
   fieldLabel,
   filterReservationFieldInput,
   VIP_TIER_FIELD_OPTIONS,
   Field,
+  SelectField,
   QUEUE_PAGE_SIZE,
 } from './official-forms-fields';
 
+/**
+ * A holder's name as the agreement records it.
+ *
+ * One composition, used twice: the copy effect that fills the agreement from
+ * an application, and the source panel that names the application it is
+ * attached to. Two spellings of the same name would let the panel describe a
+ * different person than the agreement carries.
+ */
+const holderFullName = (value: ApplicationHolder) =>
+  [value.firstName, value.middleName, value.lastName, value.suffix].filter(Boolean).join(' ');
+
+/** Formats a raw numeric money string with thousands separators while typing. */
+function formatMoneyInput(raw: string): string {
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  if (!cleaned) return '';
+  const [intPart, decPart] = cleaned.split('.');
+  const formattedInt = (intPart ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
+}
+
 export function ReservationAgreementsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState('');
   const [tier, setTier] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   // Default: only agreements that still need IST RESERVATION work. Executing
   // one hands collection to Finance, so it leaves this queue. Nothing is
   // deleted - 'Include progressed' brings the executed history back.
-  const [reservationWorkOnly, setReservationWorkOnly] = useState(true);
+  const [reservationWorkOnly, setReservationWorkOnly] = useState(false);
   // Realtime search: pagination resets only when the settled term changes.
   const settledSearch = useRef('');
   const debouncedSearch = useDebouncedValue(search, 300, (term) => {
@@ -101,13 +121,12 @@ export function ReservationAgreementsPage() {
     setPage(0);
   });
   const query = useQuery({
-    queryKey: reservationKeys.list(status, tier, debouncedSearch, reservationWorkOnly, page),
+    queryKey: reservationKeys.list('', tier, debouncedSearch, reservationWorkOnly, page),
     // Keep the previous page visible while the next one loads: without this
     // the data gap reads as an empty result during every page turn.
     placeholderData: (previousData) => previousData,
     queryFn: () =>
       getReservationAgreementsPage({
-        ...(status ? { status } : {}),
         ...(tier ? { tier } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(reservationWorkOnly ? { queue: 'reservation_work' as const } : {}),
@@ -160,19 +179,11 @@ export function ReservationAgreementsPage() {
         </div>
       </section>
     );
-  const pendingSignatures = rows.filter(
-    (item) =>
-      item.primarySignatureStatus !== 'received' ||
-      (item.hasSecondaryHolder && item.secondarySignatureStatus !== 'received'),
-  ).length;
   return (
     <section className={styles.listSection}>
       <PageHeader
         title="IST Reservation Agreements"
         description="Only agreements needing reservation work."
-        actions={
-          <Button onClick={() => navigate('/admin/sales/reservations/new')}>New agreement</Button>
-        }
       />
       {/*
        * Two figures, not a sentence. "38 agreements - 3 awaiting signature" read
@@ -189,13 +200,6 @@ export function ReservationAgreementsPage() {
           <div className={styles.queueSummaryCell}>
             <dt>{total === 1 ? 'Agreement' : 'Agreements'}</dt>
             <dd>{formatCount(total)}</dd>
-          </div>
-          <div
-            className={styles.queueSummaryCell}
-            data-alert={pendingSignatures > 0 ? 'true' : undefined}
-          >
-            <dt>Awaiting signature</dt>
-            <dd>{formatCount(pendingSignatures)}</dd>
           </div>
         </dl>
       ) : null}
@@ -224,24 +228,6 @@ export function ReservationAgreementsPage() {
                 options={[
                   { value: 'reservation_work', label: 'Needs reservation work' },
                   { value: 'all', label: 'Include progressed' },
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Status
-              <Select
-                aria-label="Status"
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(0);
-                }}
-                options={[
-                  { value: '', label: 'All' },
-                  ...['draft', 'submitted', 'executed', 'cancelled'].map((s) => ({
-                    value: s,
-                    label: s[0]!.toUpperCase() + s.slice(1),
-                  })),
                 ]}
               />
             </label>
@@ -284,15 +270,11 @@ export function ReservationAgreementsPage() {
                 <th>Tier</th>
                 <th>Payment scheme</th>
                 <th className={styles.numeric}>Amount</th>
-                <th>Signatures</th>
-                <th>Status</th>
+                <th>Payment</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((item) => {
-                const signaturesComplete =
-                  item.primarySignatureStatus === 'received' &&
-                  (!item.hasSecondaryHolder || item.secondarySignatureStatus === 'received');
                 return (
                   <tr
                     key={item.id}
@@ -320,21 +302,18 @@ export function ReservationAgreementsPage() {
                     <td data-label="Amount" className={styles.numeric}>
                       {formatMoneyOrDash(item.totalPrice)}
                     </td>
-                    <td data-label="Signatures">
-                      {/*
-                       * The exception wears the colour. Four rows of green
-                       * "Complete" say nothing and drown the one row that is
-                       * actually waiting on somebody, so the settled state
-                       * recedes to quiet text and only the pending one is a chip.
-                       */}
-                      {signaturesComplete ? (
-                        <span className={styles.settled}>Complete</span>
+                    <td data-label="Payment">
+                      {item.status === 'cancelled' ? (
+                        <StatusChip label="Cancelled" tone="danger" />
+                      ) : item.fullyPaid ? (
+                        <StatusChip label="Fully Paid" tone="success" />
+                      ) : item.paymentStatus === 'paid' ? (
+                        <StatusChip label="Partial" tone="warning" />
+                      ) : item.paymentStatus === 'pending' ? (
+                        <StatusChip label="Pending" tone="warning" />
                       ) : (
-                        <StatusChip label="Pending signature" tone="warning" />
+                        <span className={styles.settled}>—</span>
                       )}
-                    </td>
-                    <td data-label="Status">
-                      <ReservationStatusBadge status={item.status} />
                     </td>
                   </tr>
                 );
@@ -463,10 +442,9 @@ export function ReservationAgreementEditorPage() {
   };
   const [secondary, setSecondary] = useState<SecondaryState | null>(null);
   const [schedule, setSchedule] = useState({
-    particular: 'Monthly amortization',
+    particular: 'Monthly amortization' as (typeof SCHEDULE_PARTICULAR_OPTIONS)[number],
     amount: '0.00',
     paymentDate: '',
-    remarks: '',
   });
   const setMessage = (message: string) => notifyWarning({ title: 'Attention', message });
   useEffect(() => {
@@ -477,9 +455,7 @@ export function ReservationAgreementEditorPage() {
     if (!app.primary) return;
     const holder = (value: ApplicationHolder) => ({
       holderType: value.holderType,
-      name: [value.firstName, value.middleName, value.lastName, value.suffix]
-        .filter(Boolean)
-        .join(' '),
+      name: holderFullName(value),
       address: [
         value.permanentAddressLine1,
         value.permanentAddressLine2,
@@ -533,10 +509,9 @@ export function ReservationAgreementEditorPage() {
       const first = agreement.schedule[0];
       if (first)
         setSchedule({
-          particular: first.particular,
+          particular: first.particular as (typeof SCHEDULE_PARTICULAR_OPTIONS)[number],
           amount: first.amount,
           paymentDate: first.paymentDate ?? '',
-          remarks: first.remarks ?? '',
         });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -554,13 +529,10 @@ export function ReservationAgreementEditorPage() {
     monthlyAmortizationStart: dates.monthlyAmortizationStart || undefined,
     monthlyAmortizationEnd: dates.monthlyAmortizationEnd || undefined,
     paymentDueDay: dates.paymentDueDay ? Number(dates.paymentDueDay) : undefined,
-    primarySignatureStatus: 'received' as const,
-    secondarySignatureStatus: secondary ? ('received' as const) : undefined,
     scheduleNotes: [
       {
         ...schedule,
         paymentDate: schedule.paymentDate || undefined,
-        remarks: schedule.remarks || undefined,
       },
     ],
   });
@@ -578,13 +550,10 @@ export function ReservationAgreementEditorPage() {
     paymentDueDay: dates.paymentDueDay ? Number(dates.paymentDueDay) : undefined,
     primary,
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' } : undefined,
-    primarySignatureStatus: 'received',
-    secondarySignatureStatus: secondary ? 'received' : undefined,
     scheduleNotes: [
       {
         ...schedule,
         paymentDate: schedule.paymentDate || undefined,
-        remarks: schedule.remarks || undefined,
       },
     ],
   });
@@ -698,12 +667,44 @@ export function ReservationAgreementEditorPage() {
     }));
     setMessage('Prefilled from sale. Verify before saving.');
   };
-  const editable = !existing.data || existing.data.status === 'draft';
+  const editable =
+    !existing.data ||
+    existing.data.status === 'draft' ||
+    existing.data.status === 'submitted' ||
+    existing.data.status === 'executed';
   const salePlan = plans.data?.find((p) => p.id === summary.data?.saleId);
+  if (id && existing.isPending) {
+    return (
+      <section className={styles.editorSection} aria-label="Loading reservation" role="status">
+        <div className={styles.page}>
+          <Skeleton style={{ height: 32, maxWidth: 280 }} />
+          <Skeleton style={{ height: 16, maxWidth: 420 }} />
+        </div>
+        <div className={styles.stateSummary} aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className={styles.stateSummaryCell}>
+              <Skeleton style={{ height: 12, width: '40%' }} />
+              <Skeleton style={{ height: 18, width: '70%' }} />
+            </div>
+          ))}
+        </div>
+        {[0, 1, 2, 3].map((i) => (
+          <section key={i} className={styles.panel} aria-hidden="true">
+            <Skeleton style={{ height: 20, width: '30%' }} />
+            <div className={styles.editorGrid}>
+              {[0, 1, 2].map((j) => (
+                <Skeleton key={j} style={{ height: 40 }} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </section>
+    );
+  }
   return (
     <section className={styles.editorSection}>
       <PageHeader
-        title={existing.data?.reservationNumber ?? 'New IST Reservation Agreement'}
+        title={existing.data?.reservationNumber ?? 'New Reservation'}
         description="Server-derived snapshots. Schedule rows are obligations."
         actions={
           <Button variant="secondary" onClick={() => navigate('/admin/sales/reservations')}>
@@ -720,12 +721,6 @@ export function ReservationAgreementEditorPage() {
        */}
       {existing.data ? (
         <dl className={styles.stateSummary} aria-label="Agreement state">
-          <div className={styles.stateSummaryCell}>
-            <dt>Status</dt>
-            <dd>
-              <ReservationStatusBadge status={existing.data.status} />
-            </dd>
-          </div>
           <div className={styles.stateSummaryCell}>
             <dt>Tier</dt>
             <dd>{existing.data.tier}</dd>
@@ -807,7 +802,7 @@ export function ReservationAgreementEditorPage() {
               <dd>{formatMoneyOrDash(proposal.data.terms.totalPrice)}</dd>
             </div>
             <div className={styles.snapshotField}>
-              <dt>Included reservation amount</dt>
+              <dt>Reservation amount</dt>
               <dd>{formatMoneyOrDash(proposal.data.terms.reservationFee)}</dd>
             </div>
             <div className={styles.snapshotField}>
@@ -847,66 +842,107 @@ export function ReservationAgreementEditorPage() {
             Source &amp; references
           </h2>
           <p className={styles.panelNote}>Link application or sale here.</p>
-          <div className={styles.editorGrid}>
-            {/* Application-origin reservations have NO sale: the agreement comes
-                first and the sale arrives at finalization. */}
-            {applicationOrigin ? null : (
-              <>
+          <div className={styles.sourceLayout}>
+            {/* The two pickers are alternative origins of the SAME slot, so
+                they travel together under one group. The auto-fill action
+                belongs to the sale control it acts on, which is why it sits
+                under that control instead of beside it as a third field. */}
+            <fieldset className={styles.sourceGroup}>
+              <legend className={styles.sourceGroupTitle}>Source</legend>
+              <div className={styles.sourceFields}>
+                {/* Application-origin reservations have NO sale: the agreement comes
+                    first and the sale arrives at finalization. */}
+                {applicationOrigin ? null : (
+                  <div className={styles.sourceField}>
+                    <label className={styles.filterLabel}>
+                      Card sale
+                      <Select
+                        aria-label="Card sale"
+                        value={saleId}
+                        loading={sales.isPending}
+                        onChange={(e) => setSaleId(e.target.value)}
+                        options={[
+                          { value: '', label: 'Select sale' },
+                          ...(sales.data?.map((sale) => ({
+                            value: sale.id,
+                            label: `${sale.saleNumber} — ${sale.customerName}`,
+                          })) ?? []),
+                        ]}
+                      />
+                    </label>
+                    <div className={styles.sourceAction}>
+                      <Button variant="secondary" size="sm" onClick={autoFill}>
+                        Auto-fill from sale
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <label className={styles.filterLabel}>
-                  Card sale
+                  Source Application
                   <Select
-                    aria-label="Card sale"
-                    value={saleId}
-                    loading={sales.isPending}
-                    onChange={(e) => setSaleId(e.target.value)}
+                    aria-label="Source Application"
+                    value={customerApplicationId}
+                    loading={applications.isPending}
+                    onChange={(e) => setCustomerApplicationId(e.target.value)}
                     options={[
-                      { value: '', label: 'Select sale' },
-                      ...(sales.data?.map((sale) => ({
-                        value: sale.id,
-                        label: `${sale.saleNumber} — ${sale.customerName}`,
-                      })) ?? []),
+                      { value: '', label: 'Choose Customer' },
+                      ...(applications.data
+                        ?.filter((app) => ['submitted', 'approved'].includes(app.status))
+                        .map((app) => ({
+                          value: app.id,
+                          // The applicant names the option. The application
+                          // number is an internal reference the operator does
+                          // not know yet, and the linked-source strip names the
+                          // selected application in full. A nameless imported
+                          // application still needs something to say, so it
+                          // falls back to its number.
+                          label: app.applicantName ?? app.applicationNumber,
+                        })) ?? []),
                     ]}
                   />
                 </label>
-                <div className={styles.actions}>
-                  <Button variant="secondary" onClick={autoFill}>
-                    Auto-fill from sale
-                  </Button>
-                </div>
-              </>
-            )}
-            <label className={styles.filterLabel}>
-              Source Customer Application
-              <Select
-                aria-label="Source Customer Application"
-                value={customerApplicationId}
-                loading={applications.isPending}
-                onChange={(e) => setCustomerApplicationId(e.target.value)}
-                options={[
-                  { value: '', label: 'Choose a submitted or approved application' },
-                  ...(applications.data
-                    ?.filter((app) => ['submitted', 'approved'].includes(app.status))
-                    .map((app) => ({
-                      value: app.id,
-                      label: `${app.applicationNumber} — ${app.applicantName}`,
-                    })) ?? []),
-                ]}
-              />
-            </label>
-            <label className={styles.filterLabel}>
-              Imported Tier
-              <Select
-                aria-label="Imported Tier"
-                value={vipTier}
-                onChange={(e) => setVipTier(e.target.value)}
-                options={VIP_TIER_FIELD_OPTIONS}
-              />
-            </label>
+              </div>
+            </fieldset>
+            {/* Imported tier is carried in from the IST workbook, not another
+                source. The server always derives the authoritative tier from
+                the selected sale, so this never decides anything. It sits in
+                its own band because a third picker in the source group would
+                read as a third source. */}
+            <div className={styles.sourceContext}>
+              <label className={styles.filterLabel}>
+                Imported Tier
+                <Select
+                  aria-label="Imported Tier"
+                  value={vipTier}
+                  onChange={(e) => setVipTier(e.target.value)}
+                  options={VIP_TIER_FIELD_OPTIONS}
+                />
+              </label>
+            </div>
           </div>
           {sourceApplication.data ? (
-            <p className={styles.note}>
-              Copied from {sourceApplication.data.applicationNumber}. Verify before saving.
-            </p>
+            /* The attached source, named. The copy lands after the application
+               loads, so the strip announces itself when it appears. */
+            <div className={styles.sourceLinked} aria-live="polite">
+              <p className={styles.sourceLinkedLabel}>Linked source</p>
+              <p className={styles.sourceLinkedMeta}>
+                <span className={styles.sourceLinkedId}>
+                  {sourceApplication.data.applicationNumber}
+                </span>
+                {/* A thin application payload carries no holder. The strip
+                    still names the linked application; the copy effect
+                    already refuses to prefill from one. */}
+                {sourceApplication.data.primary ? (
+                  <span className={styles.sourceLinkedName}>
+                    {holderFullName(sourceApplication.data.primary)}
+                  </span>
+                ) : null}
+                <StatusChip label={sourceApplication.data.status} />
+              </p>
+              <p className={styles.sourceLinkedNote}>
+                Copied holder, tier and sale. Verify before saving.
+              </p>
+            </div>
           ) : null}
         </section>
         <section className={styles.panel} aria-labelledby="reservation-dates-heading">
@@ -915,19 +951,39 @@ export function ReservationAgreementEditorPage() {
           </h2>
           <p className={styles.panelNote}>Dates bounding this agreement.</p>
           <div className={styles.editorGrid}>
-            {Object.entries(dates).map(([key, value]) => (
-              <Field
-                key={key}
-                label={key === 'revisionNumber' ? 'Reservation Number' : fieldLabel(key)}
-                value={value}
-                type={
-                  key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
-                    ? 'date'
-                    : 'text'
-                }
-                onChange={(v) => setDates({ ...dates, [key]: v })}
-              />
-            ))}
+            {Object.entries(dates).map(([key, value]) => {
+              if (key === 'paymentDueDay') {
+                const dayOptions = [
+                  { value: '', label: 'Not specified' },
+                  { value: '1', label: '1 day' },
+                  { value: '3', label: '3 days' },
+                  { value: '5', label: '5 days' },
+                  { value: '7', label: '7 days' },
+                ];
+                return (
+                  <SelectField
+                    key={key}
+                    label={fieldLabel(key)}
+                    value={value}
+                    onChange={(v) => setDates({ ...dates, [key]: v })}
+                    options={dayOptions}
+                  />
+                );
+              }
+              return (
+                <Field
+                  key={key}
+                  label={key === 'revisionNumber' ? 'Reservation Number' : fieldLabel(key)}
+                  value={value}
+                  type={
+                    key.toLowerCase().includes('date') || key.includes('Start') || key.includes('End')
+                      ? 'date'
+                      : 'text'
+                  }
+                  onChange={(v) => setDates({ ...dates, [key]: v })}
+                />
+              );
+            })}
           </div>
         </section>
         <section className={styles.panel} aria-labelledby="reservation-primary-heading">
@@ -1003,15 +1059,37 @@ export function ReservationAgreementEditorPage() {
             Obligations only, not payments. Cash lives in payments ledger.
           </p>
           <div className={styles.editorGrid}>
-            {Object.entries(schedule).map(([key, value]) => (
-              <Field
-                key={key}
-                label={fieldLabel(key)}
-                value={value}
-                type={key === 'paymentDate' ? 'date' : 'text'}
-                onChange={(v) => setSchedule({ ...schedule, [key]: v })}
+            <label className={styles.filterLabel}>
+              Particular
+              <Select
+                value={schedule.particular}
+                onChange={(e) =>
+                  setSchedule({ ...schedule, particular: e.target.value as (typeof SCHEDULE_PARTICULAR_OPTIONS)[number] })
+                }
+                options={SCHEDULE_PARTICULAR_OPTIONS.map((opt) => ({
+                  value: opt,
+                  label: opt,
+                }))}
               />
-            ))}
+            </label>
+            <TextField
+              id="schedule-amount"
+              name="amount"
+              label="Amount"
+              value={formatMoneyInput(schedule.amount)}
+              onChange={(v) => {
+                const digits = v.replace(/[^0-9.]/g, '');
+                setSchedule({ ...schedule, amount: digits });
+              }}
+              placeholder="0.00"
+            />
+            <Field
+              key="paymentDate"
+              label="Payment Date"
+              value={schedule.paymentDate}
+              type="date"
+              onChange={(v) => setSchedule({ ...schedule, paymentDate: v })}
+            />
           </div>
         </section>
       </fieldset>
@@ -1023,9 +1101,9 @@ export function ReservationAgreementEditorPage() {
             loading={save.isPending}
             loadingLabel="Saving…"
           >
-            {applicationOrigin && !id ? 'Create Reservation Agreement' : 'Save draft'}
+            {applicationOrigin && !id ? 'Create' : 'Save'}
           </Button>
-          {id && editable ? (
+          {id && existing.data?.status === 'draft' ? (
             <Button
               variant="secondary"
               onClick={() => submit.mutate()}
@@ -1191,7 +1269,7 @@ function ApplicationOriginAgreementPanel({
           <dd>
             {money?.saleNumber ??
               agreement.saleId ??
-              'Not created — created when the purchase is finalized'}
+              'Not created'}
           </dd>
         </div>
         <div className={styles.snapshotField}>
@@ -1199,7 +1277,7 @@ function ApplicationOriginAgreementPanel({
           <dd>{formatMoneyOrDash(money?.totalPrice ?? agreement.totalPrice)}</dd>
         </div>
         <div className={styles.snapshotField}>
-          <dt>Included reservation amount</dt>
+          <dt>Reservation amount</dt>
           <dd>{formatMoneyOrDash(money?.reservationFee ?? agreement.reservationFee)}</dd>
         </div>
         <div className={styles.snapshotField}>
@@ -1253,25 +1331,34 @@ function ApplicationOriginAgreementPanel({
       </div>
       {lifecycle === 'executed' && !agreement.saleId ? (
         <Alert variant="info">
-          Executed. This agreement is now in the Finance queue for collection. No card sale exists
-          yet — one is created only when the whole price is verified.
+          Executed. Awaiting full payment.
         </Alert>
       ) : null}
       {lifecycle === 'executed' && !money?.fullyPaid && money ? (
         <p className={styles.moneyNote}>
           <StatusChip label="Payment processing" tone="warning" />
-          <span>
-            Verified {formatMoneyOrDash(money.verifiedTotal)}, remaining{' '}
-            {formatMoneyOrDash(money.remainingBalance)}.
+          <span className={styles.moneyVerified}>
+            Verified {formatMoneyOrDash(money.verifiedTotal)}
+          </span>
+          <span className={styles.moneyDivider} aria-hidden="true">
+            ·
+          </span>
+          <span className={styles.moneyRemaining}>
+            Remaining {formatMoneyOrDash(money.remainingBalance)}
           </span>
         </p>
       ) : null}
       {lifecycle === 'executed' && money?.fullyPaid ? (
         <p className={styles.moneyNote}>
           <StatusChip label="Fully paid" tone="success" />
-          <span>
-            Verified {formatMoneyOrDash(money.verifiedTotal)} against{' '}
-            {formatMoneyOrDash(money.totalPrice)}. Ready to finalize.
+          <span className={styles.moneyVerified}>
+            Verified {formatMoneyOrDash(money.verifiedTotal)}
+          </span>
+          <span className={styles.moneyDivider} aria-hidden="true">
+            ·
+          </span>
+          <span className={styles.moneyRemaining}>
+            of {formatMoneyOrDash(money.totalPrice)}
           </span>
         </p>
       ) : null}
@@ -1287,7 +1374,6 @@ function ApplicationOriginAgreementPanel({
       {payments.data && payments.data.length > 0 ? (
         <div className={`table-scroll ${styles.ledgerWrap}`}>
           <table>
-            <caption>Every AF-PAY recorded against this agreement</caption>
             <thead>
               <tr>
                 <th scope="col">AF-PAY</th>

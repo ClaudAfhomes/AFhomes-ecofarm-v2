@@ -26,6 +26,8 @@ const STAGE_LABELS: Record<CustomerImportContinuation['stage'], string> = {
   reservation: 'Reservation',
   finance: 'Finance',
   activation: 'Activation',
+  active: 'Active VIP',
+  inactive: 'Historical inactive VIP',
   complete: 'Complete',
   review: 'Needs review',
 };
@@ -35,6 +37,8 @@ const STAGE_TONES: Record<CustomerImportContinuation['stage'], StatusTone> = {
   reservation: 'info',
   finance: 'warning',
   activation: 'info',
+  active: 'success',
+  inactive: 'neutral',
   complete: 'success',
   review: 'warning',
 };
@@ -44,6 +48,8 @@ const STAGE_ACTION_LABELS: Record<CustomerImportContinuation['stage'], string> =
   reservation: 'Complete reservation',
   finance: 'Review payments',
   activation: 'Continue activation',
+  active: 'View customer',
+  inactive: 'View customer',
   complete: 'View customer',
   review: 'Review record',
 };

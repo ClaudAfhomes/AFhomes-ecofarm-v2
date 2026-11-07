@@ -7,7 +7,14 @@
  * backend remains authoritative - these tests only pin the UX layer.
  */
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Retained report behavior is tested enabled; default-off routing has its own suite.
+vi.mock('@afhomes/shared', async (original) => ({
+  ...await original<typeof import('@afhomes/shared')>(),
+  FEATURE_FLAGS: { redemption: true, services: true, reports: true, cms: false },
+  isFeaturePathEnabled: () => true,
+}));
 import { MemoryRouter, Route, Routes } from 'react-router';
 import type { AfHomesPermission } from '@afhomes/contracts';
 

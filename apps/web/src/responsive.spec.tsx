@@ -235,3 +235,9 @@ describe('Phase 33 public site keeps its responsive design', () => {
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
   });
 });
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
+});

@@ -263,8 +263,8 @@ describe('contact and inquiry form', () => {
     const { main } = await chrome();
     const scope = within(main);
     expect(
-      scope.getByRole('link', { name: /claudmarsjimenez.afhomes@gmail.com/i }),
-    ).toHaveAttribute('href', expect.stringContaining('mailto:'));
+      scope.getByRole('link', { name: /info@afhomes\.com\.ph/ }),
+    ).toHaveAttribute('href', 'mailto:info@afhomes.com.ph');
     expect(scope.getByLabelText(/Name/)).toBeInTheDocument();
     expect(scope.getByLabelText(/Message/)).toBeInTheDocument();
     expect(scope.getByRole('button', { name: /Send message/ })).toBeInTheDocument();
@@ -295,7 +295,7 @@ describe('contact and inquiry form', () => {
 
       expect(await screen.findByText('Request saved locally.')).toBeInTheDocument();
       expect((window.location as unknown as { href: string }).href).toMatch(
-        /^mailto:claudmarsjimenez\.afhomes@gmail\.com\?/,
+        /^mailto:info@afhomes\.com\.ph\?/,
       );
       const outbox = JSON.parse(localStorage.getItem('afhomes.inquiries.v1') ?? '[]') as {
         name: string;
@@ -393,4 +393,10 @@ describe('route precedence', () => {
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
     expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });
+});
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

@@ -154,6 +154,8 @@
     text-align: right;
     min-width: 0;
     max-width: 100%;
+    /* Bare text is an anonymous flex item no `> *` rule can reach. */
+    overflow-wrap: anywhere;
   }
 
   /* Values hug the right side at their content size — badges and pills

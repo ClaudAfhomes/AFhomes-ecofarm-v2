@@ -7,6 +7,15 @@ vi.mock('./compress-profile-photo.js', () => ({
 }));
 const photo = { url: null, expiresAt: null, canUpload: true, notice: null };
 describe('profile photo editor', () => {
+  it('stages a creation photo without claiming it was saved remotely', async () => {
+    const select = vi.fn();
+    render(<ProfilePhotoEditor staged photo={photo} loading={false} onRefresh={vi.fn()} onUpload={select} />);
+    await userEvent.upload(screen.getByLabelText('Choose profile photo'), new File(['x'], 'p.jpg', { type: 'image/jpeg' }));
+    expect(select).toHaveBeenCalledWith('compressed-jpeg');
+    expect(screen.getByText('Profile photo selected. It will be saved when the account is created.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile photo saved.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh photo' })).not.toBeInTheDocument();
+  });
   it('compresses before saving and allows same-file replacement after completion', async () => {
     const save = vi.fn(async () => photo),
       user = userEvent.setup();
@@ -20,6 +29,21 @@ describe('profile photo editor', () => {
     expect(await screen.findByText('Profile photo saved.')).toBeInTheDocument();
     await user.upload(input, file);
     expect(save).toHaveBeenCalledTimes(2);
+  });
+  it('removes an existing photo only when the owner action is provided', async () => {
+    const remove = vi.fn(async () => photo);
+    render(
+      <ProfilePhotoEditor
+        photo={{ ...photo, url: 'https://portal.afhomes.com.ph/api/v1/private-files?token=x' }}
+        loading={false}
+        onRefresh={vi.fn()}
+        onUpload={vi.fn()}
+        onRemove={remove}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Remove photo' }));
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Profile photo removed.')).toBeInTheDocument();
   });
   it('disables upload during account verification but leaves refresh available', () => {
     render(

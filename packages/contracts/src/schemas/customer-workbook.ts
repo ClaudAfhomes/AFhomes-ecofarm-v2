@@ -3,7 +3,7 @@ import { applicationHolderSchema, vipTierSchema } from './official-forms.js';
 import { paymentSchemeSchema } from './lifecycle.js';
 export const workbookContactSchema = z
   .string()
-  .regex(/^\d{11}$/, 'Use exactly 11 digits, including the leading zero; no spaces or separators');
+  .regex(/^09\d{9}$/, 'Use the local 09XXXXXXXXX format: starts with 09, exactly 11 digits, no spaces or separators');
 
 export const companyApplicationPrefillSchema = z.object({
   primary: applicationHolderSchema.partial(),

@@ -18,6 +18,8 @@ import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
 import { zipStored } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as FakeSupabase }));
+const photos = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+vi.mock('../_lib/storage.js', () => ({ storageClient: () => ({ from: () => photos }) }));
 
 vi.mock('../_lib/rest.js', () => ({
   serviceClient: () => holder.db,
@@ -342,6 +344,8 @@ const rpcArgs = (fn: string) =>
   ).calls.filter((c) => c.op === 'rpc' && c.table === fn);
 
 beforeEach(() => {
+  photos.upload.mockReset().mockResolvedValue({ error: null });
+  photos.remove.mockReset().mockResolvedValue({ error: null });
   install();
   resetAddressProviderCache();
   upstream.provinces.mockResolvedValue([LAGUNA]);
@@ -354,6 +358,25 @@ beforeEach(() => {
 });
 
 describe('POST /members', () => {
+  const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+  it('saves the creation photo against the new account without exposing image bytes', async () => {
+    const state = await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith('55555555-5555-4555-8555-555555555555/profile.jpg', expect.any(Buffer), expect.objectContaining({ upsert: true, contentType: 'image/jpeg' }));
+    expect(JSON.stringify(holder.db.rows('audit_events'))).not.toContain(photo);
+  });
+  it('rejects invalid image bytes before creating an account', async () => {
+    const state = await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: Buffer.from('not a jpeg').toString('base64') }) });
+    expect(state.status).toBe(400);
+    expect(holder.db.rows('staff_users').some(r => r.email === 'new.member@afhomes.test')).toBe(false);
+    expect(photos.upload).not.toHaveBeenCalled();
+  });
+  it('compensates a failed creation-photo upload', async () => {
+    photos.upload.mockResolvedValue({ error: { message: 'storage unavailable' } });
+    await expect(call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ profilePhotoBase64: photo }) })).rejects.toThrow();
+    expect(holder.db.rows('staff_users').some(r => r.email === 'new.member@afhomes.test')).toBe(false);
+    expect(photos.remove).toHaveBeenCalled();
+  });
   it('provisions the login, links the head, records the OST referrer and issues the AA', async () => {
     const state = await call({
       method: 'POST',
@@ -1236,6 +1259,23 @@ const installDirect = (extra: Record<string, unknown> = {}) =>
   });
 
 describe('POST /members/ost (direct OST creation)', () => {
+  it('saves the photo before installing the new OST account', async () => {
+    installDirect();
+    const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+    const state = await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith(`${DIRECT_MEMBER_ID}/profile.jpg`, expect.any(Buffer), expect.objectContaining({ upsert: true }));
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(1);
+  });
+  it('does not install the OST account when its photo cannot be saved', async () => {
+    const db = installDirect();
+    photos.upload.mockResolvedValue({ error: { message: 'unavailable' } });
+    const photo = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,1,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+    const state = await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ profilePhotoBase64: photo }) });
+    expect(state.status).toBe(503);
+    expect(rpcCalls('install_direct_ost_password')).toHaveLength(0);
+    expect(db.deletedAuthUsers).toContain(DIRECT_MEMBER_ID);
+  });
   it('rejects a missing password before any submission or account write', async () => {
     const db = installDirect();
     const state = await call({
@@ -1425,6 +1465,78 @@ describe('POST /members/ost (direct OST creation)', () => {
     expect(missing.status).toBe(400);
     expect(err(missing.body)?.code).toBe('VALIDATION_ERROR');
     expect(rpcCalls('submit_ost_accreditation')).toHaveLength(0);
+  });
+});
+
+describe('OST member record details', () => {
+  const applicationId = 'af000000-0000-4000-8000-000000000001';
+  function ostDetailFixture() {
+    const tables = baseTables();
+    const moduleId = 'af000000-0000-4000-8000-000000000002';
+    tables.modules!.push({ id: moduleId, key: 'network.ost_registrations', is_active: true });
+    tables.role_permissions!.push({ role_id: ROLE_ADMIN, module_id: moduleId, can_view: true });
+    tables.ost_members = [{ id: OST_ID, application_id: applicationId }];
+    return tables;
+  }
+  const records = {
+    currentApplicant: {
+      fullName: 'OST AGENT', birthDate: '1990-01-02', email: 'ost@afhomes.test',
+      phone: '+639171234567', sex: 'female', civilStatus: 'single',
+      address: { line1: '17 Mango Street', city: 'Calauan', province: 'Laguna', postalCode: '4012' },
+      messenger: null, employerName: 'LAGUNA SERVICES', jobPosition: 'CONSULTANT',
+      tinMasked: '***1234', programCategory: 'non_vip', vipCardType: null,
+    },
+    registration: {
+      form_number: 'OST-SYNTHETIC', date_applied: '2026-10-01', program_category: 'non_vip',
+      vip_card_type: null, applicant_signature_status: 'received', referrer_signature_status: 'received',
+      endorsed_at: null,
+      official_details: { telephone: '', messenger: 'OLD MESSENGER', employerAddress: '18 Rizal Street', governmentIdType: 'passport' },
+    },
+    terms: [], renewals: [],
+  };
+  it('reads saved OST creation fields and current corrections without an IST profile', async () => {
+    const db = install(ostDetailFixture(), { rpcs: [
+      { fn: 'get_sale_team_accreditation', result: null },
+      { fn: 'ost_accreditation_records', result: records },
+    ] });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      dateOfBirth: '1990-01-02', sex: 'Female', civilStatus: 'Single',
+      streetNo: '17 Mango Street', cityMunicipality: 'Calauan', province: 'Laguna', zipCode: '4012',
+      mobileNo: '+639171234567', telNo: null, fbMessenger: null,
+      employerName: 'LAGUNA SERVICES', employerAddress: '18 Rizal Street', jobPosition: 'CONSULTANT',
+      governmentIdType: 'passport', tinMasked: '***1234', tin: null, governmentIdNumber: null,
+    });
+    expect(db.calls.find(c => c.op === 'rpc' && c.table === 'ost_accreditation_records')?.arg).toMatchObject({
+      p_actor_id: ADMIN_ID, p_ost_id: OST_ID, p_application_id: applicationId,
+    });
+  });
+  it('does not read the OST official form without its existing view permission', async () => {
+    const db = install();
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(200);
+    expect(db.calls.some(c => c.op === 'rpc' && c.table === 'ost_accreditation_records')).toBe(false);
+  });
+  it('keeps existing member profile fields ahead of the frozen OST form', async () => {
+    const tables = ostDetailFixture();
+    tables.network_member_profiles!.push({ staff_id: OST_ID, tel_no: '+63281234567',
+      employer_address: '25 Updated Street', government_id_type: 'drivers_license' });
+    install(tables, { rpcs: [
+      { fn: 'get_sale_team_accreditation', result: null },
+      { fn: 'ost_accreditation_records', result: records },
+    ] });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.body).toMatchObject({ telNo: '+63281234567', employerAddress: '25 Updated Street',
+      governmentIdType: 'drivers_license' });
+  });
+  it('preserves the OST scope denial instead of returning another team\'s details', async () => {
+    install(ostDetailFixture(), {
+      rpcErrors: { ost_accreditation_records: { code: '42501', message: 'MUTATION_FORBIDDEN' } },
+    });
+    const state = await call({ method: 'GET', familyPath: OST_ID, token: ADMIN_TOKEN });
+    expect(state.status).toBe(403);
+    expect(state.body).not.toHaveProperty('mobileNo');
   });
 });
 

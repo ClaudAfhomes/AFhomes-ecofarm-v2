@@ -1,16 +1,58 @@
+import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { Button, EmptyState, ErrorState, PageHeader, Skeleton, StatusChip } from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
+import type { Member } from '@afhomes/contracts';
 
 import { ApiError, ApiNetworkError } from '../../lib/api/errors';
 import { getGenealogyNode, getGenealogySummary, getGenealogyUpline } from './services';
 import { humanizeCode } from '../business/format';
 import { genealogyKeys } from '../business/queryKeys';
+import { useSession } from '../../lib/session';
+import { GenealogyTree } from './GenealogyTree';
+import { MemberDetailDialog } from '../network-members/MemberDetailDialog';
+import { getMember } from '../network-members/services';
 import styles from './GenealogyDetailsPage.module.css';
 
 /**
- * One seller's network record: identity, upline chain, and team summary.
+ * Check if the current user can view the full profile of an upline member.
+ * SSM cannot view VD profile, SM cannot view SSM/VD profiles, OST cannot view any upline.
+ * VD can view all upline (none). Admin can view all.
+ */
+function canViewUplineProfile(
+  upline: { role: string; staffId: string },
+  viewer: { roleSlug?: string; id?: string } | null,
+): boolean {
+  if (!viewer) return false;
+  // Admin can view all
+  if (viewer.roleSlug === 'admin' || viewer.roleSlug === 'super_admin') return true;
+  // Self can always view own profile
+  if (viewer.id === upline.staffId) return true;
+  // Seller roles: check hierarchy
+  const viewerRole = viewer.roleSlug;
+  const uplineRole = upline.role;
+  if (!viewerRole) return false;
+  // VD can view all upline (none)
+  if (viewerRole === 'vice_director') return true;
+  // SSM can view VD? No - VD is upline, SSM cannot view VD profile
+  if (viewerRole === 'senior_sales_manager') {
+    return uplineRole !== 'vice_director';
+  }
+  // SM can view SSM/VD? No - both are upline
+  if (viewerRole === 'sales_manager') {
+    return !['vice_director', 'senior_sales_manager'].includes(uplineRole);
+  }
+  // OST cannot view any upline profile
+  if (viewerRole === 'ost') {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * One seller's network record: identity, upline chain, team summary,
+ * interactive downline tree.
  *
  * Read-only by construction: every figure comes from the authorized genealogy
  * APIs, and nothing here edits attribution. The server remains the security
@@ -19,10 +61,25 @@ import styles from './GenealogyDetailsPage.module.css';
 export function GenealogyDetailsPage() {
   const { staffId = '' } = useParams();
   const navigate = useNavigate();
+  const { user } = useSession();
+  const [viewingMember, setViewingMember] = useState<Member | null>(null);
+  const [memberLoading, setMemberLoading] = useState(false);
+
+  const handleMemberClick = async (genealogyNode: import('@afhomes/contracts').GenealogyNode) => {
+    setMemberLoading(true);
+    try {
+      const fullMember = await getMember(genealogyNode.staffId);
+      setViewingMember(fullMember);
+    } catch (error) {
+      console.error('Failed to load member details:', error);
+    } finally {
+      setMemberLoading(false);
+    }
+  };
+
   const node = useQuery({
     queryKey: genealogyKeys.node(staffId),
     queryFn: () => getGenealogyNode(staffId),
-    // A summary refresh elsewhere updates this view without blanking it.
     placeholderData: keepPreviousData,
   });
   const chain = useQuery({
@@ -35,9 +92,6 @@ export function GenealogyDetailsPage() {
     queryFn: () => getGenealogySummary(staffId),
     placeholderData: keepPreviousData,
   });
-
-  // First load skeletonizes the whole page so no static content flashes
-  // before the seller it describes. The sr-only line keeps the pending copy.
   if (node.isPending)
     return (
       <section>
@@ -138,14 +192,26 @@ export function GenealogyDetailsPage() {
               {(chain.data[0]!.fullName.trim().charAt(0) || '•').toUpperCase()}
             </span>
             <div className={styles.headText}>
-              <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`} className={styles.headName}>
-                {chain.data[0]!.fullName}
-              </Link>
+              {canViewUplineProfile(chain.data[0]!, user) ? (
+                <Link to={`/admin/genealogy/${chain.data[0]!.staffId}`} className={styles.headName}>
+                  {chain.data[0]!.fullName}
+                </Link>
+              ) : (
+                <span
+                  className={styles.headName}
+                  style={{ cursor: 'default', color: 'var(--color-text-primary)' }}
+                >
+                  {chain.data[0]!.fullName}
+                </span>
+              )}
               <p className={styles.headMeta}>
                 <StatusChip label={humanizeCode(chain.data[0]!.role)} />
                 {chain.data.length > 1 ? (
                   <span className={styles.panelNote}> · reads through an unavailable head</span>
                 ) : null}
+                {chain.data.length > 1 && !canViewUplineProfile(chain.data[1]!, user) && (
+                  <span className={styles.panelNote}> · upline profile restricted</span>
+                )}
               </p>
             </div>
           </article>
@@ -212,23 +278,39 @@ export function GenealogyDetailsPage() {
             </div>
             <h3 className={styles.subTitle}>Team mix</h3>
             <ul className={styles.mix}>
-              {(
-                [
-                  'vice_director',
-                  'senior_sales_manager',
-                  'sales_manager',
-                  'ost',
-                ] as const
-              ).map((role) => (
-                <li key={role}>
-                  <span>{humanizeCode(role)}</span>
-                  <strong>{formatCountOrDash(summary.data.roleCounts[role])}</strong>
-                </li>
-              ))}
+              {(['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const).map(
+                (role) => (
+                  <li key={role}>
+                    <span>{humanizeCode(role)}</span>
+                    <strong>{formatCountOrDash(summary.data.roleCounts[role])}</strong>
+                  </li>
+                ),
+              )}
             </ul>
           </>
         )}
       </section>
+
+      <section className={styles.panel} aria-label="My Downline">
+        <h2 className={styles.panelTitle}>My Downline</h2>
+        <GenealogyTree
+          rootStaffId={staffId}
+          viewerRole={user?.roleSlug ?? ''}
+          viewerId={user?.id ?? ''}
+          onMemberClick={handleMemberClick}
+        />
+        {memberLoading && <div className={styles.loading}>Loading member details…</div>}
+      </section>
+
+      {viewingMember && (
+        <MemberDetailDialog
+          member={viewingMember}
+          onClose={() => setViewingMember(null)}
+          onChanged={() => {
+            /* invalidate queries if needed */
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -240,7 +322,7 @@ export function GenealogyDetailsPage() {
  */
 function describeSellerLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
+    return 'Check your connection and try again. If this continues, contact AFhomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)

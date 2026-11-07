@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
@@ -13,6 +13,11 @@ import {
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
 vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
+vi.mock('../address/services', () => ({
+  getAddressProvinces: async () => [{ code: '0403400000', name: 'Laguna' }],
+  getAddressLocalities: async () => [{ code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000', postalCode: '4012' }],
+  getAddressBarangays: async () => [{ code: '0403406003', name: 'Dayap', localityCode: '0403406000' }],
+}));
 const calls = vi.hoisted(() => ({
   application: vi.fn<(input: CreateCustomerApplicationRequest) => Promise<never>>(),
   reservation: vi.fn<(input: CreateReservationAgreementRequest) => Promise<never>>(),
@@ -185,13 +190,20 @@ async function goToHolders(user: QAUser) {
   await screen.findByLabelText('First name');
 }
 /** Fill the required primary fields so Holders Next unlocks. */
-function fillPrimaryHolders() {
+async function fillPrimaryHolders(user: QAUser) {
   fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ana' } });
   fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
   fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
   fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
   fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
+  fireEvent.change(screen.getByLabelText('Permanent address line 1'), { target: { value: '77 Synthetic Street' } });
+  await user.click(screen.getByRole('combobox', { name: /^Province/ }));
+  await user.click(await screen.findByRole('option', { name: 'Laguna' }));
+  await user.click(screen.getByRole('combobox', { name: /City \/ municipality/ }));
+  await user.click(await screen.findByRole('option', { name: /Calauan/ }));
+  await user.click(screen.getByRole('combobox', { name: /^Barangay/ }));
+  await user.click(await screen.findByRole('option', { name: 'Dayap' }));
 }
 /**
  * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
@@ -288,7 +300,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   // The save now validates the whole official form. A tier assertion needs a
   // valid holder fixture; an empty form must not reach a creation API.
   await user.selectOptions(
-    screen.getByRole('combobox', { name: 'Source Customer Application' }),
+    screen.getByRole('combobox', { name: 'Source Application' }),
     '00000000-0000-4000-8000-000000000003',
   );
   // Application-origin mode: there is NO Card sale to pick. A first-time
@@ -300,7 +312,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   await user.type(screen.getByLabelText('Address'), '1 QA STREET');
   await user.type(screen.getByLabelText('Contact Number'), '09171234567');
   await user.type(screen.getByLabelText('Email'), 'qa@example.com');
-  await user.click(screen.getByRole('button', { name: 'Create Reservation Agreement' }));
+  await user.click(screen.getByRole('button', { name: 'Create' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalled());
   // Application-origin carries the frozen terms reference and no sale id.
   expect(calls.reservation.mock.calls[0]?.[0]).toMatchObject({ origin: 'application' });
@@ -312,13 +324,13 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   // SweetAlert removes the dialog before its delayed focus restoration completes.
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Create Reservation Agreement' })).toHaveFocus(),
+    expect(screen.getByRole('button', { name: 'Create' })).toHaveFocus(),
   );
   // An application-origin payload carries no vipTier by design, so this asserts
   // the stronger, real property: a tier can only ever be a value the schema
   // accepts, and clearing it never emits an empty or invented tier.
   await user.selectOptions(select, '');
-  await user.click(await screen.findByRole('button', { name: 'Create Reservation Agreement' }));
+  await user.click(await screen.findByRole('button', { name: 'Create' }));
   await waitFor(() => expect(calls.reservation).toHaveBeenCalledTimes(2));
   expect(calls.reservation.mock.calls[1]?.[0]).not.toHaveProperty('vipTier');
 });
@@ -354,10 +366,8 @@ it('primary landline refuses letters and blocks save while the number is invalid
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  // Save & Submit lives in the header and the sticky footer alike; both share state.
-  expect(screen.getAllByRole('button', { name: 'Save & Submit' })).toHaveLength(2);
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
-    expect(save).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
   expect(screen.queryByText('Enter a valid contact number.')).not.toBeInTheDocument();
@@ -375,25 +385,20 @@ it('supplementary landline gets its own frontend error', async () => {
   expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
-    expect(save).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
-it('recommender contact gets its own frontend error and valid formatting is allowed', async () => {
+it('recommender contact accepts only the offered dropdown values', async () => {
   const { user } = mount(true);
   await goToHolders(user);
-  fillPrimaryHolders();
+  await fillPrimaryHolders(user);
   await user.click(screen.getByRole('button', { name: 'Next' }));
   const input = await screen.findByLabelText('Recommender Contact');
-  await user.type(input, '0917TEST');
-  expect(input).toHaveAttribute('aria-invalid', 'true');
-  expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  for (const save of screen.getAllByRole('button', { name: 'Save & Submit' }))
-    expect(save).toBeDisabled();
-  await user.clear(input);
-  await user.type(input, '0917-123-4567');
-  expect(input).not.toHaveAttribute('aria-invalid');
-  expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
+  expect(input.tagName).toBe('SELECT');
+  expect(within(input).queryByRole('option', { name: /0917TEST/ })).not.toBeInTheDocument();
+  fireEvent.change(input, { target: { value: '0917TEST' } });
+  expect(input).toHaveValue('');
+  expect(calls.application).not.toHaveBeenCalled();
 });
 
 it.each(['Silver', 'Bronze', 'Select plan'])(

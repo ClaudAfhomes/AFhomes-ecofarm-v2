@@ -1,21 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { z } from 'zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Customer } from '@afhomes/contracts';
+import type { Customer, Sale } from '@afhomes/contracts';
 import {
   CIVIL_STATUS_OPTIONS,
+  GOVERNMENT_ID_TYPE_LABELS,
   PAYMENT_SCHEMES,
   PAYMENT_SCHEME_LABELS,
   SUFFIX_OPTIONS,
   TEMPLATE_PAYMENT_METHOD_OPTIONS,
   TEMPLATE_TIER_OPTIONS,
+  governmentIdTypeSchema,
   tinNumberSchema,
+  type GovernmentIdType,
 } from '@afhomes/contracts';
 import { DateField as AppDateField, Field, SelectField, chainOptions } from './official-forms-fields';
-import { Alert, Button, DateField, Dialog, Icon, Select, Tabs, TextField } from '@afhomes/ui';
+import { Alert, Button, DateField, Dialog, FileField, Icon, Select, Tabs, TextField } from '@afhomes/ui';
 import { formatStatedMoney } from '@afhomes/shared';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   filterBusinessTextInput,
+  filterGovernmentIdInput,
   filterHolderAddressInput,
   filterHolderNameInput,
   filterLandlineInput,
@@ -24,10 +29,19 @@ import {
 } from '../../lib/normalize';
 import { formatTin } from '../../lib/format';
 import { GeographicAddressFields } from '../address/GeographicAddressFields';
-import { businessKeys } from './queryKeys';
+import { businessKeys, sharedScopes } from './queryKeys';
 import { withStoredValue } from './official-forms-fields';
 import { getGenealogy } from '../genealogy/services';
 import { updateCustomer } from './services-customers';
+import { getSalePayments } from './services';
+import { CustomerIdImage } from './CustomerIdImage';
+import {
+  ACCEPTED_MIME,
+  MAX_BYTES,
+  completeDocumentUpload,
+  putUploadBytes,
+  requestUploadGrant,
+} from '../documents/services';
 import styles from './CustomerDetailPage.module.css';
 
 type Props = {
@@ -35,6 +49,9 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  sales?: Sale[];
+  /** `sales.id_documents` view grant, separate from `sales.customers`. */
+  canViewIdDocuments?: boolean;
 };
 
 type EditSection = 'primary' | 'supplementary' | 'related' | 'package';
@@ -95,6 +112,18 @@ const formatMoneyInput = (value: string): string => {
   return formatted === '—' ? filtered : formatted;
 };
 
+// Mirrors the contract's governmentIdNumber bounds (min 4, max 40 chars).
+const governmentIdNumberSchema = z.string().trim().min(4).max(40);
+
+// Government ID type options, in the shared slug/label vocabulary.
+const GOVERNMENT_ID_TYPE_OPTIONS = [
+  { value: '', label: 'Not specified' },
+  ...governmentIdTypeSchema.options.map((value) => ({
+    value,
+    label: GOVERNMENT_ID_TYPE_LABELS[value],
+  })),
+];
+
 // Customer gender is stored lowercase (contract enum) and displayed Title Case.
 const CUSTOMER_GENDER_OPTIONS = [
   { value: '', label: 'Not specified' },
@@ -151,7 +180,14 @@ function hasSupplementaryRecord(customer: Customer): boolean {
   ].some((value) => typeof value === 'string' && value.trim() !== '');
 }
 
-export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: Props) {
+export function CustomerCompanyEditDialog({
+  customer,
+  open,
+  onClose,
+  onSaved,
+  sales = [],
+  canViewIdDocuments = false,
+}: Props) {
   const client = useQueryClient();
   const [form, setForm] = useState(() => ({
     firstName: text(customer.firstName),
@@ -164,6 +200,10 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     phone: text(customer.phone),
     raNumber: text(customer.raNumber),
     companyStatus: text(customer.companyStatus),
+    governmentIdType: text(customer.governmentIdType),
+    // The stored number is write-only and never read back; this starts blank
+    // and is only sent when the edit lock below is unchecked.
+    governmentIdNumber: '',
     addressLine1: addressPart(customer.address, 'line1'),
     addressLine2: addressPart(customer.address, 'line2'),
     province: addressPart(customer.address, 'province'),
@@ -202,18 +242,26 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     relatedEmail: text(customer.relatedEmail),
     statedVipPackage: text(customer.statedVipPackage),
     statedPaymentTerms: text(customer.statedPaymentTerms),
-    statedRegularPrice: text(customer.statedRegularPrice),
-    statedDiscount: text(customer.statedDiscount),
-    statedTotalAmount: text(customer.statedTotalAmount),
-    statedRf: text(customer.statedRf),
+    statedRegularPrice: formatMoneyInput(text(customer.statedRegularPrice)),
+    statedDiscount: formatMoneyInput(text(customer.statedDiscount)),
+    statedTotalAmount: formatMoneyInput(text(customer.statedTotalAmount)),
+    statedRf: formatMoneyInput(text(customer.statedRf)),
     statedPaymentType: text(customer.statedPaymentType),
     statedRefNo: text(customer.statedRefNo),
     statedPaymentDate: text(customer.statedPaymentDate),
+    vipCardNumber: text(customer.vipCardNumber),
   }));
   const [hasSupplementary, setHasSupplementary] = useState(() => hasSupplementaryRecord(customer));
   const [tinEditable, setTinEditable] = useState(false);
+  const [governmentIdEditable, setGovernmentIdEditable] = useState(false);
   const [supplementaryTinEditable, setSupplementaryTinEditable] = useState(false);
   const [section, setSection] = useState<EditSection>('primary');
+  // Government ID image replacement: a separate, immediate upload - not part
+  // of the Save payload. The previous scan is never deleted; the server just
+  // starts treating this new upload as CURRENT once the bytes are verified.
+  const [idImageFile, setIdImageFile] = useState<File | null>(null);
+  const [idImageError, setIdImageError] = useState<string | null>(null);
+  const [idImageFieldKey, setIdImageFieldKey] = useState(0);
   const set = (key: keyof typeof form) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -243,6 +291,43 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     return withStoredValue(options, stored || undefined);
   };
 
+  // Primary (latest) sale for pre-filling blank Package fields from system data.
+  const primarySale = [...sales].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0];
+  const paymentsQuery = useQuery({
+    queryKey: ['sale-payments', primarySale?.id],
+    queryFn: () => (primarySale ? getSalePayments(primarySale.id) : Promise.resolve([])),
+    enabled: Boolean(primarySale?.id) && open,
+    staleTime: 60 * 1000,
+  });
+  const payments = paymentsQuery.data ?? [];
+  const latestVerifiedPayment = [...payments]
+    .filter((p) => p.status === 'verified')
+    .sort((a, b) => (b.verifiedAt ?? b.recordedAt ?? '').localeCompare(a.verifiedAt ?? a.recordedAt ?? ''))[0];
+  const latestPayment = latestVerifiedPayment ?? [...payments].sort((a, b) =>
+    (b.recordedAt ?? '').localeCompare(a.recordedAt ?? ''),
+  )[0];
+
+  // Pre-fill blank Package fields from system data (never overwrite user edits).
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setForm((f) => {
+      const next = { ...f };
+      if (!next.statedVipPackage && primarySale?.productName) next.statedVipPackage = primarySale.productName;
+      if (!next.statedPaymentTerms && primarySale?.paymentScheme) next.statedPaymentTerms = primarySale.paymentScheme;
+      if (!next.statedRegularPrice && primarySale?.cashPrice) next.statedRegularPrice = formatMoneyInput(primarySale.cashPrice);
+      if (!next.statedRf && primarySale?.reservationFee) next.statedRf = formatMoneyInput(primarySale.reservationFee);
+      if (!next.statedTotalAmount && primarySale?.cashPrice) next.statedTotalAmount = formatMoneyInput(primarySale.cashPrice);
+      if (!next.statedPaymentType && latestPayment) next.statedPaymentType = latestPayment.method ?? latestPayment.paymentType;
+      if (!next.statedRefNo && latestPayment?.reference) next.statedRefNo = latestPayment.reference;
+      if (!next.statedPaymentDate && latestPayment) {
+        const raw = latestPayment.verifiedAt ?? latestPayment.recordedAt;
+        if (raw) next.statedPaymentDate = raw.slice(0, 10);
+      }
+      return next;
+    });
+  }, [open, primarySale, latestPayment]);
+
   const save = useBusinessMutation({
     mutationFn: () => {
       const orNull = (v: string) => (v.trim() === '' ? null : v.trim());
@@ -262,6 +347,12 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
         phone: orNull(form.phone) ?? undefined,
         raNumber: orNull(form.raNumber),
         companyStatus: orNull(form.companyStatus),
+        governmentIdType: orNull(form.governmentIdType) as GovernmentIdType | null,
+        // Write-only: sent only when staff explicitly unlocks and types a
+        // replacement. A blank, locked field never overwrites the stored number.
+        ...(governmentIdEditable && form.governmentIdNumber.trim()
+          ? { governmentIdNumber: form.governmentIdNumber.trim() }
+          : {}),
         // Required parts fall back to the stored value; optional parts are
         // omitted when blank, never sent as empty strings.
         address: {
@@ -328,6 +419,65 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
     },
   });
 
+  // Local thumbnail for the not-yet-uploaded selection. Derived during render
+  // (no setState-in-effect); a cleanup-only effect revokes the URL the moment
+  // the selection changes or the component unmounts. PDFs show only the
+  // filename via FileField's own status slot.
+  const idImagePreviewUrl = useMemo(() => {
+    if (!idImageFile || !idImageFile.type.startsWith('image/')) return null;
+    try {
+      return URL.createObjectURL(idImageFile);
+    } catch {
+      return null;
+    }
+  }, [idImageFile]);
+  useEffect(() => {
+    return () => {
+      if (idImagePreviewUrl) {
+        try {
+          URL.revokeObjectURL(idImagePreviewUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [idImagePreviewUrl]);
+
+  const uploadIdImage = useBusinessMutation({
+    mutationFn: async () => {
+      setIdImageError(null);
+      if (!idImageFile) throw new Error('Choose a replacement file first.');
+      if (!ACCEPTED_MIME.includes(idImageFile.type as (typeof ACCEPTED_MIME)[number])) {
+        throw new Error('Only JPEG, PNG or PDF files are accepted.');
+      }
+      if (idImageFile.size === 0 || idImageFile.size > MAX_BYTES) {
+        throw new Error('The file must be non-empty and at most 10 MiB.');
+      }
+      const grant = await requestUploadGrant({
+        subjectType: 'customer',
+        subjectId: customer.id,
+        idType: form.governmentIdType
+          ? governmentIdTypeSchema.parse(form.governmentIdType)
+          : undefined,
+        mime: idImageFile.type as (typeof ACCEPTED_MIME)[number],
+        sizeBytes: idImageFile.size,
+        originalFilename: idImageFile.name.slice(0, 255),
+      });
+      await putUploadBytes(grant.uploadUrl, idImageFile);
+      const document = await completeDocumentUpload(grant.documentId);
+      if (!document.hasFile) throw new Error('Upload verification is still pending.');
+      return document;
+    },
+    onSuccess: async () => {
+      setIdImageFile(null);
+      setIdImageFieldKey((v) => v + 1);
+      await client.invalidateQueries({
+        queryKey: sharedScopes.documentsCurrentCustomer(customer.id),
+      });
+    },
+    onError: (cause) => setIdImageError(cause instanceof Error ? cause.message : 'Upload failed.'),
+  });
+
   /** One mounted tab panel per section, hidden while inactive. */
   const panel = (value: EditSection) => ({
     id: `ce-sections-${value}-panel`,
@@ -347,7 +497,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             Cancel
           </Button>
           <Button onClick={() => save.mutate()} loading={save.isPending} loadingLabel="Saving…">
-            Save company record
+            Save
           </Button>
         </>
       }
@@ -374,6 +524,13 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           />
           <div className={styles.editCardBody}>
             <div className={styles.editFields}>
+        <TextField
+          id="ce-ra"
+          name="raNumber"
+          label="RA No. (Customer ID)"
+          value={form.raNumber}
+          onChange={set('raNumber')}
+        />
         <Field
           label="Last Name"
           value={form.lastName}
@@ -433,13 +590,6 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           onChange={(v) => set('phone')(v)}
           required
         />
-        <TextField
-          id="ce-ra"
-          name="raNumber"
-          label="Ra No"
-          value={form.raNumber}
-          onChange={set('raNumber')}
-        />
         <label className={styles.filterLabel}>
           Payment Status
           <Select
@@ -451,6 +601,96 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
             options={withStoredValue(CUSTOMER_PAYMENT_STATUS_OPTIONS, form.companyStatus)}
           />
         </label>
+        <label className={styles.filterLabel}>
+          ID Type
+          <Select
+            id="ce-gov-id-type"
+            name="governmentIdType"
+            aria-label="ID Type"
+            value={form.governmentIdType}
+            onChange={(e) => set('governmentIdType')(e.target.value)}
+            options={withStoredValue(GOVERNMENT_ID_TYPE_OPTIONS, form.governmentIdType || undefined)}
+          />
+        </label>
+        <div className={styles.tinField}>
+          <Field
+            label="Government ID Number"
+            value={form.governmentIdNumber}
+            normalize={filterGovernmentIdInput}
+            validate={governmentIdEditable ? governmentIdNumberSchema : null}
+            validateMessage="Enter 4-40 characters."
+            readOnly={!governmentIdEditable}
+            placeholder={
+              customer.governmentIdMasked ? `Current: ${customer.governmentIdMasked}` : 'Not Recorded'
+            }
+            onChange={(v) => set('governmentIdNumber')(v)}
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={governmentIdEditable}
+              onChange={(e) => {
+                setGovernmentIdEditable(e.target.checked);
+                if (!e.target.checked) set('governmentIdNumber')('');
+              }}
+              aria-label="Edit Government ID Number"
+            />{' '}
+            Edit Government ID Number
+          </label>
+        </div>
+        {canViewIdDocuments ? (
+          <div className={`${styles.editFieldWide} ${styles.idImageField}`}>
+            <span className={styles.idImageLabel}>Government ID Image</span>
+            <CustomerIdImage customerId={customer.id} canView={canViewIdDocuments} />
+            <FileField
+              key={idImageFieldKey}
+              id="ce-gov-id-image"
+              name="governmentIdImage"
+              label="Replace Government ID image"
+              optional
+              hint="JPEG, PNG or PDF, max 10 MiB. Uploads immediately; Save is not required."
+              accept={ACCEPTED_MIME.join(',')}
+              status={
+                idImageFile ? (
+                  <div className={styles.idImagePreview}>
+                    {idImagePreviewUrl ? (
+                      <img
+                        className={styles.idImagePreviewThumb}
+                        src={idImagePreviewUrl}
+                        alt={`Preview of ${idImageFile.name}`}
+                      />
+                    ) : null}
+                    <span>Selected: {idImageFile.name}</span>
+                  </div>
+                ) : null
+              }
+              onSelect={(file) => {
+                setIdImageError(null);
+                setIdImageFile(file);
+              }}
+            />
+            <div className={styles.idImageActions}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => uploadIdImage.mutate()}
+                loading={uploadIdImage.isPending}
+                loadingLabel="Uploading…"
+                disabled={!idImageFile}
+              >
+                Upload replacement
+              </Button>
+            </div>
+            {idImageError ? (
+              <Alert variant="danger" title="Upload failed">
+                {idImageError}
+              </Alert>
+            ) : null}
+            {uploadIdImage.isSuccess && !idImageFile ? (
+              <Alert variant="success">Government ID image updated.</Alert>
+            ) : null}
+          </div>
+        ) : null}
         <TextField
           id="ce-addr1"
           name="addressLine1"
@@ -871,7 +1111,7 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           name="statedRf"
           label="Reservation Fee"
           value={form.statedRf}
-          onChange={(value) => set('statedRf')(filterMoneyInput(value))}
+          onChange={(value) => set('statedRf')(formatMoneyInput(value))}
           inputMode="decimal"
           hint={form.statedRf ? formatStatedMoney(form.statedRf) : undefined}
         />
@@ -917,6 +1157,14 @@ export function CustomerCompanyEditDialog({ customer, open, onClose, onSaved }: 
           optional
           value={form.statedPaymentDate}
           onChange={set('statedPaymentDate')}
+        />
+        <TextField
+          id="ce-vipcard"
+          name="vipCardNumber"
+          label="VIP Card Number"
+          value={form.vipCardNumber}
+          readOnly
+          onChange={set('vipCardNumber')}
         />
             </div>
           </div>

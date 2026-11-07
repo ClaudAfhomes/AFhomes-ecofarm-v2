@@ -1,170 +1,405 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { aaNumberSchema, saleTeamSearchResultSchema } from '@afhomes/contracts';
-import { AccreditationId, Alert, Button, Skeleton, TextField } from '@afhomes/ui';
+import {
+  aaNumberSchema,
+  saleTeamSearchConfigSchema,
+  saleTeamSearchContactSchema,
+  saleTeamSearchRevealedSchema,
+  saleTeamSearchStartedSchema,
+  type PublicSaleTeamSearchResult,
+  type SaleTeamSearchContact,
+} from '@afhomes/contracts';
+import { Alert, Button, Dialog, Icon, TextField, TurnstileChallenge } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
+import { ApiError } from '../../lib/api/errors';
 import { Container } from '../components/ui/Container';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Seo } from '../lib/seo';
-import { cn } from '../lib/cn';
+import { VerificationResultCard } from '../components/VerificationResultCard';
 
-const STATUS_PILL: Record<string, { className: string }> = {
-  accredited: { className: 'bg-leaf-100 text-leaf-700 ring-leaf-300' },
-  expired: { className: 'bg-coral-100 text-coral-700 ring-coral-300' },
-  revoked: { className: 'bg-coral-100 text-coral-700 ring-coral-300' },
-  inactive: { className: 'bg-cream-200 text-ink-600 ring-line' },
-  not_started: { className: 'bg-cream-200 text-ink-600 ring-line' },
-};
+const SESSION_KEY = 'afhomes.saleTeamSearch.session';
+type SearchSession = { sessionId: string; receipt?: string; expiresAt?: number };
+function loadSession(): SearchSession {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null') as SearchSession | null;
+    if (saved && /^[\da-f-]{36}$/i.test(saved.sessionId))
+      return {
+        sessionId: saved.sessionId,
+        ...(typeof saved.receipt === 'string' && Number(saved.expiresAt) > Date.now()
+          ? { receipt: saved.receipt, expiresAt: saved.expiresAt }
+          : {}),
+      };
+  } catch {
+    /* Storage may be unavailable; the in-memory session still works. */
+  }
+  return { sessionId: crypto.randomUUID() };
+}
 
 export default function SaleTeamSearch() {
-  const [input, setInput] = useState('');
-  const [submitted, setSubmitted] = useState('');
-  const [invalid, setInvalid] = useState(false);
-  const result = useQuery({
-    queryKey: ['sale-team-search', submitted],
+  const configQuery = useQuery({
+    queryKey: ['sale-team-search-config'],
     queryFn: ({ signal }) =>
-      request(
-        `/sale-team/search?aaNumber=${encodeURIComponent(submitted)}`,
-        saleTeamSearchResultSchema,
-        { signal },
-      ),
-    enabled: Boolean(submitted),
+      request('/sale-team/search/config', saleTeamSearchConfigSchema, { signal }),
     retry: false,
-    staleTime: 0,
-    gcTime: 0,
     refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
   });
-  const showing = submitted && submitted === input.trim().toUpperCase();
-  const data = showing && !result.isFetching && result.isSuccess ? result.data : null;
+  const config = configQuery.data;
+  const [session, setSession] = useState(loadSession);
+  const [input, setInput] = useState('');
+  const [invalid, setInvalid] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'privacy' | 'contact' | 'result'>('idle');
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [searchToken, setSearchToken] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaVersion, setCaptchaVersion] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [contact, setContact] = useState({ name: '', email: '', mobile: '' });
+  const [reuseContact, setReuseContact] = useState(false);
+  const [result, setResult] = useState<PublicSaleTeamSearchResult | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
+  const epoch = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      epoch.current++;
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  function saveSession(value: SearchSession) {
+    setSession(value);
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    } catch {
+      /* Keep only in memory. */
+    }
+  }
+  function discard() {
+    epoch.current++;
+    controller.current?.abort();
+    setBusy(false);
+    setPhase('idle');
+    setResult(null);
+    setPhotoOpen(false);
+    setSearchToken('');
+    setAcknowledged(false);
+    setContact({ name: '', email: '', mobile: '' });
+    setError('');
+  }
+  function start(event: FormEvent) {
+    event.preventDefault();
+    const number = aaNumberSchema.safeParse(input);
+    setInvalid(!number.success);
+    if (!number.success || !config?.available || busy) return;
+    discard();
+    setPhase('privacy');
+    setCaptchaToken(null);
+    setCaptchaVersion((v) => v + 1);
+  }
+  async function reveal(details?: SaleTeamSearchContact) {
+    if (!config || (!searchToken && !captchaToken) || busy) return;
+    const active = epoch.current;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy(true);
+    setError('');
+    try {
+      let token = searchToken;
+      if (!token) {
+        const started = await request('/sale-team/search/start', saleTeamSearchStartedSchema, {
+          method: 'POST',
+          body: JSON.stringify({ aaNumber: input, sessionId: session.sessionId, captchaToken }),
+          signal: abort.signal,
+        });
+        if (epoch.current !== active) return;
+        token = started.searchToken;
+        setSearchToken(token);
+      }
+      const data = await request('/sale-team/search/reveal', saleTeamSearchRevealedSchema, {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          searchToken: token,
+          acknowledged: true,
+          noticeVersion: config.noticeVersion,
+          ...(details ? { contact: details } : { contactReceipt: session.receipt }),
+        }),
+        signal: abort.signal,
+      });
+      if (epoch.current !== active) return;
+      saveSession({
+        sessionId: session.sessionId,
+        receipt: data.contactReceipt,
+        expiresAt:
+          session.receipt === data.contactReceipt ? session.expiresAt : Date.now() + 86400000,
+      });
+      setContact({ name: '', email: '', mobile: '' });
+      setResult(data.result);
+      setPhase('result');
+    } catch (cause) {
+      if (epoch.current !== active) return;
+      if (cause instanceof ApiError && cause.status === 400) {
+        saveSession({ sessionId: session.sessionId });
+        setReuseContact(false);
+        setSearchToken('');
+        setPhase('contact');
+      }
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : 'Verification is unavailable. Retry this request or cancel.',
+      );
+    } finally {
+      if (epoch.current === active) {
+        setBusy(false);
+        setCaptchaToken(null);
+        setCaptchaVersion((value) => value + 1);
+      }
+    }
+  }
+  function continuePrivacy() {
+    if (!acknowledged || busy) return;
+    setReuseContact(!!session.receipt && Number(session.expiresAt) > Date.now());
+    setPhase('contact');
+  }
+  function submitContact(event: FormEvent) {
+    event.preventDefault();
+    if (reuseContact) {
+      void reveal();
+      return;
+    }
+    const parsed = saleTeamSearchContactSchema.safeParse(contact);
+    if (!parsed.success) {
+      setError('Enter a valid name, email and mobile number.');
+      return;
+    }
+    void reveal(parsed.data);
+  }
+  const dialogError = error ? <Alert variant="danger">{error}</Alert> : null;
 
   return (
     <>
-      <Seo title="Verify a sales team member" description="Verify current IST and OST accreditation using an AA number." path="/sale-team-search" />
-      <PageHeader eyebrow="Sales accreditation" title="Verify a sales team member" lede="Enter an AA number to confirm a seller's current accreditation." />
-      <Container size="narrow" className="py-12 sm:py-16">
-        <section aria-labelledby="sale-team-search-heading" className="rounded-[var(--radius-panel)] border border-line bg-cream-50 p-6 shadow-soft sm:p-8">
-          <div className="max-w-2xl">
-            <p className="label-caps text-leaf-700">Accreditation check</p>
-            <h2 id="sale-team-search-heading" className="mt-3 font-display text-2xl font-medium text-navy-900 sm:text-3xl">Search by AA number</h2>
-            <p className="mt-2 text-body-sm text-ink-600">AA numbers are printed on a seller's accreditation card. Enter the full number exactly as shown.</p>
-          </div>
-          <form onSubmit={(e) => { e.preventDefault(); const parsed = aaNumberSchema.safeParse(input); setInvalid(!parsed.success); if (parsed.success) { if (parsed.data === submitted) void result.refetch(); else setSubmitted(parsed.data); } }} className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex-1">
-              <TextField id="sale-team-aa" name="aaNumber" label="AA number" placeholder="AAI26100001 or AAO26100001" value={input} onChange={(value) => { setInput(value); setInvalid(false); }} error={invalid ? 'Enter a valid AA number.' : undefined} autoComplete="off" />
-            </div>
-            <Button type="submit" loading={result.isFetching} loadingLabel="Searching" className="sm:mb-[2px]">Search</Button>
+      <Seo
+        title="Verify a sales team member"
+        description="Verify current IST and OST accreditation using an AA number."
+        path="/sale-team-search"
+      />
+      <PageHeader
+        eyebrow="Sales accreditation"
+        title="Verify a sales team member"
+        lede="Enter an AA number to confirm a seller's current accreditation."
+      />
+      <Container size="site" className="py-12 sm:py-16">
+        {config?.localPreview ? (
+          <Alert variant="info">
+            Local preview — draft privacy notice. Use synthetic contact details only.
+          </Alert>
+        ) : null}
+        <section
+          aria-labelledby="sale-team-search-heading"
+          className="rounded-[var(--radius-panel)] border border-line bg-cream-50 p-6 shadow-soft sm:p-8"
+        >
+          <p className="label-caps text-leaf-700">Accreditation check</p>
+          <h2
+            id="sale-team-search-heading"
+            className="mt-3 font-display text-2xl font-medium text-navy-900 sm:text-3xl"
+          >
+            Search by AA number
+          </h2>
+          <p className="mt-2 text-body-sm text-ink-600">
+            Enter the full AA number.{' '}
+            {config?.dailyLimitEnabled !== false
+              ? 'Up to 3 successful verifications per IP address in 24 hours.'
+              : 'The daily search limit is currently disabled. Security checks still apply.'}
+          </p>
+          {config?.available ? (
+            <>
+              <p className="mt-3 text-body-sm text-ink-600">
+                Select Search to read the privacy notice, enter your name, email and mobile number,
+                and complete Cloudflare verification. Validated details are reused during this session.
+              </p>
+            </>
+          ) : null}
+          {configQuery.isLoading ? <p role="status">Loading verification…</p> : null}
+          {!configQuery.isLoading && !config?.available ? (
+            <Alert variant="danger">
+              Verification is currently unavailable. Please try again later.
+            </Alert>
+          ) : null}
+          <form onSubmit={start} className="mt-6 flex flex-col gap-4">
+            <TextField
+              id="sale-team-aa"
+              name="aaNumber"
+              label="AA number"
+              placeholder="Enter AAI or AAO number"
+              normalize={(value) => value.toUpperCase()}
+              value={input}
+              onChange={(value) => {
+                discard();
+                setInput(value);
+                setInvalid(false);
+              }}
+              error={invalid ? 'Enter a valid AA number.' : undefined}
+              autoComplete="off"
+            />
+            <Button type="submit" disabled={!config?.available || busy}>
+              Search
+            </Button>
           </form>
+          {config?.available ? (
+            <details className="group mt-6 rounded-xl border border-line bg-cream-50 text-body-sm [&::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium text-navy-900">
+                <span>
+                  Privacy notice: <strong className="font-semibold text-navy-900">Data Privacy Act of 2012</strong>
+                </span>
+                <Icon name="chevron-down" size={16} className="shrink-0 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="max-h-80 overflow-y-auto whitespace-pre-wrap border-t border-line px-5 py-4 leading-relaxed text-ink-700" tabIndex={0}>
+                {config.privacyNotice}
+              </div>
+            </details>
+          ) : null}
         </section>
-
         <div aria-live="polite" className="mt-8">
-          {showing && result.isFetching ? (
-            <div role="status" aria-label="Searching accreditation" className="rounded-[var(--radius-panel)] border border-line bg-cream-50 p-8 shadow-soft">
-              <Skeleton style={{ height: 160 }} />
-            </div>
+          {phase === 'idle' || phase === 'result' ? dialogError : null}
+          {phase === 'result' && result && config ? (
+            <VerificationResultCard result={result} config={config} failedPhotoUrl={failedPhotoUrl}
+              onPhotoError={() => setFailedPhotoUrl(result.photoUrl)} onEnlarge={() => setPhotoOpen(true)} />
           ) : null}
-
-          {showing && !result.isFetching && result.isError ? (
-            <Alert variant="danger">Verification is unavailable. Please retry using Search.</Alert>
-          ) : null}
-
-          {data ? (
-            data.status === 'superseded' ? (
-              <article aria-label="Superseded AA number" className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-cream-50 shadow-soft">
-                <div className="h-1.5 bg-coral-500" aria-hidden="true" />
-                <div className="p-6 sm:p-8">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span className="inline-flex items-center gap-2 rounded-full bg-coral-100 px-3 py-1 text-xs font-semibold text-coral-700 ring-1 ring-coral-300">
-                      <span className="h-1.5 w-1.5 rounded-full bg-coral-600" aria-hidden="true" />
-                      No longer current
-                    </span>
-                    <span className="label-caps text-ink-400">Superseded record</span>
-                  </div>
-                  <div className="mt-4 flex items-center gap-4">
-                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-coral-100 text-xl font-semibold text-coral-700 ring-2 ring-coral-300">{data.photoUrl ? <img src={data.photoUrl} alt={data.fullName} className="h-full w-full rounded-full object-cover" /> : (data.fullName.trim().charAt(0) || '?').toUpperCase()}</span>
-                    <div>
-                      <h2 className="font-display text-2xl font-medium text-navy-900 sm:text-3xl">{data.fullName}</h2>
-                      <p className="mt-1 text-body-sm text-ink-600">This AA number is no longer in force. The seller was transferred to a new accreditation.</p>
-                    </div>
-                  </div>
-
-                  <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">AA number</dt>
-                      <dd className="mt-2"><AccreditationId value={data.aaNumber} /></dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Sales team</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind}</dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Valid from</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind === 'IST' ? 'Not applicable — employee' : data.startsOn}</dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Valid until</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind === 'IST' ? 'No accreditation expiry' : data.expiresOn}</dd>
-                    </div>
-                    {data.successorAaNumber ? (
-                      <div className="rounded-xl border border-leaf-300 bg-leaf-100/40 p-4 sm:col-span-2">
-                        <dt className="label-caps text-leaf-700">Current AA number</dt>
-                        <dd className="mt-2"><AccreditationId value={data.successorAaNumber} /></dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                </div>
-              </article>
-            ) : (
-              <article aria-label="Accredited sales team member" className="overflow-hidden rounded-[var(--radius-panel)] border border-line bg-cream-50 shadow-soft">
-                <div className="h-1.5 bg-leaf-500" aria-hidden="true" />
-                <div className="p-6 sm:p-8">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span className={cn('inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1', (STATUS_PILL[data.status] ?? STATUS_PILL.accredited)?.className ?? '')}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-                      {data.kind === 'IST' ? 'Employee identity' : 'Currently accredited'}
-                    </span>
-                    <span className="label-caps text-ink-400">Verified record</span>
-                  </div>
-                  <div className="mt-4 flex items-center gap-4">
-                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-leaf-100 text-xl font-semibold text-leaf-700 ring-2 ring-leaf-300">{data.photoUrl ? <img src={data.photoUrl} alt={data.fullName} className="h-full w-full rounded-full object-cover" /> : (data.fullName.trim().charAt(0) || '?').toUpperCase()}</span>
-                    <h2 className="font-display text-2xl font-medium text-navy-900 sm:text-3xl">{data.fullName}</h2>
-                  </div>
-
-                  <dl className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Sales team</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind}</dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">AA number</dt>
-                      <dd className="mt-2"><AccreditationId value={data.aaNumber} /></dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Status</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind === 'IST' ? 'Employee identity' : 'Currently accredited'}</dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4">
-                      <dt className="label-caps text-ink-400">Valid from</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind === 'IST' ? 'Not applicable — employee' : data.startsOn}</dd>
-                    </div>
-                    <div className="rounded-xl border border-line bg-cream-100/60 p-4 sm:col-span-2">
-                      <dt className="label-caps text-ink-400">Valid until</dt>
-                      <dd className="mt-2 font-medium text-ink-800">{data.kind === 'IST' ? 'No accreditation expiry' : data.expiresOn}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </article>
-            )
-          ) : null}
-
-          {showing && !result.isFetching && result.isSuccess && !result.data ? (
-            <div role="status" className="rounded-[var(--radius-panel)] border border-dashed border-line bg-cream-100/60 p-8 text-center">
-              <p className="font-display text-xl font-medium text-navy-900">No current accredited seller found.</p>
-              <p className="mt-2 text-body-sm text-ink-600">Check the AA number and try again. Revoked or expired records are not shown.</p>
-            </div>
+          {phase === 'result' && !result ? (
+            <p
+              role="status"
+              className="rounded-xl border border-dashed border-line p-8 text-center"
+            >
+              No current accredited seller found.
+            </p>
           ) : null}
         </div>
       </Container>
+      <Dialog
+        open={photoOpen && !!result?.photoUrl}
+        onClose={() => setPhotoOpen(false)}
+        title="Profile photo"
+      >
+        {result?.photoUrl ? (
+          <img
+            src={result.photoUrl}
+            alt={result.maskedName}
+            className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain"
+            onError={() => {
+              setFailedPhotoUrl(result.photoUrl);
+              setPhotoOpen(false);
+            }}
+          />
+        ) : null}
+      </Dialog>
+      <Dialog
+        open={phase === 'privacy'}
+        onClose={discard}
+        title="Privacy notice"
+        footer={
+          <>
+            <Button variant="secondary" onClick={discard}>
+              Cancel
+            </Button>
+            <Button
+              onClick={continuePrivacy}
+              disabled={!acknowledged || busy}
+              loading={busy}
+              loadingLabel="Preparing search"
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
+        <div className="whitespace-pre-wrap text-body-sm text-ink-700">{config?.privacyNotice}</div>
+        <label className="mt-6 flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          <span>
+            I acknowledge that I have read and understood the AFHomes Privacy Notice and agree to the
+            processing of my personal information for accreditation verification and security purposes.
+          </span>
+        </label>
+        {dialogError}
+      </Dialog>
+      <Dialog
+        open={phase === 'contact'}
+        onClose={discard}
+        title="Your contact details and security check"
+      >
+        {reuseContact ? (
+          <p>
+            Your details are already validated for this session. Complete the security check for
+            this search.
+          </p>
+        ) : (
+          <p className="mb-4 text-body-sm">
+            Enter your details as the person conducting this search. Matching details are saved once
+            and reused for later IST/OST verification searches.
+          </p>
+        )}
+        <form onSubmit={submitContact} className="flex flex-col gap-4">
+          {!reuseContact ? (
+            <>
+              <TextField
+                id="search-contact-name"
+                name="name"
+                label="Name"
+                value={contact.name}
+                onChange={(name) => setContact((v) => ({ ...v, name }))}
+                autoComplete="name"
+              />
+              <TextField
+                id="search-contact-email"
+                name="email"
+                label="Email"
+                type="email"
+                value={contact.email}
+                onChange={(email) => setContact((v) => ({ ...v, email }))}
+                autoComplete="email"
+              />
+              <TextField
+                id="search-contact-mobile"
+                name="mobile"
+                label="Mobile"
+                type="tel"
+                value={contact.mobile}
+                onChange={(mobile) => setContact((v) => ({ ...v, mobile }))}
+                autoComplete="tel"
+              />
+            </>
+          ) : null}
+          {phase === 'contact' && config?.available ? (
+            <TurnstileChallenge
+              siteKey={config.siteKey}
+              onToken={setCaptchaToken}
+              resetVersion={captchaVersion}
+            />
+          ) : null}
+          {dialogError}
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary" type="button" onClick={discard}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={(!captchaToken && !searchToken) || busy}
+              loading={busy}
+              loadingLabel="Verifying"
+            >
+              Verify accreditation
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </>
   );
 }

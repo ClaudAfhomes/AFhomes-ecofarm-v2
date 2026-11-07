@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { HolderFields, RecommenderFields, emptyHolder } from './official-forms-fields';
-import { getGenealogy } from '../genealogy/services';
+import { getGenealogy, getOstMemberContacts } from '../genealogy/services';
 
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(),
@@ -13,6 +13,7 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: vi.fn(async () => []),
   getGenealogyDownline: vi.fn(async () => []),
   getGenealogySummary: vi.fn(),
+  getOstMemberContacts: vi.fn(async () => ({})),
 }));
 
 /**
@@ -193,6 +194,13 @@ describe('holder birth date', () => {
 });
 
 describe('postal code hint', () => {
+  it('requests reference review rather than suggesting a missing ZIP can be submitted blank', () => {
+    render({ cityMunicipalityCode: '0205706000', postalCode: '' });
+    expect(
+      screen.getByText('Postal reference needs review for this location.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('No published code. Leave blank.')).not.toBeInTheDocument();
+  });
   it('no longer claims the postal code fills from the city', () => {
     render();
     expect(screen.queryByText('Fills from the city selected.')).not.toBeInTheDocument();
@@ -291,6 +299,80 @@ describe('recommender loading states', () => {
   });
 });
 
+describe('recommender contact/email loading states', () => {
+  it('spins and disables both dropdowns while contact lookup is in flight, never offering empty options early', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockReturnValue(new Promise(() => {}));
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    // The VIP Recommender name only resolves to a staff id - and the contact
+    // lookup only starts - once the genealogy chain itself has loaded.
+    await waitFor(() => expect(optionsOf('VIP Recommender')).toContain('ANA SANTOS'));
+    const contactSelect = screen.getByLabelText('Recommender Contact');
+    const emailSelect = screen.getByLabelText('Recommender Email');
+    await waitFor(() => {
+      expect(contactSelect).toHaveAttribute('aria-busy', 'true');
+      expect(emailSelect).toHaveAttribute('aria-busy', 'true');
+    });
+    expect(contactSelect).toBeDisabled();
+    expect(emailSelect).toBeDisabled();
+    expect(contactSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(emailSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
+    expect(within(contactSelect).queryByRole('option', { name: 'No contact available' })).not.toBeInTheDocument();
+    expect(within(emailSelect).queryByRole('option', { name: 'No email available' })).not.toBeInTheDocument();
+  });
+
+  it('enables both dropdowns and populates real options once the fetch resolves', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    expect(
+      await within(screen.getByLabelText('Recommender Contact')).findByRole('option', { name: /09171234567/ }),
+    ).toBeInTheDocument();
+    expect(
+      await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+  });
+
+  it('shows an empty-state message, not "No contact"/"No email" prematurely, once loading finishes with nothing to offer', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({ 'ost-1': { phone: null, email: '' } });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    await waitFor(() =>
+      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'No contact available' })).toBeInTheDocument(),
+    );
+    expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'No email available' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+  });
+
+  it('recovers from a failed contact lookup with a retry, instead of spinning forever', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockRejectedValue(new Error('offline'));
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    const retry = await screen.findByRole('button', { name: 'Retry contact lookup' });
+    await waitFor(() => {
+      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'Unable to load contact numbers' })).toBeInTheDocument();
+      expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'Unable to load email' })).toBeInTheDocument();
+    });
+    // Settled on error, not stuck spinning - and still interactive.
+    expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
+    expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
+
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry contact lookup' })).not.toBeInTheDocument(),
+    );
+    expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+  });
+});
+
 describe('VIP recommender', () => {
   it('is a dropdown of active OST members, not a typed name', async () => {
     vi.mocked(getGenealogy).mockResolvedValue([
@@ -341,23 +423,54 @@ describe('VIP recommender', () => {
 });
 
 describe('recommender typed fields', () => {
-  it('refuses a contact number carrying letters, rather than storing part of it', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([]);
-    renderRecommender();
-    const contact = screen.getByLabelText('Recommender Contact');
-    // The keystroke is refused whole, so the field can never hold the digits
-    // left over from a number that was never valid.
-    fireEvent.change(contact, { target: { value: '0917abc1234' } });
-    expect(contact).toHaveValue('');
-    fireEvent.change(contact, { target: { value: '09171234567' } });
-    expect(contact).toHaveValue('09171234567');
+  it.each(['0917ABC', '123'])('does not offer invalid stored phone %s', async (phone) => {
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone, email: 'ana@example.com' },
+    });
+    renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
+    expect(await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' })).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: new RegExp(phone) })).not.toBeInTheDocument();
+  });
+  it('refuses a contact number carrying letters by not offering invalid options', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node('ost-1', 'ANA SANTOS', 'ost'),
+    ]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'ana@example.com' },
+    });
+    renderRecommender({
+      referrerStaffId: 'ost-1',
+      vipRecommenderName: '',
+    });
+    await waitFor(() => expect(screen.getByLabelText('Recommender Contact')).toBeInTheDocument());
+    // Wait for contact options to load
+    await waitFor(() => {
+      const contactSelect = screen.getByLabelText('Recommender Contact');
+      expect(within(contactSelect).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+    });
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /ana@example\.com/ })).not.toBeInTheDocument();
+    // Invalid contact numbers with letters are never offered as options
+    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /0917abc/ })).not.toBeInTheDocument();
   });
 
-  it('keeps the email lowercase while typing', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([]);
-    renderRecommender();
-    const email = screen.getByLabelText('Recommender Email');
-    fireEvent.change(email, { target: { value: 'Ana@Example.COM' } });
-    expect(email).toHaveValue('ana@example.com');
+  it('keeps the email lowercase in dropdown options', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node('ost-1', 'ANA SANTOS', 'ost'),
+    ]);
+    vi.mocked(getOstMemberContacts).mockResolvedValue({
+      'ost-1': { phone: '09171234567', email: 'Ana@Example.COM' },
+    });
+    renderRecommender({
+      referrerStaffId: '',
+      vipRecommenderName: 'ANA SANTOS',
+    });
+    await waitFor(() => expect(screen.getByLabelText('Recommender Email')).toBeInTheDocument());
+    // Wait for email options to load
+    await waitFor(() => {
+      const emailSelect = screen.getByLabelText('Recommender Email');
+      expect(within(emailSelect).getByRole('option', { name: /ana@example\.com/ })).toBeInTheDocument();
+    });
+    expect(within(screen.getByLabelText('Recommender Email')).queryByRole('option', { name: /Ana@Example/ })).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AfHomesPermission } from '@afhomes/contracts';
-import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions } from './navigation';
+import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions, istNavItemsForPermissions } from './navigation';
 
 const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({
   moduleKey,
@@ -11,6 +11,13 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
 });
 
 describe('AFHomes navigation', () => {
+  it('hides disabled Reports/CMS and removes Accreditation from IST navigation',()=>{
+    const grants=[permission('dashboard.view'),permission('sales.card_sales'),permission('governance.audit'),permission('cms.pages')];
+    expect(navItemsForPermissions(grants).some(item=>['Reports','Website CMS'].includes(item.label))).toBe(false);
+    expect(canAccessNavTarget(grants,'/admin/reports')).toBe(false);
+    expect(canAccessNavTarget(grants,'/admin/cms/pages')).toBe(false);
+    expect(istNavItemsForPermissions(grants).some(item=>item.label==='Accreditation')).toBe(false);
+  });
   it('places Customer Lookup after Dashboard for employee without weakening route guards', () => {
     const grants = [
       permission('dashboard.view'),
@@ -95,15 +102,12 @@ describe('AFHomes navigation', () => {
       'Staff',
     ]);
   });
-  it('reveals the Audit Log only with the governance grant', () => {
+  it('keeps Reports hidden while its feature flag is disabled, even with governance access', () => {
     const items = navItemsForPermissions([
       permission('dashboard.view'),
       permission('governance.audit'),
     ]);
-    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Reports']);
-    expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
-      'Audit Log',
-    ]);
+    expect(items.map((item) => item.label)).toEqual(['Dashboard']);
   });
   it('hides every destination when the server grants nothing', () =>
     expect(navItemsForPermissions([])).toEqual([]));

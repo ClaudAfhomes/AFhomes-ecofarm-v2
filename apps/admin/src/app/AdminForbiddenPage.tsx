@@ -22,7 +22,7 @@ export function AdminForbiddenPage({ retry }: { retry?: () => void }) {
   return (
     <main className={styles.deniedRoot}>
       <section className={styles.deniedCard} aria-labelledby="denied-title">
-        <img src={logo} alt="AFHomes logo" className={styles.deniedLogo} />
+        <img src={logo} alt="AFhomes logo" className={styles.deniedLogo} />
         <span className={styles.deniedShield} aria-hidden="true">
           <Icon name="alert" size={28} />
         </span>
@@ -63,7 +63,7 @@ export function AdminForbiddenPage({ retry }: { retry?: () => void }) {
           void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
-        message="Sign out of AFHomes administration?"
+        message="Sign out of AFhomes administration?"
         confirmLabel="Sign out"
         cancelLabel="Cancel"
       />

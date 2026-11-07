@@ -770,8 +770,6 @@ describe('IST list holder-aware summary', () => {
         applicantName: 'QA Applicant',
         paymentScheme: 'spot_cash',
         totalPrice: '312000.00',
-        primarySignatureStatus: 'received',
-        secondarySignatureStatus: hasSecondary ? 'pending' : null,
         hasSecondaryHolder: hasSecondary,
       });
     },

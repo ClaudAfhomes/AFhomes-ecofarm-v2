@@ -7,11 +7,12 @@
 2. Read this workflow pack (`workflow/graphidian/00-guide.md`, then the stage file
    matching the task) when invoked via `@workflow/graphidian/`.
 3. Recover prior context **only if the task is a continuation**:
-   - Read `SESSION.md` **and verify it against the repository** before
-     trusting it. Compare its `Repo state` claims to `git log` / `git status`.
-   - If `SESSION.md` disagrees with the repo, **the repo wins**; note the
+   - Read the handoff region of `workflow/claude/update-session.md` **and
+     verify it against the repository** before trusting it. Compare its
+     repository-state claims to `git log` / `git status`.
+   - If the handoff disagrees with the repo, **the repo wins**; note the
      drift in your report and do not "restore" the stale text.
-   - For a genuinely new task, do **not** load `SESSION.md` — stale context
+   - For a genuinely new task, do **not** load the handoff — stale context
      costs tokens and misleads.
 4. Establish repo state, read-only:
    ```sh

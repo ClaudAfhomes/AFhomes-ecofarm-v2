@@ -1,4 +1,8 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+vi.mock('../../../../../packages/ui/src/components/compress-profile-photo.js', () => ({
+  profilePhotoBase64: vi.fn(async () => 'cGhvdG8='),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OstApplication, OstMember, OstReferralCodeRecord } from '@afhomes/contracts';
 import { Route, Routes } from 'react-router';
@@ -186,7 +190,7 @@ const CODE: OstReferralCodeRecord = {
   codeHint: 'OST-…-3456',
   useCount: 2,
   maxUses: 10,
-  expiresAt: '2026-10-28T00:00:00.000Z',
+  expiresAt: '2099-10-28T00:00:00.000Z',
   isActive: true,
   createdAt: '2026-09-28T00:00:00.000Z',
 };
@@ -379,10 +383,12 @@ describe('OST application review', () => {
     fireEvent.change(screen.getByLabelText('Confirm temporary password'), {
       target: { value: 'TempPass123' },
     });
+    expect(screen.getByRole('button', { name: 'Approve as OST' })).toBeDisabled();
+    await userEvent.upload(screen.getByLabelText('Choose profile photo'), new File(['photo'], 'profile.jpg', { type: 'image/jpeg' }));
     fireEvent.click(screen.getByRole('button', { name: 'Approve as OST' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(await screen.findByText(/Approved\. OST member OST-000001/)).toBeInTheDocument();
-    expect(mockedApprove).toHaveBeenCalledWith(APP_ID, 'TempPass123');
+    expect(mockedApprove).toHaveBeenCalledWith(APP_ID, 'TempPass123', 'cGhvdG8=');
   });
 
   it('requires a reason before rejecting', async () => {

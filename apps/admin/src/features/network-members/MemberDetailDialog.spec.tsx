@@ -19,6 +19,7 @@ const ost = memberSchema.parse({
   positionLabel: 'OST',
   status: 'active',
   createdAt: '2026-01-01',
+  detailAuthorized: true,
 });
 const permissions: AfHomesPermission[] = ['network.ost_registrations', 'network.ost_members'].map(
   (moduleKey) => ({
@@ -77,6 +78,36 @@ function show(member = ost, grants = permissions, roleSlug = 'admin', onConvertT
   );
   return { onClose, onConvertToIst };
 }
+it('waits for complete details before allowing edit of an incomplete list row', () => {
+  vi.mocked(getMember).mockImplementation(() => new Promise(() => {}));
+  show();
+  expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
+});
+it('shows fetched OST contact and work fields instead of the incomplete list row', async () => {
+  vi.mocked(getMember).mockResolvedValue({
+    ...ost,
+    streetNo: '17 Mango Street',
+    cityMunicipality: 'Calauan',
+    province: 'Laguna',
+    zipCode: '4012',
+    mobileNo: '+639171234567',
+    employerName: 'LAGUNA SERVICES',
+    employerAddress: '18 Rizal Street',
+    jobPosition: 'CONSULTANT',
+    telNo: null,
+    tin: null,
+    governmentIdNumber: null,
+  });
+  show();
+  expect(await screen.findByText('17 Mango Street')).toBeVisible();
+  expect(screen.getByText('Calauan')).toBeVisible();
+  expect(screen.getByText('Laguna')).toBeVisible();
+  expect(screen.getByText('4012')).toBeVisible();
+  expect(screen.getByText('+639171234567')).toBeVisible();
+  expect(screen.getByText('LAGUNA SERVICES')).toBeVisible();
+  expect(screen.getByText('18 Rizal Street')).toBeVisible();
+  expect(screen.getByText('CONSULTANT')).toBeVisible();
+});
 it('opens the existing OST renewal route and closes the member dialog', async () => {
   const { onClose: close } = show();
   fireEvent.click(screen.getByRole('button', { name: 'Renewal' }));

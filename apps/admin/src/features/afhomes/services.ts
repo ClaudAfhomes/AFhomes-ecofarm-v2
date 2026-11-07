@@ -8,6 +8,8 @@ import {
   dashboardQueuesSchema,
   salesTrendReportSchema,
   staffTestPurgeResponseSchema,
+  publicVerificationSettingsSchema,
+  type UpdatePublicVerificationSettings,
   type AfHomesDashboard,
   type AfHomesDepartment,
   type AfHomesPermission,
@@ -27,6 +29,14 @@ import {
   protectedRequestList as requestList,
 } from '../../lib/api/client';
 import { normalizeProfileName, normalizeStaffIdentity } from '../../lib/normalize';
+
+export const getPublicVerificationSettings = () =>
+  request('/admin/afhomes/public-verification-settings', publicVerificationSettingsSchema);
+export const savePublicVerificationSettings = (input: UpdatePublicVerificationSettings) =>
+  request('/admin/afhomes/public-verification-settings', publicVerificationSettingsSchema, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
 
 export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);

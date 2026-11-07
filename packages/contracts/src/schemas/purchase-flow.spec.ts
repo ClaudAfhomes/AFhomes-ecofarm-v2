@@ -24,7 +24,6 @@ const create = {
   purchaseTermsId: termsId,
   reservationDate: '2026-10-07',
   agreementDate: '2026-10-07',
-  primarySignatureStatus: 'pending',
   scheduleNotes: [],
 };
 const terms = {
@@ -108,8 +107,7 @@ describe('application-first purchase contracts', () => {
   });
   it('updates agreement fields without accepting source or immutable date changes', () => {
     expect(
-      purchaseReservationUpdateSchema.safeParse({ requestId, primarySignatureStatus: 'received' })
-        .success,
+      purchaseReservationUpdateSchema.safeParse({ requestId, revisionNumber: 'R1' }).success,
     ).toBe(true);
     expect(
       purchaseReservationUpdateSchema.safeParse({ requestId, purchaseTermsId: app }).success,
@@ -241,15 +239,12 @@ describe('application-first purchase contracts', () => {
       monthlyAmortizationStart: null,
       monthlyAmortizationEnd: null,
       paymentDueDay: null,
-      primarySignatureStatus: 'received',
-      secondarySignatureStatus: null,
       schedule: [
         {
           lineNumber: 1,
           particular: 'RESERVATION',
           amount: '10000.00',
           paymentDate: null,
-          remarks: null,
         },
       ],
     };
@@ -264,6 +259,11 @@ describe('application-first purchase contracts', () => {
       fields,
     };
     expect(purchaseDocumentEvidenceSchema.safeParse(document).success).toBe(true);
+    const historical = {
+      ...document,
+      fields: { ...fields, primarySignatureStatus: 'received', secondarySignatureStatus: null },
+    };
+    expect(purchaseDocumentEvidenceSchema.parse(historical)).toEqual(historical);
     expect(
       purchaseDocumentEvidenceSchema.safeParse({
         ...document,
@@ -318,4 +318,46 @@ describe('application-first purchase contracts', () => {
         }).success,
       ).toBe(false);
   });
+});
+
+it('retains original membership tier and activation time while accepting older native evidence without them', () => {
+  const document = {
+    id: app,
+    kind: 'membership_activated',
+    sourceId: app,
+    revision: 1,
+    schemaVersion: 1,
+    actorId: actor,
+    capturedAt: '2026-10-07T00:00:00Z',
+    fields: {
+      reservationNumber: null,
+      saleNumber: 'SYNTHETIC-SALE',
+      applicationNumber: null,
+      customerNumber: 'SYNTHETIC-CUSTOMER',
+      customerName: 'Synthetic customer',
+      sellerName: 'Synthetic seller',
+      actorName: 'Synthetic actor',
+      totalPrice: '54000.00',
+      membershipNumber: 'SYNTHETIC-MEMBERSHIP',
+      status: 'active',
+      yearlyPoints: 60000,
+      pointsAllocated: 60000,
+      validityMonths: 84,
+      verifiedTotal: '54000.00',
+      expiresAt: '2033-10-07T00:00:00Z',
+    },
+  };
+  expect(purchaseDocumentEvidenceSchema.safeParse(document).success).toBe(true);
+  const historical = {
+    ...document,
+    fields: { ...document.fields, tier: 'BRONZE', activatedAt: '2026-10-07T00:00:00Z' },
+  };
+  expect(purchaseDocumentEvidenceSchema.parse(historical)).toEqual(historical);
+  for (const field of ['password', 'governmentId', 'receiptStoragePath'])
+    expect(
+      purchaseDocumentEvidenceSchema.safeParse({
+        ...historical,
+        fields: { ...historical.fields, [field]: 'PRIVATE' },
+      }).success,
+    ).toBe(false);
 });

@@ -350,6 +350,7 @@ export function BusinessActivationQueuePage() {
           onDone={async (activation) => {
             setResult(activation);
             await refresh();
+            await client.resetQueries({ queryKey: ['business', 'queue', 'activation'] });
             notifySuccess({
               title: activation.alreadyActive ? 'Already Activated' : 'Membership Activated',
               message: activation.alreadyActive
@@ -381,7 +382,10 @@ function ActivateDialog({
   const [months, setMonths] = useState(frozen ? String(frozen) : '12');
   const activate = useBusinessMutation({
     mutationFn: () => activateSale(item.saleId, Number(months)),
-    onSuccess: onDone,
+    onSuccess: async (result) => {
+      await onDone(result);
+      onClose();
+    },
   });
 
   const verified = Number(item.verifiedTotal) || 0;

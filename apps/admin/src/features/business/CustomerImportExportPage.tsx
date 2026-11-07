@@ -55,9 +55,31 @@ function ImportPreviewExplanation({ value }: { value: unknown }) {
       <p>
         Destination after import: {source.stage}.{' '}
         {source.externalSummary
-          ? `Externally verified payments: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}. Business records will be reconciled on confirmation.`
+          ? `${source.externalSummary.settlement === 'certified' ? 'Certified historical settlement' : 'Externally verified payments'}: ${source.externalSummary.paid}. Remaining balance: ${source.externalSummary.balance}. Business records will be reconciled on confirmation.`
           : `${source.claimCount} payment claims awaiting Finance review; no verified payment is created by import.`}
       </p>
+      {source.vipControlNumberPreview && (
+        <div style={{ marginTop: 8, padding: 8, background: 'var(--color-surface-alt)', borderRadius: 4 }}>
+          <strong>VIP Control Number Preview:</strong>
+          <p style={{ margin: '4px 0 0' }}>
+            {source.vipControlNumberPreview.source === 'provided' && source.vipControlNumberPreview.existing
+              ? `Existing number preserved: ${source.vipControlNumberPreview.existing}`
+              : source.vipControlNumberPreview.source === 'generated'
+              ? 'Generated on confirmation; this VIP card ID will also be the purchase reference.'
+              : 'No VIP card ID supplied'}
+          </p>
+        </div>
+      )}
+      {source.historicalPointsPreview && (
+        <div style={{ marginTop: 8, padding: 8, background: 'var(--color-surface-alt)', borderRadius: 4 }}>
+          <strong>Historical Stay Points Preview:</strong>
+          <p style={{ margin: '4px 0 0' }}>
+            {source.historicalPointsPreview.eligible
+              ? `Eligible for import: ${source.historicalPointsPreview.stayPointsTotal} points (70% weekdays / 30% weekends)`
+              : `Not eligible: ${source.historicalPointsPreview.reason || 'Unknown reason'}`}
+          </p>
+        </div>
+      )}
       {source.missingRequirements.map((item) => (
         <p key={item}>{item}</p>
       ))}
@@ -178,7 +200,7 @@ function JobCounts({ job }: { job: CustomerImportJob }) {
 
 function describeJobsLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
-    return 'Check your connection and try again. If this continues, contact AFHomes support.';
+    return 'Check your connection and try again. If this continues, contact AFhomes support.';
   if (error instanceof ApiError && error.status === 401)
     return 'Your session has expired. Sign in again, then retry.';
   if (error instanceof ApiError && error.status === 403)
@@ -259,6 +281,7 @@ export function CustomerImportExportPage() {
   const [sheetUrl, setSheetUrl] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [externalHistory, setExternalHistory] = useState(false);
+  const [resumeJobId, setResumeJobId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<'xlsx' | 'csv' | null>(null);
   const [chosenFile, setChosenFile] = useState<{ kind: 'excel' | 'csv'; name: string } | null>(
     null,
@@ -307,8 +330,9 @@ export function CustomerImportExportPage() {
       sheetUrl?: string;
       sourceName?: string;
       externalVerificationReason?: string;
-    }) => parseCustomerImport(input),
+    }) => parseCustomerImport({ ...input, ...(resumeJobId ? { resumeJobId } : {}) }),
     onSuccess: (result) => {
+      setResumeJobId(null);
       setPreview(result);
       setPreviewPage(0);
       say(
@@ -356,9 +380,14 @@ export function CustomerImportExportPage() {
       void client.invalidateQueries({ queryKey: businessKeys.sales });
       void client.invalidateQueries({ queryKey: applicationKeys.reservationsScope });
       void client.invalidateQueries({ queryKey: reservationKeys.scope });
+      void client.invalidateQueries({ queryKey: applicationKeys.scope });
+      void client.invalidateQueries({ queryKey: businessKeys.customerScope });
+      void client.invalidateQueries({ queryKey: ['customer-lookup'] });
       void client.invalidateQueries({ queryKey: sharedScopes.memberships });
       void client.invalidateQueries({ queryKey: sharedScopes.memberLookup });
       void client.invalidateQueries({ queryKey: sharedScopes.analytics });
+      void client.invalidateQueries({ queryKey: ['ist-portal'] });
+      void client.invalidateQueries({ queryKey: ['team-sales'] });
       void client.invalidateQueries({ queryKey: sharedScopes.reports });
     },
     onError: (error) => {
@@ -479,6 +508,10 @@ export function CustomerImportExportPage() {
           </Button>
         }
       />
+      {resumeJobId ? <Alert variant="info" title="Revalidate archived import">
+        Upload the original or corrected workbook below. The archived values and notes remain unchanged; the new preview needs your review before confirmation.
+        <Button variant="secondary" onClick={() => setResumeJobId(null)}>Stop revalidation</Button>
+      </Alert> : null}
       <Alert variant="warning" title="Historical data rules">
         History needs real payment facts.
       </Alert>
@@ -611,7 +644,7 @@ export function CustomerImportExportPage() {
                 <Button
                   loading={parse.isPending}
                   loadingLabel="Reading…"
-                  disabled={parse.isPending || !sheetUrl.trim()}
+                  disabled={parse.isPending || !!resumeJobId || !sheetUrl.trim()}
                   onClick={() => {
                     setChosenFile(null);
                     parse.mutate({
@@ -638,6 +671,7 @@ export function CustomerImportExportPage() {
                 <h2 id={`${TAB_BASE_ID}-review-heading`} className={styles.panelTitle}>
                   3. Review preview
                 </h2>
+                {preview.reviewFile&&<div><Button variant="secondary" onClick={()=>downloadFile(preview.reviewFile!)}>Download Review Workbook</Button><p>All original rows and values are retained. Red cells need correction; amber cells need review. Correct the source cells and upload again to refresh the notes.</p></div>}
                 <div role="status" className={styles.summaryChips}>
                   <StatusChip
                     label={`Total ${formatCountOrDash(preview.job.totalRows)}`}
@@ -1006,6 +1040,19 @@ export function CustomerImportExportPage() {
                         ) : null}
                       </p>
                       <JobCounts job={job} />
+                      {job.migrationRevalidationRequired ? <div className={styles.jobActions}>
+                        <p>Archived import: fresh validation is required before continuing.</p>
+                        {job.revalidatedJobId ? <Button size="sm" variant="secondary" onClick={() => {
+                          void getCustomerImportJob(job.revalidatedJobId!).then(result => {
+                            setPreview({ ...result, pageSize: PREVIEW_PAGE_SIZE });
+                            setPreviewPage(0); setTab('import'); setResumeJobId(null);
+                          }).catch(error => say(error instanceof Error ? error.message : 'Review job could not be loaded.', 'danger'));
+                        }}>Open revalidated job</Button> : mayImport && mayConfirm ? <Button size="sm" onClick={() => {
+                          setResumeJobId(job.id); setPreview(null); setChosenFile(null);
+                          setExternalHistory(false); setSheetUrl(''); setTab('import');
+                          say('Select the workbook to create a fresh review linked to this archived job.');
+                        }}>Revalidate workbook</Button> : null}
+                      </div> : null}
                       {job.status === 'committing' && mayConfirm ? (
                         <div className={styles.jobActions}>
                           <Button
@@ -1018,7 +1065,7 @@ export function CustomerImportExportPage() {
                           </Button>
                         </div>
                       ) : null}
-                      {mayConfirm && (job.status === 'ready' || job.status === 'validated') ? (
+                      {mayConfirm && !job.migrationRevalidationRequired && (job.status === 'ready' || job.status === 'validated') ? (
                         <div className={styles.jobActions}>
                           <Button
                             size="sm"

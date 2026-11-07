@@ -1,0 +1,20 @@
+AFHomes Ecofarm — IST/OST Verification Privacy Notice
+Version: 2026-10-21-v1
+
+AFHomes Ecofarm provides this service to help you check a representative's identity or accreditation using their AA number. For privacy questions or requests concerning your personal information, contact claudmarsjimenez.afhomes@gmail.com.
+
+Before showing a result, we collect your name, email address and mobile number. We check their format but do not verify that you own the email address or number. We privately store one record per complete matching contact combination and reuse it for later IST or OST verification requests while the record is retained.
+
+We use this information to provide your requested verification service, recognize repeat submissions and help prevent misuse. Providing these details is not permission for marketing. Your contact details are not shown to the representative you search for.
+
+We also keep limited security information about connection identifiers, requests, timestamps and successful searches to enforce abuse controls and the search allowance. Current verification permits three successful disclosures per IP address in a rolling 24 hours. A result shows only the representative's masked name, AA number, available profile photo and applicable validity information.
+
+Contact records become eligible for deletion {{CONTACT_RETENTION_DAYS}} days after creation. Scheduled cleanup runs hourly in bounded batches, so deletion may occur later while a backlog is being processed. Security disclosure records become eligible after 30 days; attempt records become eligible after 30 days without an update. This notice does not promise immediate deletion from provider backups or logs governed by separate retention arrangements.
+
+The browser stores a random session identifier and a signed receipt for up to 24 hours, rather than a copy of your contact details. A receipt does not remove the requirement for a fresh acknowledgment and anti-bot check.
+
+Cloudflare Turnstile checks browser/network signals for automated requests. Vercel hosts the website and API, and Supabase stores service data. Authorized service processes handle the contact/security records; public browser users cannot read those private tables directly.
+
+You may request information, access or correction concerning your personal data, or erasure/blocking where applicable, by emailing the privacy contact above. We may need to verify your identity and evaluate applicable legal obligations. You may also raise concerns with the National Privacy Commission.
+
+If you do not provide the requested contact details and acknowledge this notice, this online workflow will not show a verification result. Contact the official AFHomes company verification number, +63 960-431-6867, for assistance. Do not send payment or transact outside official AFHomes processes.

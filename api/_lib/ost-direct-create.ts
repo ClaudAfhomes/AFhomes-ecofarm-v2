@@ -13,6 +13,7 @@
  * uncertain outcomes are preserved for review.
  */
 import type { Db, FailureCode } from './handler-kit.js';
+import { saveProfilePhoto, removeProfilePhoto } from './profile-photo.js';
 
 export type OstDirectFailure = { code: FailureCode; message: string; status: number };
 export type OstDirectInstall =
@@ -172,6 +173,7 @@ export async function createAndInstallDirectOst(
     aaNumber: string | null;
     startsOn: string;
     expiresOn: string;
+    profilePhotoBase64?: string | undefined;
   },
 ): Promise<OstDirectInstall> {
   const existing = await db
@@ -210,6 +212,27 @@ export async function createAndInstallDirectOst(
     memberId = created.data.user.id as string;
     createdHere = true;
   }
+  if (createdHere && input.profilePhotoBase64) {
+    try {
+      await saveProfilePhoto(memberId, input.profilePhotoBase64);
+    } catch {
+      const removed = await db.auth.admin.deleteUser(memberId);
+      let cleanupFailed = !!removed.error;
+      try {
+        await removeProfilePhoto(memberId);
+      } catch {
+        cleanupFailed = true;
+      }
+      return {
+        ok: false,
+        code: 'INTERNAL',
+        status: 503,
+        message: cleanupFailed
+          ? 'Account cleanup needs administrator review before retrying.'
+          : 'Could not save the profile photo. Retry using the same application.',
+      };
+    }
+  }
   const installed = await db.rpc('install_direct_ost_password', {
     p_application_id: input.applicationId,
     p_actor_id: input.actorId,
@@ -231,6 +254,7 @@ export async function createAndInstallDirectOst(
             status: 500,
             message: 'Account cleanup needs administrator review before retrying.',
           };
+        if (input.profilePhotoBase64) await removeProfilePhoto(memberId);
       }
     }
     const failure = ostDirectFailure(installed.error);

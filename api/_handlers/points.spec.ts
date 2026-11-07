@@ -667,7 +667,7 @@ describe('points: recording a purchase', () => {
       const s = await call({
         familyPath: `purchases/${PURCHASE_ID}/quote`,
         method: 'POST',
-        body: { pointsRequested: 500 },
+        body: { pointsRequested: 500, serviceDates: { serviceDate: '2026-10-24' } },
       });
       expect(s.status).toBe(200);
       expect(body(s)).toMatchObject({
@@ -706,7 +706,7 @@ describe('points: recording a purchase', () => {
       const s = await call({
         familyPath: `purchases/${PURCHASE_ID}/quote`,
         method: 'POST',
-        body: { pointsRequested: 500 },
+        body: { pointsRequested: 500, serviceDates: { serviceDate: '2026-10-24' } },
       });
       expect(s.status).toBe(403);
     });
@@ -723,7 +723,7 @@ describe('points: recording a purchase', () => {
       const s = await call({
         familyPath: `purchases/${PURCHASE_ID}/quote`,
         method: 'POST',
-        body: { pointsRequested: 500 },
+        body: { pointsRequested: 500, serviceDates: { serviceDate: '2026-10-24' } },
       });
       expect(s.status).toBe(409);
       // The member is told the staycation/promotion rule, never the internals.

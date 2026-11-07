@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import {
   MEMBER_WORKBOOK_ROWS,
@@ -10,6 +9,7 @@ import { readWorkbook, readWorkbookParts } from './customer-xlsx.js';
 import { workbookDate } from './customer-workbook.js';
 import { zipStored } from './report-export.js';
 import { companyLayout, COMPANY_ID_TYPES, COMPANY_ROLES } from './member-workbook-layout.js';
+import { readRuntimeAsset } from './runtime-assets.js';
 
 const decode = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
 const encode = (text: string) => new TextEncoder().encode(text);
@@ -29,12 +29,7 @@ export function companyMemberWorkbook(
   if (entries.length > MEMBER_WORKBOOK_ROWS)
     throw new Error('Narrow the roster to at most 500 members before exporting.');
   const parts = readWorkbookParts(
-    readFileSync(
-      new URL(
-        `../../packages/contracts/assets/member-${kind.toLowerCase()}-template-v2.xlsx`,
-        import.meta.url,
-      ),
-    ),
+    readRuntimeAsset(`member-${kind.toLowerCase()}-template-v2.xlsx`),
   );
   const teams = kind === 'IST' ? 5 : 6;
   const path = `xl/worksheets/sheet${teams}.xml`;

@@ -571,6 +571,9 @@ export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[]
 /* ------------------------------------------------------------------ */
 
 export const customerImportJobSchema = z.object({
+  migrationRevalidationRequired: z.boolean().optional(),
+  revalidatedJobId: z.uuid().nullable().optional(),
+  revalidationOfJobId: z.uuid().nullable().optional(),
   id: z.string().uuid(),
   /** Public import job ID (AF-IMP-XXXXX). Nullish only pre-migration. */
   jobNumber: z.string().nullish(),
@@ -607,7 +610,9 @@ export const customerImportRowSchema = z.object({
 });
 export type CustomerImportRow = z.infer<typeof customerImportRowSchema>;
 
+export const customerImportReviewFileSchema = z.object({filename:z.string(),mime:z.literal('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),content:z.string()});
 export const customerImportParseResponseSchema = z.object({
+  reviewFile: customerImportReviewFileSchema.optional(),
   job: customerImportJobSchema,
   rows: z.array(customerImportRowSchema),
   pageSize: z.number().int().positive().optional(),
@@ -688,7 +693,46 @@ export const customerLookupSchema = z.object({
   membershipStatus: z.string().nullable(),
   membershipExpiresAt: z.string().nullable(),
   category: customerCategorySchema,
+  /** Derived payment state from the directory RPC; null when no sale exists. */
+  paymentStatus: z.enum(['no_payment', 'partially_paid', 'fully_paid']).nullable(),
+  /** Company-stated status, verbatim (never a server-computed total). */
+  companyStatus: z.string().nullable(),
+  /** Company-stated VIP package; fallback for `tier` when no membership exists. */
+  statedVipPackage: z.string().nullable(),
+  /** Supplementary member's name, when one is on file. */
+  supplementaryFullName: z.string().nullable(),
 });
 export type CustomerLookup = z.infer<typeof customerLookupSchema>;
+
+/**
+ * Strict GSD Customer Lookup projection.
+ *
+ * Only active customers with an active, unexpired VIP membership (BRONZE/SILVER/GOLD)
+ * may be represented. This permission-gated staff lookup returns names and card
+ * details; public search responses retain their separate privacy restrictions.
+ */
+export const gsdActiveVipLookupSchema = z.object({
+  /** Customer's given/first name. */
+  firstName: z.string().min(1),
+  /** Full surname for the authorized staff lookup. */
+  lastName: z.string().min(1),
+  /** Customer's RA number (company customer ID). */
+  raNumber: z.string().nullable().optional(),
+  /** Official VIP card number (YYMMDDNNNNNVTPMMS). */
+  vipCardNumber: z.string().nullable().optional(),
+  /** Authoritative VIP tier of the qualifying membership. */
+  vipTier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
+  /** Authoritative `memberships.expires_at` formatted in Asia/Manila, `YYYY-MM-DD`. */
+  validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Total available points (from points_accounts.balance). */
+  totalAvailablePoints: z.number().int().nonnegative(),
+  /** Persisted weekend allowance after spending; null if unavailable. */
+  weekendAvailablePoints: z.number().int().nonnegative().nullable(),
+  /** Persisted weekday allowance after spending; null if unavailable. */
+  weekdayAvailablePoints: z.number().int().nonnegative().nullable(),
+  /** Short-lived signed URL for the customer's government ID image, or null. */
+  governmentIdImageUrl: z.string().nullable(),
+});
+export type GsdActiveVipLookup = z.infer<typeof gsdActiveVipLookupSchema>;
 
 export const customerSellerOptionSchema = z.object({ id: z.string().uuid(), name: z.string() });

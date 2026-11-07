@@ -30,7 +30,7 @@ function install() {
     ost_applications: [],
     final_qualifications: [],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens(), rpcs: [{ fn: 'account_imported_sales', result: [] }] });
   return holder.db as FakeSupabase;
 }
 

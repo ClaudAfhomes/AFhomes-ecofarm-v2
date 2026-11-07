@@ -38,6 +38,8 @@ import {
   memberDetailSchema,
   memberListQuerySchema,
   memberSchema,
+  ostAccreditationRecordsSchema,
+  toTitleCase,
   transferMemberSchema,
   transferOstTeamSchema,
   updateMemberProfileSchema,
@@ -66,6 +68,8 @@ import {
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { createAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
+import { getVisibleGenealogyIds, canAccessMemberDetail } from '../_lib/genealogy-visibility.js';
+import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
   'vice_director',
@@ -500,7 +504,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if ('error' in auth) return deny(res, auth);
     const parsed = memberListQuerySchema.safeParse(req.query);
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid member query', 400);
-    return list(res, await memberRows(db, parsed.data.search ?? '', parsed.data.position));
+    const rows = await memberRows(db, parsed.data.search ?? '', parsed.data.position);
+    const visibleIds = await getVisibleGenealogyIds(db, auth.userId, auth.roleSlug);
+    if (visibleIds) {
+      const filtered = rows.filter((r: Member) => visibleIds.has(r.id));
+      // Add detailAuthorized flag for frontend UX (upline names are non-clickable)
+      const withDetailAuth = await Promise.all(
+        filtered.map(async (r) => ({
+          ...r,
+          detailAuthorized: await canAccessMemberDetail(db, auth.userId, auth.roleSlug, r.id),
+        }))
+      );
+      return list(res, withDetailAuth);
+    }
+    // No restriction (admin): all members are detail-authorized
+    const withDetailAuth = rows.map((r) => ({ ...r, detailAuthorized: true }));
+    return list(res, withDetailAuth);
   }
 
   /* ---------------- issue a missing AA number (never a renumber) ---------------- */
@@ -574,6 +593,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const input = parsed.data;
     if (input.mode === 'complete' && !['admin', 'super_admin'].includes(auth.roleSlug))
       return fail(res, 'FORBIDDEN', 'Administrator approval is required.', 403);
+    if (input.profilePhotoBase64 && !decodeProfilePhoto(input.profilePhotoBase64))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
     const sponsor = await validateOstSponsor(db, input.sponsorStaffId, 'manual');
     if (!sponsor.ok) return fail(res, 'VALIDATION_ERROR', sponsor.message, sponsor.status);
     const verified = await verifyOstAddress(input.identity);
@@ -640,6 +661,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       aaNumber: input.aaNumberMode === 'manual' ? input.aaNumber! : null,
       startsOn: input.startsOn!,
       expiresOn: input.expiresOn!,
+      profilePhotoBase64: input.profilePhotoBase64,
     });
     if (!installed.ok) return fail(res, installed.code, installed.message, installed.status);
     return res.status(201).json(
@@ -757,8 +779,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const auth = await authorizeAfHomes(req, 'network.members');
       if ('error' in auth) return deny(res, auth);
       const rows = await memberRows(db, '', undefined);
-      const row = rows.find((r: Member) => r.id === id);
+      let row = rows.find((r: Member) => r.id === id);
       if (!row) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+      // DETAIL AUTHORIZATION: strict check - no upline profile access for sellers
+      const canAccess = await canAccessMemberDetail(db, auth.userId, auth.roleSlug, id);
+      if (!canAccess)
+        return fail(res, 'FORBIDDEN', 'Member is outside your authorized genealogy scope', 403);
       // The console's single-record read carries the identification fields in
       // clear so an operator can verify the recorded values; every list-shaped
       // read keeps the masks. The detail read is the only place they surface.
@@ -769,6 +795,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         .maybeSingle();
       if (secretsError) throw secretsError;
       const secretRow = secrets as Record<string, unknown> | null;
+      if (
+        row.position === 'ost' &&
+        auth.permissions.some(p => p.moduleKey === 'network.ost_registrations' && p.canView)
+      ) {
+        const { data: ost, error: ostError } = await db
+          .from('ost_members')
+          .select('application_id')
+          .eq('id', id)
+          .maybeSingle();
+        if (ostError) throw ostError;
+        if (ost) {
+          // OST registration and accepted corrections are authoritative; no IST profile is required.
+          const records = await db.rpc('ost_accreditation_records', {
+            p_actor_id: auth.userId,
+            p_ost_id: id,
+            p_application_id: ost.application_id,
+          });
+          if (records.error) {
+            if (records.error.code === '42501')
+              return fail(res, 'FORBIDDEN', 'You cannot view this OST registration.', 403);
+            throw records.error;
+          }
+          const { currentApplicant: current, registration } = ostAccreditationRecordsSchema.parse(records.data);
+          if (current) {
+            const address = current.address ?? {};
+            const form = registration?.official_details ?? {};
+            row = {
+              ...row,
+              fullName: current.fullName,
+              email: current.email ?? row.email,
+              dateOfBirth: current.birthDate,
+              sex: current.sex ? toTitleCase(current.sex.replaceAll('_', ' ')) : null,
+              civilStatus: current.civilStatus ? toTitleCase(current.civilStatus) : null,
+              streetNo: isoOrNull(address.line1),
+              cityMunicipality: isoOrNull(address.city),
+              province: isoOrNull(address.province),
+              zipCode: isoOrNull(address.postalCode),
+              mobileNo: current.phone,
+              telNo: row.telNo ?? isoOrNull(form.telephone),
+              fbMessenger: current.messenger,
+              employerName: current.employerName,
+              employerAddress: row.employerAddress ?? isoOrNull(form.employerAddress),
+              jobPosition: current.jobPosition,
+              governmentIdType: row.governmentIdType ?? isoOrNull(form.governmentIdType),
+              tinMasked: current.tinMasked,
+            };
+          }
+        }
+      }
       return res.status(200).json(
         memberDetailSchema.parse({
           ...row,
@@ -779,6 +854,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
     const auth = await authorizeAfHomes(req, 'network.members', 'update');
     if ('error' in auth) return deny(res, auth);
+    // DETAIL AUTHORIZATION: same strict check as GET - no upline profile updates for sellers
+    const canAccess = await canAccessMemberDetail(db, auth.userId, auth.roleSlug, id);
+    if (!canAccess)
+      return fail(res, 'FORBIDDEN', 'Member is outside your authorized genealogy scope', 403);
     const parsed = updateMemberProfileSchema.safeParse(jsonBody(req));
     if (!parsed.success || Object.keys(parsed.data).length === 0)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
@@ -1103,6 +1182,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         'Create OST accounts through official OST registration and approval.',
         409,
       );
+    if (input.profilePhotoBase64 && !decodeProfilePhoto(input.profilePhotoBase64))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
 
     const roles = await roleCatalog(db);
     const target = roles.find((r) => r.slug === input.position);
@@ -1234,12 +1315,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       await ignore(db.from('staff_role_assignments').delete().eq('staff_id', id));
       await ignore(db.from('staff_users').delete().eq('id', id));
       await ignore(db.auth.admin.deleteUser(id));
+      if (input.profilePhotoBase64) await ignore(removeProfilePhoto(id));
     };
     const insertError = (label: string, error: { message?: string; code?: string } | null) =>
       new Error(
         `${label} insert failed [${error?.code ?? 'unknown'}]: ${error?.message ?? 'unknown'}`,
       );
     try {
+      if (input.profilePhotoBase64) await saveProfilePhoto(created.user.id, input.profilePhotoBase64);
       const now = new Date().toISOString();
       const { error: staffError } = await db.from('staff_users').insert({
         id: created.user.id,

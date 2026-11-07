@@ -992,7 +992,7 @@ describe('activation existing-account recovery', () => {
     expect(screen.queryByText('We could not activate your account')).toBeNull();
   });
 
-  it('still signs in normally when the account was newly created', async () => {
+  it('preserves successful new activation when the subsequent normal sign-in is unavailable', async () => {
     const user = userEvent.setup();
     installRoutes({
       '/auth/customer/activate': () => ({
@@ -1005,10 +1005,9 @@ describe('activation existing-account recovery', () => {
     await user.type(screen.getByLabelText('Password'), 'StrongPass123');
     await user.type(screen.getByLabelText('Confirm password'), 'StrongPass123');
     await user.click(screen.getByRole('button', { name: 'Activate my account' }));
-    // No Supabase client is configured in tests, so the normal sign-in
-    // attempt surfaces its configuration error instead of navigating - which
-    // still proves the recovery panel was NOT shown for a fresh account.
-    expect(await screen.findByText('We could not activate your account')).toBeInTheDocument();
+    // No client is configured here; sign-in failure cannot undo the completed activation.
+    expect(await screen.findByRole('heading', { name: 'Account activated' })).toBeVisible();
+    expect(screen.getByText('Use the password you just created.')).toBeVisible();
     expect(screen.queryByText(/An account already exists for this email/)).toBeNull();
   });
 });
@@ -1095,4 +1094,10 @@ describe('points history pagination', () => {
     await user.click(screen.getByRole('button', { name: 'Newer activity' }));
     expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
   });
+});
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

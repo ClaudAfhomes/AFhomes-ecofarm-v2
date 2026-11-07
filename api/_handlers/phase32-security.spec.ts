@@ -130,7 +130,7 @@ function install(overrides: Record<string, unknown[]> = {}) {
     // if A ever received B's figures, this stub would have to change.
     rpcs: [
       {
-        fn: 'customer_points_position',
+        fn: 'customer_points_position_with_allowances',
         result: () => [
           {
             membership_id: MEMBERSHIP.active,

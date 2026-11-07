@@ -10,7 +10,7 @@
  * silent empty state. Nothing here touches earning claims: spending and
  * claiming are separate pages, separate mutations, separate histories.
  */
-import { screen } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -138,9 +138,10 @@ describe('Use VIP Points', () => {
     renderWithProviders(<UseVipPointsPage />);
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     await user.type(screen.getByLabelText(/points to spend/i), '2000');
+    fireEvent.change(screen.getByLabelText('Service date'), { target: { value: '2026-10-24' } });
     await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/2,000 points are worth/)).toBeInTheDocument();
-    expect(quotePointDiscount).toHaveBeenCalledWith(PURCHASE_ID, 2000);
+    expect(quotePointDiscount).toHaveBeenCalledWith(PURCHASE_ID, 2000, { serviceDate: '2026-10-24' });
     expect(commitPointDiscount).not.toHaveBeenCalled();
   });
 
@@ -149,6 +150,7 @@ describe('Use VIP Points', () => {
     renderWithProviders(<UseVipPointsPage />);
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     await user.type(screen.getByLabelText(/points to spend/i), '2000');
+    fireEvent.change(screen.getByLabelText('Service date'), { target: { value: '2026-10-24' } });
     await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/customer portal approval required/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open customer approval portal' })).toHaveAttribute(
@@ -168,6 +170,7 @@ describe('Use VIP Points', () => {
     renderWithProviders(<UseVipPointsPage />);
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     await user.type(screen.getByLabelText(/points to spend/i), '2000');
+    fireEvent.change(screen.getByLabelText('Service date'), { target: { value: '2026-10-24' } });
     await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(
       await screen.findByText(/points can only be used on accommodation/i),
@@ -182,6 +185,7 @@ describe('Use VIP Points', () => {
     await user.click(await screen.findByRole('button', { name: /use points/i }));
     const input = screen.getByLabelText(/points to spend/i);
     await user.type(input, '2000');
+    fireEvent.change(screen.getByLabelText('Service date'), { target: { value: '2026-10-24' } });
     await user.click(screen.getByRole('button', { name: /request customer approval/i }));
     expect(await screen.findByText(/no promotion price/i)).toBeInTheDocument();
     expect(input).toHaveValue(2000);

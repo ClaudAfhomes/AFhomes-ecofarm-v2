@@ -22,7 +22,7 @@ export function ErrorState({
   requestId,
   onRetry,
 }: ErrorStateProps) {
-  const text = message ?? 'Please try again. If this continues, contact AFHomes support.';
+  const text = message ?? 'Please try again. If this continues, contact AFhomes support.';
   const reference =
     requestId ??
     (typeof error === 'object' &&

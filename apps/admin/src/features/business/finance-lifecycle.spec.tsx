@@ -382,19 +382,18 @@ describe('Phase 26 finance queue states', () => {
   it('badges queue statuses capitalized, never snake_case', async () => {
     render('/admin/finance/payments');
     await screen.findByText('SALE-260001');
-    expect(screen.getByText('Payment in progress')).toBeInTheDocument();
+    expect(screen.getByText('Partial')).toBeInTheDocument();
     expect(screen.queryByText('payment_in_progress')).toBeNull();
   });
 
-  it('opens Record payment by clicking the row', async () => {
+  it('opens payment details by clicking the row', async () => {
     const user = userEvent.setup();
     render('/admin/finance/payments');
     const row = await screen.findByRole('link', {
       name: 'Record a payment for SALE-260001',
     });
     await user.click(row);
-    expect(await screen.findByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Amount')).toBeInTheDocument();
+    expect(await screen.findByText('Within 7 days')).toBeInTheDocument();
   });
 
   it('opens payment details from the row menu', async () => {
@@ -597,6 +596,41 @@ describe('commission qualification ownership', () => {
     expect(row.textContent).toMatch(/Awaiting final qualification/);
     expect(within(row).getByRole('button', { name: 'Decide' })).toBeEnabled();
   });
+
+  it('lists recorded progress steps in order and flags only rows needing a decision', async () => {
+    install({
+      'GET /commissions': list([
+        AWAITING,
+        {
+          ...AWAITING,
+          id: '99990000-0000-4000-8000-000000002700',
+          saleNumber: 'SALE-PAIDOUT',
+          status: 'paid',
+          qualifiedAt: '2026-09-28T10:00:00.000Z',
+          earnedAt: '2026-09-28T10:00:00.000Z',
+          paidAt: '2026-09-30T10:00:00.000Z',
+        },
+        {
+          ...AWAITING,
+          id: '99990000-0000-4000-8000-000000002701',
+          saleNumber: 'SALE-VOIDED',
+          status: 'cancelled',
+          qualifiedAt: '2026-09-28T10:00:00.000Z',
+        },
+      ]),
+    });
+    render('/admin/finance/commissions', ADMIN_USER);
+    const steps = (sale: string) =>
+      within(screen.getByText(sale).closest('tr')!)
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('span')?.textContent);
+
+    const awaitingRow = (await screen.findByText('SALE-QUALIFY')).closest('tr')!;
+    expect(steps('SALE-PAIDOUT')).toEqual(['Created', 'Qualified', 'Earned', 'Paid']);
+    expect(steps('SALE-VOIDED')).toEqual(['Created', 'Cancelled']);
+    expect(awaitingRow).toHaveAttribute('data-attention');
+    expect(screen.getByText('SALE-PAIDOUT').closest('tr')).not.toHaveAttribute('data-attention');
+  });
 });
 
 describe('payment exact-decimal input UX', () => {
@@ -646,7 +680,7 @@ describe('payment exact-decimal input UX', () => {
     });
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(screen.getByText(/Enter the transaction\/reference number/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter the transaction or reference number/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Amount'), '1000.00');
     await user.type(screen.getByLabelText('Payment reference(Optional)'), 'QA-REF');
 
@@ -751,8 +785,7 @@ describe('payment exact-decimal input UX', () => {
       await openRecordDialog(user);
       await user.type(screen.getByLabelText('Amount'), amount);
       expect(screen.getByRole('button', { name: /^Record$/ })).toBeEnabled();
-      await user.clear(screen.getByLabelText('Method(Optional)'));
-      expect(screen.getByRole('button', { name: /^Record$/ })).toBeDisabled();
+      expect(screen.getByRole('combobox', { name: 'Method' })).toHaveValue('bank_transfer');
     },
   );
 });

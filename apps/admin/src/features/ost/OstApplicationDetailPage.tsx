@@ -18,6 +18,7 @@ import {
   FileField,
   PageHeader,
   PasswordField,
+  ProfilePhotoEditor,
   Skeleton,
   StatusChip,
   TextAreaField,
@@ -79,6 +80,8 @@ export function OstApplicationDetailPage() {
     placeholderData: keepPreviousData,
   });
   const [reason, setReason] = useState('');
+  const [selectedPhoto, setSelectedPhoto] = useState({ applicationId: '', data: '' });
+  const profilePhotoBase64 = selectedPhoto.applicationId === id ? selectedPhoto.data : '';
   const [signedOn, setSignedOn] = useState('');
   const [applicantSignedOn, setApplicantSignedOn] = useState('');
   const [recordOpen, setRecordOpen] = useState(false);
@@ -112,8 +115,8 @@ export function OstApplicationDetailPage() {
   const approve = useBusinessMutation({
     mutationFn: () =>
       official
-        ? approveAccreditation(id, startsOn, expiresOn, temporaryPassword)
-        : approveOstApplication(id, temporaryPassword),
+        ? approveAccreditation(id, startsOn, expiresOn, temporaryPassword, profilePhotoBase64)
+        : approveOstApplication(id, temporaryPassword, profilePhotoBase64),
     onSuccess: (member) => {
       setTemporaryPassword('');
       setConfirmPassword('');
@@ -340,6 +343,21 @@ export function OstApplicationDetailPage() {
             Use at least 8 characters. Share this password securely with the OST; they must change
             it at first sign-in.
           </p>
+          <ProfilePhotoEditor
+            key={id}
+            staged
+            photo={{
+              url: profilePhotoBase64 ? `data:image/jpeg;base64,${profilePhotoBase64}` : null,
+              expiresAt: null,
+              canUpload: !approve.isPending,
+              notice: null,
+            }}
+            loading={false}
+            onRefresh={() => {}}
+            onUpload={async (value) => {
+              setSelectedPhoto({ applicationId: id, data: value });
+            }}
+          />
           <Button
             onClick={() => {
               setOutcome(null);
@@ -347,6 +365,7 @@ export function OstApplicationDetailPage() {
             }}
             disabled={
               (official && !management) ||
+              !profilePhotoBase64 ||
               temporaryPassword.length < 8 ||
               temporaryPassword !== confirmPassword ||
               approve.isPending ||

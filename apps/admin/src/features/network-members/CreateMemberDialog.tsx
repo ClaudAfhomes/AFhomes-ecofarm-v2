@@ -61,6 +61,7 @@ export function CreateMemberDialog({
       // authoritative and re-checks everything, including head, department
       // and duplicates, which only it can judge).
       const payload = {
+        profilePhotoBase64: values.profilePhotoBase64,
         fullName: values.fullName.trim(),
         email: values.email.trim(),
         temporaryPassword: values.temporaryPassword,

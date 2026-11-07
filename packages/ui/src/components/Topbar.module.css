@@ -20,9 +20,11 @@
   min-width: 0;
 }
 
+/* Phone-only: from 640px up the sidebar or drawer already carries the brand. */
 .mobileLeading {
-  display: flex;
+  display: none;
   align-items: center;
+  min-width: 0;
 }
 
 .menuHiddenOnMobile {

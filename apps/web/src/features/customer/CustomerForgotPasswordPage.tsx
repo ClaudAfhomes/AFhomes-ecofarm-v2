@@ -10,6 +10,7 @@ import { Alert, AuthLayout, Button, TextField } from '@afhomes/ui';
 
 import { env } from '../../lib/env';
 import { getSupabaseClient } from '../../lib/supabase';
+import { isMongoAuth, mongoAuth } from '../../lib/cookie-auth';
 import styles from './auth.module.css';
 
 /**
@@ -43,6 +44,19 @@ export function CustomerForgotPasswordPage() {
     setServerError(null);
     setPending(true);
     try {
+      if (isMongoAuth) {
+        await mongoAuth.request('/request-password-reset', {
+          email: trimmed,
+          redirectTo: buildRecoveryRedirect(
+            env.VITE_WEB_URL,
+            '/customer/reset-password',
+            window.location.origin,
+          ),
+        });
+        setSent(true);
+        setPending(false);
+        return;
+      }
       const client = getSupabaseClient();
       if (!client) {
         setServerError('Password reset is unavailable right now. Please try again later.');
@@ -79,7 +93,7 @@ export function CustomerForgotPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Reset your password"
       lead="Enter the email you signed up with and we will send you a link to choose a new password."
       brandTitle="Your farm membership, in your pocket."

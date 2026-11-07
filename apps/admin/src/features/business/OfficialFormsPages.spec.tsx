@@ -112,6 +112,7 @@ vi.mock('../address/services', () => ({
 }));
 
 beforeEach(() => {
+  sessionStorage.clear();
   // Default: no current identity document. Tests that need one set it through
   // their own setup so the value is in place before the query first runs.
   vi.mocked(getCurrentDocument).mockResolvedValue(null);
@@ -202,8 +203,6 @@ const agreement = {
   applicantName: 'QA IST Applicant',
   paymentScheme: 'spot_cash',
   totalPrice: '312000.00',
-  primarySignatureStatus: 'received',
-  secondarySignatureStatus: null,
   hasSecondaryHolder: false,
   status: 'submitted',
   submittedAt: '2026-09-28T00:00:00.000Z',
@@ -381,12 +380,12 @@ describe('CustomerApplicationEditorPage load errors', () => {
 
 describe('ReservationAgreementsPage list states', () => {
   /**
-   * Executing an agreement hands collection to Finance, so the active IST
-   * reservation queue is asked for reservation work by default. The executed
-   * agreement stays reachable through "Include progressed" or an explicit status
-   * filter - it is never deleted, only handed over.
+   * Auto-approved reservations are executed (handed to Finance) but must still
+   * appear in this list by default, so the default queue includes progressed
+   * agreements. The executed agreement stays reachable and is never deleted,
+   * only handed over.
    */
-  it('asks the server for reservation work by default', async () => {
+  it('includes progressed agreements by default', async () => {
     vi.mocked(getReservationAgreementsPage).mockResolvedValue({
       data: [agreement],
       total: 1,
@@ -394,11 +393,14 @@ describe('ReservationAgreementsPage list states', () => {
     renderWithProviders(<ReservationAgreementsPage />);
     await screen.findByText('RES-000001');
     expect(getReservationAgreementsPage).toHaveBeenCalledWith(
-      expect.objectContaining({ queue: 'reservation_work', limit: 10, offset: 0 }),
+      expect.not.objectContaining({ queue: expect.anything() }),
+    );
+    expect(getReservationAgreementsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 10, offset: 0 }),
     );
   });
 
-  it('drops the queue filter when Include progressed is selected', async () => {
+  it('adds the queue filter when reservation work is selected', async () => {
     const user = userEvent.setup();
     vi.mocked(getReservationAgreementsPage).mockResolvedValue({
       data: [agreement],
@@ -407,10 +409,10 @@ describe('ReservationAgreementsPage list states', () => {
     renderWithProviders(<ReservationAgreementsPage />);
     await screen.findByText('RES-000001');
     vi.mocked(getReservationAgreementsPage).mockClear();
-    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await user.selectOptions(screen.getByLabelText('Queue'), 'reservation_work');
     await waitFor(() =>
       expect(getReservationAgreementsPage).toHaveBeenCalledWith(
-        expect.not.objectContaining({ queue: expect.anything() }),
+        expect.objectContaining({ queue: 'reservation_work' }),
       ),
     );
   });
@@ -775,7 +777,7 @@ describe('application private ID intake', () => {
     fireEvent.pointerDown(await screen.findByRole('option', { name: option }));
   };
 
-  it('registers a new customer on Save & Submit when New Register is selected', async () => {
+  it('registers a new customer on Submit when New Register is selected', async () => {
     // Regression: the create contract was parsed before the register branch,
     // so New Register - which carries no customerId by design - was refused
     // with "Select a customer for this application." and never registered.
@@ -855,7 +857,7 @@ describe('application private ID intake', () => {
     fireEvent.click(
       screen.getByRole('checkbox', { name: /I certify the information and consent/ }),
     );
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save & Submit' })[1]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Submit' })[0]!);
 
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
     const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
@@ -867,84 +869,20 @@ describe('application private ID intake', () => {
     // The create path belongs to a picked customer only.
     expect(vi.mocked(createCustomerApplication)).not.toHaveBeenCalled();
     expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
-  });
-});
 
-describe('IST commercial summary rendering', () => {
-  it.each([
-    ['BRONZE', false, 'received', null, 'Complete'],
-    ['GOLD', false, 'received', null, 'Complete'],
-    ['GOLD', true, 'received', 'received', 'Complete'],
-    ['GOLD', true, 'received', null, 'Pending signature'],
-    ['GOLD', true, 'received', 'pending', 'Pending signature'],
-    ['SILVER', false, 'pending', null, 'Pending signature'],
-  ])(
-    'renders %s secondary=%s signatures %s/%s as %s',
-    async (tier, hasSecondaryHolder, primarySignatureStatus, secondarySignatureStatus, label) => {
-      vi.mocked(getReservationAgreementsPage).mockResolvedValue({
-        data: [
-          {
-            ...agreement,
-            tier,
-            hasSecondaryHolder,
-            primarySignatureStatus,
-            secondarySignatureStatus,
-          },
-        ],
-        total: 1,
-      } as never);
-      renderWithProviders(<ReservationAgreementsPage />);
-      await screen.findByText('RES-000001');
-      expect(screen.getByText('QA IST Applicant')).toBeInTheDocument();
-      expect(screen.getByText('Spot Cash')).toBeInTheDocument();
-      expect(screen.getByText('\u20b1312,000.00')).toBeInTheDocument();
-      expect(screen.getByText(label)).toBeInTheDocument();
-    },
-  );
-
-  it('counts the queue and the signature backlog as figures, not a sentence', async () => {
-    // The count used to read as one grey line, so the only number anyone acts
-    // on was the one you had to hunt for. Both figures are now their own cells,
-    // and only a NON-ZERO backlog takes the warning tone.
-    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
-      data: [
-        agreement,
-        {
-          ...agreement,
-          id: 'res-2',
-          reservationNumber: 'RES-000002',
-          primarySignatureStatus: 'pending',
-        },
-      ],
-      total: 7,
-    } as never);
-    renderWithProviders(<ReservationAgreementsPage />);
-    await screen.findByText('RES-000001');
-
-    const summary = screen.getByLabelText('Reservation queue summary');
-    const figure = (label: string) => screen.getByText(label).closest('div');
-    expect(summary).toBeInTheDocument();
-    expect(figure('Agreements')).toHaveTextContent('7');
-    expect(figure('Awaiting signature')).toHaveTextContent('1');
-    // One pending row out of two, so the exception is the coloured one.
-    expect(figure('Awaiting signature')).toHaveAttribute('data-alert', 'true');
-    // The settled state recedes to plain text so the pending chip stands out.
-    expect(screen.getByText('Complete')).toBeInTheDocument();
-    expect(screen.getByText('Pending signature')).toBeInTheDocument();
-  });
-
-  it('shows a clean backlog figure, and no warning tone, when nothing is pending', async () => {
-    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
-      data: [agreement],
-      total: 1,
-    } as never);
-    renderWithProviders(<ReservationAgreementsPage />);
-    await screen.findByText('RES-000001');
-    const figure = (label: string) => screen.getByText(label).closest('div');
-    expect(figure('Agreement')).toHaveTextContent('1');
-    expect(figure('Awaiting signature')).toHaveTextContent('0');
-    // A warning-coloured zero is a false alarm.
-    expect(figure('Awaiting signature')).not.toHaveAttribute('data-alert');
+    await waitFor(() => expect(vi.mocked(submitCustomerApplication)).toHaveBeenCalledTimes(1));
+    // Regression: the current-document refresh used to fire with this render's
+    // stale (empty) customerId, which the server refuses with "A valid
+    // subject is required" - the new customer's own id must be used instead.
+    expect(getCurrentDocument).not.toHaveBeenCalledWith(
+      expect.objectContaining({ subjectId: '' }),
+    );
+    // Regression: a brand-new application has no route `id` yet (this page
+    // is about to navigate to one), so the post-submit cache refresh used to
+    // call these with `undefined` and get "Official form endpoint not
+    // found", repeatedly, from the server.
+    expect(getCustomerApplication).not.toHaveBeenCalled();
+    expect(getPurchaseTermsProposal).not.toHaveBeenCalledWith(undefined);
   });
 });
 
@@ -976,33 +914,3 @@ it('never renders a raw sale id in the queue table', async () => {
  * say how far through draft -> submitted -> executed the contract is, and carry
  * an icon so the state survives color-blindness and a screen reader.
  */
-it('labels the lifecycle state, its step, and an icon for every reservation status', async () => {
-  vi.mocked(getReservationAgreementsPage).mockResolvedValue({
-    data: [
-      { ...agreement, id: 'res-d', reservationNumber: 'RES-D', status: 'draft' },
-      { ...agreement, id: 'res-s', reservationNumber: 'RES-S', status: 'submitted' },
-      { ...agreement, id: 'res-e', reservationNumber: 'RES-E', status: 'executed' },
-      { ...agreement, id: 'res-c', reservationNumber: 'RES-C', status: 'cancelled' },
-    ],
-    total: 4,
-  } as never);
-  renderWithProviders(<ReservationAgreementsPage />);
-  // Scoped to the table: the Status filter legitimately offers "Draft" too.
-  const table = await screen.findByRole('region', { name: 'Reservation agreement records' });
-  const row = (reservation: string) =>
-    within(table).getByRole('link', { name: `Review reservation ${reservation}` });
-  const rowText = (reservation: string) => row(reservation).textContent ?? '';
-  expect(rowText('RES-D')).toContain('Draft');
-  expect(rowText('RES-D')).toContain('Step 1 of 3.');
-  expect(rowText('RES-S')).toContain('Submitted');
-  expect(rowText('RES-S')).toContain('Step 2 of 3.');
-  expect(rowText('RES-E')).toContain('Executed');
-  expect(rowText('RES-E')).toContain('Step 3 of 3.');
-  // Cancelled leaves the track entirely, so it carries no step at all.
-  expect(rowText('RES-C')).toContain('Cancelled');
-  expect(rowText('RES-C')).not.toContain('Step');
-  // Every state carries a decorative icon, never color alone.
-  for (const reservation of ['RES-D', 'RES-S', 'RES-E', 'RES-C']) {
-    expect(row(reservation).querySelector('svg')).toBeTruthy();
-  }
-});

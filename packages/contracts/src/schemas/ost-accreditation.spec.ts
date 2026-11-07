@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   approveOstAccreditationSchema,
   manualOstAccreditationSchema,
@@ -9,6 +9,7 @@ import {
   updateOstApplicantSchema,
   ostAnnualExpiry,
   ostRenewalEarliestStart,
+  officialOstFormDefaults,
 } from './ost-accreditation.js';
 const form = {
   dateApplied: '2026-01-01',
@@ -31,6 +32,19 @@ const identity = {
 };
 const requestId = '00000000-0000-4000-8000-000000000001';
 describe('official accreditation boundaries', () => {
+  it.each(['2026-11-02T16:01:00Z', '2026-11-03T07:00:00Z'])(
+    'uses the Manila business date for form validation and defaults at %s', (instant) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(instant));
+      try {
+        expect(ostOfficialFormSchema.safeParse({ ...form, dateApplied: '2026-11-03' }).success).toBe(true);
+        expect(ostOfficialFormSchema.safeParse({ ...form, dateApplied: '2026-11-04' }).success).toBe(false);
+        expect(officialOstFormDefaults().dateApplied).toBe('2026-11-03');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
   it.each([['2026-10-17', '2027-10-17'], ['2024-02-29', '2025-02-28'], ['2023-02-28', '2024-02-28']])(
     'calculates a calendar year from %s as %s', (start, expected) => {
       expect(ostAnnualExpiry(start)).toBe(expected);

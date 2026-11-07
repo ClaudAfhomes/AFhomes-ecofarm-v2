@@ -1,10 +1,13 @@
-/* Commission settings: page-scoped form, table and filter contracts. Columns
-   scroll with intact cells on desktop and collapse to labelled cards on
-   phones instead of squeezing. */
+/* Commission settings: page-scoped form, table and filter contracts. The
+   page is a size container, so the rules list switches between a table and
+   cards from the width it actually gets (sidebar open or not), not from the
+   viewport. Applied alongside the global `table-scroll` class. */
 
 .page {
+  container: rules / inline-size;
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
   align-content: start;
   min-width: 0;
   max-width: 100%;
@@ -16,13 +19,36 @@
   .page {
     overflow-x: clip;
   }
-
-  .tableWrap.tableWrap {
-    overflow-x: clip;
-  }
 }
 
-/* Summary badges: one compact strip instead of cards. Counts only. */
+/* ---------- Loading ---------- */
+
+.skeleton,
+.skeletonRows {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeleton {
+  gap: var(--space-5);
+}
+
+.skeletonHead {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* ---------- Policy facts ---------- */
+
+.ruleFacts {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+/* ---------- Summary ---------- */
+
 .badges {
   display: flex;
   flex-wrap: wrap;
@@ -36,10 +62,11 @@
   min-width: 0;
 }
 
-/* Rule form panel. */
+/* ---------- Rule editor ---------- */
+
 .panel {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   margin: 0;
   padding: var(--space-5);
   border: 1px solid var(--color-border-default);
@@ -47,6 +74,20 @@
   background: var(--color-bg-surface-raised);
   box-shadow: var(--shadow-sm);
   min-width: 0;
+  scroll-margin-top: var(--space-6);
+}
+
+.panel[data-editing] {
+  border-color: var(--color-brand-primary);
+  box-shadow: inset 4px 0 0 var(--color-brand-primary), var(--shadow-sm);
+}
+
+.panelHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
 .panelTitle {
@@ -55,14 +96,14 @@
 }
 
 .panelNote {
-  margin: 0;
+  margin: 4px 0 0;
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
 
 .formGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: var(--space-4);
 }
 
@@ -83,23 +124,35 @@
 }
 
 .formActions {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-3);
   align-items: center;
 }
 
 .formAlert {
-  grid-column: 1 / -1;
   margin: 0;
   color: var(--color-danger);
   font-weight: 600;
 }
 
-/* Rules table: the page's working surface, wrapped in an elevated panel. */
+/* ---------- Rules list ---------- */
+
+.listBlock {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.resultsTitle {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
 .tableWrap {
-  margin-top: var(--space-2);
   min-width: 0;
   max-width: 100%;
 }
@@ -114,16 +167,10 @@
 
 .queueTable {
   width: 100%;
+  min-width: 44rem;
   border-collapse: separate;
   border-spacing: 0;
-}
-
-/* The wide-table floor is desktop-only: on phones the rows collapse to
-   labelled cards instead of scrolling sideways. */
-@media (min-width: 640px) {
-  .tableWrap > table {
-    min-width: 760px;
-  }
+  font-size: var(--text-body-s);
 }
 
 .queueTable thead th {
@@ -134,6 +181,7 @@
   font-size: var(--text-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
+  text-align: left;
   white-space: nowrap;
   box-shadow: inset 0 -1px 0 var(--color-border-default);
 }
@@ -142,15 +190,46 @@
 .queueTable td {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-default);
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .queueTable tbody td {
   background-color: var(--color-bg-surface-raised);
 }
 
+.queueTable tbody tr:hover td {
+  background-color: var(--color-bg-subtle);
+}
+
 .queueTable tbody tr:last-child td {
   border-bottom: 0;
+}
+
+/* The row loaded into the editor is marked so the link stays visible. */
+.queueTable tbody tr[data-editing] > td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-brand-primary);
+}
+
+.queueTable tbody tr[data-disabled] .primary,
+.queueTable tbody tr[data-disabled] .rateCell {
+  color: var(--color-text-muted);
+}
+
+.targetCell > * {
+  display: block;
+}
+
+.primary {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.secondary {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .numeric {
@@ -159,30 +238,243 @@
   white-space: nowrap;
 }
 
-.actionGroup {
+.queueTable thead th.numeric,
+.queueTable thead th.actionHead {
+  text-align: right;
+}
+
+.rateCell {
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.terms {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.terms > div {
   display: flex;
   flex-wrap: wrap;
+  gap: 0 var(--space-2);
+}
+
+.terms dt {
+  min-width: 5.5rem;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.terms dd {
+  margin: 0;
+}
+
+.statusCell {
+  white-space: nowrap;
+}
+
+.actionCell {
+  text-align: right;
+}
+
+.actionGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
   align-items: center;
 }
 
 .code {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-size: var(--text-body-s);
 }
 
-/* Small viewports: rows collapse to stacked cards. Desktop rendering
-   untouched. */
+/* ---------- Position rates ---------- */
+
+.positions {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.positionRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(9rem, 14rem) auto;
+  gap: var(--space-4);
+  align-items: end;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.positionName {
+  display: grid;
+  gap: 2px;
+  align-self: center;
+  min-width: 0;
+}
+
 @media (max-width: 639px) {
-  div.tableWrap.tableWrap > table {
-    min-width: 0;
+  .positionRow {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .tableWrap > table {
+  .positionName {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- Skeleton shapes ---------- */
+
+.skelTitle {
+  height: 32px;
+  max-width: 280px;
+}
+
+.skelLine {
+  height: 16px;
+  max-width: 360px;
+}
+
+.skelChip {
+  height: 24px;
+  width: 10rem;
+  border-radius: 999px;
+}
+
+.skelTabs {
+  height: 40px;
+  max-width: 28rem;
+}
+
+.skelRow {
+  height: 64px;
+}
+
+/* ---------- Tabs and guidance ---------- */
+
+.tabBody {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  min-width: 0;
+}
+
+.howItWorks {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.howItWorks summary {
+  cursor: pointer;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.howItWorks .ruleFacts {
+  margin-top: var(--space-2);
+}
+
+.resultsBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.resultsBar .resultsTitle {
+  margin: 0;
+}
+
+/* Refetch in flight: data stays visible but reads as updating. */
+.tableWrap[data-busy] {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+/* ---------- Notice and selection ---------- */
+
+.noticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.selectionBar {
+  position: sticky;
+  top: var(--space-2);
+  z-index: 2;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-brand-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+}
+
+.selectHead,
+.selectCell {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.selectHead input,
+.selectCell input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--color-brand-primary);
+  cursor: pointer;
+}
+
+.queueTable tbody tr[data-selected] > td {
+  background-color: var(--color-bg-subtle);
+}
+
+.appliesCell > * {
+  display: block;
+}
+
+.dialogBody {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* ---------- Narrow: rows become cards ---------- */
+
+@container rules (max-width: 47.99rem) {
+  /* Doubled class beats the global `.table-scroll` rules regardless of
+     bundle order. Cards carry their own surface, so the wrapper goes flat. */
+  .tableWrap.tableWrap {
+    overflow: visible;
+    overflow-x: clip;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  div.tableWrap.tableWrap > table {
     display: block;
+    min-width: 0;
     width: 100%;
-    max-width: 100%;
   }
 
   .tableWrap thead {
@@ -190,64 +482,182 @@
   }
 
   .tableWrap tbody {
-    display: block;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+    gap: var(--space-3);
   }
 
   .tableWrap tbody > tr {
-    display: block;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-3) var(--space-4);
+    padding: var(--space-4);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-md);
     background-color: var(--color-bg-surface-raised);
-    margin-bottom: var(--space-3);
-    padding: var(--space-2);
-  }
-
-  .tableWrap tbody > tr:last-child {
-    margin-bottom: 0;
-  }
-
-  .tableWrap tbody > tr > td {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    text-align: right;
     min-width: 0;
-    max-width: 100%;
   }
 
-  .tableWrap tbody > tr > td > * {
-    flex: 0 1 auto;
+  .tableWrap tbody > tr[data-editing] {
+    border-color: var(--color-brand-primary);
+    border-left-width: 4px;
+  }
+
+  .queueTable tbody > tr > td,
+  .queueTable tbody > tr:hover > td,
+  .queueTable tbody > tr[data-editing] > td:first-child {
+    display: block;
+    flex: 1 1 100%;
     min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .tableWrap tbody > tr > td::before {
-    content: attr(data-label);
-    font-weight: 600;
-    font-size: var(--text-caption);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-text-muted);
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
     text-align: left;
-    flex-shrink: 0;
-    max-width: 45%;
     overflow-wrap: anywhere;
   }
 
-  .tableWrap tbody > tr > td:not([data-label])::before,
-  .tableWrap tbody > tr > td[data-label='']::before {
-    display: none;
+  /* Header line: target beside its status chip, then rate, terms, actions. */
+  .queueTable tbody > tr > td.targetCell {
+    flex: 1 1 auto;
+    order: 0;
   }
 
-  .formGrid {
-    grid-template-columns: 1fr;
+  .queueTable tbody > tr > td.statusCell {
+    flex: 0 1 auto;
+    order: 1;
+  }
+
+  .queueTable tbody > tr > td.rateCell {
+    font-size: var(--text-h3);
+    order: 2;
+  }
+
+  .queueTable tbody > tr > td.appliesCell {
+    order: 3;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .queueTable tbody > tr > td.actionCell {
+    order: 4;
+  }
+
+  .queueTable tbody > tr > td.selectCell {
+    flex: 0 0 auto;
+    order: -1;
+  }
+
+  .actionGroup {
+    display: flex;
+    justify-content: stretch;
   }
 
   .actionGroup > * {
     flex: 1 1 auto;
+    min-height: 40px;
+  }
+}
+
+/* ---------- History dialog ---------- */
+
+.timeline {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.eventHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.eventAction {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.eventReason {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.changes {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: var(--text-body-s);
+}
+
+.changes > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: var(--space-3);
+}
+
+.changes dt {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.changes dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.before {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.after {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+@container rules (max-width: 29.99rem) {
+  .changes > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .selectHead input,
+  .selectCell input {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tableWrap[data-busy] {
+    transition: none;
   }
 }

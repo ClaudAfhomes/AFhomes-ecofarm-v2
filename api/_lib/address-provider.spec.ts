@@ -116,6 +116,31 @@ describe('verifyAddressHierarchy', () => {
 });
 
 describe('createCachedAddressProvider', () => {
+  it('does not let an old failed request evict a fresh entry after clear', async () => {
+    let rejectOld!: (error: Error) => void;
+    const provinces = vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }))
+      .mockResolvedValue([{ ...LAGUNA }]);
+    const cached = createCachedAddressProvider({ ...fakeProvider(), provinces });
+    const old = cached.provinces();
+    const rejected = expect(old).rejects.toBeInstanceOf(AddressProviderError);
+    cached.clear();
+    await cached.provinces();
+    rejectOld(new AddressProviderError('PROVIDER_TIMEOUT'));
+    await rejected;
+    await cached.provinces();
+    expect(provinces).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates cached reference rows from caller mutation', async () => {
+    const provinces = vi.fn().mockResolvedValue([{ ...LAGUNA }]);
+    const cached = createCachedAddressProvider({ ...fakeProvider(), provinces });
+    const first = await cached.provinces();
+    first[0]!.name = 'MUTATED CALLER COPY';
+    expect((await cached.provinces())[0]!.name).toBe(LAGUNA.name);
+    expect(provinces).toHaveBeenCalledTimes(1);
+  });
+
   it('calls the provider once for repeated provinces lookups', async () => {
     const provinces = vi.fn().mockResolvedValue([LAGUNA]);
     const cached = createCachedAddressProvider({ ...fakeProvider(), provinces });

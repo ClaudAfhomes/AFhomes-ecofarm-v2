@@ -1,12 +1,20 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { useNavigate } from 'react-router';
-import { AuthLayout, Alert, Button, ErrorState, Skeleton, TextField } from '@afhomes/ui';
+import { Navigate, useNavigate } from 'react-router';
+import {
+  AuthLayout,
+  Alert,
+  Button,
+  ErrorState,
+  Skeleton,
+  TextField,
+} from '@afhomes/ui';
 import { getSupabaseClient } from '../../lib/supabase';
 import { useSession } from '../../lib/session';
+import { isMongoAuth } from '../../lib/cookie-auth';
 
-export function AdminMfaPage() {
+function LegacyAdminMfaPage() {
   const client = getSupabaseClient();
   const session = useSession();
   const navigate = useNavigate();
@@ -45,9 +53,9 @@ export function AdminMfaPage() {
   const qr = enrollment.data?.totp.qr_code;
   return (
     <AuthLayout
-      eyebrow="AFHomes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Authenticator verification"
-      brandTitle="Secure access to AFHomes."
+      brandTitle="Secure access to AFhomes."
       lead="Admin and Super Admin verification uses Supabase TOTP."
     >
       {factors.isPending && (
@@ -117,4 +125,8 @@ export function AdminMfaPage() {
       )}
     </AuthLayout>
   );
+}
+
+export function AdminMfaPage() {
+  return isMongoAuth ? <Navigate to="/admin" replace /> : <LegacyAdminMfaPage />;
 }

@@ -32,7 +32,7 @@ export function CmsPagesPage() {
   const canUpdate =
     user?.afHomesPermissions.some((p) => p.moduleKey === 'cms.pages' && p.canUpdate) === true;
   const publication = useBusinessMutation({
-    mutationFn: ({ id, publish }: { id: string; publish: boolean }) => publishCmsPage(id, publish),
+    mutationFn: ({ id, publish }: { id: string; publish: boolean }) => publishCmsPage(id, publish, pages.data?.find(page=>page.id===id)?.version ?? 0),
     onSuccess: () => client.invalidateQueries({ queryKey: ['cms', 'pages'] }),
   });
   // First load skeletonizes the whole page - header and table - so no static

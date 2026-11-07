@@ -77,6 +77,15 @@ function install(overrides: Partial<FakeTables> = {}) {
 }
 
 describe('customer company-stated fields', () => {
+  it.each([null, '26101400003G1C01S'])('refuses manually assigning or replacing an issued VIP number (%s)', async (issued) => {
+    const db = install();
+    const id = CUSTOMER.prospectTwo;
+    db.rows('customers').find(row => row.id === id)!.vip_card_number = issued;
+    const { res, state } = makeRes();
+    await customers(makeReq({ method: 'PATCH', familyPath: id, token: TOKEN.admin, body: { vipCardNumber: '26101400004G1C01S' } }), res);
+    expect(state.status).toBe(409);
+    expect(db.rows('customers').find(row => row.id === id)!.vip_card_number).toBe(issued);
+  });
   it('stores company fields verbatim while masking TIN on read', async () => {
     const db = install();
     const { res, state } = makeRes();
@@ -150,6 +159,28 @@ describe('customer company-stated fields', () => {
       .filter((r) => r.action === 'CUSTOMER_EDITED')
       .map((r) => JSON.stringify(r));
     expect(audits.join('|')).not.toContain('999888777001');
+  });
+
+  it('updates dateOfBirth (birth_date column) without 500 — regression for RA No. edit', async () => {
+    const db = install();
+    const id = CUSTOMER.prospectTwo;
+    const res = makeRes();
+    await customers(
+      makeReq({
+        method: 'PATCH',
+        familyPath: id,
+        body: { dateOfBirth: '2000-01-01', raNumber: 'RA-NEW-001' },
+        token: TOKEN.admin,
+      }) as never,
+      res.res as never,
+    );
+    expect(res.state.status).toBe(200);
+    const body = res.state.body as Record<string, unknown>;
+    expect(body.dateOfBirth).toBe('2000-01-01');
+    expect(body.raNumber).toBe('RA-NEW-001');
+    const stored = db.rows('customers').find((r) => r.id === id)!;
+    expect(stored.birth_date).toBe('2000-01-01');
+    expect(stored.ra_number).toBe('RA-NEW-001');
   });
 
   it('stores stated package/payment facts verbatim via manual create/update', async () => {

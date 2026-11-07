@@ -139,9 +139,9 @@ try {
     (await db.query('select public.search_sale_team_accreditation($1) result', [number])).rows[0]
       .result;
   const first = await manage(db, seller);
-  assert.match(first.aaNumber, /^AA-[A-Z0-9]{12}$/);
-  check((first.aaNumber.slice(3).match(/[A-Z]/g) ?? []).length, 6, 'Six letters');
-  check((first.aaNumber.slice(3).match(/[0-9]/g) ?? []).length, 6, 'Six digits');
+  assert.match(first.aaNumber, /^AAI\d{8}$/);
+  check(first.aaNumber.startsWith('AAI'), true, 'IST prefix');
+  check(first.aaNumber.slice(3).length, 8, 'Month and sequence');
   const generated = (
     await db.query('select private.next_sale_team_aa_number() value from generate_series(1,1000)')
   ).rows.map((row) => row.value);
@@ -161,7 +161,7 @@ try {
   check(await search(first.aaNumber), first);
   check(
     Object.keys(first).sort(),
-    ['aaNumber', 'kind', 'fullName', 'status', 'startsOn', 'expiresOn'].sort(),
+    ['staffId', 'aaNumber', 'kind', 'fullName', 'status', 'startsOn', 'expiresOn'].sort(),
     'Explicit public fields',
   );
   check((await manage(db, seller)).aaNumber, first.aaNumber, 'Idempotent approval');
@@ -175,8 +175,8 @@ try {
   );
   check(
     (await manage(db, seller)).fullName,
-    'SELF EDITED NAME',
-    'Explicit approval refreshes the public name',
+    first.fullName,
+    'Employee reapproval preserves the approved public name',
   );
   check((await manage(db, seller)).aaNumber, first.aaNumber, 'Name review preserves AA');
   const a = await connect(),
@@ -185,40 +185,21 @@ try {
   check(same[0].aaNumber, same[1].aaNumber, 'Concurrent same-seller issuance');
   check(same[0].aaNumber === first.aaNumber, false, 'Unique across sellers');
   await db.query('begin');
-  await db.query(
-    "update public.staff_role_assignments set role_id=(select id from public.roles where slug='sales_manager') where staff_id=$1",
-    [outsider],
-  );
-  await db.query("select set_config('afhomes.aa_collision_existing',$1,true)", [first.aaNumber]);
-  await db.query('create temporary sequence aa_collision_calls');
-  await db.query(
-    "create or replace function private.next_sale_team_aa_number() returns text language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$ declare calls integer; begin calls:=nextval('pg_temp.aa_collision_calls'); return case when calls=1 then current_setting('afhomes.aa_collision_existing') else 'AA-ABCDEF123456' end; end $$",
-  );
-  await db.query('savepoint collision');
-  const retryIssued = await manage(db, outsider);
-  check(retryIssued.aaNumber, 'AA-ABCDEF123456', 'Collision retries with a new number');
-  check(
-    Number((await db.query('select last_value from aa_collision_calls')).rows[0].last_value),
-    2,
-    'Single collision needs exactly two attempts',
-  );
-  await db.query('rollback to savepoint collision');
-  await db.query(
-    "create or replace function private.next_sale_team_aa_number() returns text language sql volatile security definer set search_path=pg_catalog,pg_temp as $$ select current_setting('afhomes.aa_collision_existing') $$",
-  );
-  await assert.rejects(manage(db, outsider), (error) => error.code === '23505');
+  await db.query("update public.staff_role_assignments set role_id=(select id from public.roles where slug='sales_manager') where staff_id=$1", [outsider]);
+  await assert.rejects(db.query('select public.issue_ist_employee_identity($1,$2,$3)', [actor, outsider, first.aaNumber]), /ACCREDITATION_NUMBER_TAKEN/);
   checks++;
   await db.query('rollback');
-  check(
-    (await db.query('select public.get_sale_team_accreditation($1) result', [outsider])).rows[0]
-      .result,
-    null,
-    'Exhausted collisions leave no issuance',
-  );
-  await assert.rejects(manage(db, outsider), /INVALID_ACCREDITATION_TARGET/);
+  await db.query('begin');
+  await db.query("update public.staff_role_assignments set role_id=(select id from public.roles where slug='sales_manager') where staff_id=$1", [outsider]);
+  await db.query("insert into private.sale_team_aa_counters(accreditation_month,last_value) values(date_trunc('month',now() at time zone 'Asia/Manila')::date,9999) on conflict(accreditation_month) do update set last_value=9999");
+  await assert.rejects(manage(db, outsider), /AA_SEQUENCE_EXHAUSTED/);
+  checks++;
+  await db.query('rollback');
+  check((await db.query('select public.get_sale_team_accreditation($1) result', [outsider])).rows[0].result, null, 'Exhausted issuance rolls back');
+  await assert.rejects(manage(db, outsider), /INVALID_(ACCREDITATION|EMPLOYEE_IDENTITY)_TARGET/);
   checks++;
   await db.query("update public.staff_users set status='invited' where id=$1", [seller]);
-  await assert.rejects(manage(db, seller), /INVALID_ACCREDITATION_TARGET/);
+  await assert.rejects(manage(db, seller), /INVALID_(ACCREDITATION|EMPLOYEE_IDENTITY)_TARGET/);
   checks++;
   await db.query("update public.staff_users set status='active' where id=$1", [seller]);
   await assert.rejects(manage(db, seller, 'approve', 'IST', seller), /FORBIDDEN/);
@@ -227,13 +208,16 @@ try {
   await assert.rejects(manage(db, seller), /FORBIDDEN/);
   checks++;
   await db.query('update public.staff_users set must_change_password=false where id=$1', [actor]);
-  await manage(db, seller, 'revoke');
-  check(await search(first.aaNumber), null, 'Revoked denied');
+  await assert.rejects(manage(db, seller, 'revoke'), /IST_EMPLOYEE_LIFECYCLE_REQUIRED/);
+  checks++;
+  await db.query("update public.staff_users set status='inactive' where id=$1", [seller]);
+  check(await search(first.aaNumber), null, 'Inactive employee denied');
+  await db.query("update public.staff_users set status='active' where id=$1", [seller]);
   check((await manage(db, seller)).aaNumber, first.aaNumber, 'Reapproval preserves number');
   await manage(db, seller, 'approve', 'IST', actor, '2020-01-01', '2020-12-31');
-  check(await search(first.aaNumber), null, 'Expiry denied');
+  check((await search(first.aaNumber)).status, 'accredited', 'IST legacy date input does not add expiry');
   await manage(db, seller, 'approve', 'IST', actor, '2090-01-01', '2099-12-31');
-  check(await search(first.aaNumber), null, 'Future accreditation denied');
+  check((await search(first.aaNumber)).status, 'accredited', 'IST has no accreditation start date');
   await manage(db, seller);
   await db.query("update public.staff_users set status='suspended' where id=$1", [seller]);
   check(await search(first.aaNumber), null, 'Suspended denied');
@@ -257,13 +241,13 @@ try {
   );
   const term = randomUUID();
   await db.query(
-    "insert into private.ost_accreditation_terms(id,ost_id,application_id,starts_on,expires_on,approved_by) values($1,$2,$3,'2020-01-01','2099-12-31',$4)",
+    "insert into private.ost_accreditation_terms(id,ost_id,application_id,starts_on,expires_on,approved_by) values($1,$2,$3,'2020-01-01','2021-01-01',$4)",
     [term, ost, application, actor],
   );
   const ostRecord = (await db.query('select public.get_sale_team_accreditation($1) result', [ost]))
     .rows[0].result;
   await db.query("update public.staff_users set status='suspended' where id=$1", [ost]);
-  await assert.rejects(manage(db, ost, 'approve', 'OST'), /INVALID_ACCREDITATION_TARGET/);
+  await assert.rejects(manage(db, ost, 'approve', 'OST'), /INVALID_(ACCREDITATION|EMPLOYEE_IDENTITY)_TARGET/);
   checks++;
   await db.query("update public.staff_users set status='active' where id=$1", [ost]);
   // Exercise real account installation: new staff are invited, not active yet.
@@ -307,7 +291,7 @@ try {
   const newlyIssued = (
     await db.query('select public.get_sale_team_accreditation($1) result', [newAuth])
   ).rows[0].result;
-  assert.match(newlyIssued.aaNumber, /^AA-[A-Z0-9]{12}$/);
+  assert.match(newlyIssued.aaNumber, /^AAO\d{8}$/);
   checks++;
   check(newlyIssued.status, 'inactive', 'Invited account has its AA but is not publicly verified');
   check(await search(newlyIssued.aaNumber), null, 'Invite acceptance is still required');
@@ -324,23 +308,23 @@ try {
     'Approval retry keeps the same AA',
   );
   check(ostRecord.kind, 'OST', 'Automatic approved OST issuance');
-  check(await search(ostRecord.aaNumber), ostRecord);
+  check(await search(ostRecord.aaNumber), null, 'Expired OST denied');
   await db.query("update private.ost_accreditation_terms set status='superseded' where id=$1", [
     term,
   ]);
   const renewal = randomUUID();
   await db.query(
-    "insert into private.ost_accreditation_renewals(id,renewal_number,request_id,payload_hash,ost_id,prior_term_id,date_of_renewal,requested_start,requested_end,status,applicant_snapshot,original_accreditation_date,last_expiry_date,old_sponsor_staff_id,referrer_snapshot,applicant_signature_status,referrer_signature_status,created_by,approved_by,approved_at) values($1,'AA-RENEWAL-TEST',$2,repeat('b',64),$3,$4,'2021-01-01','2021-01-01','2099-12-30','approved','{}','2020-01-01','2099-12-31',$5,'{}','received','received',$6,$6,now())",
+    "insert into private.ost_accreditation_renewals(id,renewal_number,request_id,payload_hash,ost_id,prior_term_id,date_of_renewal,requested_start,requested_end,status,applicant_snapshot,original_accreditation_date,last_expiry_date,old_sponsor_staff_id,referrer_snapshot,applicant_signature_status,referrer_signature_status,created_by,approved_by,approved_at) values($1,'AA-RENEWAL-TEST',$2,repeat('b',64),$3,$4,'2026-01-01','2026-01-01','2027-01-01','approved','{}','2020-01-01','2021-01-01',$5,'{}','received','received',$6,$6,now())",
     [renewal, randomUUID(), ost, term, seller, actor],
   );
   await db.query(
-    "insert into private.ost_accreditation_terms(ost_id,renewal_id,starts_on,expires_on,approved_by) values($1,$3,'2021-01-01','2099-12-30',$2)",
+    "insert into private.ost_accreditation_terms(ost_id,renewal_id,starts_on,expires_on,approved_by) values($1,$3,'2026-01-01','2027-01-01',$2)",
     [ost, actor, renewal],
   );
   check((await search(ostRecord.aaNumber)).aaNumber, ostRecord.aaNumber, 'Renewal preserves AA');
   check(
     (await search(ostRecord.aaNumber)).expiresOn,
-    '2099-12-30',
+    '2027-01-01',
     'Renewal validity is authoritative',
   );
   await db.query(
@@ -387,7 +371,7 @@ try {
     check(result.rowCount, 0, 'RLS invariants');
   await db.query(
     fs.readFileSync(
-      'supabase/migrations/20261130000001_afhomes_sale_team_accreditation.sql',
+      'supabase/migrations/20261212000001_afhomes_public_sale_team_search.sql',
       'utf8',
     ),
   );

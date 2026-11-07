@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
-import { NotFound } from '@afhomes/ui';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
+import { FEATURE_FLAGS } from '@afhomes/shared';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
 import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
@@ -17,12 +18,17 @@ import { AdminEntryPage, StaffLoginEntryPage } from '../features/staff/StaffEntr
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { OstLoginPage } from '../features/ost/OstLoginPage';
 import { OstDashboardPage } from '../features/ost/OstDashboardPage';
+import { OstSalesPage } from '../features/ost/OstSalesPage';
+import { OstCommissionsPage } from '../features/ost/OstCommissionsPage';
+import { OstAccreditationPage } from '../features/ost/OstAccreditationPage';
+import { OstProfilePage } from '../features/ost/OstProfilePage';
 import { OstRenewalPage } from '../features/ost/OstRenewalPage';
 import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
 import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
 import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
+import { OstLayout } from './OstLayout';
 import { OstGuard } from './OstGuard';
 
 const HomePage = lazy(() =>
@@ -52,7 +58,7 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
  * auth (`/customer/login`, activate, recovery) and the OST portal
  * (`/ost/login`, `/ost/register`, `/ost/dashboard`) are public by necessity;
  * the customer portal stays guarded behind `CustomerLayout`, the OST portal
- * behind `OstGuard`, and each portal keeps its own `*` fallback.
+ * behind `OstLayout`, and each portal keeps its own `*` fallback.
  *
  * Route precedence note: static segments (`/customer/...`, `/ost/...`)
  * always outrank the root `*`, so public routes can never swallow them — and
@@ -60,6 +66,8 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
  */
 export default function App() {
   return (
+    <>
+    <ScrollToTop />
     <Routes>
       <Route
         element={
@@ -116,19 +124,24 @@ export default function App() {
       <Route path="/ost/reset-password" element={<OstResetPasswordPage />} />
       <Route path="/ost/change-password" element={<OstResetPasswordPage firstLogin />} />
       <Route
-        path="/ost/dashboard"
+        path="/ost"
         element={
-          <OstGuard>
-            <OstDashboardPage />
-          </OstGuard>
+          <OstLayout />
         }
-      />
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<OstDashboardPage />} />
+        <Route path="sales" element={<OstSalesPage />} />
+        <Route path="commissions" element={<OstCommissionsPage />} />
+        <Route path="accreditation" element={<OstAccreditationPage />} />
+        <Route path="profile" element={<OstProfilePage />} />
+      </Route>
 
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<CustomerDashboardPage />} />
         <Route path="membership" element={<CustomerMembershipPage />} />
-        <Route path="points" element={<CustomerPointsPage />} />
-        <Route path="redemptions" element={<CustomerRedemptionsPage />} />
+        <Route path="points" element={FEATURE_FLAGS.services ? <CustomerPointsPage /> : <NotFound />} />
+        <Route path="redemptions" element={FEATURE_FLAGS.redemption ? <CustomerRedemptionsPage /> : <NotFound />} />
         <Route path="payments" element={<CustomerPaymentsPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
         <Route path="*" element={<NotFound />} />
@@ -136,5 +149,6 @@ export default function App() {
 
       <Route path="*" element={<MarketingNotFoundPage />} />
     </Routes>
+    </>
   );
 }

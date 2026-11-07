@@ -1,4 +1,9 @@
 import { lazy } from 'react';
+const PublicVerificationSettingsPage = lazy(() =>
+  import('../features/afhomes/PublicVerificationSettingsPage').then((m) => ({
+    default: m.PublicVerificationSettingsPage,
+  })),
+);
 
 // Route pages load on demand: one chunk per feature module.
 // Auth screens, layout, and guards stay eager for first paint.
@@ -209,7 +214,7 @@ import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
-import { NotFound } from '@afhomes/ui';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
 import {
   AdminForgotPasswordPage,
   StaffForgotPasswordPage,
@@ -224,6 +229,10 @@ import {
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
+import { isIstRole } from '@afhomes/contracts';
+
+const IstPortalPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstPortalPage })));
+const IstAccreditationPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstAccreditationPage })));
 
 const protectedPage = (page: ReactNode) => <RequireRole>{page}</RequireRole>;
 
@@ -234,10 +243,13 @@ export default function App() {
     location.pathname,
   );
   const canonical = staffPortalPath(user?.roleSlug, location.pathname);
+  if (status === 'authenticated' && user?.roleSlug === 'ost' && !publicAuth)
+    return <Navigate replace to="/staff/login" />;
   if (status === 'authenticated' && !publicAuth && canonical !== location.pathname)
     return <Navigate replace to={`${canonical}${location.search}${location.hash}`} />;
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <Routes>
         {roleRoutes(
           <>
@@ -255,7 +267,7 @@ export default function App() {
             <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
             <Route element={<AdminLayout />}>
               {/* GSD / Employee customer desk. Read-only, and gated on the same
-          `operations.redemption` view the nav uses, so hiding the link and
+          `operations.customer_lookup` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
               <Route
                 path="/admin/customer-lookup"
@@ -264,7 +276,12 @@ export default function App() {
               {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
           Redemption rather than from the global nav. */}
               <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
-              <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
+              <Route path="/admin" element={protectedPage(isIstRole(user?.roleSlug) ? <IstPortalPage /> : <AfHomesDashboardPage />)} />
+              <Route path="/admin/ist/my-sales" element={protectedPage(<IstPortalPage view="my-sales" />)} />
+              <Route path="/admin/ist/team-sales" element={protectedPage(<IstPortalPage view="team-sales" />)} />
+              <Route path="/admin/ist/my-commissions" element={protectedPage(<IstPortalPage view="my-commissions" />)} />
+              <Route path="/admin/ist/team-commissions" element={protectedPage(<IstPortalPage view="team-commissions" />)} />
+              <Route path="/admin/ist/accreditation" element={protectedPage(<IstAccreditationPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
               sales.card_sales nav key like the sales list; customers and
               anonymous visitors never reach the staff app at all. */}
@@ -299,10 +316,14 @@ export default function App() {
               />
               <Route
                 path="/admin/customers/applications/new"
-                element={<Navigate to="/admin/customers/new" replace />}
+                element={<Navigate to={`/admin/customers/new${location.search}${location.hash}`} replace />}
               />
               <Route
                 path="/admin/customers/applications/:id"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
+              <Route
+                path="/admin/customers/applications/:id/edit"
                 element={protectedPage(<CustomerApplicationEditorPage />)}
               />
               <Route
@@ -434,6 +455,7 @@ export default function App() {
                 element={protectedPage(<AfHomesDepartmentsPage />)}
               />
               <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+              <Route path="/admin/settings/public-verification" element={protectedPage(<PublicVerificationSettingsPage />)} />
               {/* My Account: the forced first-login password change lives here, so
               the guard must let a gated session through (see RequireRole). */}
               <Route path="/admin/profile" element={protectedPage(<MyAccountPage />)} />
@@ -445,6 +467,8 @@ export default function App() {
               <Route path="/admin/audit" element={protectedPage(<AuditPage />)} />
               <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
               <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
+              <Route path="/admin/cms/faq" element={protectedPage(<CmsDocumentPage title="FAQ" description="Questions and answers for the public website." documentKey="faq" />)} />
+              <Route path="/admin/cms/vip" element={protectedPage(<CmsDocumentPage title="VIP Website Content" description="Marketing names and imagery; operational entitlements are read-only." documentKey="vip" />)} />
               <Route path="/admin/cms/media" element={protectedPage(<CmsMediaPage />)} />
               <Route
                 path="/admin/cms/stories"
@@ -471,7 +495,8 @@ export default function App() {
                 element={protectedPage(
                   <CmsDocumentPage
                     title="Site Settings"
-                    description="Site identity, contact details, navigation and footer content."
+                    description="Site identity, public contacts, navigation and footer content."
+                    mode="site"
                     documentKey="site"
                   />,
                 )}
@@ -480,9 +505,10 @@ export default function App() {
                 path="/admin/cms/seo"
                 element={protectedPage(
                   <CmsDocumentPage
-                    title="Page Content and SEO"
-                    description="Structured copy and page-level metadata for the Phase 3 templates."
-                    documentKey="pageContent"
+                    title="SEO"
+                    mode="seo"
+                    description="Global and page-specific search and sharing metadata."
+                    documentKey="site"
                   />,
                 )}
               />
