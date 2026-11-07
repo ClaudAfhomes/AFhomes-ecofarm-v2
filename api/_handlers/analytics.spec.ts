@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { analyticsOverviewSchema } from '@jad/contracts';
+import { analyticsOverviewSchema } from '@afhomes/contracts';
 import {
   STAFF2,
   TOKEN,
@@ -30,7 +30,7 @@ function install() {
     ost_applications: [],
     final_qualifications: [],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens(), rpcs: [{ fn: 'account_imported_sales', result: [] }] });
   return holder.db as FakeSupabase;
 }
 

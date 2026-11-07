@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - migration invariants and the role authorization matrix.
+ * AFHomes Phase 2 - migration invariants and the role authorization matrix.
  *
  * Two things are proven here that a handler test cannot prove on its own:
  *
@@ -43,7 +43,7 @@ const read = (prefix: string) => {
     .filter((n) => n.startsWith(prefix) && n.endsWith('.sql'))
     .sort()[0];
   if (!file) throw new Error(`no migration starting with ${prefix}`);
-  return fs.readFileSync(path.join(MIGRATIONS, file), 'utf8');
+  return fs.readFileSync(path.join(MIGRATIONS, file), 'utf8').replace(/\r\n/g, '\n');
 };
 
 const schema = read('20260927000001');

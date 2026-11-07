@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@jad/ui';
+import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@afhomes/ui';
 import { env } from '../../lib/env';
-import type { AuthPortals } from '@jad/contracts';
+import type { AuthPortals } from '@afhomes/contracts';
+import { CookieAuthError } from '@afhomes/shared';
 
 import { useSession } from '../../lib/session';
 import { getAuthPortals } from '../../lib/portals';
@@ -30,12 +31,13 @@ import styles from './AdminLoginPage.module.css';
  */
 export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
   const isAdmin = portal === 'admin';
+  const captchaSiteKey = env.VITE_TURNSTILE_SITE_KEY;
   const navigate = useNavigate();
   const location = useLocation();
   const { status, signIn, logout } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; captcha?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -107,18 +109,25 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
     }
     setServerError(null);
     setDecision(null);
+    if (captchaSiteKey && !captchaToken) {
+      setErrors({ captcha: 'Complete security verification before signing in.' });
+      return;
+    }
     setPending(true);
     try {
-      if (env.VITE_TURNSTILE_SITE_KEY) {
-        if (!captchaToken) throw new Error('Complete security verification.');
-        await signIn(email, password, captchaToken);
+      if (captchaSiteKey) {
+        await signIn(email, password, captchaToken!);
       } else await signIn(email, password);
       const portals: AuthPortals = await getAuthPortals();
       applyDecision(decideForPortal(portal, portals, requested));
-    } catch {
+    } catch (error) {
       // Generic on purpose: distinguishing unknown user from wrong password
       // would enumerate staff accounts.
-      setServerError('We could not sign you in with that email and password.');
+      setServerError(
+        error instanceof CookieAuthError && error.reason !== 'rejected'
+          ? error.message
+          : 'We could not sign you in with that email and password.',
+      );
     } finally {
       setPending(false);
       setCaptchaToken(null);
@@ -126,7 +135,7 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
     }
   };
 
-  // A signed-in identity with no AF Homes home anywhere must not linger with
+  // A signed-in identity with no AFHomes home anywhere must not linger with
   // a live session on a login screen.
   useEffect(() => {
     if (decision?.action === 'refuse' && decision.message.includes('no staff identity')) {
@@ -137,8 +146,8 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
-      title={isAdmin ? 'Administration Login' : 'Staff Login'}
+      eyebrow="AFhomes Ecofarm"
+      title={isAdmin ? 'Admin Login' : 'Staff Login'}
       lead={
         isAdmin
           ? 'Restricted to Super Admin and Admin.'
@@ -218,10 +227,12 @@ export function PortalLoginPage({ portal }: { portal: EntryPortal }) {
 
           <div className={styles.submitRow}>
             <TurnstileChallenge
-              siteKey={env.VITE_TURNSTILE_SITE_KEY}
+              action="login"
+              siteKey={captchaSiteKey}
               onToken={setCaptchaToken}
               resetVersion={captchaVersion}
             />
+            {errors.captcha ? <p role="alert">{errors.captcha}</p> : null}
             <Button
               loadingLabel="Signing in…"
               type="submit"

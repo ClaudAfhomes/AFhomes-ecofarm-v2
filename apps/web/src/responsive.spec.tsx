@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 33 - web responsive completion (portal + public site).
+ * AFHomes Phase 33 - web responsive completion (portal + public site).
  *
  * Renders the REAL portal and marketing routes at mobile widths against a
  * deny-by-default fetch stub. Assertions pin mobile-first usability without
@@ -176,7 +176,7 @@ describe('Phase 33 customer portal at mobile widths', () => {
     atWidth(width);
     render('/customer/login', false);
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
     ).toBeInTheDocument();
   });
 
@@ -234,4 +234,10 @@ describe('Phase 33 public site keeps its responsive design', () => {
     await screen.findByRole('main', undefined, { timeout: 20000 });
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
   });
+});
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

@@ -1,12 +1,12 @@
 /**
- * AF Homes-only migration runner.
+ * AFHomes-only migration runner.
  *
  * Safety properties (do not weaken):
  *  - Refuses to run unless AFHOMES_TARGET_PROJECT_REF equals the expected ref
  *    AND the DATABASE_URL actually points at that project. A matching env var
  *    with a foreign connection string is refused, not trusted.
  *  - Applies ONLY files in supabase/migrations, and refuses the whole run if
- *    any of them is not an AF Homes migration. The retired JAD migrations under
+ *    any of them is not an AFHomes migration. The retired JAD migrations under
  *    legacy/ can never reach this path.
  *  - Each migration runs in its own transaction together with its history row,
  *    so a failure leaves no partial schema and no phantom history entry.
@@ -39,6 +39,7 @@
  * directory, so it must be invoked from the repository root. `--check` prints
  * the resolved directory so a wrong CWD is immediately visible.
  */
+import { assertOrdinaryMigrationSafety } from './migration-safety.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnvFile } from 'node:process';
@@ -57,7 +58,7 @@ type Target = {
   connectionString: string;
   migrationsDir: string;
   files: string[];
-  /** Every AF Homes migration on disk, unfiltered, so `--only` can report what it skips. */
+  /** Every AFHomes migration on disk, unfiltered, so `--only` can report what it skips. */
   allFiles: string[];
   problems: string[];
 };
@@ -147,7 +148,7 @@ function readTarget(): Target {
     .sort();
   if (files.some((file) => !file.includes('afhomes_')))
     problems.push(
-      'Non-AF Homes migration found in active path. The retired JAD set must stay out.',
+      'Non-AFHomes migration found in active path. The retired JAD set must stay out.',
     );
 
   const allFiles = files;
@@ -203,17 +204,14 @@ async function main(): Promise<void> {
     const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
     try {
       await client.connect();
-      await client.query('create schema if not exists supabase_migrations');
-      await client.query(
-        'create table if not exists supabase_migrations.schema_migrations (version text primary key)',
-      );
       const selected = files[0]!;
       const selectedVersion = selected.split('_', 1)[0]!;
       const isApplied = async (version: string) =>
         (
-          await client.query('select 1 from supabase_migrations.schema_migrations where version=$1', [
-            version,
-          ])
+          await client.query(
+            'select 1 from supabase_migrations.schema_migrations where version=$1',
+            [version],
+          )
         ).rowCount
           ? true
           : false;
@@ -299,6 +297,15 @@ async function main(): Promise<void> {
     throw error;
   }
   try {
+    const historyExists = await client.query(
+      "select to_regclass('supabase_migrations.schema_migrations') relation",
+    );
+    const recorded = historyExists.rows[0]?.relation
+      ? (await client.query('select version from supabase_migrations.schema_migrations')).rows.map(
+          (row: { version: string }) => row.version,
+        )
+      : [];
+    assertOrdinaryMigrationSafety(files, recorded);
     await client.query('create schema if not exists supabase_migrations');
     await client.query(
       'create table if not exists supabase_migrations.schema_migrations (version text primary key)',

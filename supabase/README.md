@@ -1,6 +1,6 @@
 # AF Homes Supabase
 
-Only `migrations/` is active. JAD migrations and scripts are preserved under `legacy/` and are never read by AF Homes commands.
+Only `migrations/` is active. Retired predecessor migrations and scripts are preserved under `legacy/` and are never read by AF Homes commands.
 
 `pnpm seed` upserts reference configuration only. It creates no Auth users, customers, sales, payments, or commissions. `pnpm seed:demo` is explicitly preview-only and refuses the production project ref.
 

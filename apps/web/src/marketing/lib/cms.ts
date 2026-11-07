@@ -9,12 +9,12 @@
  * source site renders when its CMS backend is unreachable.
  *
  * The repository defaults render first. `hydrateCms()` then overlays only
- * structurally valid, published documents from the current AF Homes API. A
+ * structurally valid, published documents from the current AFHomes API. A
  * network, parse, or shape failure leaves the defaults in place.
  *
  * Callers continue to program against this stable repository interface.
  */
-import { cmsPublicContentSchema } from '@jad/contracts';
+import { cmsPublicContentSchema } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
 import { experiences } from '../data/mock/experiences';
 import { faqCategories } from '../data/mock/faq';

@@ -29,6 +29,20 @@ describe('ID capture browser invocation', () => {
     expect(screen.getByRole('button', { name: 'Upload an ID' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Take a photo' })).toBeDisabled();
   });
+  it('hides the cancel action unless a selection is pending', () => {
+    const onCancel = vi.fn();
+    render(<IdCapturePicker onFile={vi.fn()} onCancel={onCancel} />);
+    expect(screen.queryByRole('button', { name: 'Cancel selection' })).not.toBeInTheDocument();
+  });
+  it('offers a red cancel beside Take a photo while a selection is pending', () => {
+    const onCancel = vi.fn();
+    render(<IdCapturePicker onFile={vi.fn()} onCancel={onCancel} showCancel />);
+    const cancel = screen.getByRole('button', { name: 'Cancel selection' });
+    expect(cancel).toBeInTheDocument();
+    expect(cancel).toHaveAttribute('data-variant', 'danger');
+    fireEvent.click(cancel);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 /**

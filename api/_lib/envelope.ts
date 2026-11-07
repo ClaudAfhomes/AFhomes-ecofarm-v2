@@ -1,5 +1,5 @@
 /**
- * Shared error envelope for api/ handlers. Matches the @jad/contracts
+ * Shared error envelope for api/ handlers. Matches the @afhomes/contracts
  * error envelope shape ({ error: { code, message, details?, requestId,
  * timestamp } }) plus the HTTP status, so handlers can destructure
  * `{ error, status }` uniformly.

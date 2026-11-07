@@ -1,8 +1,12 @@
+import { storedAccreditationNumbers } from '../_lib/accreditation-numbers.js';
+import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
+import { profilePhotoInputSchema } from '@afhomes/contracts';
 import { validateOstSponsor, type SponsorCheck } from '../_lib/ost-sponsor.js';
 import accreditationHandler from './ost-accreditation.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
+import { importedAccountSales, mergeAccountSales } from '../_lib/account-sales.js';
 /**
- * AF Homes Phase 8 - OST registration and approval (SM -> OST).
+ * AFHomes Phase 8 - OST registration and approval (SM -> OST).
  *
  * The public surface carries a referral CODE, never a sponsor id. The sponsor
  * is resolved server-side from the code hash and frozen into the application;
@@ -15,16 +19,27 @@ import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
  * No commission, payout, ranking or cost-sharing rule lives here.
  */
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 
 import {
   OST_REVIEWABLE_STATUSES,
+  createAfHomesStaffSchema,
   createOstReferralCodeSchema,
   normalizeOstReferralCode,
   ostMeSchema,
   ostReferralCodeSchema,
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
-} from '@jad/contracts';
+  ostDashboardSchema,
+  ostHeadInfoSchema,
+  ostPersonalSalesSchema,
+  ostPersonalCommissionsSchema,
+  ostCommissionRecordSchema,
+  ostSalesRecordSchema,
+  ostCommissionListRecordSchema,
+  ostSalesListSchema,
+  ostCommissionsListSchema,
+} from '@afhomes/contracts';
 
 import {
   authorizeAfHomes,
@@ -113,28 +128,6 @@ function newReferralCode(): string {
   return `OST-${hex.slice(0, 6)}-${hex.slice(6, 12)}`;
 }
 
-function newOstNumberFallback(): string {
-  const hex = randomBytes(3).toString('hex').toUpperCase();
-  return `OST-${hex}`;
-}
-
-async function nextOstNumber(db: Db): Promise<string> {
-  try {
-    const { data, error } = await db.rpc('next_ost_number');
-    if (!error && data) {
-      const value = Array.isArray(data) ? data[0] : data;
-      const text =
-        typeof value === 'string'
-          ? value
-          : String((value as Record<string, unknown>)?.ost_number ?? '');
-      if (text) return text;
-    }
-  } catch {
-    // Sequence missing (pre-migration database): fall back to a local value.
-  }
-  return newOstNumberFallback();
-}
-
 /**
  * Approval-time re-validation of the FROZEN sponsor.
  *
@@ -171,13 +164,16 @@ async function validateReferralCodeIssuer(
   caller: ReferralCodeIssuer,
   sponsorId: string,
 ): Promise<SponsorCheck> {
-  if (sponsorId === caller.userId && caller.roleSlug !== 'sales_manager') {
+  if (
+    sponsorId === caller.userId &&
+    !['vice_director', 'senior_sales_manager', 'sales_manager'].includes(caller.roleSlug)
+  ) {
     return {
       ok: false,
       status: 403,
       message:
-        'Only an active Sales Manager can sponsor an OST referral code. ' +
-        'Ask a Sales Manager for their code, or have an administrator issue one on their behalf.',
+        'Only an active VD, SSM or Sales Manager can sponsor an OST referral code. ' +
+        'Ask an eligible seller for their code, or have an administrator issue one on their behalf.',
     };
   }
   const checked = await validateOstSponsor(db, sponsorId);
@@ -237,6 +233,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const userId = authData?.user?.id;
       if (authError || !userId)
         return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
       const { data: member, error } = await db
         .from('ost_members')
         .select('id, ost_number, full_name, email, status, sponsor_staff_id, approved_at')
@@ -462,127 +468,173 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ostRole?.is_active) return fail(res, 'CONFLICT', 'The OST role is not available', 409);
 
       const fullName = applicantName(app);
-      const redirectTo = resolveAdminUrl();
-      if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
-      const invited = (await db.auth.admin.inviteUserByEmail(String(app.email), {
-        redirectTo,
-        data: { full_name: fullName },
-      })) as { data?: { user?: { id: string } | null }; error?: { message?: string } | null };
+      const credentials = createAfHomesStaffSchema
+        .pick({ temporaryPassword: true })
+        .partial()
+        .extend({ profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional() })
+        .safeParse(jsonBody(req));
+      if (!credentials.success)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Use a temporary password of 8 to 128 characters.',
+          400,
+        );
+      const temporaryPassword = credentials.data.temporaryPassword;
+      if (
+        credentials.data.profilePhotoBase64 &&
+        !decodeProfilePhoto(credentials.data.profilePhotoBase64)
+      )
+        return fail(res, 'VALIDATION_ERROR', 'Choose a valid compressed profile photo.', 400);
+      let invited;
+      if (temporaryPassword) {
+        invited = await db.auth.admin.createUser({
+          email: String(app.email),
+          password: temporaryPassword,
+          email_confirm: true,
+          user_metadata: { full_name: fullName },
+        });
+      } else {
+        // Preserve invitation compatibility for historical approval clients.
+        const redirectTo = resolveAdminUrl();
+        if (!redirectTo) return fail(res, 'INTERNAL', 'AFHOMES_ADMIN_URL is not configured', 500);
+        invited = await db.auth.admin.inviteUserByEmail(String(app.email), {
+          redirectTo,
+          data: { full_name: fullName },
+        });
+      }
       if (invited.error || !invited.data?.user?.id)
-        return fail(res, 'CONFLICT', 'Unable to invite this email address', 409);
+        return fail(res, 'CONFLICT', 'Unable to create this OST account', 409);
       const ostUserId = invited.data.user.id;
 
-      try {
-        const now = new Date().toISOString();
-        const ostNumber = await nextOstNumber(db);
-
-        const { error: staffError } = await db.from('staff_users').insert({
-          id: ostUserId,
-          email: String(app.email),
-          full_name: fullName,
-          department_id: null,
-          status: 'invited',
-          invited_at: now,
-        });
-        if (staffError) throw staffError;
-
-        const { error: assignmentError } = await db.from('staff_role_assignments').insert({
-          staff_id: ostUserId,
-          role_id: ostRole.id,
-          assigned_by: auth.userId,
-        });
-        if (assignmentError) throw assignmentError;
-
-        const { error: invitationError } = await db.from('staff_invitations').insert({
-          email: String(app.email),
-          full_name: fullName,
-          role_id: ostRole.id,
-          department_id: null,
-          invited_by: auth.userId,
-          expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
-          auth_user_id: ostUserId,
-        });
-        if (invitationError) throw invitationError;
-
-        const { data: memberRow, error: memberError } = await db
-          .from('ost_members')
-          .insert({
-            id: ostUserId,
-            application_id: id,
-            sponsor_staff_id: sponsor.id,
-            ost_number: ostNumber,
-            full_name: fullName,
-            email: String(app.email),
-            phone: String(app.phone),
-            status: 'active',
-            approved_by: auth.userId,
-            approved_at: now,
-          })
-          .select('*')
-          .single();
-        if (memberError) throw memberError;
-
-        // SM -> OST genealogy edge. The Phase 7 trigger re-validates exact
-        // adjacency (ost under sales_manager), one active upline, and cycles;
-        // a violation surfaces here and rolls the approval back via cleanup.
-        const { data: edge, error: edgeError } = await db
-          .from('referral_relationships')
-          .insert({
-            subject_staff_id: ostUserId,
-            upline_staff_id: sponsor.id,
-            hierarchy_role: 'ost',
-            is_authoritative: true,
-            is_active: true,
-            assigned_by: auth.userId,
-          })
-          .select('*')
-          .single();
-        if (edgeError) throw edgeError;
-
-        const { data: updated, error: updateError } = await db
-          .from('ost_applications')
-          .update({ status: 'approved', reviewed_by: auth.userId, reviewed_at: now })
-          .eq('id', id)
-          .select('*')
-          .single();
-        if (updateError) throw updateError;
-        void updated;
-
-        await audit(
-          db,
-          auth.userId,
-          'OST_APPLICATION_APPROVED',
-          'ost_application',
-          id,
-          { status: String(app.status) },
-          {
-            status: 'approved',
-            sponsorStaffId: sponsor.id,
-            ostMemberId: ostUserId,
-            genealogyRelationshipId: String((edge as { id: string }).id),
-          },
+      // An invitation response does not prove GoTrue created a NEW identity:
+      // for an existing account it can hand back that account's id. Writing
+      // (or later unwinding) rows under a pre-existing identity would corrupt
+      // it, so a known staff identity for either the invited id or this email
+      // stops the approval BEFORE any write, with nothing to clean up.
+      const [{ data: idOwner, error: idOwnerError }, { data: emailOwner, error: emailOwnerError }] =
+        await Promise.all([
+          db.from('staff_users').select('id').eq('id', ostUserId).maybeSingle(),
+          db.from('staff_users').select('id').eq('email', String(app.email)).maybeSingle(),
+        ]);
+      if (idOwnerError || emailOwnerError)
+        return fail(
+          res,
+          'INTERNAL',
+          'Account ownership could not be verified. Review the invitation before retrying.',
+          500,
         );
-        await audit(db, auth.userId, 'OST_MEMBER_ACTIVATED', 'ost_member', ostUserId, null, {
-          applicationId: id,
-          sponsorStaffId: sponsor.id,
-          ostNumber,
-        });
-        return res
-          .status(201)
-          .json(toMember(memberRow as Record<string, unknown>, sponsor.fullName));
-      } catch (error) {
-        // The invitation created an Auth user with no usable identity: remove
-        // it so a retry starts clean. A pre-existing user is never destroyed
-        // because this run created this one.
+      if (idOwner || emailOwner)
+        return fail(
+          res,
+          'CONFLICT',
+          'This email is already linked to an account. Review the existing identity before approving.',
+          409,
+        );
+
+      let installed;
+      if (credentials.data.profilePhotoBase64) {
         try {
-          await db.auth.admin.deleteUser(ostUserId);
+          await saveProfilePhoto(ostUserId, credentials.data.profilePhotoBase64);
         } catch {
-          // Cleanup is best-effort; the original error is what matters.
+          // Password creation guarantees this request owns the new Auth identity.
+          let cleanupFailed = !temporaryPassword;
+          if (temporaryPassword) {
+            const removed = await db.auth.admin.deleteUser(ostUserId);
+            cleanupFailed = !!removed.error;
+            try {
+              await removeProfilePhoto(ostUserId);
+            } catch {
+              cleanupFailed = true;
+            }
+          }
+          return fail(
+            res,
+            'INTERNAL',
+            cleanupFailed
+              ? 'Account cleanup needs administrator review before retrying.'
+              : 'Could not save the profile photo. Please retry.',
+            503,
+          );
         }
-        if ((error as { code?: string })?.code === '23505')
-          return fail(res, 'CONFLICT', 'An OST member for this application already exists', 409);
-        return mapRpcError(res, error as { message?: string });
       }
+      try {
+        installed = await db.rpc('install_legacy_ost_identity', {
+          p_application_id: id,
+          p_actor_id: auth.userId,
+          p_auth_id: ostUserId,
+        });
+      } catch {
+        // A lost response cannot establish whether the SQL transaction committed.
+        try {
+          await audit(
+            db,
+            auth.userId,
+            'OST_APPROVAL_RECONCILIATION_REQUIRED',
+            'ost_application',
+            id,
+            null,
+            { authUserId: ostUserId, authIdentityRetained: true, databaseOutcome: 'unknown' },
+          );
+        } catch {
+          console.error('[ost-approval] reconciliation audit unavailable', { applicationId: id });
+        }
+        return fail(
+          res,
+          'INTERNAL',
+          'Approval could not be confirmed. Administrator reconciliation is required before retrying.',
+          500,
+        );
+      }
+      if (installed.error) {
+        // The RPC is one SQL transaction; no compensating history deletion is needed.
+        try {
+          await audit(
+            db,
+            auth.userId,
+            'OST_APPROVAL_PROVISIONING_FAILED',
+            'ost_application',
+            id,
+            null,
+            { authUserId: ostUserId, authIdentityRetained: true, databaseOutcome: 'rolled_back' },
+          );
+        } catch {
+          console.error('[ost-approval] provisioning failure audit unavailable', {
+            applicationId: id,
+          });
+        }
+        if (installed.error.code === '23505')
+          return fail(
+            res,
+            'CONFLICT',
+            'An account already exists. Review the retained invitation and account before retrying.',
+            409,
+          );
+        return fail(
+          res,
+          installed.error.code === '42501' ? 'FORBIDDEN' : 'INTERNAL',
+          'OST installation failed. Review the retained invitation before retrying.',
+          installed.error.code === '42501' ? 403 : 500,
+        );
+      }
+      if (temporaryPassword) {
+        const activated = await db
+          .from('staff_users')
+          .update({
+            status: 'active',
+            must_change_password: true,
+            activated_at: new Date().toISOString(),
+          })
+          .eq('id', ostUserId)
+          .eq('status', 'invited')
+          .select('id')
+          .maybeSingle();
+        if (activated.error || !activated.data)
+          return fail(res, 'INTERNAL', 'Account setup requires administrator reconciliation.', 500);
+      }
+      return res
+        .status(201)
+        .json(toMember(installed.data as Record<string, unknown>, sponsor.fullName));
     }
 
     /* ---------------- staff: reject ---------------- */
@@ -712,8 +764,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const membersPath = subPath(req);
     const memberSingle = membersPath.match(/^members\/([0-9a-f-]+)$/);
     if ((membersPath === 'members' || memberSingle) && method(req) === 'GET') {
+      const includeAccreditation = req.query.includeAccreditation === '1';
+      const addNumbers = async <T extends { id: unknown }>(
+        rows: T[],
+      ): Promise<(T & { aaNumber?: string | null })[]> => {
+        if (!includeAccreditation) return rows;
+        const numbers = await storedAccreditationNumbers(
+          db,
+          rows.map((row) => String(row.id)),
+        );
+        return rows.map((row) => ({ ...row, aaNumber: numbers.get(String(row.id)) ?? null }));
+      };
       const principal = await resolveAfHomesPrincipal(req);
       if ('error' in principal) return deny(res, principal);
+      if (principal.mustChangePassword || principal.mfaRequired)
+        return fail(res, 'FORBIDDEN', 'Complete account security setup before continuing.', 403);
       const single = memberSingle;
       const grants = principal.permissions.find((p) => p.moduleKey === 'network.ost_members');
       const canViewAll = grants?.canView === true;
@@ -741,7 +806,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('id', data.sponsor_staff_id)
           .maybeSingle();
         if (sponsorError) throw sponsorError;
-        return res.status(200).json(toMember(data, String(sponsor?.full_name ?? '')));
+        return res
+          .status(200)
+          .json((await addNumbers([toMember(data, String(sponsor?.full_name ?? ''))]))[0]);
       }
 
       // OST without the module grant still reads exactly one row: itself.
@@ -768,7 +835,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (sponsorError) throw sponsorError;
         const search = String(req.query.search ?? '').trim();
         if (search.length > 120) return fail(res, 'VALIDATION_ERROR', 'Search is too long', 400);
-        const row = toMember(data, String(sponsor?.full_name ?? ''));
+        const row = (await addNumbers([toMember(data, String(sponsor?.full_name ?? ''))]))[0]!;
         return list(
           res,
           matchesSearch(search, [
@@ -776,6 +843,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             row.email,
             row.phone,
             row.ostNumber,
+            row.aaNumber,
             row.sponsorName,
             row.status,
           ])
@@ -801,18 +869,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       return list(
         res,
-        rows
-          .map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? ''))
-          .filter((row) =>
-            matchesSearch(search, [
-              row.fullName,
-              row.email,
-              row.phone,
-              row.ostNumber,
-              row.sponsorName,
-              row.status,
-            ]),
-          ),
+        (
+          await addNumbers(rows.map((r) => toMember(r, byId.get(String(r.sponsor_staff_id)) ?? '')))
+        ).filter((row) =>
+          matchesSearch(search, [
+            row.fullName,
+            row.email,
+            row.phone,
+            row.ostNumber,
+            row.aaNumber,
+            row.sponsorName,
+            row.status,
+          ]),
+        ),
       );
     }
 
@@ -820,10 +889,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === 'referral-codes/me' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.referrals');
       if ('error' in auth) return deny(res, auth);
-      const selected = typeof req.query.sponsorStaffId === 'string' ? req.query.sponsorStaffId : auth.userId;
+      const selected =
+        typeof req.query.sponsorStaffId === 'string' ? req.query.sponsorStaffId : auth.userId;
       if (!createOstReferralCodeSchema.shape.sponsorStaffId.safeParse(selected).success)
         return fail(res, 'VALIDATION_ERROR', 'Select a valid Sales Manager.', 400);
-      const sponsorCheck = await validateReferralCodeIssuer(db, { userId: auth.userId, roleSlug: auth.roleSlug }, selected);
+      const sponsorCheck = await validateReferralCodeIssuer(
+        db,
+        { userId: auth.userId, roleSlug: auth.roleSlug },
+        selected,
+      );
       if (!sponsorCheck.ok) return fail(res, 'FORBIDDEN', sponsorCheck.message, 403);
       const data = await readSearchRows(
         db
@@ -833,7 +907,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .order('created_at', { ascending: false })
           .order('id'),
       );
-      const webBase = process.env.AFHOMES_WEB_URL ?? '';
       return list(
         res,
         ((data ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -895,17 +968,363 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const raw = newReferralCode();
       const expiresAt = new Date(Date.now() + parsed.data.expiresInHours * 3600000).toISOString();
       const { error } = await db.rpc('manage_ost_referral_code', {
-        p_actor: auth.userId, p_sponsor: sponsor.id, p_rotate: parsed.data.rotate,
-        p_hash: hashIdentifier(raw), p_hint: 'OST-?-' + raw.slice(-4),
-        p_expires: expiresAt, p_max_uses: parsed.data.maxUses,
+        p_actor: auth.userId,
+        p_sponsor: sponsor.id,
+        p_rotate: parsed.data.rotate,
+        p_hash: hashIdentifier(raw),
+        p_hint: 'OST-?-' + raw.slice(-4),
+        p_expires: expiresAt,
+        p_max_uses: parsed.data.maxUses,
       });
-      if (error) throw error;
+      if (error) {
+        if (error.message.startsWith('CONFLICT:'))
+          return fail(
+            res,
+            'CONFLICT',
+            'An active referral code already exists. Rotate it to generate a replacement.',
+            409,
+          );
+        if (error.message.startsWith('FORBIDDEN:'))
+          return fail(
+            res,
+            'FORBIDDEN',
+            'Only authorized administrators or the active sponsoring Sales Manager may issue this code.',
+            403,
+          );
+        if (error.message.startsWith('VALIDATION_ERROR:'))
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Check the referral code expiry and usage limit.',
+            400,
+          );
+        throw error;
+      }
       return res.status(201).json({
         code: raw,
         codeHint: 'OST-?-' + raw.slice(-4),
         expiresAt,
         maxUses: parsed.data.maxUses,
       });
+    }
+
+    /* ---------------- authenticated OST personal dashboard ---------------- */
+    if (subPath(req) === 'me/dashboard' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error } = await db
+        .from('ost_members')
+        .select('id, ost_number, full_name, email, status, sponsor_staff_id, approved_at')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      // Get head info (sponsor)
+      const { data: sponsor, error: sponsorError } = await db
+        .from('staff_users')
+        .select('id, full_name, status')
+        .eq('id', member.sponsor_staff_id)
+        .maybeSingle();
+      if (sponsorError) throw sponsorError;
+      const { data: sponsorRole } = sponsor
+        ? await db.from('staff_role_assignments').select('role_id').eq('staff_id', member.sponsor_staff_id).maybeSingle()
+        : { data: null };
+      const { data: sponsorRoleName } = sponsorRole
+        ? await db.from('roles').select('slug').eq('id', sponsorRole.role_id).maybeSingle()
+        : { data: null };
+
+      const headInfo = {
+        headId: sponsor?.id ?? '',
+        headName: sponsor?.full_name ?? 'Unknown',
+        headRole: sponsorRoleName?.slug ?? 'Unknown',
+        headStatus: sponsor?.status ?? 'unknown',
+        relationship: 'Direct Sponsor',
+      };
+
+      // Get personal sales (qualifying sales where this OST is the seller)
+      const { data: sales, error: salesError } = await db
+        .from('card_sales')
+        .select('id, sale_number, status, created_at, cash_price_snapshot')
+        .eq('origin', 'normal')
+        .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
+        .order('created_at', { ascending: false });
+      if (salesError) throw salesError;
+      const accountSales = mergeAccountSales(sales ?? [], await importedAccountSales(db, userId));
+      const qualifyingSales = accountSales.filter(s => s.status === 'active');
+      const periodSales = qualifyingSales.length; // For now, all qualifying sales
+
+      const salesInfo = {
+        totalSales: accountSales.length,
+        periodSales,
+        qualifyingSaleStatus: 'active',
+      };
+
+      // Get personal commissions
+      const { data: commissions, error: commError } = await db
+        .from('commissions')
+        .select(`
+          id,
+          commission_number,
+          sale_id,
+          amount,
+          status,
+          qualified_at,
+          earned_at,
+          paid_at,
+          created_at,
+          card_sales!inner(sale_number)
+        `)
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
+        .order('created_at', { ascending: false });
+      if (commError) throw commError;
+
+      const commissionRecords = (commissions ?? []).map((row: any) => ({
+        id: row.id,
+        commissionNumber: row.commission_number ?? null,
+        saleNumber: row.card_sales?.sale_number ?? '',
+        amount: row.amount,
+        status: row.status,
+        qualifiedAt: row.qualified_at ?? null,
+        earnedAt: row.earned_at ?? null,
+        paidAt: row.paid_at ?? null,
+        createdAt: row.created_at,
+      }));
+
+      // Calculate commission KPIs
+      const toEarn = commissionRecords.filter((c: { status: string }) => ['pending', 'payment_verified', 'final_qualification_pending'].includes(c.status));
+      const earned = commissionRecords.filter((c: { status: string }) => c.status === 'earned');
+      const paid = commissionRecords.filter((c: { status: string }) => c.status === 'paid');
+      const cancelled = commissionRecords.filter((c: { status: string }) => c.status === 'cancelled');
+
+      const sumAmount = (records: { amount: string | null }[]) => records.reduce((sum, r) => {
+        const match = String(r.amount ?? '0').match(/^(\d+)(?:\.(\d{1,2}))?$/);
+        if (match) return sum + BigInt(match[1]) * 100n + BigInt((match[2] ?? '').padEnd(2, '0'));
+        return sum;
+      }, 0n);
+
+      const formatAmount = (cents: bigint) => `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
+
+      const commissionsInfo = {
+        toEarn: {
+          count: toEarn.length,
+          amount: formatAmount(sumAmount(toEarn)),
+        },
+        earned: {
+          count: earned.length,
+          amount: formatAmount(sumAmount(earned)),
+        },
+        paid: {
+          count: paid.length,
+          amount: formatAmount(sumAmount(paid)),
+        },
+        cancelled: {
+          count: cancelled.length,
+          amount: formatAmount(sumAmount(cancelled)),
+        },
+      };
+
+      const dashboardData = {
+        head: headInfo,
+        sales: salesInfo,
+        commissions: commissionsInfo,
+        commissionHistory: commissionRecords,
+      };
+
+      const parsed = ostDashboardSchema.safeParse(dashboardData);
+      if (!parsed.success) return fail(res, 'INTERNAL', 'Dashboard data validation failed', 500);
+      return res.status(200).json(parsed.data);
+    }
+
+    /* ---------------- authenticated OST personal sales list ---------------- */
+    if (subPath(req) === 'me/sales' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error: memberError } = await db
+        .from('ost_members')
+        .select('id, status')
+        .eq('id', userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      const querySchema = z.object({
+        status: z.string().trim().max(40).optional(),
+        search: z.string().trim().max(100).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(20),
+        offset: z.coerce.number().int().min(0).default(0),
+      });
+      const parsed = querySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
+      const { status, search, limit, offset } = parsed.data;
+
+      const query = db
+        .from('card_sales')
+        .select('id, sale_number, status, created_at, cash_price_snapshot, customer_id')
+        .eq('origin', 'normal')
+        .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
+        .order('created_at', { ascending: false }).order('id');
+      const accountSales = mergeAccountSales(await readSearchRows(query), await importedAccountSales(db, userId));
+      const matchingSales = accountSales.filter(s => (!status || s.status === status)
+        && matchesSearch(search, [s.sale_number, s.customer_id]));
+      matchingSales.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(a.id).localeCompare(String(b.id)));
+      const sales = matchingSales.slice(offset, offset + limit);
+
+      // Fetch customer names for the sales
+      const customerIds = [...new Set((sales ?? []).map((s: Record<string, unknown>) => s.customer_id).filter(Boolean))];
+      const customerNames = new Map<string, { name: string; number: string }>();
+      if (customerIds.length > 0) {
+        const { data: customers } = await db
+          .from('customers')
+          .select('id, customer_number, first_name, last_name')
+          .in('id', customerIds);
+        for (const c of customers ?? []) {
+          customerNames.set(c.id, {
+            name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+            number: c.customer_number,
+          });
+        }
+      }
+
+      const salesRecords = (sales ?? []).map((s: Record<string, unknown>) => {
+        const cust = customerNames.get(String(s.customer_id ?? ''));
+        return {
+          id: s.id,
+          saleNumber: s.sale_number,
+          customerName: cust?.name ?? null,
+          customerNumber: cust?.number ?? null,
+          status: s.status,
+          cashPriceSnapshot: s.cash_price_snapshot,
+          createdAt: s.created_at,
+        };
+      });
+
+      const validated = ostSalesListSchema.safeParse({
+        data: salesRecords,
+        meta: { total: matchingSales.length, limit, offset },
+        summary: { qualifyingSales: matchingSales.filter(s => s.status === 'active').length },
+      });
+      if (!validated.success) return fail(res, 'INTERNAL', 'Sales list validation failed', 500);
+      return res.status(200).json(validated.data);
+    }
+
+    /* ---------------- authenticated OST personal commissions list ---------------- */
+    if (subPath(req) === 'me/commissions' && method(req) === 'GET') {
+      const anon = anonClient();
+      if (!anon) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+      const token = extractBearerToken(req);
+      if (!token) return fail(res, 'UNAUTHORIZED', 'Sign in to continue', 401);
+      const { data: authData, error: authError } = await verifySessionToken(anon.auth, token);
+      const userId = authData?.user?.id;
+      if (authError || !userId)
+        return fail(res, 'UNAUTHORIZED', 'Your session has expired. Please sign in again.', 401);
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('status,must_change_password')
+        .eq('id', userId)
+        .maybeSingle();
+      if (staffError)
+        return fail(res, 'INTERNAL', 'Account security verification is unavailable.', 503);
+      if (!staff) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (staff.status !== 'active' || staff.must_change_password === true)
+        return fail(res, 'FORBIDDEN', 'Set a new password before opening your OST portal.', 403);
+      const { data: member, error: memberError } = await db
+        .from('ost_members')
+        .select('id, status')
+        .eq('id', userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member) return fail(res, 'NOT_FOUND', 'No OST record found for this sign-in', 404);
+      if (member.status !== 'active')
+        return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
+
+      const querySchema = z.object({
+        status: z.string().trim().max(40).optional(),
+        search: z.string().trim().max(100).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(20),
+        offset: z.coerce.number().int().min(0).default(0),
+      });
+      const parsed = querySchema.safeParse(req.query);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
+      const { status, search, limit, offset } = parsed.data;
+
+      let query = db
+        .from('commissions')
+        .select(
+          'id, commission_number, sale_id, amount, status, qualified_at, earned_at, paid_at, created_at, card_sales!inner(sale_number)',
+          { count: 'exact' },
+        )
+        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+        .not('settled_before_system', 'is', true)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (status) query = query.eq('status', status);
+      if (search) {
+        query = query.or(`commission_number.ilike.%${search}%,sale_number.ilike.%${search}%`);
+      }
+
+      const { data: commissions, error: commError, count } = await query;
+      if (commError) throw commError;
+
+      const commissionRecords = (commissions ?? []).map((row: Record<string, unknown>) => {
+        const sale = (row.card_sales ?? {}) as Record<string, unknown>;
+        return {
+          id: row.id,
+          commissionNumber: row.commission_number ?? null,
+          saleNumber: String(sale.sale_number ?? ''),
+          amount: row.amount,
+          status: row.status,
+          qualifiedAt: row.qualified_at ?? null,
+          earnedAt: row.earned_at ?? null,
+          paidAt: row.paid_at ?? null,
+          createdAt: row.created_at,
+        };
+      });
+
+      const validated = ostCommissionsListSchema.safeParse({
+        data: commissionRecords,
+        meta: { total: count ?? 0, limit, offset },
+      });
+      if (!validated.success) return fail(res, 'INTERNAL', 'Commissions list validation failed', 500);
+      return res.status(200).json(validated.data);
     }
 
     return fail(res, 'NOT_FOUND', 'OST endpoint not found', 404);

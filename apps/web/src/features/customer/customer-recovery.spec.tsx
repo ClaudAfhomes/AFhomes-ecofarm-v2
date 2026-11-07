@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from '../../app/App';
 import { renderWithProviders } from '../../test/utils';
-import { RECOVERY_SENT_MESSAGE } from '@jad/shared';
+import { RECOVERY_SENT_MESSAGE } from '@afhomes/shared';
 import { CustomerForgotPasswordPage } from './CustomerForgotPasswordPage';
 import { CustomerResetPasswordPage } from './CustomerResetPasswordPage';
 

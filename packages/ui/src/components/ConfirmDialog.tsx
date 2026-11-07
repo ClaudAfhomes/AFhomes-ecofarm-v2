@@ -18,6 +18,8 @@ export interface ConfirmDialogProps {
   confirmDisabled?: boolean;
   /** Show a loading state on the confirm button. */
   confirmLoading?: boolean;
+  /** Loading label on the confirm button (defaults to "Processing…"). */
+  confirmLoadingLabel?: string;
 }
 
 /** Confirmation dialog for destructive/irreversible actions (UI-UX §9.6). */
@@ -32,6 +34,7 @@ export function ConfirmDialog({
   danger = false,
   confirmDisabled = false,
   confirmLoading = false,
+  confirmLoadingLabel = 'Processing…',
 }: ConfirmDialogProps) {
   return (
     <Dialog
@@ -48,7 +51,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={confirmDisabled}
             loading={confirmLoading}
-            loadingLabel="Processing…"
+            loadingLabel={confirmLoadingLabel}
           >
             {confirmLabel}
           </Button>

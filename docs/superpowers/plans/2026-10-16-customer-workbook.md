@@ -1,0 +1,14 @@
+# Company customer workbook integration
+
+Goal: enhance the existing Customer Import/Export flow using the supplied ten-sheet company workbook. The user's master implementation prompt is the specification and authorizes implementation and local verification. No commits, remote writes, deployments, or live SQL are authorized. (Delivery status, 2026-10-16: the continuation handoff later authorized local commits and a normal, non-force push to `origin/claud/develop` only, after the stated gates pass. Deployment and live SQL remain unauthorized.)
+
+Baseline: local `claud/develop`, 362bde5; isolated worktree on the user-approved `feature/customer-bulk-import` branch. Do not copy coworker work or alter either existing checkout. (ZIP delivery, 2026-10-16: integration proceeded once the coworker's work landed on `origin/claud/develop` @ `b89c320`; the postal reference is a pinned, license-verified compiled asset with explicit review holds, and this branch's migration was renumbered to `20261206000003` to avoid the upstream version collision.)
+
+1. Audit the supplied archive without executing VBA. Preserve the ten worksheet names and exact entry headers; remove sample data, VBA, cached personal strings and document metadata from the downloadable XLSX.
+2. Extend the bounded ZIP/XML reader, retaining legacy single-sheet behavior. Merge Primary/Supplementary/Related/Package by explicit row indices, ignoring derived formulas for row detection. Pin malformed archives, sparse rows, exact headers, formula handling and 5,000-row limits in tests.
+3. Add centralized company label/date/name/phone mappings; use existing address-provider hierarchy verification. Keep workbook package/status claims separate from payment, membership and refund lifecycle operations. Resolve or hold ambiguous identities for review.
+4. Extend existing job validation/confirmation and transaction RPC. Preserve structured holder details for application prefill without inventing acknowledgements, signatures or payment evidence. Existing customer identity disagreements must conflict, never overwrite.
+5. Render blank/export workbooks using the sanitized company template, preserve validation/reference/formula behavior, and verify export/reimport with synthetic data. Keep compatible flat CSV and link-readable Google Sheets, and state private-sheet OAuth limitations.
+6. Add only required forward migrations; create/update the missing context-only schema index with actual sorted manifest and table inventory. Run relevant API/contracts/UI tests, typecheck, lint/build, disposable PostgreSQL and browser checks where available. Record failures and distinguish local from live proof.
+
+Review risks: sparse sheet alignment; formula caches masquerading as customers; changed identity on email match; source claims becoming verified money; sensitive TIN disclosure; broad geography or unsupported postal matches; retries and parallel commits; absent application prerequisites.

@@ -1,8 +1,10 @@
 import styles from './ReportsPage.module.css';
 import { useCallback, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { formatCountOrDash } from '@afhomes/shared';
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -10,7 +12,8 @@ import {
   SearchField,
   Select,
   Skeleton,
-} from '@jad/ui';
+  StatusChip,
+} from '@afhomes/ui';
 
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -75,6 +78,9 @@ export function ReportsPage() {
       offset,
     ],
     queryFn: () => getReport(type, filters),
+    // Keep the previous page visible while the next one loads: without this
+    // the data gap reads as an empty result during every page turn.
+    placeholderData: keepPreviousData,
     // Operational freshness without reload: same-scoped refetch every 30s.
     // Mutation invalidation stays the primary mechanism; this covers changes
     // made from another session (e.g. a redemption completed at the POS while
@@ -132,14 +138,52 @@ export function ReportsPage() {
   const summary = query.data?.summary as Record<string, unknown> | undefined;
   const summaryNumber = (key: string): string => {
     const value = summary?.[key];
-    return typeof value === 'number' ? value.toLocaleString('en-PH') : String(value ?? '—');
+    if (typeof value === 'number') return formatCountOrDash(value);
+    if (value === null || value === undefined || value === '') return '-';
+    return String(value);
+  };
+  const summaryKeyLabel = (key: string): string => {
+    if (key === 'grossFrozenValue') return 'Total Sales';
+    if (key === 'verifiedPaid') return 'Verified Paid';
+    if (key === 'remaining') return 'Remaining Balance';
+    return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
   };
 
+  // First load skeletonizes the whole page - header, filters, and table - so
+  // no static content flashes before the data it describes. Refetches keep the
+  // previous page visible via placeholderData and never reach this branch.
+  if (query.isPending)
+    return (
+      <section className={styles.page}>
+        <div
+          style={{ display: 'grid', gap: 'var(--space-4)' }}
+          role="status"
+          aria-label="Loading report"
+        >
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <Skeleton style={{ height: 32, maxWidth: 240 }} />
+            <Skeleton style={{ height: 16, maxWidth: 420 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <Skeleton style={{ height: 40, flex: '1 1 200px', maxWidth: 420 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 160 }} />
+            <Skeleton style={{ height: 40, width: 140 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
+      </section>
+    );
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Reports"
-        description="Role-scoped operational reports. Every figure is computed server-side from your authorized scope."
+        description="Operational reports. Every figure is computed server-side from your authorized scope."
       />
 
       <FilterBar
@@ -153,6 +197,7 @@ export function ReportsPage() {
             onChange={(value) => {
               setSearch(value);
             }}
+            busy={query.isFetching && !query.isPending}
           />
         }
         filters={
@@ -165,21 +210,25 @@ export function ReportsPage() {
               }}
               options={defs.map((d) => ({ value: d.type, label: d.label }))}
             />
-            <input
-              aria-label="From"
-              type="date"
+            <DateField
+              id="reports-from"
+              name="from"
+              label="From"
+              optional
               value={from}
-              onChange={(e) => {
-                setFrom(e.target.value);
+              onChange={(value) => {
+                setFrom(value);
                 resetPage();
               }}
             />
-            <input
-              aria-label="To"
-              type="date"
+            <DateField
+              id="reports-to"
+              name="to"
+              label="To"
+              optional
               value={to}
-              onChange={(e) => {
-                setTo(e.target.value);
+              onChange={(value) => {
+                setTo(value);
                 resetPage();
               }}
             />
@@ -250,21 +299,11 @@ export function ReportsPage() {
         }
       />
 
-      <p style={{ opacity: 0.8 }}>{def.description}</p>
+      <p className={styles.muted}>{def.description}</p>
 
-      {query.isPending ? (
-        <div
-          style={{ display: 'grid', gap: 'var(--space-3)' }}
-          role="status"
-          aria-label="Loading report"
-        >
-          <Skeleton style={{ height: 48 }} />
-          <Skeleton style={{ height: 48 }} />
-          <Skeleton style={{ height: 48 }} />
-        </div>
-      ) : query.isError ? (
+      {query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
-      ) : query.data.data.length === 0 ? (
+      ) : !query.data || query.data.data.length === 0 ? (
         <EmptyState
           title={type === 'redemptions' ? 'No service transactions yet.' : 'No rows in scope'}
           description={
@@ -276,7 +315,7 @@ export function ReportsPage() {
       ) : (
         <>
           {type === 'redemptions' && summary ? (
-            <dl className={styles.summary} aria-label="Personal service summary">
+            <ul className={styles.badges} aria-label="Personal service summary">
               {(
                 [
                   ['customersServed', 'Customers served'],
@@ -286,40 +325,37 @@ export function ReportsPage() {
                   ['monthTransactions', "This month's transactions"],
                 ] as const
               ).map(([key, label]) => (
-                <div key={key}>
-                  <dt className={styles.summaryLabel}>{label}</dt>
-                  <dd>
-                    <strong>{summaryNumber(key)}</strong>
-                  </dd>
-                </div>
+                <li key={key}>
+                  <StatusChip
+                    label={`${label}: ${summaryNumber(key)}`}
+                    tone="neutral"
+                    icon="file-text"
+                  />
+                </li>
               ))}
-            </dl>
+            </ul>
           ) : (
-            <dl className={styles.summary}>
+            <ul className={styles.badges} aria-label="Report summary">
               {Object.entries(query.data.summary).map(([key, value]) => (
-                <div key={key}>
-                  <dt className={styles.summaryLabel}>
-                    {key === 'grossFrozenValue'
-                      ? 'Gross Sales Value'
-                      : key === 'verifiedPaid'
-                        ? 'Verified Paid'
-                        : key === 'remaining'
-                          ? 'Remaining Balance'
-                          : key
-                              .replace(/([a-z])([A-Z])/g, '$1 $2')
-                              .replace(/^./, (c) => c.toUpperCase())}
-                  </dt>
-                  <dd>
-                    <strong>{formatCell(key, value)}</strong>
-                  </dd>
-                </div>
+                <li key={key}>
+                  <StatusChip
+                    label={`${summaryKeyLabel(key)}: ${formatCell(key, value)}`}
+                    tone="neutral"
+                    icon="file-text"
+                  />
+                </li>
               ))}
-            </dl>
+            </ul>
           )}
-          <p style={{ opacity: 0.8 }}>
+          <p className={styles.muted}>
             Scope: {query.data.scope.label} · {query.data.meta.total} rows
           </p>
-          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <div
+            role="region"
+            aria-label="Scrollable records"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
             <table>
               <thead>
                 <tr>
@@ -340,10 +376,12 @@ export function ReportsPage() {
                       onClick={() =>
                         setSelected(selected?.referenceNumber === reference ? null : record)
                       }
-                      style={{ cursor: 'pointer' }}
+                      className={styles.clickableRow}
                     >
                       {def.columns.map((col) => (
-                        <td key={col.key}>{formatCell(col.key, record[col.key])}</td>
+                        <td key={col.key} data-label={col.label}>
+                          {formatCell(col.key, record[col.key])}
+                        </td>
                       ))}
                     </tr>
                   );
@@ -352,15 +390,9 @@ export function ReportsPage() {
             </table>
           </div>
           {selected ? (
-            <section aria-label="Transaction detail" style={{ marginTop: 16 }}>
+            <section aria-label="Transaction detail" className={styles.detailSection}>
               <h3>Transaction {String(selected.referenceNumber ?? '')}</h3>
-              <dl
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: 12,
-                }}
-              >
+              <dl className={styles.detailGrid}>
                 {(
                   [
                     ['customer', 'Customer'],
@@ -391,7 +423,7 @@ export function ReportsPage() {
               </Button>
             </section>
           ) : null}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <div className={styles.actionsRow}>
             <Button
               variant="secondary"
               disabled={offset === 0}
@@ -399,10 +431,6 @@ export function ReportsPage() {
             >
               Previous
             </Button>
-            <span>
-              {offset + 1}–{Math.min(offset + PAGE_SIZE, query.data.meta.total)} of{' '}
-              {query.data.meta.total}
-            </span>
             <Button
               variant="secondary"
               disabled={offset + PAGE_SIZE >= query.data.meta.total}

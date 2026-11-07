@@ -26,6 +26,33 @@ export function validateRecoveryPassword(password: string): string | null {
   return null;
 }
 
+export type PasswordRuleId = 'length' | 'lowercase' | 'uppercase' | 'digit';
+
+export interface PasswordRuleState {
+  id: PasswordRuleId;
+  /** Short, stable label for live checklists (not a validation message). */
+  label: string;
+  met: boolean;
+}
+
+/**
+ * Live per-rule view of the same policy `validateRecoveryPassword` enforces.
+ * The checklist is presentation only: submit paths keep calling the
+ * validator, so the two can never disagree (pinned: every rule met ⟺ null).
+ */
+export function passwordRuleStates(password: string): PasswordRuleState[] {
+  return [
+    {
+      id: 'length',
+      label: `At least ${RECOVERY_PASSWORD_MIN_LENGTH} characters`,
+      met: password.length >= RECOVERY_PASSWORD_MIN_LENGTH,
+    },
+    { id: 'lowercase', label: 'One lowercase letter', met: /[a-z]/.test(password) },
+    { id: 'uppercase', label: 'One uppercase letter', met: /[A-Z]/.test(password) },
+    { id: 'digit', label: 'One digit', met: /[0-9]/.test(password) },
+  ];
+}
+
 /** Minimal email shape check for the forgot-password form (UX only). */
 export function isValidRecoveryEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());

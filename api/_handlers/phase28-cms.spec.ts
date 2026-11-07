@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 28 - CMS business-content completion.
+ * AFHomes Phase 28 - CMS business-content completion.
  *
  * Drives the REAL cms handler with a captured authorization mock against the
  * in-memory Supabase fake, plus a stubbed storage seam (the same seam
@@ -65,8 +65,8 @@ function tables(): Record<string, Record<string, unknown>[]> {
       },
       {
         key: 'site',
-        draft_value: { businessName: 'AF Homes', phone: '+639171234567' },
-        published_value: { businessName: 'AF Homes', phone: '+639171234567' },
+        draft_value: { businessName: 'AFHomes', phone: '+639171234567' },
+        published_value: { businessName: 'AFHomes', phone: '+639171234567' },
         status: 'published',
         version: 4,
         published_at: '2026-10-01T00:00:00.000Z',
@@ -348,7 +348,7 @@ describe('Phase 28 public reads', () => {
     expect(result.status).toBe(200);
     const body = result.body as { documents: Record<string, unknown>; revision: string };
     expect(body.documents.stories).toEqual([{ title: 'Published story' }]);
-    expect(body.documents.site).toEqual({ businessName: 'AF Homes', phone: '+639171234567' });
+    expect(body.documents.site).toEqual({ businessName: 'AFHomes', phone: '+639171234567' });
     expect(serialised(body)).not.toContain('Draft only');
     expect(body.revision).toBe('2026-10-02T00:00:00.000Z');
     expect(holder.authCalls).toHaveLength(0);

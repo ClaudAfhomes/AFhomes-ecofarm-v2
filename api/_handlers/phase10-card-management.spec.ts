@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 10 - membership card management.
+ * AFHomes Phase 10 - membership card management.
  *
  * Drives the real memberships handler, the real authorization resolver and the
  * real Zod contracts against the in-memory Supabase fake. The rotation RPC is

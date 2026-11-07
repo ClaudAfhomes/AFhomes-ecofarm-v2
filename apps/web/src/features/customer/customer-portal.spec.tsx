@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
+import { getCustomerPoints, getCustomerPointsPosition } from './services';
 import { CustomerSessionProvider } from '../../lib/customer-session';
 import { resetSupabaseClientForTest } from '../../lib/supabase';
 import { ApiError } from '../../lib/api/errors';
@@ -56,17 +57,40 @@ const MEMBERSHIP = {
   validityYears: 1,
   credentialsAvailable: false as const,
   credentialsNote:
-    'Your member code and QR below never change - show them at any AF Homes Ecofarm desk.',
+    'Your member code and QR below never change - show them at any AFHomes Ecofarm desk.',
   memberCode: 'MBS-000777',
   qrPayload: 'AFHOMES:MBS-000777',
 };
 
+/**
+ * The LEGACY summary. Its shape is FROZEN - a deployed client validates against
+ * exactly these five fields, so removing one, or changing what `balance` means,
+ * is a breaking change. `balance` here is the RAW account balance, not spendable.
+ */
 const POINTS = {
   membershipId: MEMBERSHIP.id,
   balance: 60000,
   lifetimeAllocated: 60000,
   lifetimeRedeemed: 0,
   updatedAt: '2026-01-05T02:00:00.000Z',
+};
+
+/**
+ * The NEW position endpoint, separately named so the richer shape is ADDITIVE
+ * rather than a silent replacement of the legacy summary above.
+ */
+const POSITION = {
+  membershipId: MEMBERSHIP.id,
+  balance: 60000,
+  annualCap: 100000,
+  remainingEarningCapacity: 40000,
+  spendable: 60000,
+  reversalDebt: 0,
+  periodStart: '2026-01-01T00:00:00.000Z',
+  periodEnd: '2027-01-01T00:00:00.000Z',
+  tier: 'GOLD' as const,
+  earnedThisPeriod: 60000,
+  redeemedThisPeriod: 20000,
 };
 
 const LEDGER = {
@@ -144,8 +168,15 @@ function installRoutes(over: Record<string, RouteHandler> = {}) {
   routes.clear();
   routes.set('/auth/portals', ok({ staff: null, customer: { status: 'active' }, ost: null }));
   routes.set('/customer', ok(CUSTOMER));
+  routes.set(
+    '/profile-photo/customer',
+    ok({ url: null, expiresAt: null, canUpload: true, notice: null }),
+  );
   routes.set('/customer/membership', ok(MEMBERSHIP));
   routes.set('/customer/points', ok(POINTS));
+  routes.set('/customer/points/position', ok(POSITION));
+  routes.set('/earning/approvals', list([]));
+  routes.set('/customer/refunds', list([]));
   routes.set('/customer/points/ledger', list(LEDGER.data));
   for (const [path, handler] of Object.entries(over)) routes.set(path, handler);
 }
@@ -160,7 +191,8 @@ function mockFetch() {
       .replace(/^\/api\/v1/, '')
       .split('?')[0]!;
     requests.push(`${path}`);
-    const handler = routes.get(path);
+    const fullPath = url.replace(/^https?:\/\/[^/]+/, '').replace(/^\/api\/v1/, '');
+    const handler = routes.get(fullPath) ?? routes.get(path);
     if (!handler) {
       return new Response(
         JSON.stringify({ error: { code: 'NOT_FOUND', message: `unstubbed route ${path}` } }),
@@ -197,7 +229,7 @@ describe('customer guard', () => {
   it('sends an unauthenticated visitor to the sign-in screen', async () => {
     render('/customer', false);
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
     ).toBeInTheDocument();
     // The guard must not even ask for customer data without a session.
     expect(requests).not.toContain('/customer');
@@ -208,7 +240,7 @@ describe('customer guard', () => {
     async (route) => {
       render(route, false);
       expect(
-        await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+        await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
       ).toBeInTheDocument();
     },
   );
@@ -261,7 +293,7 @@ describe('customer guard', () => {
     expect(
       await screen.findByRole(
         'heading',
-        { name: 'Sign in to your card', level: 2 },
+        { name: 'Sign in to your card', level: 1 },
         { timeout: 3000 },
       ),
     ).toBeInTheDocument();
@@ -446,18 +478,112 @@ describe('membership screen', () => {
 /* Points                                                               */
 /* ================================================================== */
 
-describe('points screen', () => {
-  it('shows the balance, lifetime totals and history', async () => {
+describe('points position vs legacy summary', () => {
+  /**
+   * The two endpoints are separate on purpose, and this is what proves it.
+   * `getCustomerPoints` keeps the deployed contract; `getCustomerPointsPosition`
+   * adds the three figures. If either were folded into the other, a deployed
+   * client would start failing validation the moment this branch deploys.
+   */
+  it('the new page reads the position endpoint, not the legacy summary', async () => {
     render('/customer/points');
-    const balanceCard = (await screen.findByRole('heading', { name: 'Balance' })).closest(
-      'section',
-    )!;
-    // "60,000" legitimately appears as both the current balance and the lifetime
-    // allocation, so assert the presence and the labelled totals rather than
-    // counting occurrences.
-    expect(within(balanceCard).getAllByText('60,000').length).toBeGreaterThanOrEqual(1);
-    expect(within(balanceCard).getByText('All time allocated')).toBeInTheDocument();
-    expect(within(balanceCard).getByText('All time redeemed')).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Your points' });
+    const paths = (globalThis.fetch as unknown as { mock: { calls: [unknown][] } }).mock.calls.map(
+      (call) =>
+        String(call[0])
+          .replace(/^https?:\/\/[^/]+/, '')
+          .replace(/^\/api\/v1/, '')
+          .split('?')[0],
+    );
+    // The screen that needs the three figures uses the endpoint that has them.
+    expect(paths).toContain('/customer/points/position');
+  });
+
+  it('the legacy summary keeps every deployed field, with balance unchanged', async () => {
+    // Called directly so the assertion is about the CLIENT CONTRACT, not about
+    // which screen happens to render it.
+    const summary = await getCustomerPoints();
+    // Exactly the frozen shape. `balance` is still the raw account balance.
+    expect(Object.keys(summary).sort()).toEqual([
+      'balance',
+      'lifetimeAllocated',
+      'lifetimeRedeemed',
+      'membershipId',
+      'updatedAt',
+    ]);
+    expect(summary.balance).toBe(60000);
+    expect(summary.lifetimeAllocated).toBe(60000);
+    expect(summary.lifetimeRedeemed).toBe(0);
+  });
+
+  it('the position endpoint exposes spendable, capacity and debt separately', async () => {
+    const position = await getCustomerPointsPosition();
+    expect(position.balance).toBe(60000);
+    expect(position.spendable).toBe(60000);
+    expect(position.remainingEarningCapacity).toBe(40000);
+    expect(position.annualCap).toBe(100000);
+    expect(position.reversalDebt).toBe(0);
+    expect(position.tier).toBe('GOLD');
+  });
+
+  it('a member in debt sees a spendable figure LOWER than the balance', async () => {
+    installRoutes({
+      '/customer/points/position': ok({
+        ...POSITION,
+        balance: 60000,
+        reversalDebt: 15000,
+        spendable: 45000,
+      }),
+    });
+    render('/customer/points');
+    // The headline is spendable, so a member in debt is not told they hold the
+    // full balance as usable.
+    expect(await screen.findByText(/15,000 points are held/i)).toBeTruthy();
+  });
+
+  it('a member at their earning cap still sees a healthy spendable balance', async () => {
+    installRoutes({
+      '/customer/points/position': ok({
+        ...POSITION,
+        remainingEarningCapacity: 0,
+        earnedThisPeriod: 100000,
+      }),
+    });
+    render('/customer/points');
+    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
+    // Capacity 0 must not read as "no points": the balance is untouched. Await
+    // the loaded balance card: the shell renders while loading, so the heading
+    // alone does not prove the figures arrived.
+    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
+    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
+  });
+});
+
+describe('points screen', () => {
+  it('shows earning and refund references even without a redemption row', async () => {
+    installRoutes({
+      '/customer/points/ledger': list([
+        { ...LEDGER.data[0], entryType: 'earned', referenceNumber: 'CLM-LOCAL-001' },
+        { ...LEDGER.data[0], id: '3', referenceNumber: 'REFUND-LOCAL-001' },
+      ]),
+    });
+    render('/customer/points');
+    expect(await screen.findByText('CLM-LOCAL-001')).toBeInTheDocument();
+    expect(screen.getByText('REFUND-LOCAL-001')).toBeInTheDocument();
+  });
+
+  it('separates spendable points from what may still be earned', async () => {
+    render('/customer/points');
+    const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
+    // Await the loaded figures: the card shell renders while loading.
+    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
+    // The three figures are labelled separately so none can be read as another.
+    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
+    expect(within(card).getByText('Annual limit')).toBeInTheDocument();
+    // 40,000 of capacity is NOT spendable and must not be presented as money.
+    expect(within(card).getByText('40,000')).toBeInTheDocument();
     const history = screen.getByRole('heading', { name: 'Points activity' }).closest('section')!;
     expect(within(history).getByText('Goodwill adjustment')).toBeInTheDocument();
     expect(within(history).getByText('Annual points allocation on activation')).toBeInTheDocument();
@@ -465,7 +591,7 @@ describe('points screen', () => {
 
   it('offers no redemption control and mutates nothing', async () => {
     render('/customer/points');
-    await screen.findByRole('heading', { name: 'Balance' });
+    await screen.findByRole('heading', { name: 'Your points' });
     expect(screen.queryByRole('button', { name: /redeem|convert|spend|use points/i })).toBeNull();
     // Every request the screen made was a read.
     const calls = (globalThis.fetch as unknown as { mock: { calls: [unknown, RequestInit?][] } })
@@ -566,7 +692,7 @@ describe('customer session provider', () => {
     expect(
       await screen.findByRole(
         'heading',
-        { name: 'Sign in to your card', level: 2 },
+        { name: 'Sign in to your card', level: 1 },
         { timeout: 3000 },
       ),
     ).toBeInTheDocument();
@@ -684,6 +810,20 @@ describe('customer payments screen', () => {
 /* ================================================================== */
 
 describe('customer redemptions screen', () => {
+  it('shows the operational spending reference from the customer ledger', async () => {
+    installRoutes({
+      '/customer/points/ledger': list([
+        {
+          ...REDEMPTION_LEDGER.data[0],
+          redemptionNumber: undefined,
+          referenceNumber: 'Q-LOCAL-001',
+        },
+      ]),
+    });
+    render('/customer/redemptions');
+    expect(await screen.findByText('Q-LOCAL-001')).toBeInTheDocument();
+  });
+
   it('renders only redemption entries with their frozen snapshots', async () => {
     installRoutes({ '/customer/points/ledger': list(REDEMPTION_LEDGER.data) });
     render('/customer/redemptions');
@@ -796,6 +936,24 @@ describe('activation password policy', () => {
     await user.click(screen.getByRole('button', { name: 'Activate my account' }));
     expect(await screen.findByText('The passwords do not match')).toBeInTheDocument();
   });
+
+  it('shows a live rule checklist while typing, before submit', async () => {
+    const user = userEvent.setup();
+    render('/customer/activate', false);
+    // Untouched password: no checklist yet.
+    expect(screen.queryByRole('list', { name: 'Password requirements' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Password'), 'abc');
+    const list = await screen.findByRole('list', { name: 'Password requirements' });
+    expect(within(list).getByText('One lowercase letter')).toBeInTheDocument();
+    expect(within(list).getAllByText('(missing)')).toHaveLength(3);
+    // A compliant password flips every row to met.
+    await user.clear(screen.getByLabelText('Password'));
+    await user.type(screen.getByLabelText('Password'), 'StrongPass123');
+    await screen.findAllByText('(met)');
+    expect(
+      within(screen.getByRole('list', { name: 'Password requirements' })).queryByText('(missing)'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('activation existing-account recovery', () => {
@@ -834,7 +992,7 @@ describe('activation existing-account recovery', () => {
     expect(screen.queryByText('We could not activate your account')).toBeNull();
   });
 
-  it('still signs in normally when the account was newly created', async () => {
+  it('preserves successful new activation when the subsequent normal sign-in is unavailable', async () => {
     const user = userEvent.setup();
     installRoutes({
       '/auth/customer/activate': () => ({
@@ -847,10 +1005,9 @@ describe('activation existing-account recovery', () => {
     await user.type(screen.getByLabelText('Password'), 'StrongPass123');
     await user.type(screen.getByLabelText('Confirm password'), 'StrongPass123');
     await user.click(screen.getByRole('button', { name: 'Activate my account' }));
-    // No Supabase client is configured in tests, so the normal sign-in
-    // attempt surfaces its configuration error instead of navigating - which
-    // still proves the recovery panel was NOT shown for a fresh account.
-    expect(await screen.findByText('We could not activate your account')).toBeInTheDocument();
+    // No client is configured here; sign-in failure cannot undo the completed activation.
+    expect(await screen.findByRole('heading', { name: 'Account activated' })).toBeVisible();
+    expect(screen.getByText('Use the password you just created.')).toBeVisible();
     expect(screen.queryByText(/An account already exists for this email/)).toBeNull();
   });
 });
@@ -895,4 +1052,52 @@ describe('membership status display', () => {
     expect(await screen.findAllByText('MBS-000777')).not.toHaveLength(0);
     expect(screen.getByText('expired')).toBeInTheDocument();
   });
+});
+
+describe('points history pagination', () => {
+  it('loads an older bounded page and returns to newer activity', async () => {
+    installRoutes({
+      '/customer/points/ledger': ok({
+        data: [
+          {
+            id: '101',
+            entryType: 'earned',
+            amount: 100,
+            balanceAfter: 100,
+            reason: 'Newest synthetic award',
+            occurredAt: '2026-10-01T00:00:00.000Z',
+          },
+        ],
+        meta: { nextCursor: 'older-page' },
+      }),
+      '/customer/points/ledger?cursor=older-page': ok({
+        data: [
+          {
+            id: '1',
+            entryType: 'adjustment',
+            amount: 50,
+            balanceAfter: 50,
+            reason: 'Older synthetic correction',
+            occurredAt: '2026-09-01T00:00:00.000Z',
+          },
+        ],
+        meta: { nextCursor: null },
+      }),
+    });
+    render('/customer/points');
+    expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Older activity' }));
+    expect(await screen.findByText('Older synthetic correction')).toBeInTheDocument();
+    expect(screen.queryByText('Newest synthetic award')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Older activity' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Newer activity' }));
+    expect(await screen.findByText('Newest synthetic award')).toBeInTheDocument();
+  });
+});
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

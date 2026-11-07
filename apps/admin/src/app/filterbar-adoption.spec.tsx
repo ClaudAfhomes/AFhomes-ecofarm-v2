@@ -1,9 +1,9 @@
 /**
- * FilterBar adoption + UI safety scans (JAD parity completion).
+ * FilterBar adoption + UI safety scans (AFHomes pattern completion).
  *
  * Every eligible admin list renders the canonical FilterBar (role="search")
  * instead of a one-off toolbar wrapper, and no migrated feature uses a
- * blocking browser dialog. Finance/Activation queues intentionally carry no
+ * blocking browser dialog. The Activation queue intentionally carries no
  * FilterBar: a queue is status-defined, not filterable.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -18,14 +18,12 @@ import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
 import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
 import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
 import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
 import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
-import { DocumentsPage } from '../features/documents/DocumentsPage';
+
 import { GenealogyPage } from '../features/genealogy/GenealogyPage';
 import { MembershipsPage } from '../features/memberships/MembershipsPage';
 import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
-import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
+import { LegacyRedemptionHistoryPage } from '../features/redemption/LegacyRedemptionHistoryPage';
 import { AuditPage } from '../features/reports/AuditPage';
 import { ReportsPage } from '../features/reports/ReportsPage';
 
@@ -51,6 +49,9 @@ vi.mock('../features/business/services', () => ({
   createCardCategory: vi.fn(),
   updateCardCategory: vi.fn(),
   getCustomers: vi.fn(async () => []),
+  getCustomersPage: vi.fn(async () => ({ data: [], total: 0 })),
+  getCustomerById: vi.fn(),
+
   createCustomer: vi.fn(),
   getSales: vi.fn(async () => []),
   createSale: vi.fn(),
@@ -59,7 +60,7 @@ vi.mock('../features/business/services', () => ({
   recordPayment: vi.fn(),
   verifyPayment: vi.fn(),
   activateSale: vi.fn(),
-  getFinanceQueue: vi.fn(async () => []),
+  getFinanceQueue: vi.fn(async () => ({ items: [], total: 0 })),
   getActivationQueue: vi.fn(async () => []),
   getCommissions: vi.fn(async () => []),
   markCommissionPaid: vi.fn(),
@@ -68,8 +69,6 @@ vi.mock('../features/business/services', () => ({
 vi.mock('../features/redemption/services', () => ({
   getRedemptionItems: vi.fn(async () => []),
   getRedemptions: vi.fn(async () => []),
-  createRedemptionItem: vi.fn(),
-  updateRedemptionItem: vi.fn(),
 }));
 vi.mock('../features/ost/services', () => ({
   getOstApplications: vi.fn(async () => []),
@@ -85,8 +84,10 @@ vi.mock('../features/memberships/services', () => ({
   reissueMembershipCard: vi.fn(),
   markMembershipPrinted: vi.fn(),
 }));
-vi.mock('../features/genealogy/services', () => ({
+vi.mock('../features/genealogy/services', async (original) => ({
+  ...(await original<typeof import('../features/genealogy/services')>()),
   getGenealogy: vi.fn(async () => []),
+  getTeamSalesOverview: vi.fn(async () => null),
 }));
 vi.mock('../features/reports/services', () => ({
   getReport: vi.fn(async () => ({
@@ -131,20 +132,104 @@ const STAFF: SessionUser = {
   roleName: 'Super Admin',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'dashboard.view', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_sales', canView: true, canCreate: true, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.card_plans', canView: true, canCreate: true, canUpdate: true, canDelete: false },
-    { moduleKey: 'finance.payment_verification', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'finance.card_activation', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'operations.redemption', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'operations.catalog', canView: true, canCreate: true, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.genealogy', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'network.ost_registrations', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'governance.audit', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'sales.id_documents', canView: true, canCreate: false, canUpdate: false, canDelete: false },
-    { moduleKey: 'organization.staff', canView: true, canCreate: true, canUpdate: true, canDelete: false },
+    {
+      moduleKey: 'dashboard.view',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_sales',
+      canView: true,
+      canCreate: true,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.customers',
+      canView: true,
+      canCreate: true,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.card_plans',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.payment_verification',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'finance.card_activation',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'operations.redemption',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'operations.catalog',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.genealogy',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.ost_registrations',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'governance.audit',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'sales.id_documents',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'organization.staff',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
   ],
 };
 
@@ -159,10 +244,6 @@ describe('FilterBar adoption', () => {
   it('staff renders search + status in one toolbar', async () => {
     await showsFilterBar(<AfHomesStaffPage />);
     expect(screen.getByLabelText('Search staff')).toBeInTheDocument();
-  });
-
-  it('sales renders its status filter in one toolbar', async () => {
-    await showsFilterBar(<BusinessSalesPage />);
   });
 
   it('customers renders search in one toolbar', async () => {
@@ -181,13 +262,8 @@ describe('FilterBar adoption', () => {
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
   });
 
-  it('catalog renders search + status in one toolbar', async () => {
-    await showsFilterBar(<RedemptionCatalogPage />);
-    expect(screen.getByLabelText('Search catalog items')).toBeInTheDocument();
-  });
-
   it('history renders membership, item, and date filters in one toolbar', async () => {
-    await showsFilterBar(<RedemptionHistoryPage />);
+    await showsFilterBar(<LegacyRedemptionHistoryPage />);
     expect(screen.getByLabelText('Membership number')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
@@ -214,11 +290,6 @@ describe('FilterBar adoption', () => {
   it('audit renders action, entity, dates, and export in one toolbar', async () => {
     await showsFilterBar(<AuditPage />);
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
-  });
-
-  it('documents renders its scope selector in one toolbar', async () => {
-    await showsFilterBar(<DocumentsPage />);
-    expect(screen.getByRole('button', { name: 'Show' })).toBeInTheDocument();
   });
 
   it('the internal guide carries no filterable surface', async () => {

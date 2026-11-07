@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 32 - security + authorization UAT.
+ * AFHomes Phase 32 - security + authorization UAT.
  *
  * Drives the REAL handlers, the REAL staff/customer resolvers and the REAL
  * contracts against the in-memory Supabase fake. Each test is numbered for the
@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CUSTOMER,
   LINKS,
+  MEMBERSHIP,
   PRODUCT,
   ROLE2,
   SALE,
@@ -123,6 +124,30 @@ function install(overrides: Record<string, unknown[]> = {}) {
     },
     unique: UNIQUE,
     links: LINKS as never,
+    // public.customer_points_position is the function the portal now reads, so
+    // the fake needs it. It is scripted to return CUSTOMER A's OWN position and
+    // nothing else, which is what makes the cross-read assertion below meaningful:
+    // if A ever received B's figures, this stub would have to change.
+    rpcs: [
+      {
+        fn: 'customer_points_position_with_allowances',
+        result: () => [
+          {
+            membership_id: MEMBERSHIP.active,
+            balance: '60000',
+            annual_cap: '100000',
+            remaining_earning_capacity: '40000',
+            spendable: '60000',
+            reversal_debt: '0',
+            period_start: '2026-01-01',
+            period_end: '2027-01-01',
+            tier: 'GOLD',
+            earned_this_period: '60000',
+            redeemed_this_period: '0',
+          },
+        ],
+      },
+    ],
   });
   return holder.db as FakeSupabase;
 }

@@ -1,8 +1,8 @@
 /**
- * AF Homes Phase 8 OST onboarding API client.
+ * AFHomes Phase 8 OST onboarding API client.
  *
  * Every call goes through `lib/api/client`, which validates the response
- * against `@jad/contracts`. The browser never names a sponsor: submission
+ * against `@afhomes/contracts`. The browser never names a sponsor: submission
  * carries the referral code and review carries no sponsor field at all.
  */
 import {
@@ -21,7 +21,8 @@ import {
   type OstMember,
   type OstReferralCodeIssued,
   type OstReferralCodeRecord,
-} from '@jad/contracts';
+  type UpdateOstApplicant,
+} from '@afhomes/contracts';
 import { z } from 'zod';
 import {
   protectedRequest as request,
@@ -58,13 +59,24 @@ export const reviewAccreditation = (
     action,
     notes,
   });
-export const approveAccreditation = (id: string, startsOn: string, expiresOn: string) =>
+export const approveAccreditation = (
+  id: string,
+  startsOn: string,
+  expiresOn: string,
+  temporaryPassword: string,
+  profilePhotoBase64?: string,
+) =>
   post(`/ost-accreditation/applications/${id}/approve`, ostMutationResultSchema, {
     startsOn,
     expiresOn,
+    temporaryPassword,
+    profilePhotoBase64,
   });
 export const submitRenewal = (id: string, body: SubmitOstRenewal) =>
   post(`/ost-accreditation/members/${id}/renew`, ostMutationResultSchema, body);
+/** Controlled applicant correction: records prior/resulting values with a reason. */
+export const updateOstApplicant = (id: string, body: UpdateOstApplicant) =>
+  post(`/ost-accreditation/members/${id}/applicant`, ostMutationResultSchema, body);
 export const reviseRenewal = (id: string, body: SubmitOstRenewal) =>
   post(`/ost-accreditation/renewals/${id}/revise`, ostMutationResultSchema, body);
 export const decideRenewal = (
@@ -92,8 +104,8 @@ export const getOstApplications = (status = '', search = ''): Promise<OstApplica
 export const getOstApplication = (id: string): Promise<OstApplication> =>
   request(`/ost/applications/${id}`, ostApplicationSchema);
 
-export const approveOstApplication = (id: string): Promise<OstMember> =>
-  post(`/ost/applications/${id}/approve`, ostMemberSchema, {});
+export const approveOstApplication = (id: string, temporaryPassword: string, profilePhotoBase64?: string): Promise<OstMember> =>
+  post(`/ost/applications/${id}/approve`, ostMemberSchema, { temporaryPassword, profilePhotoBase64 });
 
 export const rejectOstApplication = (id: string, reason: string): Promise<OstApplication> =>
   post(`/ost/applications/${id}/reject`, ostApplicationSchema, { reason });
@@ -103,12 +115,16 @@ export const requestOstApplicationChanges = (id: string, notes: string): Promise
 
 export const getOstMembers = (search = ''): Promise<OstMember[]> =>
   requestList(
-    '/ost/members' + (search ? '?search=' + encodeURIComponent(search) : ''),
+    '/ost/members?includeAccreditation=1' + (search ? '&search=' + encodeURIComponent(search) : ''),
     ostMemberSchema,
   );
 
 export const getMyReferralCodes = (sponsorStaffId?: string): Promise<OstReferralCodeRecord[]> =>
-  requestList('/ost/referral-codes/me' + (sponsorStaffId ? '?sponsorStaffId=' + encodeURIComponent(sponsorStaffId) : ''), ostReferralCodeRecordSchema);
+  requestList(
+    '/ost/referral-codes/me' +
+      (sponsorStaffId ? '?sponsorStaffId=' + encodeURIComponent(sponsorStaffId) : ''),
+    ostReferralCodeRecordSchema,
+  );
 
 export const createReferralCode = (
   input: CreateOstReferralCodeRequest,

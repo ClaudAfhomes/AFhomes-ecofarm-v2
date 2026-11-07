@@ -1,5 +1,5 @@
 {
-  "name": "@jad/shared",
+  "name": "@afhomes/shared",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,6 +18,6 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@jad/contracts": "workspace:*"
+    "@afhomes/contracts": "workspace:*"
   }
 }

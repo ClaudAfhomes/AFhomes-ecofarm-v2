@@ -1,0 +1,45 @@
+/* VIP tier badge: pill with a metal dot plus the tier name. The name always
+   carries the meaning; color is emphasis only. Gold and silver reuse brand
+   tokens; bronze has no token, so its tint is fixed here beside its text. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+  flex: 0 0 auto;
+}
+
+.gold {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.silver {
+  background-color: var(--color-bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.bronze {
+  background-color: #f7ece0;
+  border-color: #a06a32;
+  color: #7c4f21;
+}
+
+.none {
+  color: var(--color-text-muted);
+}

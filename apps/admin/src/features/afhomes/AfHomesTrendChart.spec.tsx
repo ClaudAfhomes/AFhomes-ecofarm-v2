@@ -1,10 +1,11 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SalesTrendReport } from '@jad/contracts';
+import type { SalesTrendReport } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
-import { AfHomesTrendChart, TrendChartSkeleton, periodLabel } from './AfHomesTrendChart';
+import { AfHomesTrendChart, periodLabel } from './AfHomesTrendChart';
+import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 
 const getTrend = vi.hoisted(() => vi.fn());
 vi.mock('./services', async (importOriginal) => {
@@ -15,7 +16,7 @@ vi.mock('./services', async (importOriginal) => {
 /**
  * jsdom has no ResizeObserver; recharts ResponsiveContainer needs one. The
  * stub reports a fixed 800x280 viewport on observe so the chart renders
- * synchronously enough for assertions (same approach as JAD's chart spec).
+ * synchronously enough for assertions (same approach as the predecessor chart spec).
  */
 class ResizeObserverStub {
   private cb: ResizeObserverCallback;
@@ -88,9 +89,13 @@ const renderChart = () => renderWithProviders(<AfHomesTrendChart />);
  *  the line path carries the real scaled values, so a metric switch must
  *  change it while a refetch-free toggle keeps the fetch count at one. */
 const lineD = (container: HTMLElement) =>
-  (container.querySelector('.recharts-line path') as unknown as { getAttribute?: (n: string) => string } | null)?.getAttribute?.('d') ?? '';
+  (
+    container.querySelector('.recharts-line path') as unknown as {
+      getAttribute?: (n: string) => string;
+    } | null
+  )?.getAttribute?.('d') ?? '';
 
-describe('periodLabel (JAD grammar)', () => {
+describe('periodLabel (AFHomes grammar)', () => {
   it('7. labels monthly keys as "Sep \'26"', () => {
     expect(periodLabel('2026-09')).toBe("Sep '26");
     expect(periodLabel('2026-01')).toBe("Jan '26");
@@ -101,10 +106,11 @@ describe('periodLabel (JAD grammar)', () => {
   });
 });
 
-describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
+describe('AfHomesTrendChart (AFHomes Sales Overview pattern)', () => {
   it('1. renders the "Sales Overview" title', async () => {
     const { container } = renderChart();
-    expect(screen.getByText('Sales Overview')).toBeInTheDocument();
+    // Loading is skeleton-only, so the title arrives with the series.
+    expect(await screen.findByText('Sales Overview')).toBeInTheDocument();
     expect(screen.getByLabelText('Sales overview')).toBeInTheDocument();
     await waitFor(() => {
       expect(container.querySelector('svg.recharts-surface')).not.toBeNull();
@@ -142,7 +148,7 @@ describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
       expect(lineD(container)).toBe(valueGeometry);
     });
     expect(getTrend).toHaveBeenCalledTimes(1);
-    // JAD KPIs stay money/count aggregates regardless of the plotted metric.
+    // AFHomes KPIs stay money/count aggregates regardless of the plotted metric.
     expect(screen.getByText('4 · ₱1,260,000.30')).toBeInTheDocument();
   });
 
@@ -209,10 +215,12 @@ describe('AfHomesTrendChart (JAD Sales Overview parity)', () => {
     expect(container.querySelector('svg.recharts-surface')).toBeNull();
   });
 
-  it('14. owns its loading state in the chart region', () => {
+  it('14. skeletonizes the whole chart region while loading (no spinner)', () => {
     getTrend.mockReturnValue(new Promise(() => {}));
     renderChart();
-    expect(screen.getByRole('status')).toHaveTextContent('Loading trend…');
+    expect(screen.getByRole('status', { name: 'Loading sales overview' })).toBeInTheDocument();
+    expect(screen.queryByText('Sales Overview')).toBeNull();
+    expect(screen.queryByText(/Loading trend/)).toBeNull();
   });
 
   it('15/17. surfaces API errors with retry and renders no figures until then', async () => {

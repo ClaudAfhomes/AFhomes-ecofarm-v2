@@ -1,6 +1,7 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CardCategory, CardProduct, Customer } from '@jad/contracts';
+import type { CardCategory, CardProduct, Customer } from '@afhomes/contracts';
 
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
@@ -25,11 +26,15 @@ vi.mock('./services', () => ({
   createCardCategory: vi.fn(),
   updateCardCategory: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(async () => {
+    const { getCustomers } = await import('./services');
+    const data = await getCustomers();
+    return { data, total: data.length };
+  }),
   createCustomer: vi.fn(),
   createSale: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   deactivateCustomer: vi.fn(),
-  anonymizeCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
 }));
 
@@ -157,7 +162,6 @@ const CUSTOMER_ADMIN: SessionUser = {
   ],
 };
 
-
 afterEach(() => vi.clearAllMocks());
 
 beforeEach(() => {
@@ -268,7 +272,7 @@ describe('Customer onboarding recovery', () => {
   });
 
   it('calls the onboarding-token endpoint for the row customer and reports email_sent', async () => {
-    const { getCustomers, createSale, deactivateCustomer, anonymizeCustomer, deleteCustomer } =
+    const { getCustomers, createSale, deactivateCustomer, deleteCustomer } =
       await import('./services');
     vi.mocked(getCustomers).mockResolvedValue([ACTIVE_CUSTOMER]);
     mockedGetCardProducts.mockResolvedValue([]);
@@ -294,7 +298,6 @@ describe('Customer onboarding recovery', () => {
     // points, commission, or credential mutation is reachable from this page.
     expect(vi.mocked(createSale)).not.toHaveBeenCalled();
     expect(vi.mocked(deactivateCustomer)).not.toHaveBeenCalled();
-    expect(vi.mocked(anonymizeCustomer)).not.toHaveBeenCalled();
     expect(vi.mocked(deleteCustomer)).not.toHaveBeenCalled();
   });
 });
@@ -317,7 +320,7 @@ describe('Card Plans states', () => {
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
     renderWithProviders(<BusinessProductsPage />);
     expect(await screen.findByRole('heading', { name: 'Gold' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Gold VIP membership card' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: 'Gold VIP Privilege Card' })).toHaveAttribute(
       'src',
       expect.stringContaining('gold-card'),
     );
@@ -341,6 +344,43 @@ describe('Card Plans states', () => {
     expect(screen.getByRole('button', { name: 'Edit plan' })).toBeInTheDocument();
   });
 
+  /**
+   * The detail dialog leads with the plan's identity and presents benefits and
+   * payment options as discrete pills, so each fact is readable on its own
+   * instead of dissolving into one run-on sentence.
+   */
+  it('opens the detail dialog with the plan identity and per-fact option pills', async () => {
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    const user = userEvent.setup();
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    await user.click(screen.getByRole('button', { name: 'View details' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Gold' });
+
+    // Identity: tier code, artwork, category and status.
+    expect(within(dialog).getByText('GOLD')).toBeInTheDocument();
+    expect(within(dialog).getByRole('img', { name: 'Gold VIP Privilege Card' })).toBeTruthy();
+    expect(within(dialog).getByText(/Membership Cards/)).toBeInTheDocument();
+    expect(within(dialog).getAllByText('Active').length).toBeGreaterThan(0);
+
+    // Each enabled payment option is its own pill, not a sentence.
+    for (const option of [
+      'Spot Cash · 7 days',
+      'Standard · 4 months',
+      'Move A',
+      'B1 · 40% DP',
+      'B2 · 25% DP',
+    ]) {
+      expect(within(dialog).getByText(option)).toBeInTheDocument();
+    }
+    // The benefit is still stated, as its own pill.
+    expect(within(dialog).getByText('25% discount')).toBeInTheDocument();
+    // Actions live in the dialog footer, not duplicated in the body.
+    expect(within(dialog).getAllByRole('button', { name: 'Edit plan' })).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
   it('replaces loading with a retryable API error state', async () => {
     mockedGetCardProducts.mockRejectedValue(new Error('Plans service unavailable'));
     renderWithProviders(<BusinessProductsPage />);
@@ -358,6 +398,25 @@ describe('Card Plans states', () => {
     expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
   });
 
+  /**
+   * Search is live: the debounced term drives the query, so a submit button
+   * would be a second, redundant way to do the same thing.
+   */
+  it('searches live without a Search button', async () => {
+    const user = userEvent.setup();
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Search card plans'), 'gol');
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'gol' }),
+      ),
+    );
+  });
+
   it('creates a plan and refreshes the list', async () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
@@ -366,16 +425,20 @@ describe('Card Plans states', () => {
     await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Jade' } });
-    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'JADE' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Jade' } });
+    fireEvent.change(screen.getByLabelText('Code(Optional)'), { target: { value: 'JADE' } });
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '80000.00' } });
-    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), {
+      target: { value: '80000.00' },
+    });
+    fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '100000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), {
+      target: { value: '80000' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Create plan' }));
 
     await waitFor(() => expect(mockedCreateCardProduct).toHaveBeenCalled());
@@ -394,19 +457,21 @@ describe('Card Plans states', () => {
     await screen.findByRole('heading', { name: 'Gold' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Card Plan' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad' } });
-    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'BAD' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Bad' } });
+    fireEvent.change(screen.getByLabelText('Code(Optional)'), { target: { value: 'BAD' } });
     fireEvent.change(screen.getByLabelText('Category'), {
       target: { value: MEMBERSHIP_CATEGORY_ID },
     });
-    fireEvent.change(screen.getByLabelText('Spot cash price'), { target: { value: '5000.00' } });
-    fireEvent.change(screen.getByLabelText('4-month installment price'), {
+    fireEvent.change(screen.getByLabelText('Spot cash price(Optional)'), {
+      target: { value: '5000.00' },
+    });
+    fireEvent.change(screen.getByLabelText('4-month installment price(Optional)'), {
       target: { value: '12000.00' },
     });
-    fireEvent.change(screen.getByLabelText('Yearly points'), { target: { value: '80000' } });
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Reservation fee cannot exceed the spot cash price',
-    );
+    fireEvent.change(screen.getByLabelText('Yearly points(Optional)'), {
+      target: { value: '80000' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Reservation cannot exceed spot.');
     expect(mockedCreateCardProduct).not.toHaveBeenCalled();
   });
 
@@ -461,8 +526,8 @@ describe('Categories tab', () => {
     await screen.findByText('membership');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Category' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'VIP Cards' } });
-    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'vip-cards' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'VIP Cards' } });
+    fireEvent.change(screen.getByLabelText('Slug(Optional)'), { target: { value: 'vip-cards' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create category' }));
 
     await waitFor(() => expect(mockedCreateCardCategory).toHaveBeenCalled());
@@ -480,8 +545,8 @@ describe('Categories tab', () => {
     await screen.findByText('membership');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Category' }));
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad' } });
-    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'not a slug!' } });
+    fireEvent.change(screen.getByLabelText('Name(Optional)'), { target: { value: 'Bad' } });
+    fireEvent.change(screen.getByLabelText('Slug(Optional)'), { target: { value: 'not a slug!' } });
     expect(screen.getByRole('alert')).toHaveTextContent('Slug must start with a letter');
     expect(mockedCreateCardCategory).not.toHaveBeenCalled();
   });
@@ -504,6 +569,44 @@ describe('Categories tab', () => {
 });
 
 describe('live plan management search', () => {
+  /**
+   * Regression: a loading skeleton must never replace live controls.
+   *
+   * Searching re-keys the query, which flips `isPending` back to true while the
+   * operator is still typing. A full-page skeleton then unmounted the search
+   * box itself, destroying focus and silently swallowing the next keystroke.
+   * Only the FIRST load may replace the screen; later fetches leave the chrome
+   * mounted and replace the results region alone.
+   */
+  it('keeps the search field mounted and focused while a search refetches', async () => {
+    const user = userEvent.setup();
+    mockedGetCardProducts.mockResolvedValue([GOLD]);
+    mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);
+    renderWithProviders(<BusinessProductsPage />);
+    await screen.findByRole('heading', { name: 'Gold' });
+    const input = screen.getByLabelText('Search card plans');
+
+    await user.type(input, 'gol');
+    expect(input).toHaveFocus();
+    // Still the same live node after the debounce re-keys the query.
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'gol' }),
+      ),
+    );
+    expect(screen.getByLabelText('Search card plans')).toBe(input);
+    expect(input).toHaveFocus();
+
+    // A clearing keystroke still reaches the component after the refetch.
+    await user.clear(input);
+    expect(input).toHaveValue('');
+    await waitFor(() =>
+      expect(mockedGetCardProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: undefined }),
+      ),
+    );
+  });
+
   it('debounces plan search and clears without requiring submit', async () => {
     mockedGetCardProducts.mockResolvedValue([GOLD]);
     mockedGetCardCategories.mockResolvedValue([MEMBERSHIP]);

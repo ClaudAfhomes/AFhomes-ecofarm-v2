@@ -1,5 +1,5 @@
 /**
- * AF Homes default role permission baseline (Phase 2).
+ * AFHomes default role permission baseline (Phase 2).
  *
  * Single source of truth for the explicit, reviewed, database-backed default
  * grants that take every non-customer operational role from zero modules to
@@ -111,7 +111,42 @@ export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
 export const MIGRATION_SEEDED_GRANTS: readonly {
   moduleKey: AfHomesModuleKey;
   roles: readonly string[];
-}[] = [{ moduleKey: 'governance.customer_import', roles: ['admin'] }];
+}[] = [
+  { moduleKey: 'governance.customer_import', roles: ['admin'] },
+  // Operational Services selling, seeded by 20261105000001. `employee` (the GSD)
+  // holds view+create: enough to record a service sale and a receipt, and
+  // deliberately NOT update/delete, because no operation needs them. `finance`
+  // holds view only, because Finance verifies those receipts under
+  // finance.payment_verification update and must never originate a sale. It is
+  // seeded rather than folded into the matrix above because it arrived after the
+  // baseline was reviewed, and rewriting that matrix would rewrite history.
+  { moduleKey: 'operations.sales', roles: ['employee', 'admin', 'finance'] },
+  // Operational Services RECEIPT verification, seeded by 20261106000001.
+  // Deliberately its own key rather than the VIP-card
+  // `finance.payment_verification`: the two payment workflows stay independent,
+  // and `employee` is absent, so a GSD can never verify their own receipt.
+  { moduleKey: 'operations.payments', roles: ['finance', 'admin'] },
+  // Customer Lookup for the GSD/Employee desk, seeded by 20261131000003. It
+  // replaces the earlier reuse of `operations.redemption` for a read-only
+  // search screen: `employee` keeps the till key for the redemption desk and
+  // gains this one for the lookup, and `admin` keeps oversight. View only -
+  // the screen has no mutating endpoint to authorize.
+  { moduleKey: 'operations.customer_lookup', roles: ['employee', 'admin'] },
+  // Sales-network Members, seeded by 20261205000001. `admin` manages
+  // (view/create/update: onboarding provisions the staff account); the
+  // hierarchy reads its own network, mirroring the `network.genealogy`
+  // audience. Seeded rather than folded into the matrix above because it
+  // arrived after the baseline was reviewed.
+  {
+    moduleKey: 'network.members',
+    roles: ['admin', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'],
+  },
+  // OST registration oversight for the Sales Manager, seeded by 20261208000004
+  // alongside the IST conversion ledger. View only: the conversion itself runs
+  // through the transfer function, and no SM edits a registration directly. The
+  // matrix above is not rewritten because the grant arrived after review.
+  { moduleKey: 'network.ost_registrations', roles: ['senior_sales_manager'] },
+];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {
   admin: [

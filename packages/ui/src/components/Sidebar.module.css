@@ -24,6 +24,29 @@
   flex: 1 1 auto;
   overflow-y: auto;
   padding: var(--space-3) var(--space-3) var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+.nav::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.nav::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-accent-light);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 /* ── Primary list ─────────────────────────────────────────────────────── */
@@ -102,6 +125,14 @@
   color: var(--color-text-muted);
 }
 
+/* Footer action text collapses to icons only, matching the nav links above.
+   Any footer content carrying the global `sidebar-footer-label` class hides
+   its text when the rail is collapsed; the control itself keeps its
+   accessible name and tooltip. */
+.sidebar.collapsed .footer :global(.sidebar-footer-label) {
+  display: none;
+}
+
 /* ── Category (expandable) ────────────────────────────────────────────── */
 .category {
   /* Block layout: header + sub-list stack vertically. */
@@ -155,10 +186,40 @@
 }
 
 /* ── Sub-item list ────────────────────────────────────────────────────── */
+.subListWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms ease,
+    visibility 0s linear 280ms;
+}
+
+.subListWrapOpen {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 240ms ease 40ms,
+    visibility 0s;
+}
+
 .subList {
   list-style: none;
   margin: 0;
   padding: 2px 0 6px var(--space-8);
+  min-height: 0;
+  overflow: hidden;
+  transform: translateY(-4px);
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.subListWrapOpen .subList {
+  transform: translateY(0);
 }
 
 .sidebar a.subLink {
@@ -219,6 +280,13 @@
   .chevron {
     transition: none;
   }
+  .subListWrap,
+  .subList {
+    transition: none;
+  }
+  .subListWrapOpen .subList {
+    transform: none;
+  }
 }
 
 /* ── Collapsed sidebar (icons only) ──────────────────────────────────── */
@@ -253,7 +321,7 @@
 .sidebar.collapsed .label,
 .sidebar.collapsed .badge,
 .sidebar.collapsed .chevron,
-.sidebar.collapsed .subList {
+.sidebar.collapsed .subListWrap {
   display: none;
 }
 
@@ -263,10 +331,6 @@
   padding: var(--space-3);
 }
 
-.sidebar a.active,
-.sidebar a.activeSubLink {
-  box-shadow: inset 3px 0 var(--color-accent-light);
-}
 .category {
   margin-top: var(--space-2);
 }

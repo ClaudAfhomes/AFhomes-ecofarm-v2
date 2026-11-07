@@ -1,3 +1,19 @@
+/* Page shell: shrinkable grid so filter controls can never prop the page open
+   sideways on phones. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+}
+
 .filters {
   display: flex;
   gap: var(--space-4);

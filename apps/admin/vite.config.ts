@@ -8,6 +8,16 @@ export default defineConfig(({ mode }) => ({
   // Served under /admin on the same origin as the web app + API in production
   // (see scripts/assemble-vercel-output.mjs); local dev keeps the root base.
   base: mode === 'production' ? '/admin/' : '/',
+  // Single shared env source: repo-root `.env.local` (see AGENTS.md). Vite only
+  // inlines `VITE_`-prefixed vars, so server-only keys in that file stay safe.
+  // Without this, a documented root-only setup leaves VITE_SUPABASE_URL empty
+  // and staff login fails with a generic "could not sign you in".
+  // Tests stay hermetic: under `vitest` (mode === 'test') the app-local dir is
+  // used, so a developer's real `.env.local` can never leak into assertions.
+  envDir:
+    process.env.AFHOMES_DEV_ENV_DIR ?? (mode === 'test'
+      ? fileURLToPath(new URL('./', import.meta.url))
+      : fileURLToPath(new URL('../../', import.meta.url))),
   plugins: [react()],
   resolve: {
     alias: {
@@ -18,7 +28,7 @@ export default defineConfig(({ mode }) => ({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.AFHOMES_DEV_API_TARGET ?? 'http://localhost:3000',
         changeOrigin: true,
       },
     },

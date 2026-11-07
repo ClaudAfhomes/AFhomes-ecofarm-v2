@@ -1,4 +1,4 @@
-import { Button } from '@jad/ui';
+import { Button } from '@afhomes/ui';
 import { cn } from '../../lib/cn';
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {

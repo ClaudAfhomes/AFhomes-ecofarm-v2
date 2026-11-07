@@ -4,6 +4,24 @@ import { commissionStatusSchema } from './lifecycle.js';
 export const analyticsPeriodSchema = z.enum(['day', 'week', 'month', 'year']);
 export type AnalyticsPeriod = z.infer<typeof analyticsPeriodSchema>;
 
+/**
+ * Date range schema for custom date filtering.
+ * Uses ISO date strings (YYYY-MM-DD).
+ */
+export const dateRangeSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+}).refine(
+  (data) => {
+    if (data.from && data.to) {
+      return new Date(data.from) <= new Date(data.to);
+    }
+    return true;
+  },
+  { message: 'End date must be on or after start date', path: ['to'] }
+);
+export type DateRange = z.infer<typeof dateRangeSchema>;
+
 export const analyticsScopeSchema = z.enum([
   'global',
   'finance',
@@ -119,16 +137,16 @@ export const analyticsOverviewSchema = z.object({
 export type AnalyticsOverview = z.infer<typeof analyticsOverviewSchema>;
 
 /* ------------------------------------------------------------------ */
-/* Sales Overview trend (JAD SalesTrendChart parity)                   */
+/* Sales Overview trend (AFHomes sales-trend pattern)                   */
 /* ------------------------------------------------------------------ */
 
 /**
- * Dedicated Sales Overview series, mirroring JAD's `salesTrendReportSchema`.
+ * Dedicated Sales Overview series, mirroring the predecessor `salesTrendReportSchema`.
  * One bucket per period (`YYYY-MM` for months, `YYYY` for years) with the
  * count of qualifying sales and the exact-decimal sum of their frozen sale
  * value. Qualifying = sale status `active` (activated membership): activation
- * is AF Homes' explicit recognition decision after full verified payment, the
- * same role JAD's `QUALIFYING_SALE` transition plays after `PAYMENT_VERIFIED`.
+ * is AFHomes' explicit recognition decision after full verified payment, the
+ * same role the predecessor's `QUALIFYING_SALE` transition plays after `PAYMENT_VERIFIED`.
  * Pipeline and cancelled sales are never counted.
  */
 export const salesTrendGranularitySchema = z.enum(['month', 'year']);
@@ -149,3 +167,84 @@ export const salesTrendReportSchema = z.object({
   periods: z.array(salesTrendPeriodSchema),
 });
 export type SalesTrendReport = z.infer<typeof salesTrendReportSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Team Sales Activity Analytics                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sales activity classification for a team member.
+ * Based on qualifying sales count within the reporting period.
+ */
+export const teamSalesActivitySchema = z.enum([
+  'Top Seller',
+  'With Sales',
+  'Low Sales',
+  'No Sales',
+]);
+export type TeamSalesActivity = z.infer<typeof teamSalesActivitySchema>;
+
+/**
+ * Individual member's sales performance within a team.
+ */
+export const teamSalesMemberSchema = z.object({
+  staffId: z.string().uuid(),
+  fullName: z.string(),
+  role: z.string(),
+  status: z.string(),
+  salesCount: countSchema,
+  salesActivity: teamSalesActivitySchema,
+});
+export type TeamSalesMember = z.infer<typeof teamSalesMemberSchema>;
+
+/**
+ * Team sales analytics for a single team (VD/SSM/SM view).
+ * Returns KPIs and ranked member list for the viewer's authorized team.
+ */
+export const teamSalesAnalyticsSchema = z.object({
+  period: analyticsPeriodSchema,
+  window: z.object({ from: z.string(), to: z.string(), timezone: z.literal('UTC') }),
+  viewerStaffId: z.string().uuid(),
+  viewerRole: z.string(),
+  kpis: z.object({
+    totalTeamSales: countSchema,
+    membersWithSales: countSchema,
+    membersNoSales: countSchema,
+    topSellerCount: countSchema,
+    participationRate: z.number().min(0).max(100),
+  }),
+  members: z.array(teamSalesMemberSchema),
+});
+export type TeamSalesAnalytics = z.infer<typeof teamSalesAnalyticsSchema>;
+
+/**
+ * Team comparison entry for admin global overview.
+ */
+export const teamSalesTeamSchema = z.object({
+  teamHead: z.object({
+    staffId: z.string().uuid(),
+    fullName: z.string(),
+    role: z.string(),
+  }),
+  memberCount: countSchema,
+  totalSales: countSchema,
+  membersWithSales: countSchema,
+  membersNoSales: countSchema,
+});
+export type TeamSalesTeam = z.infer<typeof teamSalesTeamSchema>;
+
+/**
+ * Admin global team sales overview.
+ * Compares all VD-led teams by sales performance.
+ */
+export const teamSalesOverviewSchema = z.object({
+  period: analyticsPeriodSchema,
+  window: z.object({ from: z.string(), to: z.string(), timezone: z.literal('UTC') }),
+  totalSales: countSchema,
+  totalEligibleSellers: countSchema,
+  sellersWithSales: countSchema,
+  sellersNoSales: countSchema,
+  topTeam: teamSalesTeamSchema.nullable(),
+  teams: z.array(teamSalesTeamSchema),
+});
+export type TeamSalesOverview = z.infer<typeof teamSalesOverviewSchema>;

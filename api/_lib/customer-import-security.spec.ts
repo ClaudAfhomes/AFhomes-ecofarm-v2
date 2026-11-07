@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readXlsx, XLSX_LIMITS } from './customer-xlsx.js';
 import { fetchGoogleSheetCsv, validateImportRow, type ImportContext } from './customer-import.js';
 import { escapeCsvCell } from './report-export.js';
-import { resolveCustomerCategory } from '@jad/contracts';
+import { resolveCustomerCategory } from '@afhomes/contracts';
 function crc(bytes: Uint8Array) {
   let n = 0xffffffff;
   for (const b of bytes) {

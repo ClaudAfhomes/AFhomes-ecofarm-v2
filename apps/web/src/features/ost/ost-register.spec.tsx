@@ -3,7 +3,7 @@
  * frozen at submission. The form carries no sponsor field - hidden or
  * otherwise - so the applicant cannot choose or swap sponsors.
  */
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,6 +63,11 @@ function mockFetch() {
 function install(over: Record<string, RouteHandler> = {}) {
   routes.clear();
   routes.set('GET /ost/referrals/OST-ABCDEF-123456', ok(RESOLUTION));
+  const reference = (data: unknown[]) => ok({ data, meta: { total: data.length } });
+  routes.set('GET /address/public/regions', reference([{ code: '0400000000', name: 'CALABARZON' }]));
+  routes.set('GET /address/public/regions/0400000000/provinces', reference([{ code: '0402100000', name: 'Cavite' }]));
+  routes.set('GET /address/public/provinces/0402100000/localities', reference([{ code: '0402120000', name: 'Tagaytay', type: 'city', provinceCode: '0402100000', postalCode: '4120' }]));
+  routes.set('GET /address/public/localities/0402120000/barangays', reference([{ code: '0402120001', name: 'SYNTHETIC BARANGAY', localityCode: '0402120000' }]));
   routes.set('POST /ost-accreditation/public', () => ({
     status: 201,
     body: {
@@ -83,7 +88,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', mockFetch());
 });
 
-it('shows a readable own-renewal date error without posting', async () => {
+it('derives the annual renewal end from the selected start and posts once', async () => {
   const id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
   routes.set(
     '/ost/me',
@@ -99,6 +104,7 @@ it('shows a readable own-renewal date error without posting', async () => {
     `/ost-accreditation/members/${id}`,
     ok({
       registration: null,
+      currentApplicant: null,
       renewals: [],
       terms: [
         {
@@ -112,18 +118,22 @@ it('shows a readable own-renewal date error without posting', async () => {
     }),
   );
   routes.set('/ost-accreditation/sponsors', ok({ data: [], meta: { total: 0 } }));
+  routes.set(`POST /ost-accreditation/members/${id}/renew`, ok({ id }));
   renderWithProviders(<OstRenewalPage />, {
     sessionUser: { authUserId: id, email: 'qa@example.invalid' },
   });
   await screen.findByRole('button', { name: 'Submit renewal for review' });
-  fireEvent.change(screen.getByLabelText('date Of Renewal'), { target: { value: '2026-01-01' } });
-  fireEvent.change(screen.getByLabelText('requested Start'), { target: { value: '2026-02-01' } });
-  fireEvent.change(screen.getByLabelText('requested End'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('Date of renewal'), { target: { value: '2026-01-01' } });
+  fireEvent.change(screen.getByLabelText('Requested start'), { target: { value: '2026-02-01' } });
+  const end = screen.getByLabelText('Requested end') as HTMLInputElement;
+  expect(end.value).toBe('2027-02-01');
+  expect(end.disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Submit renewal for review' }));
-  expect((await screen.findByRole('alert')).textContent).toBe(
-    'Expiry must be on or after the start',
-  );
-  expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+  await waitFor(() => expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1));
+  expect(requests.find((r) => r.method === 'POST')?.body).toMatchObject({
+    requestedStart: '2026-02-01',
+    requestedEnd: '2027-02-01',
+  });
 });
 
 async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
@@ -133,12 +143,14 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Phone'), '+639171234567');
   await user.type(screen.getByLabelText('Date of birth'), '1995-06-15');
   await user.type(screen.getByLabelText('Street address'), '1 Farm Road');
-  await user.type(screen.getByLabelText('City'), 'Tagaytay');
-  await user.type(screen.getByLabelText('Province'), 'Cavite');
+  for (const [label, option] of [['Region', 'CALABARZON'], ['Province', 'Cavite'], ['City / municipality', 'Tagaytay'], ['Barangay', 'SYNTHETIC BARANGAY']]) {
+    await user.click(screen.getByRole('combobox', { name: new RegExp(`^${label}`) }));
+    await user.click(await screen.findByRole('option', { name: new RegExp(`^${option}`) }));
+  }
   await user.selectOptions(screen.getByLabelText('Program category'), 'non_vip');
   await user.selectOptions(screen.getByLabelText('Sex'), 'male');
   await user.selectOptions(screen.getByLabelText('Civil status'), 'single');
-  await user.type(screen.getByLabelText('Government ID type'), 'QA TEST');
+  await user.selectOptions(screen.getByLabelText('Government ID type'), 'philippine_id');
   await user.type(screen.getByLabelText('Government ID number'), 'SYNTHETIC-ID');
 }
 
@@ -185,7 +197,7 @@ describe('public OST registration', () => {
     expect(post?.body).toMatchObject({
       referralCode: 'OST-ABCDEF-123456',
       identity: { firstName: 'Oscar', lastName: 'Trainee', email: 'oscar@example.invalid' },
-      form: { programCategory: 'non_vip', governmentIdType: 'QA TEST' },
+      form: { programCategory: 'non_vip', governmentIdType: 'philippine_id' },
     });
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsorStaffId');
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsor_staff_id');
@@ -218,10 +230,10 @@ describe('public OST registration', () => {
       'Phone',
       'Date of birth',
       'Street address',
-      'City',
+      'City / municipality',
       'Province',
     ]) {
-      expect(screen.getByLabelText(label)).toBeVisible();
+      expect(screen.getByLabelText(new RegExp(`^${label}`))).toBeVisible();
     }
     expect(screen.queryByRole('table')).toBeNull();
   });

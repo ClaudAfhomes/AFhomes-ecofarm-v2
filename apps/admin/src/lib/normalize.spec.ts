@@ -4,6 +4,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  filterGovernmentIdInput,
+  filterLandlineInput,
+  filterMemberTinInput,
+  filterMobileInput,
+  formatTinInput,
   normalizeCustomerApplicationRequest,
   normalizeCustomerRequest,
   normalizeProfileName,
@@ -26,7 +31,6 @@ describe('live field normalization', () => {
     'firstName',
     'name',
     'vipRecommenderName',
-    'email',
     'password',
     'temporaryPassword',
     'OTP',
@@ -45,6 +49,40 @@ describe('live field normalization', () => {
     'tinNumber',
   ])('preserves excluded field %s exactly', (field) => {
     expect(normalizeLiveHumanField(field, 'MixedCase-aB123/Path ')).toBe('MixedCase-aB123/Path ');
+  });
+
+  it.each(['email', 'recommenderEmail'])('lowercases live field %s while typing', (field) => {
+    expect(normalizeLiveHumanField(field, 'Claud@Example.COM')).toBe('claud@example.com');
+  });
+
+  it('keeps mobiles digit-only at 11', () => {
+    expect(filterMobileInput('+639171234567')).toBe('63917123456');
+    expect(filterMobileInput('0917-123-4567')).toBe('09171234567');
+    expect(filterMobileInput('abc')).toBe('');
+  });
+
+  it('blocks letters from landlines but keeps dialing punctuation', () => {
+    expect(filterLandlineInput('(02) 8123-4567')).toBe('(02) 8123-4567');
+    expect(filterLandlineInput('abc123')).toBe('123');
+  });
+
+  it('keeps member TINs digit-only at 9', () => {
+    expect(filterMemberTinInput('123-456-789')).toBe('123456789');
+    expect(filterMemberTinInput('1234567890')).toBe('123456789');
+  });
+
+  it('groups a typed TIN as 123-456-789 and keeps a branch suffix', () => {
+    expect(formatTinInput('123456789')).toBe('123-456-789');
+    expect(formatTinInput('123-456-789')).toBe('123-456-789');
+    expect(formatTinInput('1234')).toBe('123-4');
+    expect(formatTinInput('123456789000')).toBe('123-456-789-000');
+    expect(formatTinInput('12345678901234567890')).toBe('123-456-789-01234');
+    expect(formatTinInput('abc')).toBe('');
+  });
+
+  it('keeps government IDs alphanumeric at 16', () => {
+    expect(filterGovernmentIdInput('p 123/456!')).toBe('p123456');
+    expect(filterGovernmentIdInput('ABCDEFGHIJKLMNOPQRS')).toBe('ABCDEFGHIJKLMNOP');
   });
 });
 
@@ -109,16 +147,50 @@ describe('submit normalization', () => {
       validIdReceived: true,
       reservationPaymentProofReceived: true,
     });
-    expect(application.primary.lastName).toBe('jimenez');
+    expect(application.primary.lastName).toBe('Jimenez');
     expect(application.primary.mobile).toBe('+639171234567');
     expect(application.primary.email).toBe('claud@example.com');
+    // Official geographic names are reference values, not prose: upper-casing
+    // them would store a spelling the authority never published.
+    expect(application.primary.cityMunicipality).toBe('quezon city');
+    expect(application.primary.province).toBe('metro manila');
+    // A typed street line follows the same readability rule as names now.
+    expect(application.primary.permanentAddressLine1).toBe('123 Main St');
+    // The referral chain names are title-cased like every other name field.
+    expect(
+      normalizeCustomerApplicationRequest({
+        customerId: '00000000-0000-4000-8000-000000000001',
+        planId: '00000000-0000-4000-8000-000000000002',
+        tier: 'GOLD',
+        paymentScheme: 'spot_cash',
+        primary: {
+          holderType: 'PRIMARY',
+          lastName: 'dela cruz',
+          firstName: 'juan',
+          birthDate: '1990-05-04',
+          permanentAddressLine1: '123 main st',
+          cityMunicipality: 'quezon city',
+          province: 'metro manila',
+          mobile: '09171234567',
+          email: 'juan@example.com',
+          printedName: 'juan dela cruz',
+        },
+        svdName: 'pedro reyes',
+        ssmName: 'maria santos',
+        consentAcknowledged: true,
+        acknowledgedAt: '2026-01-01',
+        acquisitionChannels: [],
+        primarySignatureStatus: 'pending' as const,
+        validIdReceived: true,
+        reservationPaymentProofReceived: true,
+      }),
+    ).toMatchObject({ svdName: 'Pedro Reyes', ssmName: 'Maria Santos' });
 
     const reservation = normalizeReservationAgreementRequest({
       saleId: '00000000-0000-4000-8000-000000000003',
       reservationDate: '2026-01-01',
       agreementDate: '2026-01-02',
       scheduleNotes: [],
-      primarySignatureStatus: 'pending' as const,
       primary: {
         holderType: 'PRIMARY',
         name: 'claud jimenez',

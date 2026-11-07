@@ -15,7 +15,7 @@ const fields: Record<string, string> = {
   program_category: 'non_vip',
   sex: 'male',
   civil_status: 'single',
-  government_id_type: 'QA',
+  government_id_type: 'philippine_id',
   government_id_number: 'SYNTHETIC',
 };
 afterEach(() => vi.unstubAllGlobals());

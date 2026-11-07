@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 33 - admin responsive completion.
+ * AFHomes Phase 33 - admin responsive completion.
  *
  * Renders the REAL pages through the REAL router at mobile widths and pins
  * the structural contracts the CSS relies on: every wide table inside a
@@ -51,11 +51,17 @@ vi.mock('./features/afhomes/services', () => ({
 }));
 
 vi.mock('./features/business/services', () => ({
+  FINANCE_QUEUE_LIMIT: 200,
   getSales: vi.fn(),
+
+  getCustomerApplications: vi.fn(),
+  cancelSale: vi.fn(),
   getFinanceQueue: vi.fn(),
   getActivationQueue: vi.fn(),
   getCommissions: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(async () => ({ data: [], total: 0 })),
+  getCustomerById: vi.fn(),
   getCardProducts: vi.fn(),
   getCardCategories: vi.fn(),
 }));
@@ -97,7 +103,12 @@ vi.mock('./features/cms/services', () => ({
 vi.mock('./features/genealogy/services', () => ({
   getGenealogy: vi.fn(),
   getGenealogyNode: vi.fn(),
+  getGenealogyDownline: vi.fn(),
   getGenealogySummary: vi.fn(),
+  teamSalesKeys: {
+    overview: (period: string, dateFrom?: string, dateTo?: string) => ['team-sales', 'overview', period, dateFrom, dateTo],
+  },
+  getTeamSalesOverview: vi.fn(),
 }));
 
 vi.mock('./features/ost/services', () => ({
@@ -114,13 +125,37 @@ import {
   getAfHomesDashboardQueues,
   getAfHomesSalesTrend,
 } from './features/afhomes/services';
-import { getCommissions, getFinanceQueue, getSales } from './features/business/services';
+import { getCommissions, getCustomersPage, getFinanceQueue } from './features/business/services';
 import { getMemberships } from './features/memberships/services';
 import { getRedemptionItems, getRedemptions } from './features/redemption/services';
 import { getAudit, getReport } from './features/reports/services';
 import { getCmsHistory, getCmsPages } from './features/cms/services';
-import { getGenealogy } from './features/genealogy/services';
+import { getGenealogy, getGenealogyNode, getGenealogyDownline, getTeamSalesOverview } from './features/genealogy/services';
 import { getOstApplications } from './features/ost/services';
+import {
+  getPurchaseSummary,
+  getSettlement,
+  listClaimsPage,
+  listFinancePurchases,
+  listPurchasesPage,
+  listReceipts,
+} from './features/business/points-services';
+
+vi.mock('./features/business/points-services', async (original) => {
+  const purchases = vi.fn();
+  const claims = vi.fn();
+  return {
+    ...(await original<typeof import('./features/business/points-services')>()),
+    listPurchasesPage: purchases,
+    listPurchases: purchases,
+    listFinancePurchases: vi.fn(),
+    listClaimsPage: claims,
+    listClaims: claims,
+    listReceipts: vi.fn(),
+    getPurchaseSummary: vi.fn(),
+    getSettlement: vi.fn(),
+  };
+});
 
 const view = (moduleKey: string) => ({
   moduleKey: moduleKey as never,
@@ -152,6 +187,11 @@ const SUPER: SessionUser = {
     'network.ost_members',
     'operations.redemption',
     'operations.catalog',
+    // Operational Services: the GSD sale screen and the Finance verification
+    // queue are separate grants, and this user holds both so the wide tables on
+    // those routes can be rendered.
+    'operations.sales',
+    'operations.payments',
     'finance.points',
     'governance.audit',
     'cms.pages',
@@ -166,38 +206,26 @@ const STAFF_ROW = {
   fullName: 'Ana Reyes Santos Dela Cruz',
   email: 'ana.reyes.santos.delacruz@example.invalid',
   departmentName: 'Sales',
-  roleName: 'Sales Manager',
-  roleId: 'r-sm',
+  roleName: 'Employee',
+  roleId: 'r-emp',
   status: 'active',
   restrictions: [],
 };
 
 const ROLE_ROW = {
-  id: 'r-sm',
-  name: 'Sales Manager',
-  description: 'Sellers',
-  slug: 'sales_manager',
+  id: 'r-emp',
+  name: 'Employee',
+  description: 'Staff',
+  slug: 'employee',
   isActive: true,
   isSystem: false,
   assignedCount: 12,
   permissions: [],
 };
 
-const SALE_ROW = {
-  id: 'sale-1',
-  saleNumber: 'SALE-000001',
-  customerName: 'Juan Dela Cruz',
-  productName: 'Gold',
-  sellerName: 'SM Ana',
-  cashPrice: '60000.00',
-  paidAmount: '20000.00',
-  balance: '40000.00',
-  status: 'payment_in_progress',
-  activatedAt: null,
-  createdAt: '2026-09-27T09:00:00.000Z',
-};
-
 const QUEUE_ROW = {
+  // The Finance queue is a discriminated union; a sale-origin row must say so.
+  origin: 'sale',
   status: 'payment_in_progress',
   saleId: 'sale-1',
   saleNumber: 'SALE-000001',
@@ -332,6 +360,78 @@ const OST_ROW = {
   status: 'submitted',
 };
 
+/**
+ * Operational-services fixtures. Names are deliberately long, because a
+ * realistic customer and service name is what exposes a table that cannot
+ * actually hold its content.
+ */
+const OPERATIONAL_PURCHASE = {
+  id: 'dddddddd-0000-4000-8000-000000000001',
+  purchaseNumber: 'AF-TXN-000001',
+  customerId: 'aaaaaaaa-0000-4000-8000-000000000001',
+  membershipId: 'bbbbbbbb-0000-4000-8000-000000000001',
+  status: 'completed',
+  grossAmount: '100000.00',
+  tierDiscountAmount: '25000.00',
+  pointsDiscountAmount: '0.00',
+  netAmount: '75000.00',
+  recordedTotal: '75000.00',
+  verifiedTotal: '75000.00',
+  rejectedTotal: '0.00',
+  remainingAmount: '0.00',
+  tierSnapshot: 'GOLD',
+  createdAt: '2026-03-01T02:00:00.000Z',
+  completedAt: '2026-03-01T03:00:00.000Z',
+  customerName: 'Ana R Buyer',
+  customerNumber: 'CUS-000777',
+  createdByName: 'GSD Staffer',
+  lines: [
+    {
+      id: 'eeeeeeee-0000-4000-8000-000000000001',
+      serviceId: 'ffffffff-0000-4000-8000-000000000001',
+      serviceName: 'Japanese Teppanyaki',
+      quantity: 50,
+      unitAmount: '2000.00',
+      lineTotal: '100000.00',
+    },
+  ],
+};
+
+const OPERATIONAL_CLAIM = {
+  id: 'cccccccc-0000-4000-8000-000000000001',
+  claimNumber: 'CLM-000001',
+  customerId: 'aaaaaaaa-0000-4000-8000-000000000001',
+  purchaseId: OPERATIONAL_PURCHASE.id,
+  customerNumber: 'CUS-000777',
+  customerName: 'Ana R Buyer',
+  membershipNumber: 'MBS-000777',
+  purchaseNumber: 'AF-TXN-000001',
+  serviceName: 'Japanese Teppanyaki',
+  status: 'available',
+  pointsRequested: 5000,
+  pointsReserved: 5000,
+  pointsAwarded: 0,
+  pointsCapped: 0,
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  claimedAt: null,
+  createdAt: '2026-03-01T03:00:00.000Z',
+};
+
+const OPERATIONAL_RECEIPT = {
+  id: 'abababab-0000-4000-8000-000000000001',
+  paymentNumber: 'AF-OPR-000001',
+  purchaseId: OPERATIONAL_PURCHASE.id,
+  amount: '75000.00',
+  method: 'bank_transfer',
+  reference: 'BCA-1234567890',
+  status: 'recorded',
+  recordedBy: 'GSD Staffer',
+  verifiedBy: null,
+  rejectionReason: null,
+  recordedAt: '2026-03-01T02:30:00.000Z',
+  verifiedAt: null,
+};
+
 function install() {
   vi.mocked(getAfHomesStaff).mockResolvedValue([STAFF_ROW] as never);
   vi.mocked(getAfHomesRoles).mockResolvedValue([ROLE_ROW] as never);
@@ -341,17 +441,55 @@ function install() {
   vi.mocked(getAnalyticsOverview).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesDashboardQueues).mockRejectedValue(new Error('stub'));
   vi.mocked(getAfHomesSalesTrend).mockRejectedValue(new Error('stub'));
-  vi.mocked(getSales).mockResolvedValue([SALE_ROW] as never);
-  vi.mocked(getFinanceQueue).mockResolvedValue([QUEUE_ROW] as never);
+  vi.mocked(getFinanceQueue).mockResolvedValue({ items: [QUEUE_ROW], total: 1 } as never);
   vi.mocked(getMemberships).mockResolvedValue([MEMBER_ROW] as never);
   vi.mocked(getCommissions).mockResolvedValue(COMMISSION_ROWS as never);
   vi.mocked(getRedemptionItems).mockResolvedValue([ITEM_ROW] as never);
   vi.mocked(getRedemptions).mockResolvedValue([REDEMPTION_ROW] as never);
   vi.mocked(getReport).mockResolvedValue(REPORT_ROW as never);
+  // The operational-services pages read through points-services, which is mocked
+  // below rather than stubbed over the network.
+  vi.mocked(listPurchasesPage).mockResolvedValue([OPERATIONAL_PURCHASE] as never);
+  vi.mocked(listFinancePurchases).mockResolvedValue([OPERATIONAL_PURCHASE] as never);
+  vi.mocked(listClaimsPage).mockResolvedValue([OPERATIONAL_CLAIM] as never);
+  vi.mocked(getPurchaseSummary).mockResolvedValue({
+    purchaseId: OPERATIONAL_PURCHASE.id,
+    grossAmount: '100000.00',
+    pointsDiscountAmount: '0.00',
+    netAmount: '75000.00',
+    recordedTotal: '75000.00',
+    verifiedTotal: '75000.00',
+    rejectedTotal: '0.00',
+    remainingBalance: '0.00',
+    overpaidAmount: '0.00',
+    fullyPaid: true,
+  } as never);
+  vi.mocked(getSettlement).mockResolvedValue({
+    purchaseId: OPERATIONAL_PURCHASE.id,
+    status: 'completed',
+    grossAmount: '100000.00',
+    tierDiscountAmount: '25000.00',
+    netAmount: '75000.00',
+    recordedTotal: '75000.00',
+    verifiedTotal: '75000.00',
+    remainingAmount: '0.00',
+    claimable: false,
+    claimStatus: 'available',
+  } as never);
+  vi.mocked(listReceipts).mockResolvedValue([OPERATIONAL_RECEIPT] as never);
   vi.mocked(getAudit).mockResolvedValue(AUDIT_ROW as never);
   vi.mocked(getCmsPages).mockResolvedValue([CMS_ROW] as never);
   vi.mocked(getCmsHistory).mockResolvedValue([] as never);
   vi.mocked(getGenealogy).mockResolvedValue([GENEALOGY_ROW] as never);
+  vi.mocked(getGenealogyNode).mockResolvedValue(GENEALOGY_ROW as never);
+  vi.mocked(getGenealogyDownline).mockResolvedValue([] as never);
+  vi.mocked(getTeamSalesOverview).mockResolvedValue({
+    totalSales: 0,
+    totalEligibleSellers: 0,
+    sellersWithSales: 0,
+    sellersNoSales: 0,
+    teams: [],
+  } as never);
   vi.mocked(getOstApplications).mockResolvedValue([OST_ROW] as never);
 }
 
@@ -385,7 +523,7 @@ describe('Phase 33 viewport smoke: shell renders at every target width', () => {
 
   it('390px mobile keeps the drawer opener reachable', async () => {
     atWidth(390, false);
-    renderApp('/admin/sales');
+    renderApp('/admin/customers');
     expect(await screen.findByRole('main')).not.toBeNull();
     expect(screen.getAllByRole('button', { name: /menu/i }).length).toBeGreaterThanOrEqual(1);
   });
@@ -394,13 +532,10 @@ describe('Phase 33 viewport smoke: shell renders at every target width', () => {
 describe('Phase 33 tables scroll instead of breaking', () => {
   it.each([
     ['/admin/staff', 'Ana Reyes Santos Dela Cruz'],
-    ['/admin/roles', 'Sales Manager'],
-    ['/admin/sales', 'SALE-000001'],
+    ['/admin/roles', 'Employee'],
     ['/admin/finance/payments', 'SALE-000001'],
     ['/admin/memberships', 'MBS-000001'],
     ['/admin/finance/commissions', 'SALE-000001'],
-    ['/admin/redemption/items', 'TEPPANYAKI'],
-    ['/admin/genealogy', 'SM Ana Santos'],
     ['/admin/ost/applications', 'Applicant Ana Santos Del Rosario'],
     ['/admin/cms/pages', 'Ecofarm Story'],
   ])('%s wraps its wide table in .table-scroll at 390px', async (route, marker) => {
@@ -408,6 +543,16 @@ describe('Phase 33 tables scroll instead of breaking', () => {
     renderApp(route);
     expect(await screen.findByText(marker)).not.toBeNull();
     expect(document.querySelector('.table-scroll')).not.toBeNull();
+  });
+
+  it('/admin/genealogy shows the genealogy tree for the first head', async () => {
+    atWidth(390, false);
+    renderApp('/admin/genealogy');
+    expect(await screen.findByText('SM Ana Santos')).not.toBeNull();
+    // Genealogy tree is rendered for the first head (admin view)
+    expect(screen.getByRole('region', { name: 'Genealogy tree' })).not.toBeNull();
+    // Old standalone toggle is gone
+    expect(screen.queryByRole('button', { name: 'Hide Genealogy' })).toBeNull();
   });
 
   it('reports and audit tables scroll with filters and export reachable', async () => {
@@ -427,7 +572,7 @@ describe('Phase 33 tables scroll instead of breaking', () => {
 
   it('redemption history uses the shared collapsing table with labelled cells', async () => {
     atWidth(390, false);
-    renderApp('/admin/redemption/history');
+    renderApp('/admin/redemption/legacy-history');
     expect(await screen.findByText('RDM-000001')).not.toBeNull();
   });
 
@@ -456,17 +601,11 @@ describe('Phase 33 forms stack and dialogs fit', () => {
     expect(screen.getByRole('button', { name: /create staff/i })).not.toBeNull();
   });
 
-  it('catalog search row wraps and the add-item dialog fits at 320px', async () => {
+  it('retired catalog opens the claim queue at 320px', async () => {
     atWidth(320, false);
-    const { container } = renderApp('/admin/redemption/items');
-    expect(await screen.findByText('TEPPANYAKI')).not.toBeNull();
-    const form = container.querySelector('form');
-    expect(form).not.toBeNull();
-    // Canonical FilterBar grammar (wrapping lives in the shared stylesheet,
-    // not an inline style, so it cannot be lost per page).
-    expect(form!.querySelector('[role="search"]')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /add item/i }));
-    expect(await screen.findByRole('dialog')).not.toBeNull();
+    renderApp('/admin/redemption/items');
+    expect(await screen.findByRole('heading', { name: 'Earned Points Claims' })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /add item/i })).toBeNull();
   });
 
   it('fixed filter rows wrap instead of overflowing at 320px', async () => {
@@ -483,18 +622,50 @@ describe('Phase 33 forms stack and dialogs fit', () => {
   });
 });
 
+/**
+ * The operational-services tables carry eleven and seven columns. jsdom performs
+ * no layout, so what is pinned here is the STRUCTURAL contract the CSS depends
+ * on: every wide table sits inside a keyboard-reachable scroll region, which is
+ * what keeps a 360px phone from scrolling the whole page sideways.
+ */
+describe('operational services tables stay inside a scrollable region', () => {
+  it.each([
+    ['/admin/points/records', /Japanese Teppanyaki/],
+    ['/admin/points/payments', /AF-TXN-000001/],
+    ['/admin/redemption', /CLM-000001/],
+  ])('%s wraps its table in a focusable .table-scroll at 360px', async (route, marker) => {
+    atWidth(360, false);
+    renderApp(route);
+    // `findAllByText`: a purchase number legitimately appears more than once
+    // (the sales row and its own receipt panel), so an exact-single match would
+    // fail for the right page for the wrong reason.
+    expect(
+      (await screen.findAllByText(marker, undefined, { timeout: 20000 })).length,
+    ).toBeGreaterThan(0);
+
+    const scrollers = Array.from(document.querySelectorAll('.table-scroll'));
+    expect(scrollers.length).toBeGreaterThan(0);
+    for (const scroller of scrollers) {
+      // A scroller that cannot be focused cannot be scrolled by a keyboard user.
+      expect(scroller.getAttribute('role')).toBe('region');
+      expect(scroller.getAttribute('aria-label')).toBeTruthy();
+      expect(scroller.getAttribute('tabindex')).toBe('0');
+    }
+  });
+});
+
 describe('Phase 33 loading, empty, and error states fit mobile', () => {
   it('empty tables explain themselves at 390px', async () => {
     atWidth(390, false);
-    vi.mocked(getSales).mockResolvedValue([]);
-    renderApp('/admin/sales');
-    expect(await screen.findByText(/no card sales|no sales/i)).not.toBeNull();
+    vi.mocked(getCustomersPage).mockResolvedValue({ data: [], total: 0 });
+    renderApp('/admin/customers');
+    expect(await screen.findByText(/no customers found/i)).not.toBeNull();
   });
 
   it('errors wrap with a reachable retry at 390px', async () => {
     atWidth(390, false);
-    vi.mocked(getSales).mockRejectedValue(new Error('boom'));
-    renderApp('/admin/sales');
+    vi.mocked(getCustomersPage).mockRejectedValue(new Error('boom'));
+    renderApp('/admin/customers');
     expect(await screen.findByRole('button', { name: /retry/i })).not.toBeNull();
   });
 });
@@ -547,4 +718,10 @@ describe('Phase 33 mobile shows no permission-hidden links', () => {
     });
     expect(screen.getByText(/access denied|forbidden|not allowed/i)).not.toBeNull();
   });
+});
+
+// Explicit feature-on fixture preserves coverage for retained, disabled source.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+ const actual = await importOriginal<typeof import('@afhomes/shared')>();
+ return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

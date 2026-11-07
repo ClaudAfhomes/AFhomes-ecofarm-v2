@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 29 - analytics completion.
+ * AFHomes Phase 29 - analytics completion.
  *
  * Drives the REAL analytics handler (plus the REAL reports handler for the
  * OST-status and genealogy-performance proofs) against a two-team fixture
@@ -25,7 +25,7 @@
  *   callers never share scope (no cache layer exists in the handler).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { analyticsOverviewSchema, reportResponseSchema } from '@jad/contracts';
+import { analyticsOverviewSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,
@@ -250,7 +250,7 @@ function tables(): Record<string, Record<string, unknown>[]> {
 }
 
 function install() {
-  const db = new FakeSupabase({
+  const db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }],
     tables: phase2World(tables() as never),
     tokens: {
       ...phase2WorldTokens(),

@@ -8,6 +8,8 @@ import {
   dashboardQueuesSchema,
   salesTrendReportSchema,
   staffTestPurgeResponseSchema,
+  publicVerificationSettingsSchema,
+  type UpdatePublicVerificationSettings,
   type AfHomesDashboard,
   type AfHomesDepartment,
   type AfHomesPermission,
@@ -19,20 +21,35 @@ import {
   type SalesTrendGranularity,
   type SalesTrendReport,
   type StaffTestPurgeResponse,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { z } from 'zod';
+import { staffSaleInvolvementSchema } from '@afhomes/contracts';
 import {
   protectedRequest as request,
   protectedRequestList as requestList,
 } from '../../lib/api/client';
 import { normalizeProfileName, normalizeStaffIdentity } from '../../lib/normalize';
 
+export const getPublicVerificationSettings = () =>
+  request('/admin/afhomes/public-verification-settings', publicVerificationSettingsSchema);
+export const savePublicVerificationSettings = (input: UpdatePublicVerificationSettings) =>
+  request('/admin/afhomes/public-verification-settings', publicVerificationSettingsSchema, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+
 export const getAfHomesRoles = (): Promise<AfHomesRole[]> =>
   requestList('/admin/afhomes/roles', afHomesRoleSchema);
+
+export const getStaffSalesInvolvement = (staffId: string, offset = 0) =>
+  requestList(
+    `/admin/afhomes/staff/${staffId}/sales-involvement?limit=25&offset=${offset}`,
+    staffSaleInvolvementSchema,
+  );
 export const createAfHomesRole = (input: {
   name: string;
-  description?: string;
   isActive: boolean;
+  departmentId: string;
   permissions: AfHomesPermission[];
 }) =>
   request('/admin/afhomes/roles', afHomesRoleSchema, {
@@ -43,8 +60,8 @@ export const updateAfHomesRole = (
   id: string,
   input: Partial<{
     name: string;
-    description: string;
     isActive: boolean;
+    departmentId: string;
     permissions: AfHomesPermission[];
   }>,
 ) =>
@@ -65,14 +82,17 @@ export const getAfHomesStaffAudit = (id: string) =>
   requestList(`/admin/afhomes/staff/${id}/audit`, auditEventSchema);
 export const getAfHomesRoleById = (id: string): Promise<AfHomesRole> =>
   request(`/admin/afhomes/roles/${id}`, afHomesRoleSchema);
+const roleDeletionSchema = z.object({ deleted: z.literal(true) });
+export const deleteAfHomesRole = (id: string) =>
+  request(`/admin/afhomes/roles/${id}`, roleDeletionSchema, { method: 'DELETE' });
 export const getAfHomesStaff = (): Promise<AfHomesStaff[]> =>
-  requestList('/admin/afhomes/staff', afHomesStaffSchema);
+  requestList('/admin/afhomes/staff?includeAccreditation=1', afHomesStaffSchema);
 export const getAfHomesStaffById = (id: string): Promise<AfHomesStaff> =>
   request(`/admin/afhomes/staff/${id}`, afHomesStaffSchema);
 /**
- * JAD-parity staff creation: the administrator sets a temporary password and
+ * AFHomes staff creation: the administrator sets a temporary password and
  * the account starts gated on `mustChangePassword`. The secret travels to
- * Supabase Auth only and is never stored in an AF Homes table. (The legacy
+ * Supabase Auth only and is never stored in an AFHomes table. (The legacy
  * `inviteAfHomesStaff` invitation callback is retired for standard
  * onboarding; pre-existing invited accounts still activate through
  * `/admin/activate-account`.)
@@ -115,9 +135,18 @@ export function isTestStaffEmail(email: unknown): boolean {
   const parts = email.trim().toLowerCase().split('@');
   if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
   const host = parts[1]!;
-  if (host === 'localhost' || host === 'example.com' || host === 'example.net' || host === 'example.org')
+  if (
+    host === 'localhost' ||
+    host === 'example.com' ||
+    host === 'example.net' ||
+    host === 'example.org'
+  )
     return true;
-  if (host.endsWith('.example.com') || host.endsWith('.example.net') || host.endsWith('.example.org'))
+  if (
+    host.endsWith('.example.com') ||
+    host.endsWith('.example.net') ||
+    host.endsWith('.example.org')
+  )
     return true;
   return host.endsWith('.invalid') || host.endsWith('.test') || host.endsWith('.localhost');
 }
@@ -130,11 +159,19 @@ export const purgeTestAfHomesStaff = (id: string): Promise<StaffTestPurgeRespons
   });
 export const getAfHomesDepartments = (): Promise<AfHomesDepartment[]> =>
   requestList('/admin/afhomes/departments', afHomesDepartmentSchema);
-export const createAfHomesDepartment = (input: { code: string; name: string }) =>
+export const createAfHomesDepartment = (input: { name: string }) =>
   request('/admin/afhomes/departments', afHomesDepartmentSchema, {
     method: 'POST',
     body: JSON.stringify(input),
   });
+const departmentDeletionSchema = z.object({ deleted: z.literal(true) });
+export const updateAfHomesDepartment = (id: string, input: { name: string }) =>
+  request(`/admin/afhomes/departments/${id}`, afHomesDepartmentSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+export const deleteAfHomesDepartment = (id: string) =>
+  request(`/admin/afhomes/departments/${id}`, departmentDeletionSchema, { method: 'DELETE' });
 export const getAfHomesDashboard = (range: string): Promise<AfHomesDashboard> =>
   request(`/admin/afhomes/dashboard?range=${encodeURIComponent(range)}`, afHomesDashboardSchema);
 
@@ -160,7 +197,7 @@ export const getAnalyticsOverview = (period: AnalyticsPeriod): Promise<Analytics
   request(`/analytics?period=${encodeURIComponent(period)}`, analyticsOverviewSchema);
 
 /**
- * JAD-parity Sales Overview trend: a dedicated per-granularity series of
+ * AFHomes Sales Overview trend: a dedicated per-granularity series of
  * qualifying-sale counts and exact-decimal frozen-value totals. Independent of
  * the page-level analytics period selector.
  */
@@ -173,7 +210,7 @@ export const getAfHomesSalesTrend = (
   );
 
 /**
- * Phase 2B operational dashboard queue cards (JAD QueueCard parity).
+ * Phase 2B operational dashboard queue cards (AFHomes queue-card pattern).
  * Server-side counts; a `null` count means the caller may not know that queue
  * and its card stays hidden. Never fetch full lists to count client-side.
  */

@@ -1,17 +1,25 @@
-import { Container } from "../components/ui/Container";
-import { Reveal } from "../components/ui/Reveal";
-import { Button } from "../components/ui/Button";
-import { Badge, StatusBadge } from "../components/ui/Badge";
-import { PageHeader } from "../components/ui/PageHeader";
-import { cmsRepository } from "../lib/cms";
-import { getPlaceholder } from "../lib/images";
-import { Seo } from "../lib/seo";
-import { ImageReveal } from "../components/ui/ImageReveal";
-import { cn } from "../lib/cn";
-import type { Experience } from "../types/experience";
+import { Container } from '../components/ui/Container';
+import { Reveal } from '../components/ui/Reveal';
+import { Button } from '../components/ui/Button';
+import { Badge, StatusBadge } from '../components/ui/Badge';
+import { PageHeader } from '../components/ui/PageHeader';
+import { cmsRepository } from '../lib/cms';
+import { getPlaceholder } from '../lib/images';
+import { Seo } from '../lib/seo';
+import { ImageReveal } from '../components/ui/ImageReveal';
+import { cn } from '../lib/cn';
+import type { Experience } from '../types/experience';
+import { usePublishedServices, serviceExperience } from '../lib/services';
+import { ErrorState, Skeleton } from '@afhomes/ui';
 
 export default function Experiences() {
-  const experiences = cmsRepository.getExperiences();
+  // Original destination content is synchronous and always available, even when
+  // the Operational Services API is down. Service products are a DIFFERENT
+  // content domain and render as an additive section below, never as a
+  // replacement.
+  const cmsExperiences = cmsRepository.getExperiences();
+  const services = usePublishedServices();
+  const bookable = (services.data ?? []).map(serviceExperience);
   const content = cmsRepository.getPageContent().experiences;
   return (
     <>
@@ -24,42 +32,79 @@ export default function Experiences() {
         eyebrow={content.eyebrow}
         title={content.title}
         lede={content.lede}
-        imageSpec={content.image.src ? content.image : getPlaceholder("resort-hero")}
+        imageSpec={content.image.src ? content.image : getPlaceholder('resort-hero')}
       />
 
       <div className="py-20 sm:py-28">
         <div className="space-y-24 sm:space-y-32">
-          {experiences.map((experience, index) => (
+          {cmsExperiences.map((experience, index) => (
             <ExperienceRow key={experience.id} experience={experience} index={index} />
           ))}
         </div>
       </div>
+
+      {services.isLoading && (
+        <Container>
+          <div role="status" aria-label="Loading bookable services" aria-busy="true">
+            <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
+              <Skeleton className="aspect-[4/3] w-full" />
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-3/4" />
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+              </div>
+            </div>
+          </div>
+        </Container>
+      )}
+      {services.isError && (
+        <Container>
+          <ErrorState error={services.error} onRetry={services.refetch} />
+        </Container>
+      )}
+      {services.isSuccess && bookable.length > 0 && (
+        <div className="py-20 sm:py-28">
+          <Container>
+            <p className="label-caps text-ink-400">Also bookable now</p>
+            <h2 className="font-display mt-2 text-3xl font-medium text-navy-900">
+              Operational services
+            </h2>
+          </Container>
+          <div className="mt-10 space-y-24 sm:space-y-32">
+            {bookable.map((experience, index) => (
+              <ExperienceRow key={experience.id} experience={experience} index={index} />
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function ExperienceRow({
-  experience,
-  index,
-}: {
-  experience: Experience;
-  index: number;
-}) {
+function ExperienceRow({ experience, index }: { experience: Experience; index: number }) {
   const reversed = index % 2 === 1;
 
   return (
     <Container>
       <article className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
-        <div className={cn(reversed && "lg:order-2")}>
+        <div className={cn(reversed && 'lg:order-2')}>
           <Reveal y={40}>
-            <ImageReveal spec={experience.image} ratio="aspect-[4/3]" className="rounded-[1.25rem]" />
+            <ImageReveal
+              spec={experience.image}
+              ratio="aspect-[4/3]"
+              className="rounded-[1.25rem]"
+            />
           </Reveal>
         </div>
 
-        <div className={cn(reversed && "lg:order-1")}>
+        <div className={cn(reversed && 'lg:order-1')}>
           <Reveal>
-            <span aria-hidden="true" className="font-display text-6xl leading-none font-medium text-navy-800/60 sm:text-7xl">
-              {String(index + 1).padStart(2, "0")}
+            <span
+              aria-hidden="true"
+              className="font-display text-6xl leading-none font-medium text-navy-800/60 sm:text-7xl"
+            >
+              {String(index + 1).padStart(2, '0')}
             </span>
           </Reveal>
           <Reveal delay={0.06}>
@@ -78,7 +123,10 @@ function ExperienceRow({
           <Reveal delay={0.18}>
             <ul className="mt-6 flex flex-wrap gap-x-6 gap-y-2.5">
               {experience.highlights.slice(0, 4).map((highlight) => (
-                <li key={highlight} className="flex items-center gap-2 text-sm font-medium text-navy-800">
+                <li
+                  key={highlight}
+                  className="flex items-center gap-2 text-sm font-medium text-navy-800"
+                >
                   <span className="h-1 w-1 rounded-full bg-coral-500" aria-hidden="true" />
                   {highlight}
                 </li>

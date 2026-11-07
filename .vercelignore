@@ -4,6 +4,12 @@
 **/*.spec.ts
 **/*.spec.tsx
 api/dev-server.ts
+# MongoDB standalone entry points are not Vercel Functions.
+api/server.ts
+api/_server.ts
+# Standalone production artifact and operator scripts are not Vercel functions.
+api/dist/
+api/scripts/
 # Test-only harness (Supabase fake + fixtures). Never imported by production
 # code; excluded so it cannot reach a deployment snapshot.
 api/_lib/testing/
@@ -17,6 +23,7 @@ api/_lib/testing/
 .vercel/
 
 # Not needed on the server
+workflow/
 supabase/
 supabase/.temp/
 docs/
@@ -32,3 +39,5 @@ C：UsersSSD-OR~1AppDataLocalTemplint.txt
 # Retired JAD dev scratch scripts (operated on the JAD `marketing-tools` bucket)
 test-cleanup.ts
 test-realtime.ts
+# Disposable SQL and HTTP fixtures are never deployed.
+packages/db-testing/

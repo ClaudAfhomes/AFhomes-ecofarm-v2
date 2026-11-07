@@ -1,5 +1,15 @@
+/**
+ * Staff-console date display (browser-zone, en-PH).
+ *
+ * Staff consoles run on Philippine time alongside the servers, so these
+ * helpers intentionally render in the browser's zone. Anything shown to a
+ * MEMBER (portal, QR receipts, onboarding) must use the UTC-pinned helpers in
+ * `@afhomes/shared` instead, so the date never shifts with the member's zone.
+ */
+
 /** Format an ISO-8601 date string to a human-readable short date. */
-export function formatDate(iso: string): string {
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const date = new Date(iso);
   return date.toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -9,7 +19,8 @@ export function formatDate(iso: string): string {
 }
 
 /** Format an ISO-8601 date string to a human-readable datetime. */
-export function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
   const date = new Date(iso);
   return date.toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -18,6 +29,18 @@ export function formatDateTime(iso: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/**
+ * Group a TIN for display: 123-456-789, with an optional branch suffix
+ * (123-456-789-000). Digits are the record; grouping is presentation only.
+ */
+export function formatTin(value: string | null | undefined): string {
+  const digits = (value ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  const groups = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)].filter(Boolean);
+  const branch = digits.slice(9);
+  return branch ? `${groups.join('-')}-${branch}` : groups.join('-');
 }
 
 const MINUTE_MS = 60_000;
@@ -58,4 +81,17 @@ export function formatDayLabel(iso: string, now: Date = new Date()): string {
   const dayDiff = Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / DAY_MS);
   if (dayDiff === 1) return 'Yesterday';
   return formatDate(iso);
+}
+
+/**
+ * Turn a machine token into a readable label: `STAFF_ROLE_CHANGED` and
+ * `staffRoleChanged` both become `Staff role changed`. Presentation only -
+ * the caller keeps the raw token wherever it is still the identity.
+ */
+export function humanizeToken(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
 }

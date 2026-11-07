@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 12 - identity documents and OCR-assisted extraction.
+ * AFHomes Phase 12 - identity documents and OCR-assisted extraction.
  *
  * OCR output is SUGGESTION data, never authoritative data. Nothing extracted
  * ever reaches a customer or application record without explicit human review
@@ -66,12 +66,22 @@ export const identityDocumentSchema = z.object({
 });
 export type IdentityDocument = z.infer<typeof identityDocumentSchema>;
 
+/** Queue metadata; detailed reads retain OCR suggestions and reviewed fields. */
+export const identityDocumentSummarySchema = identityDocumentSchema.omit({
+  extractedFields: true,
+  reviewedFields: true,
+  warnings: true,
+  possibleDuplicate: true,
+});
+export type IdentityDocumentSummary = z.infer<typeof identityDocumentSummarySchema>;
+
 /** Page flags describe subject-wide currentness; a page may contain no current row. */
 export const documentListQuerySchema = z.object({
   subjectType: documentSubjectSchema,
   subjectId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(100),
   offset: z.coerce.number().int().min(0).default(0),
+  view: z.enum(['detail', 'summary']).default('detail'),
 });
 export const currentDocumentQuerySchema = documentListQuerySchema
   .pick({

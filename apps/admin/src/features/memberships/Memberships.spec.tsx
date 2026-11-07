@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditResponse, Membership, MembershipCard } from '@jad/contracts';
+import type { AuditResponse, Membership, MembershipCard } from '@afhomes/contracts';
 import { Route, Routes } from 'react-router';
 
 import { renderWithProviders } from '../../test/utils';
@@ -10,6 +10,18 @@ import { MembershipDetailPage } from './MembershipDetailPage';
 import { MembershipsPage } from './MembershipsPage';
 import { getMembershipCard, getMemberships } from './services';
 import { getAudit } from '../reports/services';
+
+const reportFeature = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return {
+    ...actual,
+    isFeaturePathEnabled: (path: string) =>
+      reportFeature.enabled && path === '/api/v1/reports/audit'
+        ? true
+        : actual.isFeaturePathEnabled(path),
+  };
+});
 
 vi.mock('./services', () => ({
   getMemberships: vi.fn(),
@@ -124,6 +136,7 @@ const STAFF: SessionUser = {
 afterEach(() => vi.clearAllMocks());
 
 beforeEach(() => {
+  reportFeature.enabled = false;
   mockedGetAudit.mockResolvedValue({ ...HISTORY, data: [] });
 });
 
@@ -197,14 +210,16 @@ describe('Membership detail', () => {
     );
   }
 
-  it('renders card metadata, issuer, entitlement and history', async () => {
+  it('renders card metadata, issuer, entitlement and retained history when reports are enabled', async () => {
+    reportFeature.enabled = true;
     mockedGetMembershipCard.mockResolvedValue(CARD);
     mockedGetAudit.mockResolvedValue(HISTORY);
     renderDetail(STAFF);
     expect(await screen.findByText('Pedro Reyes')).toBeInTheDocument();
     expect(screen.getByText('Membership Cards')).toBeInTheDocument();
     expect(screen.getByText('Ops Admin')).toBeInTheDocument();
-    expect(screen.getAllByText('60,000')).toHaveLength(2);
+    expect(screen.getByText('Points balance').nextElementSibling).toHaveTextContent('60,000');
+    expect(screen.getByText('Yearly entitlement').nextElementSibling).toHaveTextContent('60,000');
     expect(await screen.findByText('History')).toBeInTheDocument();
     expect(screen.getByText(/MEMBERSHIP_CARD_PRINTED/)).toBeInTheDocument();
     expect(mockedGetAudit).toHaveBeenCalledWith(
@@ -213,11 +228,22 @@ describe('Membership detail', () => {
   });
 
   it('hides history without the audit grant', async () => {
+    reportFeature.enabled = true;
     mockedGetMembershipCard.mockResolvedValue(CARD);
     renderDetail({ ...STAFF, afHomesPermissions: STAFF.afHomesPermissions.slice(0, 1) });
     await screen.findByText('Pedro Reyes');
     expect(screen.queryByText('History')).not.toBeInTheDocument();
     expect(mockedGetAudit).not.toHaveBeenCalled();
+  });
+
+  it('does not render or request disabled history even with the audit grant', async () => {
+    mockedGetMembershipCard.mockResolvedValue(CARD);
+    renderDetail(STAFF);
+    await screen.findByText('Pedro Reyes');
+    expect(screen.queryByRole('region', { name: 'Card history' })).not.toBeInTheDocument();
+    expect(screen.queryByText('History')).not.toBeInTheDocument();
+    expect(mockedGetAudit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Record a print/ })).toBeInTheDocument();
   });
 
   it('shows a retryable error state', async () => {
@@ -242,9 +268,9 @@ describe('Printable card', () => {
       },
     );
     const proof = await screen.findByRole('img', {
-      name: 'AF Homes membership card for Pedro Reyes',
+      name: 'AFhomes VIP Privilege Card for Pedro Reyes',
     });
-    expect(proof).toHaveTextContent('AF Homes Ecofarm');
+    expect(proof).toHaveTextContent('AFhomes Ecofarm');
     expect(proof).toHaveTextContent('MBS-000001');
     expect(proof).toHaveTextContent('Membership Cards');
     expect(

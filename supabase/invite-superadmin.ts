@@ -197,7 +197,7 @@ async function main(): Promise<void> {
       const { error: staffError } = await supabase.from('staff_users').insert({
         id: userId,
         email,
-        full_name: 'AF Homes Super Admin',
+        full_name: 'AFHomes Super Admin',
         status: 'invited',
         invited_at: new Date().toISOString(),
       });

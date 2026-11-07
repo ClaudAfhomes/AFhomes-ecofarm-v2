@@ -15,6 +15,29 @@
  */
 import { writeFileSync } from 'node:fs';
 
+// Full application deployments need privileged APIs even when public Auth can still log in.
+if (['preview', 'production'].includes(process.env.VERCEL_ENV)) {
+  const required = [
+    ['SUPABASE_SERVICE_ROLE_KEY'],
+    ['SUPABASE_URL', 'VITE_SUPABASE_URL'],
+    [
+      'SUPABASE_PUBLISHABLE_KEY',
+      'VITE_SUPABASE_PUBLISHABLE_KEY',
+      'SUPABASE_ANON_KEY',
+      'VITE_SUPABASE_ANON_KEY',
+    ],
+    ['VITE_SUPABASE_URL'],
+    ['VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY'],
+  ];
+  const missing = required.filter((names) => !names.some((name) => process.env[name]?.trim()));
+  if (missing.length) {
+    console.error(
+      `[release] Incomplete deployment configuration: ${missing.map((names) => names.join(' or ')).join(', ')}. Check this deployment's environment and Git branch scope. No credential values are logged.`,
+    );
+    process.exit(1);
+  }
+}
+
 const url =
   process.env.VERCEL_ENV === 'production'
     ? (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL)

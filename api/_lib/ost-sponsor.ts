@@ -5,19 +5,13 @@ export type SponsorCheck =
   | { ok: false; status: 403 | 404 | 409; message: string };
 
 /**
- * OST sponsorship validation: the sponsor of an OST referral code must be an
- * ACTIVE SALES MANAGER holding an active role.
- *
- * This rule belongs ONLY to the OST sponsorship context (public code
- * resolution, public application submission, and the approval re-check),
- * because an approved OST is inserted into the genealogy as `ost` directly
- * under a `sales_manager`. It must never be reused for customer/card-sale
- * referrals or for generic referral-code issuance - those contexts have
- * their own validators below.
+ * Public referral sponsors may be VD/SSM/SM. Manual registration requires SM;
+ * SQL additionally validates its complete upperline and the actor's scope.
  */
 export async function validateOstSponsor(
   db: NonNullable<ReturnType<typeof serviceClient>>,
   sponsorStaffId: string,
+  context: 'referral' | 'manual' = 'referral',
 ): Promise<SponsorCheck> {
   const { data: staff, error: staffError } = await db
     .from('staff_users')
@@ -27,7 +21,7 @@ export async function validateOstSponsor(
   if (staffError) throw staffError;
   if (!staff) return { ok: false, status: 404, message: 'Sponsor not found' };
   if (staff.status !== 'active')
-    return { ok: false, status: 409, message: 'The sponsoring Sales Manager is not active' };
+    return { ok: false, status: 409, message: 'The sponsoring seller is not active' };
   const { data: assignment, error: assignmentError } = await db
     .from('staff_role_assignments')
     .select('role_id')
@@ -42,8 +36,13 @@ export async function validateOstSponsor(
     .eq('id', assignment.role_id)
     .maybeSingle();
   if (roleError) throw roleError;
-  if (!role?.is_active || role.slug !== 'sales_manager')
-    return { ok: false, status: 409, message: 'Referrals must come from an active Sales Manager' };
+  const eligible = context === 'manual'
+    ? role?.slug === 'sales_manager'
+    : ['vice_director', 'senior_sales_manager', 'sales_manager'].includes(role?.slug);
+  if (!role?.is_active || !eligible)
+    return { ok: false, status: 409, message: context === 'manual'
+      ? 'Choose an active Sales Manager for manual registration'
+      : 'Referrals require an active VD, SSM or Sales Manager' };
   return {
     ok: true,
     id: String(staff.id),

@@ -94,7 +94,9 @@ for (const test of cases)
   describe(`${test.name} durable request boundary`, () => {
     it('requires a UUID before calling the database', async () => {
       expect((await call(test, { ...test.body, requestId: undefined })).status).toBe(400);
-      expect(holder.db!.calls.some((c) => c.op === 'rpc')).toBe(false);
+      expect(
+        holder.db!.calls.some((c) => c.op === 'rpc' && c.table !== 'afhomes_admin_mfa_required'),
+      ).toBe(false);
     });
     it('rejects malformed request identity', async () => {
       expect((await call(test, { ...test.body, requestId: 'not-a-uuid' })).status).toBe(400);

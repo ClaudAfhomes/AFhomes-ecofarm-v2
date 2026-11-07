@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { cmsPageSchema, type CmsSection } from '@jad/contracts';
+import { cmsPageSchema, type CmsSection } from '@afhomes/contracts';
 import { Navigate, useParams } from 'react-router';
 
 import { request } from '../../lib/api/client';
@@ -63,7 +63,7 @@ export default function CmsPage() {
   if (!page.data) return <NotFound />;
   return (
     <>
-      <PageHeader eyebrow="AF Homes" title={page.data.title} />
+      <PageHeader eyebrow="AFhomes" title={page.data.title} />
       <Container className="py-16">
         {page.data.sections.map((section) => (
           <Section key={section.id ?? section.sortOrder} section={section} />

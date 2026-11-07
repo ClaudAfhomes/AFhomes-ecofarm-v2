@@ -1,7 +1,7 @@
 /**
- * AF Homes Phase 28 CMS admin surface.
+ * AFHomes Phase 28 CMS admin surface.
  *
- * Proves the Website CMS screens render real backend state (never mocks):
+ * Checks retained Website CMS behavior using contract-shaped mock API responses:
  * list loading/empty/error-with-retry, create/edit with server validation
  * errors, publish/unpublish toggles, permission-gated actions, no duplicate
  * submission while a save is pending, and no dead navigation links across the
@@ -14,6 +14,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
+import { websiteDefaults } from '@afhomes/ui/website-content';
+
+// Exercise retained CMS behavior; default-off routing is tested without this mock.
+vi.mock('@afhomes/shared', async (original) => {
+  const actual = await original<typeof import('@afhomes/shared')>();
+  return {
+    ...actual,
+    FEATURE_FLAGS: { ...actual.FEATURE_FLAGS, cms: true },
+    isFeaturePathEnabled: (path: string) =>
+      path === '/admin/cms' || path.startsWith('/admin/cms/') || actual.isFeaturePathEnabled(path),
+  };
+});
 
 type Route = { status?: number; body: unknown };
 const routes = new Map<string, Route>();
@@ -181,9 +193,9 @@ describe('Phase 28 CMS page editing', () => {
     render('/admin/cms/pages');
     await screen.findByText('Visit Us');
     await user.click(screen.getByRole('button', { name: 'New page' }));
-    await user.type(screen.getByLabelText('Title'), 'Harvest');
-    await user.type(screen.getByLabelText('Slug'), 'harvest');
-    await user.type(screen.getByLabelText('Change summary'), 'Announce the harvest.');
+    await user.type(screen.getByLabelText('Title(Optional)'), 'Harvest');
+    await user.type(screen.getByLabelText('Slug(Optional)'), 'harvest');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Announce the harvest.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     await waitFor(() => {
       const post = requests.find((r) => r.method === 'POST' && r.path === '/cms/pages');
@@ -202,13 +214,13 @@ describe('Phase 28 CMS page editing', () => {
     render('/admin/cms/pages');
     await screen.findByText('Visit Us');
     await user.click(screen.getByRole('button', { name: 'New page' }));
-    await user.type(screen.getByLabelText('Title'), 'Copy');
-    await user.type(screen.getByLabelText('Slug'), 'visit-us');
-    await user.type(screen.getByLabelText('Change summary'), 'Duplicate the slug.');
+    await user.type(screen.getByLabelText('Title(Optional)'), 'Copy');
+    await user.type(screen.getByLabelText('Slug(Optional)'), 'visit-us');
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Duplicate the slug.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     expect(await screen.findByText('That slug or media path already exists.')).toBeInTheDocument();
     // The editor stays open for correction.
-    expect(screen.getByLabelText('Slug')).toBeInTheDocument();
+    expect(screen.getByLabelText('Slug(Optional)')).toBeInTheDocument();
   });
 
   it('toggles publish state per row and sends no duplicate save', async () => {
@@ -259,24 +271,31 @@ describe('Phase 28 CMS document editing', () => {
     });
     render('/admin/cms/stories');
     expect(await screen.findByRole('heading', { name: 'Stories' })).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Change summary'), 'Refresh the stories.');
-    await user.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByText('Draft saved.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Publish draft' }));
-    expect(await screen.findByText('Publication state updated.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Refresh the stories.');
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    expect(await screen.findByText('Draft saved. The public website is unchanged until you publish.')).toBeInTheDocument();
+    expect(requests.find((r) => r.method === 'PATCH' && r.path === '/cms/documents/stories')?.body)
+      .toMatchObject({ value: [], expectedVersion: 1, changeSummary: 'Refresh the stories.' });
+    await user.click(screen.getByRole('button', { name: 'Publish Saved Draft' }));
+    expect(await screen.findByText('Saved draft published.')).toBeInTheDocument();
+    expect(requests.find((r) => r.method === 'POST' && r.path === '/cms/documents/stories/publish')?.body)
+      .toMatchObject({ expectedVersion: 2 });
   });
 
-  it('rejects invalid JSON locally with an explanation', async () => {
+  it('retains invalid structured content and blocks saving with an explanation', async () => {
     const user = userEvent.setup();
+    install({ 'GET /cms/documents': list([storiesDoc({ draftValue: [websiteDefaults.stories[0]] })]) });
     render('/admin/cms/stories');
     await screen.findByRole('heading', { name: 'Stories' });
-    const editor = screen.getByLabelText('Structured content (JSON)');
-    await user.clear(editor);
-    // fireEvent: userEvent.type would parse `{` as a keyboard descriptor.
-    fireEvent.change(editor, { target: { value: '{not json' } });
-    await user.type(screen.getByLabelText('Change summary'), 'Broken edit.');
-    await user.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await screen.findByText('Content must be valid JSON.')).toBeInTheDocument();
+    const editor = screen.getByLabelText('Title(Optional)');
+    const invalid = 'x'.repeat(20001);
+    fireEvent.change(editor, { target: { value: invalid } });
+    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Broken edit.');
+    expect(screen.getByText(/Content needs review. The original data is preserved/)).toBeInTheDocument();
+    expect(editor).toHaveValue(invalid);
+    const save = screen.getByRole('button', { name: 'Save Draft' });
+    expect(save).toBeDisabled();
+    await user.click(save);
     expect(requests.filter((r) => r.method === 'PATCH')).toHaveLength(0);
   });
 });
@@ -347,7 +366,7 @@ describe('Phase 28 CMS navigation completeness', () => {
     ['/admin/cms/stories', 'Stories'],
     ['/admin/cms/experiences', 'Experiences'],
     ['/admin/cms/site-settings', 'Site Settings'],
-    ['/admin/cms/seo', 'Page Content and SEO'],
+    ['/admin/cms/seo', 'SEO'],
     ['/admin/cms/history', 'CMS History'],
   ];
 

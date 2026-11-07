@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AuthPortals } from '@jad/contracts';
+import type { AuthPortals } from '@afhomes/contracts';
 import { decideCustomerLogin } from './CustomerLoginForm';
 const staff = (roleSlug: string, mustChangePassword = false): AuthPortals => ({
   staff: { roleSlug, roleName: roleSlug, status: 'active', mustChangePassword },
@@ -7,6 +7,11 @@ const staff = (roleSlug: string, mustChangePassword = false): AuthPortals => ({
   ost: null,
 });
 describe('customer entry identity routing', () => {
+  it('routes an OST temporary password to its own password screen', () =>
+    expect(decideCustomerLogin(staff('ost', true))).toEqual({
+      kind: 'navigate',
+      to: '/ost/change-password',
+    }));
   it.each([
     'employee',
     'finance',

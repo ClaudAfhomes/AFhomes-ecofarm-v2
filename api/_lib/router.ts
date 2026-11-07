@@ -12,6 +12,7 @@
  * loaded on first use (cold-start win); shared libs stay imported eagerly.
  */
 import { toErrorEnvelope } from './envelope.js';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 type HandlerFn = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
@@ -40,11 +41,11 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * handler. Supports both `/api/v1/...` and bare `/api/...` prefixes (the bare
  * prefix only matters for the local dev server; Vercel only serves `/api/v1`).
  *
- * Phase 2 surface: the AF Homes operations API, the business families
+ * Phase 2 surface: the AFHomes operations API, the business families
  * (card products, customers, sales, payments, activation, memberships, points,
  * commissions, referrals, queues), and the health probe. Every other route
- * family (members, vouchers, withdrawals, CMS, ...) belonged to the retired JAD
- * platform and was removed - none of it had a table in the AF Homes schema.
+ * family (members, vouchers, withdrawals, CMS, ...) belonged to the retired
+ * predecessor platform and was removed - none of it had a table in the AFHomes schema.
  */
 
 /**
@@ -52,7 +53,14 @@ function lazy(load: () => Promise<{ default: HandlerFn }>): HandlerFn {
  * query parameter. Declared as data so adding a family is a single entry and
  * `route-coverage` can still prove every handler is reachable.
  */
-const BUSINESS_FAMILIES = [
+export const BUSINESS_FAMILIES = [
+  { prefix: 'ist-portal', module: 'ist-portal', load: () => import('../_handlers/ist-portal.js') },
+  {
+    prefix: 'profile-photo',
+    module: 'profile-photo',
+    load: () => import('../_handlers/profile-photo.js'),
+  },
+  { prefix: 'sale-team', module: 'sale-team', load: () => import('../_handlers/sale-team.js') },
   {
     prefix: 'ost-accreditation',
     module: 'ost-accreditation',
@@ -90,6 +98,14 @@ const BUSINESS_FAMILIES = [
   },
   { prefix: 'referrals', module: 'referrals', load: () => import('../_handlers/referrals.js') },
   { prefix: 'genealogy', module: 'genealogy', load: () => import('../_handlers/genealogy.js') },
+  // Sales-network Members: hierarchy sellers with a linked profile record.
+  // Own module key (`network.members`); the handler authorizes list, uplines,
+  // create and update separately.
+  {
+    prefix: 'members',
+    module: 'network.members',
+    load: () => import('../_handlers/members.js'),
+  },
   { prefix: 'analytics', module: 'analytics', load: () => import('../_handlers/analytics.js') },
   // Phase 15 Reports and Audit Center. One family for the ten scoped reports
   // plus the audit log; the handler authorizes each report against its own
@@ -111,8 +127,8 @@ const BUSINESS_FAMILIES = [
   //
   // `auth` is the UNAUTHENTICATED activation entry point and carries an explicit
   // `path`, so it claims ONLY `auth/customer/activate`. Without that constraint it
-  // would also swallow `/api/v1/auth/register` - a route belonging to the retired
-  // JAD platform, which must stay unroutable. Claiming a whole prefix is how a
+  // would also swallow `/api/v1/auth/register` - a route belonging to the
+  // retired predecessor platform, which must stay unroutable. Claiming a whole prefix is how a
   // retired surface quietly comes back to life.
   //
   // `customer` (singular) is listed AFTER `customers` (plural) and cannot match
@@ -130,6 +146,27 @@ const BUSINESS_FAMILIES = [
     load: () => import('../_handlers/auth-portals.js'),
   },
   { prefix: 'customer', module: 'customer', load: () => import('../_handlers/customer-portal.js') },
+  // Points EARNING: recording a purchase, creating and reissuing an earning claim,
+  // the customer's own QR claim, and the catalog/rules that decide what earns.
+  //
+  // The prefix is `earning`, NOT `points`. `/points` is ALREADY owned by
+  // memberships.ts (the per-member account, ledger and card), and selectHandler
+  // returns the FIRST matching family - so declaring a second `points` family
+  // shadowed this one entirely and every route below 404'd into the wrong handler
+  // while its unit tests stayed green, because those call the handler directly and
+  // never go through selectHandler. `router.spec.ts` now asserts prefix uniqueness
+  // and the dispatch target, so this cannot happen silently again.
+  //
+  // It reuses the EXISTING module keys - `sales.customers`,
+  // `operations.redemption` and `operations.catalog` - so the points rebuild adds
+  // NO new authorization vocabulary and the eight existing authorization
+  // invariants are untouched. The module field only builds the routeKey; each
+  // handler authorizes its own module and action.
+  {
+    prefix: 'earning',
+    module: 'operations.redemption',
+    load: () => import('../_handlers/points.js'),
+  },
   // Staff redemption. Reuses the Phase 1 `operations.redemption` and
   // `operations.catalog` module keys, so Phase 4 adds NO new authorization
   // vocabulary. `items` and `history` live under the same prefix, and because a
@@ -145,12 +182,25 @@ const BUSINESS_FAMILIES = [
     module: 'cms',
     load: () => import('../_handlers/cms.js'),
   },
+  // Official Philippine address reference data (province -> city/municipality
+  // -> barangay) for the Customer Application form. Read-only. The `module`
+  // here only names the route; the handler authorizes against `sales.customers`
+  // itself, which is the screen that needs it - so this adds NO new module key.
+  //
+  // Deliberately NOT `locations`: that prefix belonged to the retired
+  // predecessor platform and must stay unroutable (see router.spec.ts).
+  {
+    prefix: 'address',
+    module: 'sales.customers',
+    load: () => import('../_handlers/_address-supabase.js'),
+  },
 ] as const;
 
 export function selectHandler(
   pathname: string,
   query: Record<string, string | string[] | undefined>,
 ): RouteMatch | null {
+  if (!isFeaturePathEnabled(pathname)) return null;
   const afHomesMatch = pathname.match(/^\/api(?:\/v1)?\/admin\/afhomes\/(.+)$/);
   if (afHomesMatch) {
     query.afPath = decodeURIComponent(afHomesMatch[1] ?? '');

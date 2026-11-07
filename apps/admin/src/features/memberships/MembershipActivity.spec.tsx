@@ -1,10 +1,11 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { membershipSchema, pointsAccountSchema, type AfHomesPermission } from '@jad/contracts';
+import { membershipSchema, pointsAccountSchema, type AfHomesPermission } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { MembershipActivity } from './MembershipActivity';
 import { getMembership, getMembershipLedger, getMembershipPoints } from './services';
 import { getSalePayments } from '../business/services';
+import { getReport } from '../reports/services';
 vi.mock('./services', () => ({
   getMembership: vi.fn(),
   getMembershipPoints: vi.fn(),
@@ -24,9 +25,7 @@ const grant = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => 
   canDelete: false,
 });
 const open = (label: string) => {
-  const details = screen.getByText(label).closest('details')!;
-  details.open = true;
-  fireEvent(details, new Event('toggle'));
+  fireEvent.click(screen.getByRole('button', { name: label }));
 };
 it('shows no restricted activity and performs no requests without grants', () => {
   renderWithProviders(<MembershipActivity id={id} number="MBS-QA-1" permissions={[]} />);
@@ -35,6 +34,45 @@ it('shows no restricted activity and performs no requests without grants', () =>
   expect(getMembership).not.toHaveBeenCalled();
   expect(getMembershipPoints).not.toHaveBeenCalled();
   expect(getSalePayments).not.toHaveBeenCalled();
+});
+it('toggles a group and queries only after it opens', async () => {
+  vi.mocked(getMembershipPoints).mockResolvedValue(
+    pointsAccountSchema.parse({
+      id: accountId,
+      membershipId: id,
+      balance: 1,
+      lifetimeAllocated: 1,
+      lifetimeRedeemed: 0,
+      updatedAt: '2026-10-01',
+    }),
+  );
+  vi.mocked(getMembershipLedger).mockResolvedValue([]);
+  renderWithProviders(
+    <MembershipActivity id={id} number="MBS-QA-1" permissions={[grant('finance.points')]} />,
+  );
+  const trigger = screen.getByRole('button', { name: 'Points' });
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  expect(getMembershipPoints).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await waitFor(() => expect(getMembershipPoints).toHaveBeenCalled());
+});
+it('hides disabled transaction reports even with a grant and keeps active activity available', () => {
+  renderWithProviders(
+    <MembershipActivity
+      id={id}
+      number="MBS-QA-1"
+      permissions={[
+        grant('operations.redemption'),
+        grant('finance.points'),
+        grant('finance.payment_verification'),
+      ]}
+    />,
+  );
+  expect(screen.queryByText('Transactions')).not.toBeInTheDocument();
+  expect(screen.getByText('Points')).toBeInTheDocument();
+  expect(screen.getByText('Payments')).toBeInTheDocument();
+  expect(getReport).not.toHaveBeenCalled();
 });
 it('loads authoritative points and its ledger lazily through the account identifier', async () => {
   vi.mocked(getMembershipPoints).mockResolvedValue(

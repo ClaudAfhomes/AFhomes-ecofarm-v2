@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField } from '@jad/ui';
-import { validateRecoveryPassword } from '@jad/shared';
+import { Alert, AuthLayout, Button, PasswordChecklist, PasswordField, TextField, TurnstileChallenge } from '@afhomes/ui';
+import { passwordRuleStates, validateRecoveryPassword } from '@afhomes/shared';
 
 import { useActivateMutation } from './queries';
 import { useCustomerSession } from '../../lib/customer-session';
+import { env } from '../../lib/env';
 import styles from './auth.module.css';
 
 /**
@@ -51,6 +52,9 @@ export function CustomerActivatePage() {
   // email. The typed password was never set on that account, so the page must
   // not attempt a sign-in with it - it points at sign-in / forgot-password.
   const [recovered, setRecovered] = useState(false);
+  const [activated, setActivated] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaVersion, setCaptchaVersion] = useState(0);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -67,6 +71,10 @@ export function CustomerActivatePage() {
       return;
     }
     setFieldError(null);
+    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+      setError('Complete security verification before activating your account.');
+      return;
+    }
     const secret = token.trim();
     try {
       const result = await activation.mutateAsync({
@@ -80,29 +88,36 @@ export function CustomerActivatePage() {
         setRecovered(true);
         return;
       }
-      // Now sign in through the normal Supabase Auth password flow.
-      await signIn(result.email, password);
-      navigate('/customer', { replace: true });
+      try {
+        await signIn(result.email, password, captchaToken ?? undefined);
+        navigate('/customer', { replace: true });
+      } catch {
+        // Activation is complete even if the separate login challenge has expired.
+        setActivated(true);
+      }
     } catch (cause) {
       setToken('');
       setError(cause instanceof Error ? cause.message : 'We could not activate your account.');
+    } finally {
+      setCaptchaToken(null);
+      setCaptchaVersion((version) => version + 1);
     }
   };
 
-  if (recovered) {
+  if (recovered || activated) {
     return (
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
-        title="Account linked"
+        eyebrow="AFhomes Ecofarm"
+        title={recovered ? 'Account linked' : 'Account activated'}
         lead="Your membership is ready."
         brandTitle="Your farm membership, in your pocket."
         brandLead="Track points, view your digital membership card, and follow your payments."
       >
         <Alert
           variant="success"
-          title="An account already exists for this email. Your membership has been linked."
+          title={recovered ? 'An account already exists for this email. Your membership has been linked.' : 'Your account is ready. Sign in to continue.'}
         >
-          Use Sign in with your existing password, or reset your password if needed.
+          {recovered ? 'Use Sign in with your existing password, or reset your password if needed.' : 'Use the password you just created.'}
         </Alert>
         <p className={styles.prompt}>
           <Link className={styles.promptLink} to="/customer/login">
@@ -119,9 +134,9 @@ export function CustomerActivatePage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Activate your account"
-      lead="Use the activation code you received from the AF Homes Ecofarm branch that registered you, then choose a password."
+      lead="Use your branch activation code."
       brandTitle="Your farm membership, in your pocket."
       brandLead="Track points, view your digital membership card, and follow your payments."
     >
@@ -150,9 +165,9 @@ export function CustomerActivatePage() {
             setFieldError(null);
           }}
           autoComplete="new-password"
-          hint="At least 10 characters, with a lowercase letter, an uppercase letter and a digit."
           error={fieldError ?? undefined}
         />
+        {password.length > 0 && <PasswordChecklist items={passwordRuleStates(password)} />}
 
         <PasswordField
           id="activation-password-confirm"
@@ -165,6 +180,7 @@ export function CustomerActivatePage() {
           autoComplete="new-password"
         />
 
+        <TurnstileChallenge siteKey={env.VITE_TURNSTILE_SITE_KEY} action="login" onToken={setCaptchaToken} resetVersion={captchaVersion} />
         <div className={styles.submitRow}>
           <Button type="submit" loading={activation.isPending} disabled={activation.isPending}>
             Activate my account

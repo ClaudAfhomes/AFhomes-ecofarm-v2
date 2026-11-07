@@ -1,5 +1,5 @@
 /**
- * AF Homes operations API - direct handler coverage.
+ * AFHomes operations API - direct handler coverage.
  *
  * Exercises `api/_handlers/admin/afhomes.ts` end to end through the same seam
  * production uses: the real handler, the real authorization resolver, the real
@@ -11,10 +11,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { baseTables, baseTokens, TOKEN, UUID, moduleId } from '../../_lib/testing/fixtures.js';
 import { FakeSupabase, makeReq, makeRes } from '../../_lib/testing/supabase-fake.js';
 
-const holder = vi.hoisted(() => ({ db: null as unknown }));
+const holder = vi.hoisted(() => ({ db: null as unknown, svcNull: false, userDb: null as unknown }));
 
 vi.mock('../../_lib/rest.js', () => ({
-  serviceClient: () => holder.db,
+  serviceClient: () => (holder.svcNull ? null : holder.db),
+  userClient: () => holder.userDb,
   anonClient: () => holder.db,
   requireService: (res: { status: (c: number) => { json: (b: unknown) => void } }) => {
     if (!holder.db) {
@@ -50,7 +51,7 @@ afterAll(() => {
 
 type Json = Record<string, unknown>;
 
-/** Unique keys as declared by the AF Homes foundation migration. */
+/** Unique keys as declared by the AFHomes foundation migration. */
 const UNIQUE = {
   departments: [['code'], ['name']],
   roles: [['slug'], ['name']],
@@ -92,6 +93,8 @@ function install(
     signIn?: (creds: { email: string; password: string }) => Promise<unknown>;
   } = {},
 ) {
+  holder.svcNull = false;
+  holder.userDb = null;
   holder.db = new FakeSupabase({
     tables: baseTables(options.tables as never),
     tokens: { ...baseTokens(), ...options.tokens },
@@ -133,9 +136,106 @@ async function call(options: {
 const err = (body: unknown) => (body as Json).error as Json | undefined;
 const data = (body: unknown) => (body as Json).data;
 
+describe('staff sales involvement authorization', () => {
+  beforeEach(() => install());
+  it('passes the authenticated actor and target to the read-only adapter', async () => {
+    const original = (holder.db as FakeSupabase).rpc.bind(holder.db);
+    const rpc = vi
+      .spyOn(holder.db as FakeSupabase, 'rpc')
+      .mockImplementation((fn, args) =>
+        fn === 'staff_sales_involvement'
+          ? Promise.resolve({ data: [], error: null })
+          : original(fn, args),
+      );
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(data(state.body)).toEqual([]);
+    expect(rpc).toHaveBeenCalledWith('staff_sales_involvement', {
+      p_actor_id: UUID.superAdminStaff,
+      p_staff_id: UUID.adminStaff,
+      p_limit: 25,
+      p_offset: 0,
+    });
+  });
+  it('requires authentication', async () => {
+    const state = await call({ afPath: `staff/${UUID.adminStaff}/sales-involvement` });
+    expect(state.status).toBe(401);
+  });
+  it('denies a viewer without staff/customer access', async () => {
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.viewer,
+    });
+    expect(state.status).toBe(403);
+  });
+  it('rejects invalid pagination before querying purchase history', async () => {
+    const state = await call({
+      afPath: `staff/${UUID.adminStaff}/sales-involvement`,
+      token: TOKEN.superAdmin,
+      query: { limit: '1000' },
+    });
+    expect(state.status).toBe(400);
+  });
+});
+
 /* ================================================================== */
 /* Session / authentication                                           */
 /* ================================================================== */
+
+describe('staff OST lifecycle boundary', () => {
+  const ostRoleId = '10000000-0000-4000-8000-000000000001';
+  it.each(['into', 'out of'])('refuses generic staff role changes %s OST', async (direction) => {
+    const db = install();
+    db.rows('roles').push({
+      id: ostRoleId,
+      slug: 'ost',
+      name: 'OST',
+      is_active: true,
+      is_system: true,
+    });
+    if (direction === 'out of')
+      db.rows('staff_role_assignments').find((r) => r.staff_id === UUID.viewerStaff)!.role_id =
+        ostRoleId;
+    const before = JSON.stringify(db.tables);
+    const result = await call({
+      method: 'PATCH',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+      body: { roleId: direction === 'into' ? ostRoleId : UUID.role.employee },
+    });
+    expect(result.status).toBe(409);
+    expect(JSON.stringify(db.tables)).toBe(before);
+  });
+  it('refuses generic staff creation with the OST role before Auth provisioning', async () => {
+    const db = install();
+    db.rows('roles').push({
+      id: ostRoleId,
+      slug: 'ost',
+      name: 'OST',
+      is_active: true,
+      is_system: true,
+    });
+    const result = await call({
+      method: 'POST',
+      afPath: 'staff',
+      token: TOKEN.superAdmin,
+      body: {
+        fullName: 'Synthetic Ost',
+        email: 'synthetic@example.invalid',
+        roleId: ostRoleId,
+        departmentId: UUID.department.sales,
+        temporaryPassword: 'SyntheticPass123',
+      },
+    });
+    expect(result.status).toBe(409);
+    expect(db.calls.some((c) => ['createUser', 'inviteUserByEmail', 'insert'].includes(c.op))).toBe(
+      false,
+    );
+  });
+});
 
 describe('GET /admin/afhomes/session', () => {
   beforeEach(() => install());
@@ -273,13 +373,21 @@ describe('GET /admin/afhomes/session', () => {
   });
 
   it('resolves a Super Admin session with every module granted', async () => {
+    const db = install();
     const state = await call({ afPath: 'session', token: TOKEN.superAdmin });
     expect(state.status).toBe(200);
     const body = state.body as Json;
     expect(body.roleSlug).toBe('super_admin');
     const perms = body.permissions as { moduleKey: string; canView: boolean }[];
-    expect(perms).toHaveLength(22);
+    // Super Admin is granted every module by SLUG rather than by row, so the
+    // meaningful assertion is "one grant per declared module", where the
+    // declared vocabulary is the fixture's own modules table. A hardcoded
+    // literal here silently passes for a different module set.
+    expect(perms).toHaveLength(db.rows('modules').length);
     expect(perms.every((p) => p.canView)).toBe(true);
+    // The Operational Services capability must be reachable by Super Admin, or
+    // the GSD sale workflow would be invisible to the one role that owns it.
+    expect(perms.some((p) => p.moduleKey === 'operations.sales')).toBe(true);
   });
 
   it('resolves a custom role with exactly its granted matrix', async () => {
@@ -361,6 +469,7 @@ describe('staff account deletion safety', () => {
   const blockerSchema: Record<string, readonly string[]> = {
     card_sales: ['seller_staff_id', 'created_by'],
     commissions: ['beneficiary_staff_id', 'qualified_by', 'paid_by'],
+    commission_rules: ['created_by', 'updated_by'],
     referral_relationships: ['subject_staff_id', 'upline_staff_id', 'assigned_by'],
     card_sale_hierarchy_snapshots: ['ancestor_staff_id'],
     customers: ['referred_by_staff_id', 'created_by'],
@@ -481,6 +590,59 @@ describe('staff account deletion safety', () => {
     expect(state.body).toMatchObject({
       error: { code: 'PROTECTED_HISTORY', details: { blockers: ['sales'] } },
     });
+  });
+
+  it.each(['staff', 'ost'])(
+    'preserves a %s commission rule target during deletion',
+    async (targetType) => {
+      const db = install({
+        tables: {
+          commission_rules: [{ id: 'rule', target_type: targetType, target_id: UUID.viewerStaff }],
+        },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(state.body).toMatchObject({
+        error: { code: 'PROTECTED_HISTORY', details: { blockers: ['commission rules'] } },
+      });
+      expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(true);
+      expect(db.deletedAuthUsers).toEqual([]);
+    },
+  );
+
+  it.each(['created_by', 'updated_by'])(
+    'preserves a commission rule %s attribution',
+    async (column) => {
+      const db = install({
+        tables: { commission_rules: [{ id: 'rule', [column]: UUID.viewerStaff }] },
+      });
+      const state = await call({
+        method: 'DELETE',
+        afPath: `staff/${UUID.viewerStaff}`,
+        token: TOKEN.superAdmin,
+      });
+      expect(state.status).toBe(409);
+      expect(db.deletedAuthUsers).toEqual([]);
+    },
+  );
+
+  it('keeps a role-target UUID separate from a staff-target UUID', async () => {
+    const db = install({
+      tables: {
+        commission_rules: [{ id: 'rule', target_type: 'role', target_id: UUID.viewerStaff }],
+      },
+    });
+    const state = await call({
+      method: 'DELETE',
+      afPath: `staff/${UUID.viewerStaff}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('staff_users').some((row) => row.id === UUID.viewerStaff)).toBe(false);
   });
 
   it.each([
@@ -660,7 +822,7 @@ describe('staff deletion blockers on tables without an id column', () => {
   });
 
   it('scans id-less tables without throwing for a clean target', async () => {
-    const db = install({
+    install({
       tables: {
         card_sale_hierarchy_snapshots: [{ ...HIERARCHY_ROW, ancestor_staff_id: UUID.adminStaff }],
         cms_documents: [{ ...CMS_DOC_ROW }],
@@ -910,6 +1072,21 @@ describe('staff test-account purge', () => {
     const actions = db.rows('audit_events').map((row) => row.action);
     expect(actions).toContain('TEST_ACCOUNT_PURGE_STARTED');
     expect(actions).toContain('TEST_ACCOUNT_PURGED');
+  });
+
+  it('refuses test purge when it would orphan a commission rule', async () => {
+    enablePurge();
+    const db = install();
+    addTestStaff(db);
+    db.rows('commission_rules').push({
+      id: 'rule',
+      target_type: 'staff',
+      target_id: TEST_STAFF_ID,
+    });
+    const state = await purge(TEST_STAFF_ID);
+    expect(state.status).toBe(409);
+    expect(db.rows('staff_users').some((row) => row.id === TEST_STAFF_ID)).toBe(true);
+    expect(db.deletedAuthUsers).toEqual([]);
   });
 
   it('purges a disposable test customer owned by the staff graph', async () => {
@@ -1270,6 +1447,17 @@ describe('roles', () => {
     expect(state.status).toBe(401);
   });
 
+  it('defaults the admin and super admin roles to the Admins department', async () => {
+    const state = await call({ afPath: 'roles', token: TOKEN.admin });
+    expect(state.status).toBe(200);
+    const rows = (state.body as { data: Json[] }).data;
+    for (const slug of ['admin', 'super_admin']) {
+      const row = rows.find((r) => r.slug === slug)!;
+      expect(row.departmentId).toBe(UUID.department.admins);
+      expect(row.departmentName).toBe('Admins');
+    }
+  });
+
   it('creates a custom role with a permission subset the actor holds', async () => {
     const db = install();
     const state = await call({
@@ -1278,7 +1466,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Sales Reviewer',
-        description: 'Read sales only',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'sales.card_sales',
@@ -1292,10 +1480,38 @@ describe('roles', () => {
     });
     expect(state.status).toBe(201);
     expect((state.body as Json).slug).toBe('sales_reviewer');
+    expect((state.body as Json).departmentId).toBe(UUID.department.sales);
+    expect((state.body as Json).departmentName).toBe('Sales');
     expect(
       db.rows('role_permissions').filter((r) => r.role_id === (state.body as Json).id),
     ).toHaveLength(1);
     expect(db.rows('audit_events').some((e) => e.action === 'ROLE_CREATED')).toBe(true);
+  });
+
+  it('refuses role creation without a department', async () => {
+    const state = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.admin,
+      body: { name: 'No Department Role', permissions: [] },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('refuses role creation with an unknown department', async () => {
+    const state = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.admin,
+      body: {
+        name: 'Ghost Department Role',
+        departmentId: '00000000-0000-4000-8000-000000009999',
+        permissions: [],
+      },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.message).toMatch(/department/i);
   });
 
   it('refuses to grant a permission the acting user does not hold (Invariant B)', async () => {
@@ -1305,6 +1521,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Escalation Attempt',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'governance.config',
@@ -1356,6 +1573,7 @@ describe('roles', () => {
       token: TOKEN.admin,
       body: {
         name: 'Rollback Me',
+        departmentId: UUID.department.sales,
         permissions: [
           {
             moduleKey: 'sales.card_sales',
@@ -1380,6 +1598,29 @@ describe('roles', () => {
     });
     expect(state.status).toBe(200);
     expect((state.body as Json).name).toBe('Regional Sales Manager');
+  });
+
+  it('moves a custom role to another department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.admin,
+      body: { departmentId: UUID.department.executive },
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Json).departmentId).toBe(UUID.department.executive);
+    expect((state.body as Json).departmentName).toBe('Executive');
+  });
+
+  it('refuses a role move to an unknown department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: `roles/${UUID.role.custom}`,
+      token: TOKEN.admin,
+      body: { departmentId: '00000000-0000-4000-8000-000000009999' },
+    });
+    expect(state.status).toBe(400);
+    expect(err(state.body)?.code).toBe('VALIDATION_ERROR');
   });
 
   it('refuses to edit a protected system role (Invariant D)', async () => {
@@ -1434,7 +1675,7 @@ describe('roles', () => {
     expect(err(state.body)?.message).toMatch(/do not possess/i);
   });
 
-  it('404s an unknown role and 404s on delete (no role delete surface)', async () => {
+  it('404s an unknown role and protects system roles on delete', async () => {
     const unknown = await call({
       method: 'PATCH',
       afPath: 'roles/00000000-0000-4000-8000-000000009999',
@@ -1442,12 +1683,36 @@ describe('roles', () => {
       body: { name: 'Ghost' },
     });
     expect(unknown.status).toBe(404);
-    const del = await call({
+    const missing = await call({
       method: 'DELETE',
-      afPath: `roles/${UUID.role.custom}`,
+      afPath: 'roles/00000000-0000-4000-8000-000000009999',
       token: TOKEN.superAdmin,
     });
-    expect(del.status).toBe(404);
+    expect(missing.status).toBe(404);
+    const system = await call({
+      method: 'DELETE',
+      afPath: `roles/${UUID.role.admin}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(system.status).toBe(403);
+  });
+
+  it('deletes an unassigned custom role', async () => {
+    const created = await call({
+      method: 'POST',
+      afPath: 'roles',
+      token: TOKEN.superAdmin,
+      body: {
+        name: 'Temp Delete Role',
+        isActive: true,
+        departmentId: UUID.department.sales,
+        permissions: [],
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = (created.body as { id: string }).id;
+    const del = await call({ method: 'DELETE', afPath: `roles/${id}`, token: TOKEN.superAdmin });
+    expect(del.status).toBe(200);
   });
 
   it('returns the audit trail for a role', async () => {
@@ -1494,7 +1759,7 @@ describe('departments', () => {
     const state = await call({ afPath: 'departments', token: TOKEN.admin });
     expect(state.status).toBe(200);
     const rows = data(state.body) as Json[];
-    expect(rows.map((r) => r.code).sort()).toEqual(['EXECUTIVE', 'LEGACY', 'SALES']);
+    expect(rows.map((r) => r.code).sort()).toEqual(['ADMINS', 'EXECUTIVE', 'LEGACY', 'SALES']);
     expect(rows.find((r) => r.code === 'SALES')!.staffCount).toBe(2);
     expect(rows.find((r) => r.code === 'LEGACY')!.isActive).toBe(false);
   });
@@ -1510,32 +1775,33 @@ describe('departments', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'FINANCE', name: 'Finance' },
+      body: { name: 'Finance' },
     });
     expect(state.status).toBe(201);
+    expect((state.body as Json).name).toBe('Finance');
     expect((state.body as Json).code).toBe('FINANCE');
-    expect(db.rows('departments').some((d) => d.code === 'FINANCE')).toBe(true);
+    expect(db.rows('departments').some((d) => d.name === 'Finance')).toBe(true);
     expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_CREATED')).toBe(true);
   });
 
-  it('rejects a malformed department code', async () => {
-    for (const code of ['finance', '1FIN', 'F', '']) {
+  it('rejects a short or missing department name', async () => {
+    for (const name of ['F', '', '  ']) {
       const state = await call({
         method: 'POST',
         afPath: 'departments',
         token: TOKEN.admin,
-        body: { code, name: 'Finance Team' },
+        body: { name },
       });
-      expect(state.status, code).toBe(400);
+      expect(state.status, name).toBe(400);
     }
   });
 
-  it('rejects a duplicate department code with 409', async () => {
+  it('rejects a duplicate department name with 409', async () => {
     const state = await call({
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'SALES', name: 'Sales Again' },
+      body: { name: 'Sales' },
     });
     expect(state.status).toBe(409);
     expect(err(state.body)?.code).toBe('CONFLICT');
@@ -1546,7 +1812,95 @@ describe('departments', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.viewer,
-      body: { code: 'NEWDEPT', name: 'New Dept' },
+      body: { name: 'New Dept' },
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('renames a department and audits it', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'PATCH',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.admin,
+      body: { name: 'Field Sales' },
+    });
+    expect(state.status).toBe(200);
+    expect((state.body as Json).name).toBe('Field Sales');
+    expect(db.rows('departments').find((d) => d.id === target.id)!.name).toBe('Field Sales');
+    expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_UPDATED')).toBe(true);
+  });
+
+  it('returns 404 when renaming a missing department', async () => {
+    const state = await call({
+      method: 'PATCH',
+      afPath: 'departments/00000000-0000-4000-8000-000000000000',
+      token: TOKEN.admin,
+      body: { name: 'Ghost Dept' },
+    });
+    expect(state.status).toBe(404);
+  });
+
+  it('denies renaming without organization.departments update', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'PATCH',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.viewer,
+      body: { name: 'Field Sales' },
+    });
+    expect(state.status).toBe(403);
+  });
+
+  it('deletes an unused department and audits it', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(200);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(false);
+    expect(db.rows('audit_events').some((e) => e.action === 'DEPARTMENT_DELETED')).toBe(true);
+  });
+
+  it('refuses to delete a department with assigned staff', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'SALES')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(true);
+  });
+
+  it('refuses to delete a department with assigned roles', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const role = db.rows('roles').find((r) => r.slug === 'employee')!;
+    role.department_id = target.id;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.superAdmin,
+    });
+    expect(state.status).toBe(409);
+    expect(err(state.body)?.message).toMatch(/roles/i);
+    expect(db.rows('departments').some((d) => d.id === target.id)).toBe(true);
+  });
+
+  it('denies deletion without organization.departments delete', async () => {
+    const db = install();
+    const target = db.rows('departments').find((d) => d.code === 'LEGACY')!;
+    const state = await call({
+      method: 'DELETE',
+      afPath: `departments/${target.id}`,
+      token: TOKEN.viewer,
     });
     expect(state.status).toBe(403);
   });
@@ -2315,7 +2669,7 @@ describe('dashboard', () => {
 describe('handler surface', () => {
   beforeEach(() => install());
 
-  it('404s an unknown AF Homes sub-path', async () => {
+  it('404s an unknown AFHomes sub-path', async () => {
     const state = await call({ afPath: 'does/not/exist', token: TOKEN.admin });
     expect(state.status).toBe(404);
     expect(err(state.body)?.code).toBe('NOT_FOUND');
@@ -2341,7 +2695,7 @@ describe('handler surface', () => {
       method: 'POST',
       afPath: 'departments',
       token: TOKEN.admin,
-      body: { code: 'AUDITLESS', name: 'Auditless' },
+      body: { name: 'Auditless' },
     });
     expect(state.status).toBe(500);
     expect(err(state.body)?.code).toBe('INTERNAL');
@@ -2350,7 +2704,7 @@ describe('handler surface', () => {
   });
 
   it('creates staff with a temporary password without any admin redirect target', async () => {
-    // JAD parity: creation no longer depends on the invitation callback, so
+    // AFHomes pattern: creation no longer depends on the invitation callback, so
     // no redirect URL is required at all.
     const saved = process.env.AFHOMES_ADMIN_URL;
     delete process.env.AFHOMES_ADMIN_URL;
@@ -2372,5 +2726,27 @@ describe('handler surface', () => {
     } finally {
       process.env.AFHOMES_ADMIN_URL = saved;
     }
+  });
+});
+
+describe('read-only staff session HTTP boundary', () => {
+  afterEach(() => {
+    holder.svcNull = false;
+    holder.userDb = null;
+  });
+  it('serves an authenticated self session while keeping staff writes blocked', async () => {
+    install();
+    const full = await call({ afPath: 'session', token: TOKEN.admin });
+    expect(full.status).toBe(200);
+    holder.svcNull = true;
+    holder.userDb = new FakeSupabase({ rpcs: [{ fn: 'afhomes_self_session', result: full.body }] });
+    const session = await call({ afPath: 'session', token: TOKEN.admin });
+    expect(session.status).toBe(200);
+    expect((session.body as Json).id).toBe(UUID.adminStaff);
+    const write = await call({ afPath: 'staff', method: 'POST', token: TOKEN.admin, body: {} });
+    // Mutations stay service-only: without a service key the write is refused
+    // before any insert reaches the database.
+    expect(write.status).toBe(503);
+    expect((holder.userDb as FakeSupabase).calls.filter((c) => c.op === 'insert')).toHaveLength(0);
   });
 });

@@ -1,4 +1,5 @@
-import { ErrorState } from '@jad/ui';
+import { ErrorState } from '@afhomes/ui';
+import { formatMoneyOrDash } from '@afhomes/shared';
 
 import { useCustomerPaymentsQuery } from './queries';
 import { isForbidden } from './http';
@@ -20,7 +21,7 @@ export function CustomerPaymentsPage() {
         title="Payments unavailable"
         message={
           isForbidden(payments.error)
-            ? 'Your account is not active, so payments are not available. Contact AF Homes Ecofarm to restore access.'
+            ? 'Your account is not active, so payments are not available. Contact AFhomes Ecofarm to restore access.'
             : 'We could not load your payments. Please try again in a moment.'
         }
       />
@@ -57,7 +58,7 @@ export function CustomerPaymentsPage() {
                   <td>{payment.method}</td>
                   <td className={styles.mono}>{payment.reference ?? '—'}</td>
                   <td>{payment.status}</td>
-                  <td className={styles.numeric}>₱{payment.amount}</td>
+                  <td className={styles.numeric}>{formatMoneyOrDash(payment.amount)}</td>
                 </tr>
               ))}
             </tbody>

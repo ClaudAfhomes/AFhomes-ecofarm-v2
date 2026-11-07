@@ -6,8 +6,13 @@ import { z } from 'zod';
  * Private/backend configuration NEVER appears here.
  */
 const vitePublicEnvSchema = z.object({
-  /** Base URL of the AF Homes REST API. Defaults to same-origin `/api/v1`. */
+  /** Base URL of the AFHomes REST API. Defaults to same-origin `/api/v1`. */
   VITE_API_BASE_URL: z.string().min(1).default('/api/v1'),
+  /** This branch uses Supabase; reject configuration copied from the MongoDB branch. */
+  VITE_AUTH_PROVIDER: z
+    .enum(['supabase', 'mongodb'])
+    .default('supabase')
+    .refine((provider) => provider === 'supabase', 'This branch requires Supabase authentication'),
   /** Public widget key; the verification secret belongs only in Supabase Auth. */
   VITE_TURNSTILE_SITE_KEY: z.string().min(1).optional(),
   /** Base URL of the Admin application for cross-origin redirects from the web origin. */

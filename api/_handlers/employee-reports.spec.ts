@@ -12,7 +12,7 @@
  * the empty-state 200, and the absence of sensitive customer fields.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportExportSchema, reportResponseSchema } from '@jad/contracts';
+import { reportExportSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,

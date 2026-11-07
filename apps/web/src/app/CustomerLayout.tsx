@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router';
-import { Button, ErrorState, Spinner } from '@jad/ui';
+import { isFeaturePathEnabled } from '@afhomes/shared';
+import { Button, ErrorState, Spinner } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { CustomerGuard } from './CustomerGuard';
@@ -14,7 +15,7 @@ const NAV = [
   { to: '/customer/redemptions', label: 'Redemptions', end: false },
   { to: '/customer/payments', label: 'Payments', end: false },
   { to: '/customer/profile', label: 'Profile', end: false },
-];
+].filter((item) => isFeaturePathEnabled(item.to));
 
 /**
  * The customer portal shell.
@@ -69,7 +70,7 @@ function CustomerShell() {
       <div className={styles.centered}>
         <ErrorState
           title="Customer access unavailable"
-          message="Your customer access could not be verified. Please sign out and contact AF Homes if this continues."
+          message="Your customer access could not be verified. Please sign out and contact AFhomes if this continues."
         />
         <div className={styles.centeredActions}>
           <Button onClick={() => void signOut()}>Sign out</Button>
@@ -96,7 +97,7 @@ function CustomerShell() {
     <div className={styles.shell}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>AF Homes Ecofarm</p>
+          <p className={styles.eyebrow}>AFhomes Ecofarm</p>
           <p className={styles.customerName}>{customer.fullName}</p>
           <p className={styles.customerNumber}>{customer.customerNumber}</p>
         </div>
@@ -108,7 +109,7 @@ function CustomerShell() {
       {restricted && (
         <div className={styles.restricted} role="alert">
           <strong>Your account is {customer.status}.</strong> Your card and points are not available
-          while this is in effect. Contact AF Homes Ecofarm to restore access.
+          while this is in effect. Contact AFhomes Ecofarm to restore access.
         </div>
       )}
 

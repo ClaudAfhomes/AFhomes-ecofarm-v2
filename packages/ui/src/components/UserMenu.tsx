@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { Icon, type IconName } from './Icon.js';
@@ -23,12 +23,14 @@ export interface UserMenuItem {
 }
 
 export interface UserMenuProps {
+  photoUrl?: string | null;
   name?: string;
   role?: string;
   items: UserMenuItem[];
 }
 
-export function UserMenu({ name, role, items }: UserMenuProps) {
+export function UserMenu({ name, role, items, photoUrl }: UserMenuProps) {
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   const { isOpen, close, toggle } = useDisclosure();
   const panelRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -63,8 +65,20 @@ export function UserMenu({ name, role, items }: UserMenuProps) {
         aria-haspopup="menu"
         onClick={toggle}
       >
-        <span className={styles.avatar} aria-hidden="true">
-          {getInitials(name)}
+        <span
+          className={`${styles.avatar} ${photoUrl && photoUrl !== failedPhoto ? styles.hasPhoto : ''}`}
+          aria-hidden="true"
+        >
+          {photoUrl && photoUrl !== failedPhoto ? (
+            <img
+              className={styles.photo}
+              src={photoUrl}
+              alt=""
+              onError={() => setFailedPhoto(photoUrl)}
+            />
+          ) : (
+            getInitials(name)
+          )}
         </span>
         <span className={styles.userInfo}>
           <span className={styles.name}>{name}</span>

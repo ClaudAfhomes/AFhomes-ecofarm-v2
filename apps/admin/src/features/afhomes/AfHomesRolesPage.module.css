@@ -1,0 +1,184 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badges > li {
+  min-width: 0;
+}
+
+.roleLink {
+  display: block;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.clickableRow {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .clickableRow:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.clickableRow:focus-visible {
+  background-color: var(--color-state-hover);
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+.actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.roleLink:hover {
+  color: var(--color-brand-secondary);
+}
+
+.permissionCell {
+  display: inline-grid;
+  gap: 4px;
+  min-width: 8rem;
+}
+
+.permissionText {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.permissionMeter {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background-color: var(--color-bg-sunken);
+  overflow: hidden;
+}
+
+.permissionMeterFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-brand-secondary), var(--color-brand-primary));
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
+}
+
+.tableWrap {
+  margin-top: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    position: relative;
+    max-width: 100%;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    text-align: right;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+}

@@ -1,7 +1,14 @@
-import { useState } from 'react';
-import { Button, Dialog } from '@jad/ui';
-import { afHomesModuleKeySchema, type AfHomesPermission, type AfHomesRole } from '@jad/contracts';
-import { useSession } from '../../lib/session';
+import { useMemo, useState } from 'react';
+import { Button, Dialog, Icon, Select, StatusChip, TextField } from '@afhomes/ui';
+import {
+  MODULE_CATALOG,
+  afHomesModuleKeySchema,
+  groupedModuleCatalog,
+  type AfHomesDepartment,
+  type AfHomesPermission,
+  type AfHomesRole,
+} from '@afhomes/contracts';
+import styles from './AfHomesRoleFormDialog.module.css';
 
 const MODULES = afHomesModuleKeySchema.options;
 const blankPermissions = (): AfHomesPermission[] =>
@@ -42,14 +49,16 @@ export function isRoleAccessProtected(
 
 export interface RoleFormInput {
   name: string;
-  description: string;
   isActive: boolean;
+  /** Owning department. Required on every save. */
+  departmentId: string;
   permissions: AfHomesPermission[];
 }
 
 export function AfHomesRoleFormDialog({
   open,
   role,
+  departments,
   saving,
   error,
   onClose,
@@ -57,23 +66,33 @@ export function AfHomesRoleFormDialog({
 }: {
   open: boolean;
   role: AfHomesRole | null;
+  departments: Pick<AfHomesDepartment, 'id' | 'name' | 'isActive'>[];
   saving: boolean;
   error: Error | null;
   onClose: () => void;
   onSave: (input: RoleFormInput) => void;
 }) {
-  const { user } = useSession();
-  const titleEditable =
-    role?.isSystem &&
-    user?.roleSlug === 'super_admin' &&
-    !['admin', 'super_admin', 'customer'].includes(role.slug);
-  const protectedAccess = isRoleAccessProtected(role, user?.roleSlug);
+  // Edit always exposes every field (Name, Active, Department, Page
+  // Access). The server stays authoritative: protected/system roles are
+  // still refused there (`api/_handlers/admin/afhomes.ts` +
+  // `update_operational_role`), so a forbidden save surfaces as a 403 rather
+  // than a hidden control.
+  const titleEditable = role?.isSystem && !['admin', 'super_admin', 'customer'].includes(role.slug);
   // Form state mounts fresh per open session: callers pass a `key` that
   // changes with each open (new vs. which role), so initializers below run
   // exactly on open and no effect-sync is needed.
   const [name, setName] = useState(role?.name ?? '');
-  const [description, setDescription] = useState(role?.description ?? '');
   const [active, setActive] = useState(role?.isActive ?? true);
+  const [departmentId, setDepartmentId] = useState(role?.departmentId ?? '');
+  // The role's current department stays selectable even when inactive, so an
+  // assigned role never opens with a blank picker it cannot keep.
+  const departmentOptions = useMemo(() => {
+    const options = departments
+      .filter((d) => d.isActive || d.id === role?.departmentId)
+      .map((d) => ({ value: d.id, label: d.name }));
+    return [{ value: '', label: 'Select a department' }, ...options];
+  }, [departments, role?.departmentId]);
+  const canSave = name.trim().length > 0 && departmentId.length > 0 && !saving;
   const [permissions, setPermissions] = useState<AfHomesPermission[]>(() =>
     role
       ? MODULES.map(
@@ -84,93 +103,231 @@ export function AfHomesRoleFormDialog({
       : blankPermissions(),
   );
 
-  const toggle = (key: string, action: keyof Omit<AfHomesPermission, 'moduleKey'>) =>
+  /**
+   * The ONE per-page control: "Can access".
+   *
+   * Checking grants access (canView) and deliberately leaves create / update /
+   * delete exactly as they were, so editing a role can never silently upgrade
+   * the actions it may perform. Unchecking clears all four, because the
+   * database enforces "an action right implies access" - there is no such
+   * state as a page that is inaccessible but writable.
+   */
+  const toggleAccess = (key: string) =>
     setPermissions((current) =>
       current.map((permission) => {
         if (permission.moduleKey !== key) return permission;
-        const next = { ...permission, [action]: !permission[action] };
-        if (action !== 'canView' && next[action]) next.canView = true;
-        if (action === 'canView' && !next.canView)
-          Object.assign(next, { canCreate: false, canUpdate: false, canDelete: false });
-        return next;
+        if (permission.canView)
+          return {
+            moduleKey: permission.moduleKey,
+            canView: false,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: false,
+          };
+        return { ...permission, canView: true };
       }),
     );
+
+  /**
+   * Group-level "view" behavior is deliberately PER MODULE: there is no bulk
+   * "view all" control, so a click can never grant a module the operator did
+   * not see. The group header is a plain disclosure instead.
+   */
+  const groups = useMemo(() => {
+    const byKey = new Map(permissions.map((permission) => [permission.moduleKey, permission]));
+    return groupedModuleCatalog().map((bucket) => ({
+      group: bucket.group,
+      entries: bucket.modules.map((module) => ({
+        ...module,
+        permission: byKey.get(module.key) ?? {
+          moduleKey: module.key,
+          canView: false,
+          canCreate: false,
+          canUpdate: false,
+          canDelete: false,
+        },
+      })),
+    }));
+  }, [permissions]);
+  const viewCount = permissions.filter((permission) => permission.canView).length;
+  /**
+   * Which group dropdowns are open. A group with several modules is a
+   * disclosure: it opens pre-expanded when the role already holds something in
+   * it, so opening this dialog shows current access at a glance, and starts
+   * collapsed otherwise so the list stays short. A group with ONE module
+   * (Dashboard) is not a dropdown at all - it renders as its own row.
+   */
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () =>
+      new Set(
+        groups
+          .filter((bucket) => bucket.entries.some((entry) => entry.permission.canView))
+          .map((bucket) => bucket.group),
+      ),
+  );
+  const toggleGroup = (group: string) =>
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title={
-        role
-          ? protectedAccess
-            ? `View ${role.name} access`
-            : `Edit ${role.name} access`
-          : 'Create custom role'
-      }
+      title={role ? `Edit ${role.name} access` : 'Create custom role'}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             {role?.isSystem ? 'Close' : 'Cancel'}
           </Button>
-          {!protectedAccess ? (
-            <Button
-              disabled={!name.trim() || saving}
-              onClick={() => onSave({ name, description, isActive: active, permissions })}
-            >
-              {saving ? 'Saving…' : 'Save role'}
-            </Button>
-          ) : null}
+          <Button
+            disabled={!canSave}
+            onClick={() =>
+              onSave({ name, isActive: active, departmentId, permissions })
+            }
+          >
+            {saving ? 'Saving…' : 'Save role'}
+          </Button>
         </>
       }
     >
-      <fieldset disabled={protectedAccess || saving}>
-        <legend>{protectedAccess ? 'Protected access — read only' : 'Role access'}</legend>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <label>
-            {titleEditable ? 'Display title' : 'Name'}
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label>
-            Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-          </label>
-          <label>
-            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />{' '}
-            Active
-          </label>
-          {error ? <p role="alert">{error.message}</p> : null}
-          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Module</th>
-                  <th>View</th>
-                  <th>Create</th>
-                  <th>Update</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {permissions.map((p) => (
-                  <tr key={p.moduleKey}>
-                    <td>{p.moduleKey}</td>
-                    {(['canView', 'canCreate', 'canUpdate', 'canDelete'] as const).map((action) => (
-                      <td key={action}>
-                        <input
-                          aria-label={`${p.moduleKey} ${action}`}
-                          type="checkbox"
-                          checked={p[action]}
-                          onChange={() => toggle(p.moduleKey, action)}
-                        />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className={styles.body}>
+        {role ? (
+          <div className={styles.identity}>
+            <div>
+              <p className={styles.roleName}>{role.name}</p>
+            </div>
+            <div className={styles.identityChips}>
+              <StatusChip
+                label={role.isSystem ? 'System' : 'Custom'}
+                tone={role.isSystem ? 'neutral' : 'info'}
+              />
+              <StatusChip
+                label={role.isActive ? 'Active' : 'Inactive'}
+                tone={role.isActive ? 'success' : 'neutral'}
+              />
+            </div>
           </div>
-        </div>
-      </fieldset>
+        ) : null}
+        <fieldset disabled={saving} className={styles.accessFieldset}>
+          <legend>Role access</legend>
+          <div className={styles.formGrid}>
+            <TextField
+              id="role-name"
+              name="roleName"
+              label={titleEditable ? 'Display title' : 'Name'}
+              optional
+              value={name}
+              onChange={setName}
+            />
+            <label className={styles.fieldLabel}>
+              Department
+              <Select
+                aria-label="Role department"
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+                options={departmentOptions}
+              />
+            </label>
+            {departmentOptions.length <= 1 ? (
+              <p className={styles.permissionCount}>Create a department first.</p>
+            ) : null}
+            <label className={styles.activeRow}>
+              <input
+                type="checkbox"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+              />{' '}
+              Active
+            </label>
+          </div>
+          {error ? <p role="alert">{error.message}</p> : null}
+          <div className={styles.permissionHead}>
+            <p className={styles.permissionTitle}>Page access</p>
+            <p className={styles.permissionCount}>
+              {viewCount} of {MODULE_CATALOG.length} pages accessible
+            </p>
+          </div>
+          {/*
+            ONE control per page. The four underlying action rights still exist
+            in the data and are enforced by the server, but they are not an
+            operator decision here:
+            - Checking grants ACCESS (the page opens for this role) and leaves
+              any action rights the role already holds untouched, so editing a
+              role can never silently escalate it.
+            - Unchecking removes access AND every action right on that page,
+              which is the only way the stored flags can stay legal.
+            A page where the role holds more than access is tagged so the
+            difference stays visible instead of hidden.
+          */}
+          <ul className={styles.moduleList}>
+            {groups.map((bucket) => {
+              const grantedCount = bucket.entries.filter(
+                (entry) => entry.permission.canView,
+              ).length;
+              const singleModule = bucket.entries.length === 1;
+              const expanded = singleModule || expandedGroups.has(bucket.group);
+              return (
+                <li key={bucket.group} className={styles.groupBlock}>
+                  {singleModule ? null : (
+                    <button
+                      type="button"
+                      className={styles.groupToggleButton}
+                      aria-expanded={expanded}
+                      onClick={() => toggleGroup(bucket.group)}
+                    >
+                      <span className={styles.chevron} data-open={expanded}>
+                        <Icon name="chevron-right" size={14} />
+                      </span>
+                      <span className={styles.groupName}>{bucket.group}</span>
+                      <span
+                        className={grantedCount > 0 ? styles.groupCountOn : styles.groupCount}
+                        title={`${grantedCount} of ${bucket.entries.length} pages accessible`}
+                      >
+                        {grantedCount}/{bucket.entries.length}
+                      </span>
+                    </button>
+                  )}
+                  {expanded ? (
+                    <ul className={styles.moduleRows}>
+                      {bucket.entries.map((entry) => {
+                        const elevated =
+                          entry.permission.canCreate ||
+                          entry.permission.canUpdate ||
+                          entry.permission.canDelete;
+                        return (
+                          <li key={entry.key} className={styles.moduleRow}>
+                            <label className={styles.moduleCheck}>
+                              <input
+                                aria-label={`${entry.label} access`}
+                                type="checkbox"
+                                checked={entry.permission.canView}
+                                onChange={() => toggleAccess(entry.key)}
+                              />
+                              <span className={styles.moduleName}>{entry.label}</span>
+                              {elevated ? (
+                                <span
+                                  className={styles.moduleTag}
+                                  title="This role also keeps its action rights here."
+                                >
+                                  Full
+                                </span>
+                              ) : null}
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      </div>
     </Dialog>
   );
 }

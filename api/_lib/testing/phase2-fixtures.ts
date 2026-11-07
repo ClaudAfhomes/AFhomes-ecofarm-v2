@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 fixtures: card products, customers, sales, payments,
+ * AFHomes Phase 2 fixtures: card products, customers, sales, payments,
  * memberships, commissions, and the relationship network they hang from.
  *
  * Extends the Phase 1 organization fixtures rather than replacing them, so a

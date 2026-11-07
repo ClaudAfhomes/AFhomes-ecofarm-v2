@@ -1,47 +1,63 @@
 import { useContext, useEffect, useId, useState, type ComponentProps } from 'react';
+import type { ZodType } from 'zod';
 import { HumanInputValidity } from './human-input-validity';
-import { NormalizedInput } from '@jad/ui';
+import { NormalizedInput } from '@afhomes/ui';
 import {
   personNameSchema,
   phoneSchema,
   emailSchema,
   exactDecimalStringSchema,
   optionalLandlineSchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 /** Shared contract validation for interacted-with human fields. Server validation remains mandatory. */
 export function HumanInput({
   onChange,
   onBlur,
   landline = false,
+  contractSchema,
+  contractMessage,
   ...props
-}: ComponentProps<typeof NormalizedInput> & { landline?: boolean }) {
+}: ComponentProps<typeof NormalizedInput> & {
+  landline?: boolean;
+  /** Override the detected contract schema (e.g. the TIN pattern). */
+  contractSchema?: ZodType | null;
+  /** Message shown when `contractSchema` rejects a value. */
+  contractMessage?: string;
+}) {
   const id = useId();
   const [dirty, setDirty] = useState(false);
   const [blockedPhone, setBlockedPhone] = useState(false);
   const phone = props.type === 'tel' || props.inputMode === 'tel';
-  const schema = props.suggestName
-    ? personNameSchema
-    : landline
-      ? optionalLandlineSchema
-      : phone
-        ? phoneSchema
-        : props.type === 'email'
-          ? emailSchema
-          : props.inputMode === 'decimal'
-            ? exactDecimalStringSchema
-            : null;
+  const schema =
+    contractSchema ??
+    (props.suggestName
+      ? personNameSchema
+      : landline
+        ? optionalLandlineSchema
+        : phone
+          ? phoneSchema
+          : props.type === 'email'
+            ? emailSchema
+            : props.inputMode === 'decimal'
+              ? exactDecimalStringSchema
+              : null);
   const value = String(props.value ?? '');
   const invalid =
     blockedPhone ||
     (dirty && schema && (props.required || value !== '') && !schema.safeParse(value).success);
-  const message = phone
-    ? 'Enter a valid contact number. Letters are not accepted.'
-    : props.type === 'email'
-      ? 'Please enter a valid email address.'
-      : props.inputMode === 'decimal'
-        ? 'Enter a valid amount without letters or scientific notation.'
-        : 'Names cannot contain numbers. Use letters, initials, apostrophes or hyphens.';
+  // Name errors carry no text: the field itself turns red (see the global
+  // `aria-invalid` rule) and stays reported through HumanInputValidity, so
+  // blocking and guidance keep working without the paragraph.
+  const message =
+    contractMessage ??
+    (phone
+      ? 'Enter a valid contact number. Letters are not accepted.'
+      : props.type === 'email'
+        ? 'Please enter a valid email address.'
+        : props.inputMode === 'decimal'
+          ? 'Enter a valid amount without letters or scientific notation.'
+          : null);
   const errorId = `${id}-error`;
   const report = useContext(HumanInputValidity);
   useEffect(() => {
@@ -54,8 +70,9 @@ export function HumanInput({
         {...props}
         aria-invalid={invalid ? true : props['aria-invalid']}
         aria-describedby={
-          [props['aria-describedby'], invalid ? errorId : undefined].filter(Boolean).join(' ') ||
-          undefined
+          [props['aria-describedby'], invalid && message ? errorId : undefined]
+            .filter(Boolean)
+            .join(' ') || undefined
         }
         onBlur={(event) => {
           setDirty(true);
@@ -63,7 +80,10 @@ export function HumanInput({
         }}
         onChange={(event) => {
           setDirty(true);
-          if (phone && !landline && /\p{L}/u.test(event.target.value)) {
+          // Letters are never part of a phone number, landline included. The
+          // keystroke is refused rather than stored, so the field cannot hold
+          // a value the contract would reject later.
+          if (phone && /\p{L}/u.test(event.target.value)) {
             setBlockedPhone(true);
             return;
           }
@@ -79,7 +99,7 @@ export function HumanInput({
           onChange?.(event);
         }}
       />
-      {invalid ? (
+      {invalid && message ? (
         <small id={errorId} role="alert">
           {message}
         </small>

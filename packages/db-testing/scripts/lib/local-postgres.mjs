@@ -15,7 +15,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+const REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  '..',
+);
 
 /** Never collide with a developer's own PostgreSQL on 5432. */
 const PORT = Number(process.env.AFHOMES_TEST_PG_PORT ?? 55432);
@@ -36,9 +42,10 @@ export function listMigrations() {
 
 /**
  * Boot a disposable PostgreSQL, install the shim, and apply every migration.
+ * @param {{ beforeMigration?: string, excludedMigrations?: string[] }} [options] Exclusive baseline migration boundary.
  * @returns {{ url: string, applied: string[], client: import('pg').Client, stop: () => Promise<void> }}
  */
-export async function startDisposablePostgres() {
+export async function startDisposablePostgres({ beforeMigration, excludedMigrations = [] } = {}) {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
 
   const server = new EmbeddedPostgres({
@@ -48,6 +55,12 @@ export async function startDisposablePostgres() {
     database: 'afhomes',
     port: PORT,
     persistent: true,
+    // Migrations are UTF-8 (one carries a leading BOM, covered byte-for-byte by
+    // the release allowlist hashes, so the file itself must not be edited).
+    // Force a UTF-8 cluster: a Windows-locale WIN1252 initdb cannot load them.
+    // ponytail: encoding-only override; locale left at platform default.
+    initdbFlags: process.platform === 'win32' ? ['-c', 'io_method=sync', '-E', 'UTF8'] : [],
+    postgresFlags: process.platform === 'win32' ? ['-c', 'io_method=sync'] : [],
     onLog: () => {},
     onError: () => {},
   });
@@ -66,11 +79,34 @@ export async function startDisposablePostgres() {
   const database = rows[0].name;
   const user = rows[0].usr;
 
+  console.log(
+    '[db-test] target host=127.0.0.1 port=' +
+      PORT +
+      ' database=' +
+      database +
+      ' pid=' +
+      fs.readFileSync(path.join(DATA_DIR, 'postmaster.pid'), 'utf8').split(/\r?\n/)[0],
+  );
   await client.query(fs.readFileSync(SHIM, 'utf8'));
 
+  const migrations = listMigrations();
+  if (
+    (beforeMigration && !migrations.includes(beforeMigration)) ||
+    excludedMigrations.some((file) => !migrations.includes(file))
+  ) {
+    await client.end();
+    await server.stop();
+    throw new Error('Unknown baseline migration boundary');
+  }
   const applied = [];
-  for (const file of listMigrations()) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+  for (const file of migrations.filter(
+    (file) => (!beforeMigration || file < beforeMigration) && !excludedMigrations.includes(file),
+  )) {
+    // Same leading-BOM tolerance as the preservation batch's sql() helper:
+    // one allowlisted file carries a BOM pinned by its release hash, so the
+    // byte is stripped at load, never from the file. Hashes still cover raw
+    // bytes; shared psql-based apply skips a leading BOM the same way.
+    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').replace(/^\uFEFF/, '');
     try {
       await client.query(sql);
       applied.push(file);
@@ -90,6 +126,8 @@ export async function startDisposablePostgres() {
     // will delete. It is passed by environment variable and never logged.
     url: `postgres://${user}:${LOCAL_PASSWORD}@127.0.0.1:${PORT}/${database}`,
     database,
+    dataDir: DATA_DIR,
+    pid: Number(fs.readFileSync(path.join(DATA_DIR, 'postmaster.pid'), 'utf8').split(/\r?\n/)[0]),
     applied,
     client,
     async stop() {

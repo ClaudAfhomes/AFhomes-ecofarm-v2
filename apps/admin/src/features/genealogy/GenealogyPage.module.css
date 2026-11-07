@@ -1,0 +1,576 @@
+/* Sales network: head card first, full tree on demand. */
+
+.page {
+  display: grid;
+  /* One shrinkable column: a wide child must scroll inside itself, never
+     widen the column (which the phone clip below would then cut off). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  /* Phone tap targets for the small buttons this page owns. */
+  .presetButtons button,
+  .headChips button,
+  .nodeActions button {
+    min-height: 40px;
+  }
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.heads {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.headCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  min-width: 0;
+  padding: var(--space-5) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-brand-primary) 9%, transparent),
+      transparent 65%
+    ),
+    var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.headAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow:
+    0 0 0 3px var(--color-bg-surface),
+    0 0 0 5px var(--color-brand-secondary);
+}
+
+.headText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.headEyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.headName {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.headName:hover {
+  color: var(--color-brand-secondary);
+  text-decoration: underline;
+}
+
+.headMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.headChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.flatList {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.nodeCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  transition: background-color var(--transition-fast);
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .nodeCard:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.nodeAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nodeText {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 10rem;
+}
+
+.nodeName {
+  font-weight: 700;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.nodeName:hover {
+  color: var(--color-brand-secondary);
+  text-decoration: underline;
+}
+
+.nodeMeta {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.nodeActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filterLabel select,
+.filterLabel input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Admin Team Sales Activity Section */
+.adminSalesSection {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-h3);
+  font-weight: 700;
+}
+
+/* Date Filter Section */
+.dateFilterSection {
+  margin-bottom: var(--space-4);
+}
+
+.presetButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.presetButtons button {
+  border-radius: var(--radius-full);
+}
+
+.presetActive {
+  background: var(--color-brand-primary);
+  color: #fff;
+  border-color: var(--color-brand-primary);
+}
+
+.presetActive:hover {
+  background: var(--color-brand-secondary);
+  border-color: var(--color-brand-secondary);
+}
+
+.dateRangeInputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.validationError {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
+  font-size: var(--text-body-s);
+}
+
+/* KPI Cards */
+.adminKpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.kpiCard {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  display: grid;
+  gap: var(--space-2);
+  transition: box-shadow var(--transition-fast);
+}
+
+.kpiCard:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.kpiIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: #fff;
+}
+
+.kpiCard dt {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.kpiCard dd {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* Team Comparison Table: scrolls inside its own panel on tablets, collapses
+   to labelled cards on phones. */
+.tableWrap {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+}
+
+.teamTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.teamTable th,
+.teamTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.teamTable th {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  white-space: nowrap;
+}
+
+.teamTable td {
+  font-size: var(--text-body);
+  color: var(--color-text-primary);
+}
+
+.teamTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.teamTable tbody tr:hover {
+  background: var(--color-state-hover);
+}
+
+/* Column alignment classes */
+.colNum {
+  width: 48px;
+  text-align: center;
+}
+
+.colName {
+  min-width: 200px;
+  text-align: left;
+}
+
+.colCenter {
+  width: 120px;
+  text-align: center;
+}
+
+.colCenter th,
+.colCenter td {
+  text-align: center;
+}
+
+.colAction {
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  div.tableWrap.tableWrap {
+    overflow-x: clip;
+    border: 0;
+    background: none;
+  }
+
+  div.tableWrap.tableWrap > table {
+    display: block;
+    min-width: 0;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .tableWrap tbody > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-surface-raised);
+  }
+
+  .tableWrap tbody > tr:hover {
+    background: var(--color-bg-surface-raised);
+  }
+
+  .teamTable td {
+    display: grid;
+    gap: 2px;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+
+  .teamTable td::before {
+    content: attr(data-label);
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  /* Rank and name read as the card title; the action spans the card. */
+  .teamTable td.colNum {
+    display: none;
+  }
+
+  .teamTable td.colName,
+  .teamTable td.colAction {
+    grid-column: 1 / -1;
+  }
+
+  .teamTable td.colName::before,
+  .teamTable td.colAction::before {
+    display: none;
+  }
+
+  .teamTable td.colName {
+    overflow-wrap: anywhere;
+  }
+
+  .teamTable td.colAction button {
+    width: 100%;
+    min-height: 40px;
+  }
+}
+
+/* Team link */
+.teamLink {
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+
+.teamLink:hover {
+  text-decoration: underline;
+}
+
+/* View Genealogy button in table */
+.teamActionBtn {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-body-s);
+}
+
+/* Genealogy Tree Section */
+.genealogyTreeSection {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+}
+
+/* Upline Chain (read-only for sellers) */
+.uplineChain {
+  margin-bottom: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+
+.uplineTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.uplineList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.uplineItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+}
+
+.uplineConnector {
+  font-size: var(--text-body-s);
+  color: var(--color-brand-primary);
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+}
+
+.uplineInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.uplineRole {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-brand-primary);
+}
+
+.uplineName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.uplineLabel {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  background: color-mix(in srgb, var(--color-brand-primary) 15%, transparent);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+/* Tree Root */
+.treeRoot {
+  margin-top: var(--space-4);
+}
+
+.genealogyTreeWrapper {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.genealogyTreeSection,
+.adminSalesSection,
+.heads,
+.treeRoot {
+  min-width: 0;
+}

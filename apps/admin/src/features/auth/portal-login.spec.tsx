@@ -6,13 +6,14 @@
  * stubbed and the portals probe answered over stubbed fetch, so entry
  * gating, wrong-portal messaging, and post-login destinations are exercised.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLocation } from 'react-router';
 
 import App from '../../app/App';
 import { renderWithProviders } from '../../test/utils';
+import { env } from '../../lib/env';
 
 const supabaseMock = vi.hoisted(() => ({ impl: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({
@@ -138,10 +139,10 @@ async function signInAs(email = 'fin@afhomes.test', password = 'Password123!') {
 }
 
 describe('portal entries render', () => {
-  it('serves the Administration Login at /admin/login with no staff links', async () => {
+  it('serves the Admin Login at /admin/login with no staff links', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
     expect(
-      await screen.findByRole('heading', { name: 'Administration Login' }),
+      await screen.findByRole('heading', { name: 'Admin Login' }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /staff login/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /customer login/i })).not.toBeInTheDocument();
@@ -243,6 +244,56 @@ describe('staff entry decisions', () => {
 });
 
 describe('admin entry decisions', () => {
+  it('keeps CAPTCHA required for the staff login', async () => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    try {
+      renderWithProviders(<App />, { route: '/staff/login' });
+      await screen.findByRole('heading', { name: 'Staff Login' });
+      await signInAs('staff@afhomes.test');
+      expect(await screen.findByText('Complete security verification before signing in.')).toBeVisible();
+      expect(screen.queryByText('We could not sign you in')).not.toBeInTheDocument();
+      expect(authMock.signInWithPassword).not.toHaveBeenCalled();
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+    }
+  });
+  it('requires CAPTCHA for Admin and Super Admin login when a site key is configured', async () => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    portalsBody.current = staffPortals('admin');
+    try {
+      renderWithProviders(<><App /><LocationProbe /></>, { route: '/admin/login' });
+      await screen.findByRole('heading', { name: 'Admin Login' });
+      await signInAs('admin@afhomes.test');
+      expect(await screen.findByText('Complete security verification before signing in.')).toBeVisible();
+      expect(authMock.signInWithPassword).not.toHaveBeenCalled();
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+    }
+  });
+  it.each(['admin', 'super_admin'])('forwards a completed challenge for %s sign-in', async (role) => {
+    const previousKey = env.VITE_TURNSTILE_SITE_KEY;
+    env.VITE_TURNSTILE_SITE_KEY = 'synthetic-site-key';
+    const widget = vi.fn<NonNullable<Window['turnstile']>['render']>(() => 'synthetic-widget');
+    window.turnstile = { render: widget, remove: vi.fn() };
+    portalsBody.current = staffPortals(role);
+    try {
+      renderWithProviders(<><App /><LocationProbe /></>, { route: '/admin/login' });
+      await screen.findByRole('heading', { name: 'Admin Login' });
+      await waitFor(() => expect(widget).toHaveBeenCalled());
+      act(() => widget.mock.calls[0]![1].callback('synthetic-login-token'));
+      await signInAs('admin@afhomes.test');
+      await expectLocation('/admin');
+      expect(authMock.signInWithPassword).toHaveBeenCalledWith({
+        email: 'admin@afhomes.test', password: 'Password123!',
+        options: { captchaToken: 'synthetic-login-token' },
+      });
+    } finally {
+      env.VITE_TURNSTILE_SITE_KEY = previousKey;
+      delete window.turnstile;
+    }
+  });
   it('accepts an admin', async () => {
     portalsBody.current = staffPortals('admin');
     renderWithProviders(

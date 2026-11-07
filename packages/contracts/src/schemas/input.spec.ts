@@ -18,10 +18,12 @@ import {
   normalizePhilippinePhone,
   normalizePostalCode,
   nullablePersonNameSchema,
+  optionalLandlineSchema,
   optionalPersonNameSchema,
   optionalPhoneSchema,
   optionalContactNumberSchema,
   personNameSchema,
+  philippineLandlineDigitCount,
   phoneSchema,
   uppercaseAddressSchema,
   uppercasedText,
@@ -128,6 +130,70 @@ describe('phones', () => {
       expect(phoneSchema.safeParse(phone).success).toBe(false);
     }
     expect(phoneSchema.safeParse('0'.repeat(16)).success).toBe(false);
+  });
+
+  it('rejects mobile shapes that are not exactly 09XXXXXXXXX or its +63 equivalent', () => {
+    // A generic 7-15 digit "phone" is no longer accepted for a mobile field -
+    // only the local 09-prefixed 11-digit form (or its canonical +63 round
+    // trip) is a valid Philippine mobile number.
+    for (const phone of [
+      '1234567', // 7 digits - too short, not 09-prefixed
+      '091234567', // 9 digits - missing two digits
+      '0917123456789', // 13 digits - too long
+      '08171234567', // starts 08, not 09
+      '639171234567123', // 63-prefixed but wrong total length
+    ]) {
+      expect(normalizePhilippinePhone(phone)).toBeNull();
+      expect(phoneSchema.safeParse(phone).success).toBe(false);
+    }
+  });
+
+  it('enforces the exact 11-digit mobile boundary on both sides (local and +63 forms)', () => {
+    // One digit short/long of the local 09-form.
+    expect(normalizePhilippinePhone('0917123456')).toBeNull(); // 10 digits
+    expect(normalizePhilippinePhone('091712345678')).toBeNull(); // 12 digits
+    expect(normalizePhilippinePhone('09171234567')).toBe('+639171234567'); // 11 digits, exact
+    // The same boundary expressed as the canonical 63-prefixed form (12 total digits).
+    expect(normalizePhilippinePhone('63917123456')).toBeNull(); // 11 digits after "63" - one short
+    expect(normalizePhilippinePhone('6391712345678')).toBeNull(); // 13 digits after "63" - one long
+    expect(normalizePhilippinePhone('639171234567')).toBe('+639171234567'); // 12 digits, exact
+  });
+});
+
+describe('landlines', () => {
+  it('accepts 7-11 combined digits (subscriber plus optional area code)', () => {
+    for (const landline of ['1234567', '12345678', '02 8123 4567', '0281234567']) {
+      expect(optionalLandlineSchema.safeParse(landline).success).toBe(true);
+    }
+  });
+
+  it('rejects landlines outside the 7-11 combined digit range', () => {
+    for (const landline of ['123456', '123456789012']) {
+      expect(optionalLandlineSchema.safeParse(landline).success).toBe(false);
+    }
+  });
+
+  it('enforces the exact 7 and 11 digit landline boundaries on both sides', () => {
+    expect(philippineLandlineDigitCount('123456')).toBe(6);
+    expect(optionalLandlineSchema.safeParse('123456').success).toBe(false); // one short of the 7-digit floor
+    expect(philippineLandlineDigitCount('1234567')).toBe(7);
+    expect(optionalLandlineSchema.safeParse('1234567').success).toBe(true); // exact floor
+    expect(philippineLandlineDigitCount('12345678901')).toBe(11);
+    expect(optionalLandlineSchema.safeParse('12345678901').success).toBe(true); // exact ceiling (3-digit area + 8-digit subscriber)
+    expect(philippineLandlineDigitCount('123456789012')).toBe(12);
+    expect(optionalLandlineSchema.safeParse('123456789012').success).toBe(false); // one over the 11-digit ceiling
+  });
+
+  it('excludes a leading +63/63 country code from the combined digit count', () => {
+    // A 3-digit area code + 8-digit subscriber (11 digits) prefixed with the
+    // country code must still validate against the 11-digit domestic ceiling,
+    // not against the combined 13-digit total.
+    expect(philippineLandlineDigitCount('+6312345678901')).toBe(11);
+    expect(optionalLandlineSchema.safeParse('+6312345678901').success).toBe(true);
+    // One digit over the domestic ceiling must still be rejected once the
+    // country code is excluded (12 domestic digits, not 14 total).
+    expect(philippineLandlineDigitCount('+63123456789012')).toBe(12);
+    expect(optionalLandlineSchema.safeParse('+63123456789012').success).toBe(false);
   });
 });
 

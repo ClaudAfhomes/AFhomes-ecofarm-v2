@@ -7,8 +7,8 @@ import App from './app/App';
 import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
 
-import '@jad/ui/tokens.css';
-import '@jad/ui/base.css';
+import '@afhomes/ui/tokens.css';
+import '@afhomes/ui/base.css';
 import './styles/global.css';
 
 const rootElement = document.getElementById('root');

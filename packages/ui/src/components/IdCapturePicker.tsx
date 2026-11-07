@@ -17,10 +17,17 @@ export function IdCapturePicker({
   onFile,
   disabled = false,
   resetVersion = 0,
+  onCancel,
+  cancelLabel = 'Cancel selection',
+  showCancel = false,
 }: {
   onFile: (file: File | null) => void;
   disabled?: boolean;
   resetVersion?: number;
+  /** Clears the pending selection. Shown beside Take photo when set. */
+  onCancel?: () => void;
+  cancelLabel?: string;
+  showCancel?: boolean;
 }) {
   const upload = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
@@ -50,7 +57,7 @@ export function IdCapturePicker({
   }
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       <input
         key={`upload-${resetVersion}`}
         ref={upload}
@@ -72,12 +79,7 @@ export function IdCapturePicker({
         disabled={disabled}
         onChange={(e) => onFile(e.target.files?.[0] ?? null)}
       />
-      <Button
-        type="button"
-        variant="secondary"
-        disabled={disabled}
-        onClick={() => upload.current?.click()}
-      >
+      <Button type="button" disabled={disabled} onClick={() => upload.current?.click()}>
         Upload an ID
       </Button>
       <Button
@@ -97,6 +99,11 @@ export function IdCapturePicker({
       >
         Take a photo
       </Button>
+      {showCancel && onCancel ? (
+        <Button type="button" variant="danger" disabled={disabled} onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+      ) : null}
 
       <Dialog
         open={sheetOpen}

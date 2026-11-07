@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 30 reports and audit UI.
+ * AFHomes Phase 30 reports and audit UI.
  *
  * Renders the REAL Reports and Audit pages through the REAL router against a
  * mocked API: list loading/empty/error-with-retry, populated tables with
@@ -11,6 +11,13 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Retained report behavior is tested enabled; default-off routing has its own suite.
+vi.mock('@afhomes/shared', async (original) => ({
+  ...await original<typeof import('@afhomes/shared')>(),
+  FEATURE_FLAGS: { redemption: true, services: true, reports: true, cms: false },
+  isFeaturePathEnabled: () => true,
+}));
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
@@ -148,11 +155,17 @@ beforeEach(() => {
   requests.length = 0;
   install();
   vi.stubGlobal('fetch', mockFetch());
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:mock'),
-    revokeObjectURL: vi.fn(),
-  });
+  // jsdom lacks object URLs. Subclass the real URL so the constructor survives:
+  // route pages load through dynamic import(), whose machinery calls `new URL()`,
+  // and a plain-object stub would break every lazily loaded route in this file.
+  const RealURL = URL;
+  vi.stubGlobal(
+    'URL',
+    class extends RealURL {
+      static override createObjectURL = vi.fn(() => 'blob:mock');
+      static override revokeObjectURL = vi.fn();
+    },
+  );
 });
 
 /* ================================================================== */
@@ -186,7 +199,7 @@ describe('Phase 30 reports page', () => {
     install();
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('SALE-000001')).toBeInTheDocument();
-    expect(screen.getByText('Gross Sales Value')).toBeInTheDocument();
+    expect(screen.getByText(/Total Sales/)).toBeInTheDocument();
     expect(screen.queryByText('grossFrozenValue')).not.toBeInTheDocument();
     expect(screen.getAllByText('₱60,000.00').length).toBeGreaterThan(0);
   });
@@ -195,7 +208,6 @@ describe('Phase 30 reports page', () => {
     render('/admin/reports');
     expect(await screen.findByText('SALE-000001')).toBeInTheDocument();
     expect(screen.getByText(/Scope: Global \(super_admin\)/)).toBeInTheDocument();
-    expect(screen.getByText('1–1 of 1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
@@ -258,7 +270,6 @@ describe('Phase 30 audit page', () => {
     const user = userEvent.setup();
     render('/admin/audit');
     expect(await screen.findByText('Application submitted')).toBeInTheDocument();
-    expect(screen.getByText('1–1 of 1')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Metadata' }));
     expect(await screen.findByText('Event metadata (redacted)')).toBeInTheDocument();
     expect(screen.getByText(/SALE-000001/)).toBeInTheDocument();

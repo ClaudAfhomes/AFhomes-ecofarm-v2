@@ -1,10 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
-import { validateRecoveryPassword } from '@jad/shared';
-import { Alert, AuthLayout, Button, PasswordField } from '@jad/ui';
+import { Link, useNavigate } from 'react-router';
+import { validateRecoveryPassword } from '@afhomes/shared';
+import { Alert, AuthLayout, Button, PasswordField } from '@afhomes/ui';
+import { z } from 'zod';
 
 import { getSupabaseClient } from '../../lib/supabase';
+import { request } from '../../lib/api/client';
+import { useCustomerSession } from '../../lib/customer-session';
 import styles from '../customer/auth.module.css';
+import { isMongoAuth } from '../../lib/cookie-auth';
+import { getAuthPortals } from '../../lib/portals';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
 
@@ -12,15 +17,18 @@ type Phase = 'checking' | 'ready' | 'invalid' | 'done';
  * OST reset-password: the recovery-link landing page. Same session rules as
  * the customer reset page; on completion the seller returns to OST Login.
  */
-export function OstResetPasswordPage() {
+export function OstResetPasswordPage({ firstLogin = false }: { firstLogin?: boolean }) {
+  const navigate = useNavigate();
+  const { signOut } = useCustomerSession();
   const linkError =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('error') !== null;
   const [phase, setPhase] = useState<Phase>(() => {
-    if (!getSupabaseClient() || linkError) return 'invalid';
+    if (linkError || (!(isMongoAuth && firstLogin) && !getSupabaseClient())) return 'invalid';
     return 'checking';
   });
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -28,6 +36,12 @@ export function OstResetPasswordPage() {
 
   useEffect(() => {
     let mounted = true;
+    if (isMongoAuth && firstLogin) {
+      getAuthPortals().then(portals=>{
+        if(mounted)setPhase(!linkError && portals.staff?.roleSlug==='ost' && portals.staff.status==='active' && portals.staff.mustChangePassword ? 'ready':'invalid');
+      }).catch(()=>{if(mounted)setPhase('invalid');});
+      return ()=>{mounted=false;};
+    }
     const client = getSupabaseClient();
     if (!client) return;
     client.auth
@@ -57,11 +71,19 @@ export function OstResetPasswordPage() {
       mounted = false;
       subscription.subscription.unsubscribe();
     };
-  }, [linkError]);
+  }, [linkError, firstLogin]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (pending) return;
+    if (firstLogin && !currentPassword) {
+      setFieldError('Enter your temporary password.');
+      return;
+    }
+    if (firstLogin && currentPassword === password) {
+      setFieldError('Choose a password different from your temporary password.');
+      return;
+    }
     const policyError = validateRecoveryPassword(password);
     if (policyError) {
       setFieldError(policyError);
@@ -75,33 +97,38 @@ export function OstResetPasswordPage() {
     setServerError(null);
     setPending(true);
     try {
-      const client = getSupabaseClient();
-      if (!client) {
-        setServerError('Password recovery is not available right now.');
-        setPending(false);
-        return;
+      if (firstLogin) {
+        await request('/admin/afhomes/session/password', z.object({ changed: z.literal(true) }), {
+          method: 'POST',
+          body: JSON.stringify({ currentPassword, newPassword: password }),
+        });
+      } else {
+        const client = getSupabaseClient();
+        if(!client)throw new Error('Password recovery unavailable');
+        const { error } = await client.auth.updateUser({ password });
+        if (error) throw error;
       }
-      const { error } = await client.auth.updateUser({ password });
-      if (error) {
-        setServerError('We could not update your password. Request a new link and try again.');
-        setPending(false);
-        return;
-      }
-      await client.auth.signOut().catch(() => undefined);
+      await signOut().catch(() => undefined);
       setPassword('');
+      setCurrentPassword('');
       setConfirm('');
       setPhase('done');
       setPending(false);
+      if (firstLogin) navigate('/ost/login', { replace: true });
     } catch {
-      setServerError('We could not update your password. Request a new link and try again.');
+      setServerError(
+        firstLogin
+          ? 'We could not update your password. Check your temporary password and try again.'
+          : 'We could not update your password. Request a new link and try again.',
+      );
       setPending(false);
     }
   };
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
-      title="Choose a new password"
+      eyebrow="AFhomes Ecofarm"
+      title={firstLogin ? 'Create your own password' : 'Choose a new password'}
       brandTitle="Sell the farm you believe in."
       brandLead="Your pipeline, your referral code, and your network."
     >
@@ -118,7 +145,7 @@ export function OstResetPasswordPage() {
         </div>
       ) : phase === 'checking' ? (
         <p className={styles.prompt} role="status">
-          Checking your recovery link…
+          {firstLogin ? 'Checking your session…' : 'Checking your recovery link…'}
         </p>
       ) : phase === 'ready' ? (
         <form onSubmit={onSubmit} className={styles.form} noValidate>
@@ -126,6 +153,15 @@ export function OstResetPasswordPage() {
             <Alert variant="danger" title="We could not update your password">
               {serverError}
             </Alert>
+          )}
+          {firstLogin && (
+            <PasswordField
+              id="ost-current-password"
+              label="Temporary password"
+              value={currentPassword}
+              onChange={setCurrentPassword}
+              autoComplete="current-password"
+            />
           )}
           <PasswordField
             id="ost-reset-password"
@@ -153,18 +189,30 @@ export function OstResetPasswordPage() {
           </p>
           <div className={styles.submitRow}>
             <Button type="submit" loading={pending} disabled={pending}>
-              Update password
+              {firstLogin ? 'Save password' : 'Update password'}
             </Button>
           </div>
         </form>
       ) : (
         <div className={styles.resultPanel}>
-          <Alert variant="danger" title="Recovery link is invalid or has expired">
-            Recovery links are single-use.
+          <Alert
+            variant="danger"
+            title={
+              firstLogin
+                ? 'Sign in to create your password'
+                : 'Recovery link is invalid or has expired'
+            }
+          >
+            {firstLogin
+              ? 'Use the email and temporary password provided by your administrator.'
+              : 'Recovery links are single-use.'}
           </Alert>
           <p className={styles.prompt}>
-            <Link className={styles.promptLink} to="/ost/forgot-password">
-              Request a new link
+            <Link
+              className={styles.promptLink}
+              to={firstLogin ? '/ost/login' : '/ost/forgot-password'}
+            >
+              {firstLogin ? 'Back to sign in' : 'Request a new link'}
             </Link>
           </p>
         </div>

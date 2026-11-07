@@ -1,0 +1,4 @@
+supabase/migrations/20261101000001_afhomes_application_purchase_flow.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Preserve the exact bytes approved and applied to Supabase across checkouts.
+supabase/migrations/20261226000001_afhomes_supabase_review_reason_reconciliation.sql -text
+supabase/migrations/20261227000001_afhomes_develop_catalog_reconciliation.sql -text

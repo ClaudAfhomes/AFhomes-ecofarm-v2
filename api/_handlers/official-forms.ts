@@ -1,10 +1,13 @@
+import { randomUUID } from 'node:crypto';
+import { workbookApplicationPrefill } from '../_lib/customer-workbook.js';
 import { z } from 'zod';
+import { addMoney, compareMoney } from '@afhomes/shared';
 import { currentIdForSubject } from './documents.js';
-import { governmentIdTypeSchema } from '@jad/contracts';
+import { governmentIdTypeSchema } from '@afhomes/contracts';
 import {
-  canTransitionCustomerApplication,
   canTransitionReservationAgreement,
   createCustomerApplicationSchema,
+  importContinuationRequestSchema,
   registerCustomerApplicationSchema,
   createReservationAgreementSchema,
   customerApplicationDecisionSchema,
@@ -12,11 +15,22 @@ import {
   normalizePersonName,
   normalizePostalCode,
   officialFormListQuerySchema,
+  purchaseReservationCreateSchema,
+  purchaseReservationUpdateSchema,
+  recordPurchasePaymentSchema,
+  verifyPurchasePaymentSchema,
+  finalizeReservationPurchaseSchema,
+  purchaseTermsProposalSchema,
   reservationAgreementDecisionSchema,
-  type CustomerApplicationStatus,
+  reviewPurchaseTermsSchema,
+  submitPurchaseApplicationSchema,
   type ReservationAgreementStatus,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { addressProvider } from '../_lib/address-source.js';
+import { loadImportRecoveryContext } from '../_lib/customer-import-continuation.js';
+import { verifyAddressHierarchy } from '../_lib/address-provider.js';
+import { resolvePostalCode } from '../_lib/postal-reference.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
@@ -24,6 +38,7 @@ import {
   fail,
   isoOrNull,
   jsonBody,
+  list,
   mapRpcError,
   method,
   route,
@@ -39,6 +54,12 @@ import {
   reservationAgreementXlsx,
   validateFormImport,
 } from '../_lib/official-forms.js';
+import {
+  purchaseDocumentFilename,
+  purchaseDocumentPdf,
+  type PurchaseDocumentEvidence,
+  type PurchaseDocumentKind,
+} from '../_lib/purchase-documents.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -84,6 +105,8 @@ const normalizeHolderOptionals = <T extends OptionalTextHolder>(holder: T): T =>
 const normalizeApplicationHeader = <
   T extends {
     salesManagerName?: string;
+    svdName?: string;
+    ssmName?: string;
     vipRecommenderName?: string;
     vipReferrer?: string;
   },
@@ -94,11 +117,154 @@ const normalizeApplicationHeader = <
   ...(header.salesManagerName
     ? { salesManagerName: normalizePersonName(header.salesManagerName) }
     : {}),
+  ...(header.svdName ? { svdName: normalizePersonName(header.svdName) } : {}),
+  ...(header.ssmName ? { ssmName: normalizePersonName(header.ssmName) } : {}),
   ...(header.vipRecommenderName
     ? { vipRecommenderName: normalizePersonName(header.vipRecommenderName) }
     : {}),
   ...(header.vipReferrer ? { vipReferrer: normalizePersonName(header.vipReferrer) } : {}),
 });
+
+/**
+ * A holder's location codes, as they arrive from a client.
+ *
+ * `verified` means the authority confirmed the whole chain. A legacy holder has
+ * none of these, which is legitimate: absence is "this record predates the
+ * selectors", not "this address is wrong".
+ */
+type HolderLocation = {
+  province?: string;
+  cityMunicipality?: string;
+  barangay?: string;
+  provinceCode?: string;
+  cityMunicipalityCode?: string;
+  barangayCode?: string;
+};
+
+/** A refusal, expressed so the caller can hand it straight to `fail`. */
+type LocationRefusal = { status: number; message: string };
+
+/**
+ * Tagged, because a bare `Record<string, unknown>` cannot be narrowed by
+ * `'status' in value`: any record may carry a `status` key, so the compiler
+ * would let a refusal fall through as a holder and vice versa.
+ */
+type LocationResult =
+  { ok: true; holder: Record<string, unknown> } | { ok: false; refusal: LocationRefusal };
+
+/**
+ * Re-resolve a submitted location against the official hierarchy and RETURN THE
+ * AUTHORITY'S OWN SPELLING.
+ *
+ * This is the security boundary, and it is deliberately not the UI. The cascading
+ * comboboxes make a mismatched combination hard to produce by hand, but a
+ * hand-crafted request body does not have to go through them, and a client-side
+ * "approved" combination proves nothing. So the codes are re-checked against the
+ * provider before anything is persisted, and the names the browser sent are
+ * DISCARDED in favour of the provider's - which is why a stored address can never
+ * disagree with the official list.
+ *
+ * An outage is NOT treated as "allow it": if the hierarchy cannot be confirmed,
+ * a coded address is refused rather than saved unverified.
+ */
+async function resolveHolderLocation(holder: HolderLocation): Promise<LocationResult> {
+  const { provinceCode, cityMunicipalityCode, barangayCode } = holder;
+  const present = [provinceCode, cityMunicipalityCode, barangayCode].filter(Boolean).length;
+
+  // No codes: a legacy free-text address. Nothing to contradict, so it passes and
+  // is stored exactly as the operator typed it.
+  if (present === 0) return { ok: true, holder };
+  if (present !== 3)
+    return {
+      ok: false,
+      refusal: {
+        status: 400,
+        message: 'Choose the province, city or municipality and barangay from the list.',
+      },
+    };
+
+  const check = await verifyAddressHierarchy(addressProvider(), {
+    provinceCode: provinceCode!,
+    localityCode: cityMunicipalityCode!,
+    barangayCode: barangayCode!,
+  });
+
+  if (check.valid) {
+    const postal = resolvePostalCode(
+      check.hierarchy.province.name,
+      check.hierarchy.locality.name,
+      check.hierarchy.barangay.name,
+    );
+    if (postal.status !== 'matched')
+      return {
+        ok: false,
+        refusal: {
+          status: 400,
+          message:
+            'Postal reference requires review for this location. No unverified ZIP was saved.',
+        },
+      };
+    return {
+      ok: true,
+      holder: {
+        ...holder,
+        province: check.hierarchy.province.name,
+        cityMunicipality: check.hierarchy.locality.name,
+        barangay: check.hierarchy.barangay.name,
+        provinceCode: check.hierarchy.province.code,
+        cityMunicipalityCode: check.hierarchy.locality.code,
+        barangayCode: check.hierarchy.barangay.code,
+        // The postal code comes from the national reference resolver, never
+        // from the locality's raw provider zip (which is known to disagree
+        // with PHLPost in places); a review hold was refused above.
+        postalCode: postal.postalCode,
+      },
+    };
+  }
+
+  switch (check.reason) {
+    case 'PROVIDER_UNAVAILABLE':
+      return {
+        ok: false,
+        refusal: {
+          status: 503,
+          message: 'The address list is temporarily unavailable. Try again shortly.',
+        },
+      };
+    case 'PROVIDER_BAD_RESPONSE':
+      return {
+        ok: false,
+        refusal: { status: 502, message: 'The address list returned an unusable response.' },
+      };
+    default:
+      // Never echo the offending code back: the message must not confirm or
+      // deny a specific code to someone probing for valid ones.
+      return {
+        ok: false,
+        refusal: {
+          status: 400,
+          message:
+            'That province, city or municipality and barangay do not form a valid location. Choose them again from the list.',
+        },
+      };
+  }
+}
+
+/** Apply the resolver to both holders, refusing the whole submission on failure. */
+async function resolveHolderLocations(
+  primary: HolderLocation,
+  secondary?: HolderLocation,
+): Promise<
+  | { ok: true; primary: Record<string, unknown>; secondary: Record<string, unknown> | null }
+  | LocationRefusal
+> {
+  const resolvedPrimary = await resolveHolderLocation(primary);
+  if (!resolvedPrimary.ok) return resolvedPrimary.refusal;
+  if (!secondary) return { ok: true, primary: resolvedPrimary.holder, secondary: null };
+  const resolvedSecondary = await resolveHolderLocation(secondary);
+  if (!resolvedSecondary.ok) return resolvedSecondary.refusal;
+  return { ok: true, primary: resolvedPrimary.holder, secondary: resolvedSecondary.holder };
+}
 
 const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   holderType: row.holder_type,
@@ -112,8 +278,18 @@ const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   civilStatus: row.civil_status ?? undefined,
   permanentAddressLine1: row.permanent_address_line_1,
   permanentAddressLine2: row.permanent_address_line_2 ?? undefined,
+  /**
+   * Official geography. The codes and `barangay` are absent on every record
+   * written before the structured selectors existed, which is why each one
+   * degrades to undefined instead of being defaulted - a legacy application must
+   * read back exactly as it was stored, with no fabricated code.
+   */
   cityMunicipality: row.city_municipality,
   province: row.province,
+  barangay: row.barangay ?? undefined,
+  provinceCode: row.province_code ?? undefined,
+  cityMunicipalityCode: row.city_municipality_code ?? undefined,
+  barangayCode: row.barangay_code ?? undefined,
   postalCode: row.postal_code ?? undefined,
   landline: row.landline ?? undefined,
   mobile: row.mobile,
@@ -147,6 +323,9 @@ async function getApplication(db: Db, id: string) {
   return {
     id: row.id,
     applicationNumber: row.application_number,
+    // Which frozen terms record this application points at. Null is the honest
+    // "review required" state the UI keys off.
+    purchaseTermsId: row.purchase_terms_id ?? null,
     customerId: row.customer_id,
     saleId: row.sale_id ?? undefined,
     planId: row.plan_id,
@@ -161,6 +340,12 @@ async function getApplication(db: Db, id: string) {
     primary: primary ? shapeApplicationHolder(primary) : null,
     secondary: secondary ? shapeApplicationHolder(secondary) : undefined,
     salesManagerName: row.sales_manager_name ?? undefined,
+    svdStaffId: row.svd_staff_id ?? undefined,
+    ssmStaffId: row.ssm_staff_id ?? undefined,
+    smStaffId: row.sm_staff_id ?? undefined,
+    referrerStaffId: row.referrer_staff_id ?? undefined,
+    svdName: row.svd_name ?? undefined,
+    ssmName: row.ssm_name ?? undefined,
     vipRecommenderName: row.vip_recommender_name ?? undefined,
     recommenderContact: row.recommender_contact ?? undefined,
     recommenderEmail: row.recommender_email ?? undefined,
@@ -168,7 +353,7 @@ async function getApplication(db: Db, id: string) {
     acquisitionChannels: row.acquisition_channels ?? [],
     consentAcknowledged: row.consent_acknowledged === true,
     acknowledgedAt: row.acknowledged_at,
-    primarySignatureStatus: row.primary_signature_status,
+    primarySignatureStatus: row.primary_signature_status ?? 'received',
     secondarySignatureStatus: row.secondary_signature_status ?? undefined,
     validIdReceived: row.valid_id_received === true,
     reservationPaymentProofReceived: row.reservation_payment_proof_received === true,
@@ -198,6 +383,10 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
     primary_address_line_2: String(p.permanentAddressLine2 ?? ''),
     primary_city_municipality: String(p.cityMunicipality ?? ''),
     primary_province: String(p.province ?? ''),
+    // Empty for every application written before the structured selectors
+    // existed. Blank is the honest rendering; inventing a barangay from the city
+    // name would fabricate a record.
+    primary_barangay: String(p.barangay ?? ''),
     primary_postal_code: String(p.postalCode ?? ''),
     primary_landline: String(p.landline ?? ''),
     primary_mobile: String(p.mobile ?? ''),
@@ -217,8 +406,8 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
     vip_referrer: String(app.vipReferrer ?? ''),
     acquisition_channels: (app.acquisitionChannels as string[]).join('|'),
     consent_acknowledged: String(app.consentAcknowledged),
-    acknowledgement_date: String(app.acknowledgedAt),
-    primary_signature_status: String(app.primarySignatureStatus),
+    acknowledgement_date: app.acknowledgedAt == null ? '' : String(app.acknowledgedAt),
+    primary_signature_status: String(app.primarySignatureStatus ?? 'received'),
     secondary_signature_status: String(app.secondarySignatureStatus ?? ''),
     valid_id_received: String(app.validIdReceived),
     reservation_payment_proof_received: String(app.reservationPaymentProofReceived),
@@ -237,6 +426,7 @@ function applicationFields(app: NonNullable<Awaited<ReturnType<typeof getApplica
       ['permanentAddressLine2', 'address_line_2'],
       ['cityMunicipality', 'city_municipality'],
       ['province', 'province'],
+      ['barangay', 'barangay'],
       ['postalCode', 'postal_code'],
       ['landline', 'landline'],
       ['mobile', 'mobile'],
@@ -286,8 +476,14 @@ async function getAgreement(db: Db, id: string) {
     revisionNumber: row.revision_number ?? undefined,
     reservationDate: row.reservation_date,
     agreementDate: row.agreement_date,
+    // `origin` is the discriminator the purchase-flow contracts key on. Legacy
+    // sale-origin rows carry the column default, so both modes read the same.
+    origin: (row.origin as string | undefined) ?? 'sale',
     saleId: row.sale_id,
     customerApplicationId: row.customer_application_id ?? undefined,
+    customerId: row.customer_id ?? undefined,
+    sellerStaffId: row.seller_staff_id ?? undefined,
+    purchaseTermsId: row.purchase_terms_id ?? null,
     planId: row.plan_id,
     tier: row.tier_snapshot,
     inclusions: row.inclusions_snapshot,
@@ -307,8 +503,6 @@ async function getAgreement(db: Db, id: string) {
     monthlyAmortizationStart: row.monthly_amortization_start ?? undefined,
     monthlyAmortizationEnd: row.monthly_amortization_end ?? undefined,
     paymentDueDay: row.payment_due_day ?? undefined,
-    primarySignatureStatus: row.primary_signature_status,
-    secondarySignatureStatus: row.secondary_signature_status ?? undefined,
     primary: holders.find((h) => h.holderType === 'PRIMARY') ?? null,
     secondary: holders.find((h) => h.holderType === 'SECONDARY'),
     schedule: ((scheduleResult.data ?? []) as Record<string, unknown>[]).map((line) => ({
@@ -316,7 +510,6 @@ async function getAgreement(db: Db, id: string) {
       particular: line.particular,
       amount: line.amount_snapshot,
       paymentDate: line.payment_date ?? undefined,
-      remarks: line.remarks ?? undefined,
     })),
     status: row.status,
     createdBy: row.created_by,
@@ -325,6 +518,38 @@ async function getAgreement(db: Db, id: string) {
     submittedAt: isoOrNull(row.submitted_at),
     executedAt: isoOrNull(row.executed_at),
   };
+}
+
+/**
+ * Drop applications the reservation workflow already owns.
+ *
+ * An application stops being application work the moment a LIVE
+ * application-origin reservation exists: from there the reservation, the
+ * payment ledger and the finance queue own the customer. The record is never
+ * deleted or archived - it simply stops occupying the active queue, and stays
+ * reachable through the detail screen, the reservation link and reports.
+ *
+ * The exclusion is applied IN THE DATABASE (`not.in`), not by filtering the
+ * returned page in JS. Filtering after `.range()` would silently corrupt both
+ * `meta.total` and the page length, so the table would still look polluted.
+ *
+ * A CANCELLED reservation is deliberately not counted as progress: cancelling
+ * the agreement hands the customer back to the application stage.
+ */
+async function progressedApplicationIds(db: Db): Promise<string[]> {
+  const { data, error } = await db
+    .from('reservation_agreements')
+    .select('customer_application_id')
+    .eq('origin', 'application')
+    .neq('status', 'cancelled');
+  if (error) throw error;
+  return [
+    ...new Set(
+      ((data ?? []) as Record<string, unknown>[])
+        .map((row) => String(row.customer_application_id ?? ''))
+        .filter(Boolean),
+    ),
+  ];
 }
 
 async function listRows(
@@ -338,6 +563,12 @@ async function listRows(
   const q = parsed.data;
   let query = db.from(table).select('*', { count: 'exact' });
   if (q.status) query = query.eq('status', q.status);
+  if (q.saleId) query = query.eq('sale_id', q.saleId);
+  // "This customer's applications". Reservations hang off an APPLICATION, not
+  // a customer, so the filter is applications-only rather than silently
+  // returning every agreement in the system.
+  if (q.customerId && table === 'customer_applications')
+    query = query.eq('customer_id', q.customerId);
   if (q.tier) query = query.eq('tier_snapshot', q.tier);
   if (q.seller) query = query.eq('created_by', q.seller);
   if (q.from) query = query.gte('created_at', q.from);
@@ -347,6 +578,31 @@ async function listRows(
       table === 'customer_applications' ? 'application_number' : 'reservation_number',
       `%${q.search.replace(/[%_,]/g, '')}%`,
     );
+  // The application-origin link is the ONLY way to ask "did this application
+  // become a reservation?", so this is the authoritative lookup for it.
+  if (table === 'reservation_agreements' && q.application)
+    query = query.eq('customer_application_id', q.application);
+  // Executing the agreement is the handover to Finance: the contract is
+  // finalized, collection is owned by the payment queue, and the agreement
+  // stops being IST reservation work. It stays fully readable and printable.
+  //
+  // An explicit `status` wins over the queue default, so asking for
+  // `status=executed` still returns executed rows. Without that, the two
+  // filters would contradict each other and report zero rows, which reads as
+  // "the data is gone" instead of "it moved to Finance".
+  if (table === 'reservation_agreements' && q.queue === 'reservation_work' && !q.status)
+    query = query.neq('status', 'executed');
+  if (table === 'customer_applications' && q.queue === 'application_work' && !q.status) {
+    // The builder is thenable, so it must never cross an `await`: only the id
+    // list does.
+    const progressed = await progressedApplicationIds(db);
+    // `not()` is `not(column, operator, value)` - THREE arguments, and the value
+    // is raw PostgREST syntax, so an `in` list is a parenthesised string.
+    // ponytail: an explicit id list, so a reservation created outside this
+    // schema still counts. Upgrade to a SQL-side anti-join if the progressed set
+    // ever outgrows a request URL.
+    if (progressed.length) query = query.not('id', 'in', `(${progressed.join(',')})`);
+  }
   const { data, error, count } = await query
     .order('created_at', { ascending: false })
     .range(q.offset, q.offset + q.limit - 1);
@@ -369,6 +625,33 @@ async function listRows(
       ]),
     );
     for (const row of rows) row.applicant_name = names.get(String(row.id)) ?? null;
+    const termsIds = rows.flatMap((row) =>
+      row.purchase_terms_id ? [String(row.purchase_terms_id)] : [],
+    );
+    const sellersByTerms = new Map<string, string>();
+    if (termsIds.length) {
+      const { data: terms, error: termsError } = await db
+        .from('customer_application_purchase_terms')
+        .select('id,seller_staff_id')
+        .in('id', termsIds);
+      if (termsError) throw termsError;
+      for (const term of (terms ?? []) as Record<string, unknown>[])
+        sellersByTerms.set(String(term.id), String(term.seller_staff_id));
+    }
+    const sellerId = (row: Record<string, unknown>) =>
+      sellersByTerms.get(String(row.purchase_terms_id)) ?? String(row.created_by ?? '');
+    const sellerIds = [...new Set(rows.map(sellerId).filter(Boolean))];
+    const sellerNames = new Map<string, string>();
+    if (sellerIds.length) {
+      const { data: staff, error: staffError } = await db
+        .from('staff_users')
+        .select('id,full_name')
+        .in('id', sellerIds);
+      if (staffError) throw staffError;
+      for (const seller of (staff ?? []) as Record<string, unknown>[])
+        sellerNames.set(String(seller.id), String(seller.full_name ?? ''));
+    }
+    for (const row of rows) row.seller_name = sellerNames.get(sellerId(row)) || null;
   }
   if (table === 'reservation_agreements' && rows.length) {
     const ids = rows.map((row) => String(row.id));
@@ -388,6 +671,48 @@ async function listRows(
       row.applicant_name = names.get(String(row.id)) ?? null;
       row.has_secondary_holder = secondaryAgreements.has(String(row.id));
     }
+    // Attach a payment verification status so the reservations list can show
+    // Pending/Verified without a per-row round-trip.
+    const paymentIds = rows.map((row) => String(row.id));
+    if (paymentIds.length) {
+      const { data: payments, error: paymentsError } = await db
+        .from('payments')
+        .select('reservation_id,status')
+        .in('reservation_id', paymentIds);
+      if (paymentsError) throw paymentsError;
+      const verified = new Set<string>();
+      const anyPayment = new Set<string>();
+      const verifiedTotal = new Map<string, string>();
+      for (const p of (payments ?? []) as Record<string, unknown>[]) {
+        const rid = String(p.reservation_id ?? '');
+        if (!rid) continue;
+        anyPayment.add(rid);
+        if (String(p.status ?? '') === 'verified') {
+          verified.add(rid);
+          const amount = String(p.amount ?? '0.00');
+          verifiedTotal.set(rid, addMoney(verifiedTotal.get(rid) ?? '0.00', amount));
+        }
+      }
+      for (const row of rows) {
+        const rid = String(row.id);
+        const vTotal = verifiedTotal.get(rid) ?? '0.00';
+        const total = String(row.total_price_snapshot ?? '0.00');
+        row.payment_status = verified.has(rid)
+          ? 'paid'
+          : anyPayment.has(rid)
+            ? 'pending'
+            : null;
+        row.verified_total = vTotal;
+        let fullyPaid = false;
+        try {
+          fullyPaid =
+            compareMoney(total, '0.00') > 0 && compareMoney(vTotal, total) >= 0;
+        } catch {
+          fullyPaid = false;
+        }
+        row.fully_paid = fullyPaid;
+      }
+    }
   }
   return res.status(200).json({
     data: rows,
@@ -396,59 +721,201 @@ async function listRows(
 }
 
 const APPLICABLE_DECISION_AUDIT: Record<string, string> = {
-  approved: 'CUSTOMER_APPLICATION_APPROVED',
-  rejected: 'CUSTOMER_APPLICATION_REJECTED',
-  cancelled: 'CUSTOMER_APPLICATION_CANCELLED',
   executed: 'RESERVATION_AGREEMENT_EXECUTED',
 };
 
-async function transitionApplicationStatus(
-  db: Db,
-  authUserId: string,
-  id: string,
-  to: CustomerApplicationStatus,
-) {
-  const { data, error } = await db
-    .from('customer_applications')
-    .select('id,status,submitted_at')
-    .eq('id', id)
-    .maybeSingle();
+/**
+ * Optional `sellerCandidateId` query parameter.
+ *
+ * It is a REQUEST for who the operator wants to sell for, never an assertion:
+ * the RPC re-resolves the seller against the actor's downline and the target's
+ * role/status. A present-but-malformed value is refused rather than ignored,
+ * so a typo can never silently fall back to "me".
+ */
+/**
+ * The module that authorizes a document kind.
+ *
+ * Payment and purchase documents follow the money; the activation confirmation
+ * follows the card. Each is mapped once, so a new kind cannot inherit the wrong
+ * permission by being added next to an existing route.
+ */
+function documentModule(kind: PurchaseDocumentKind): Parameters<typeof authorizeAfHomes>[1] {
+  return kind === 'membership_activated'
+    ? 'finance.card_activation'
+    : kind === 'reservation'
+      ? 'sales.card_sales'
+      : 'finance.payment_verification';
+}
+
+/** One payments row in API field names, for either source. */
+function shapePayment(row: Record<string, unknown>) {
+  return {
+    origin: (row.origin as string | undefined) ?? 'sale',
+    id: row.id,
+    paymentNumber: (row.payment_number as string | null | undefined) ?? null,
+    saleId: (row.sale_id as string | null | undefined) ?? null,
+    reservationId: (row.reservation_id as string | null | undefined) ?? null,
+    customerId: isoOrNull(row.customer_id),
+    amount: row.amount,
+    paymentType: row.payment_type,
+    method: row.method,
+    reference: isoOrNull(row.reference),
+    notes: isoOrNull(row.notes),
+    status: row.status,
+    rejectionReason: isoOrNull(row.rejection_reason),
+    recordedBy: row.recorded_by,
+    verifiedBy: isoOrNull(row.verified_by),
+    recordedAt: isoOrNull(row.recorded_at) ?? '',
+    verifiedAt: isoOrNull(row.verified_at),
+  };
+}
+
+/**
+ * Server-authoritative money state for a reservation-origin purchase.
+ *
+ * Every figure comes from the `purchase_financial_summary` RPC, which reads the
+ * FROZEN terms and the payment rows. No total is computed here, and nothing on
+ * the browser can influence one: the only request fields are a request id and the
+ * amount being recorded.
+ */
+async function agreementFinanceSummary(db: Db, id: string) {
+  const { data, error } = await db.rpc('purchase_financial_summary', { p_source_id: id });
   if (error) throw error;
-  if (!data) return null;
-  const row = data as { status: CustomerApplicationStatus; submitted_at: string | null };
-  if (!canTransitionCustomerApplication(row.status, to)) {
-    const conflict = new Error(
-      `INVALID_APPLICATION_TRANSITION: cannot move from ${row.status} to ${to}`,
-    );
-    (conflict as { code?: string }).code = 'INVALID_APPLICATION_TRANSITION';
-    throw conflict;
+  const summary = data as Record<string, unknown> | null;
+  if (!summary) throw new Error('RESERVATION_FINANCE_SUMMARY_MISSING');
+  const [application, customer, seller, payments] = await Promise.all([
+    db
+      .from('customer_applications')
+      .select('application_number, status')
+      .eq('id', String(summary.customerApplicationId))
+      .maybeSingle(),
+    db
+      .from('customers')
+      .select('first_name, middle_name, last_name, suffix')
+      .eq('id', String(summary.customerId))
+      .maybeSingle(),
+
+    db
+      .from('staff_users')
+      .select('full_name')
+      .eq('id', String(summary.sellerStaffId))
+      .maybeSingle(),
+    db
+      .from('payments')
+      .select('*')
+      .eq('reservation_id', id)
+      .order('recorded_at', { ascending: false }),
+  ]);
+  for (const result of [application, customer, seller, payments]) {
+    if (result.error) throw result.error;
   }
-  const now = new Date().toISOString();
-  const patch: Record<string, unknown> = { status: to, updated_at: now };
-  if (to === 'approved') {
-    patch.submitted_at = row.submitted_at ?? now;
-    patch.approved_at = now;
-  }
-  if (to === 'rejected') {
-    patch.submitted_at = row.submitted_at ?? now;
-    patch.rejected_at = now;
-  }
-  if (to === 'cancelled') patch.updated_at = now;
-  if (to === 'draft') patch.updated_at = now;
-  const { error: writeError } = await db.from('customer_applications').update(patch).eq('id', id);
-  if (writeError) throw writeError;
-  await audit(
-    db,
-    authUserId,
-    to === 'draft'
-      ? 'CUSTOMER_APPLICATION_REOPENED'
-      : (APPLICABLE_DECISION_AUDIT[to] ?? 'CUSTOMER_APPLICATION_UPDATED'),
-    'customer_application',
-    id,
-    { status: row.status },
-    { status: to },
-  );
-  return true;
+  const sale = summary.saleId
+    ? await db
+        .from('card_sales')
+        .select('sale_number')
+        .eq('id', String(summary.saleId))
+        .maybeSingle()
+    : null;
+  if (sale?.error) throw sale.error;
+  const saleNumber = (sale?.data as { sale_number?: string } | null)?.sale_number ?? null;
+  const membershipResult = summary.saleId
+    ? await db
+        .from('memberships')
+        .select('id,membership_number,status')
+        .eq('sale_id', String(summary.saleId))
+        .maybeSingle()
+    : null;
+  if (membershipResult?.error) throw membershipResult.error;
+  const member = membershipResult?.data as {
+    id: string;
+    membership_number: string;
+    status: string;
+  } | null;
+  const account = member
+    ? await db
+        .from('points_accounts')
+        .select('balance')
+        .eq('membership_id', member.id)
+        .maybeSingle()
+    : null;
+  if (account?.error) throw account.error;
+  const membership = member
+    ? {
+        id: member.id,
+        membershipNumber: member.membership_number,
+        status: member.status,
+        pointsBalance: Number((account?.data as { balance: number } | null)?.balance ?? 0),
+      }
+    : null;
+  const name = (customer.data ?? {}) as Record<string, unknown>;
+  const applicationRow = (application.data ?? {}) as Record<string, unknown>;
+  return {
+    reservationId: summary.reservationId,
+    reservationNumber: summary.reservationNumber,
+    customerApplicationId: summary.customerApplicationId,
+    applicationNumber: String(applicationRow.application_number ?? ''),
+    applicationStatus: applicationRow.status ?? 'approved',
+    purchaseTermsId: summary.purchaseTermsId,
+    sellerStaffId: summary.sellerStaffId,
+    sellerName: String((seller.data as Record<string, unknown> | null)?.full_name ?? ''),
+    tier: summary.tier,
+    customerId: summary.customerId,
+    customerName:
+      [name.first_name, name.middle_name, name.last_name, name.suffix]
+        .filter((part) => typeof part === 'string' && part)
+        .join(' ') || 'Unknown customer',
+    productName: `VIP ${String(summary.tier)}`,
+    status: summary.status,
+    paymentScheme: summary.paymentScheme,
+    totalPrice: summary.totalPrice,
+    reservationFee: summary.reservationFee,
+    requiredInitial: summary.requiredInitial,
+    installmentMonths: summary.installmentMonths,
+    monthlyAmount: summary.monthlyAmount,
+    validityMonths: summary.validityMonths,
+
+    verifiedTotal: summary.verifiedTotal,
+
+    remainingBalance: summary.remainingBalance,
+    overpaidAmount: summary.overpaidAmount,
+    fullyPaid: summary.fullyPaid,
+    recordedPaymentCount: summary.recordedPaymentCount,
+    firstVerifiedPayment: isoOrNull(summary.firstVerifiedPayment),
+    spotCashDeadline: isoOrNull(summary.spotCashDeadline),
+    saleId: summary.saleId,
+    saleNumber,
+    membership,
+    payments: (payments.data ?? []).map((row: Record<string, unknown>) => shapePayment(row)),
+  };
+}
+/**
+ * The request identity for an application-origin reservation transition.
+ *
+ * A caller that sends one gets exact retry semantics; a caller that sends none
+ * still gets a stable id for the length of this request, so the legacy bodies
+ * (which predate request identities) keep working without inventing a new field
+ * they cannot satisfy. The domain guards in SQL remain authoritative either way.
+ */
+function purchaseRequestId(req: VercelRequest): string {
+  const body = jsonBody(req) as { requestId?: unknown } | undefined;
+  return typeof body?.requestId === 'string' && z.string().uuid().safeParse(body.requestId).success
+    ? body.requestId
+    : randomUUID();
+}
+
+function sellerCandidateQuery(req: VercelRequest):
+  | { ok: true; value: string | null }
+  | {
+      ok: false;
+      message: string;
+    } {
+  const raw = req.query.sellerCandidateId;
+  if (raw === undefined || raw === '') return { ok: true, value: null };
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = z.string().uuid().safeParse(value);
+  return parsed.success
+    ? { ok: true, value: parsed.data }
+    : { ok: false, message: 'sellerCandidateId must be a single UUID' };
 }
 
 async function transitionAgreementStatus(
@@ -607,6 +1074,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   try {
     const path = subPath(req);
+    const importPrefill = route(req, 'GET', /^customer-import-prefill\/([0-9a-f-]+)$/);
+    if (importPrefill) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
+      if ('error' in auth) return deny(res, auth);
+      const importAccess = await authorizeAfHomes(req, 'governance.customer_import');
+      if ('error' in importAccess) return deny(res, importAccess);
+      const id = z.string().uuid().safeParse(importPrefill[1]);
+      if (!id.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer', 400);
+      const { data, error } = await db
+        .from('customer_import_rows')
+        .select('raw_data,committed_at')
+        .eq('customer_id', id.data)
+        .order('committed_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      const imported = (
+        (data ?? []) as { raw_data: Record<string, string>; committed_at: string | null }[]
+      ).find((r) => r.committed_at && r.raw_data.workbook_format === 'company_v1');
+      if (!imported)
+        return fail(
+          res,
+          'NOT_FOUND',
+          'No committed company workbook details for this customer',
+          404,
+        );
+      return res.status(200).json(workbookApplicationPrefill(imported.raw_data));
+    }
     if (method(req) === 'GET' && path === 'customer/template') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
@@ -657,6 +1151,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'customer-applications' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
+      const incoming = jsonBody(req) as Record<string, unknown>;
+      if (incoming?.registerNewCustomer && incoming?.importContext)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'An imported purchase must use its existing linked customer',
+          400,
+        );
       const newRegistration = registerCustomerApplicationSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -668,39 +1170,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           registerNewCustomer: _mode,
           ...header
         } = newRegistration.data;
+        const locations = await resolveHolderLocations(primary, secondary);
+        if ('status' in locations)
+          return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
         const { data, error } = await db.rpc('register_customer_application_once', {
           p_request_id: requestId,
           p_actor_id: auth.userId,
           p_header: normalizeApplicationHeader(header),
-          p_primary: normalizeHolderOptionals(primary),
-          p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
+          p_primary: normalizeHolderOptionals({ ...primary, ...locations.primary }),
+          p_secondary: secondary
+            ? normalizeHolderOptionals({
+                ...secondary,
+                ...(locations.secondary as Record<string, unknown>),
+              })
+            : null,
         });
         if (error) throw error;
         return res.status(201).json(await getApplication(db, rpcId(data)));
       }
       const parsed = createCustomerApplicationSchema
-        .safeExtend({ requestId: z.string().uuid() })
+        .safeExtend({
+          requestId: z.string().uuid(),
+          importContext: importContinuationRequestSchema
+            .extend({
+              rowId: z.uuid(),
+              purchaseReference: z.string().trim().min(1).max(200).optional(),
+            })
+            .optional(),
+        })
         .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
-      const { primary, secondary, requestId, ...header } = parsed.data;
+      const { primary, secondary, requestId, importContext, ...header } = parsed.data;
+      const locations = await resolveHolderLocations(primary, secondary);
+      if ('status' in locations)
+        return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
+      if (importContext) {
+        const importAuth = await authorizeAfHomes(req, 'governance.customer_import', 'update');
+        if ('error' in importAuth) return deny(res, importAuth);
+        const { fields, recoveryArguments } = await loadImportRecoveryContext(
+          db,
+          importContext.rowId,
+        );
+        const result = await db.rpc('complete_import_application_once', {
+          p_row_id: importContext.rowId,
+          p_actor_id: auth.userId,
+          p_request_id: requestId,
+          p_expected_source_hash: importContext.expectedSourceHash,
+          p_expected_target_version: importContext.expectedTargetVersion,
+          p_header: {
+            ...normalizeApplicationHeader(header),
+            ...(importContext.purchaseReference
+              ? { importPurchaseReference: importContext.purchaseReference }
+              : {}),
+          },
+          p_primary: normalizeHolderOptionals({
+            ...primary,
+            tinNumber: primary.tinNumber || fields.tin || undefined,
+            ...locations.primary,
+          }),
+          p_secondary: secondary
+            ? normalizeHolderOptionals({
+                ...secondary,
+                tinNumber: secondary.tinNumber || fields.secondary_tin || undefined,
+                ...(locations.secondary as Record<string, unknown>),
+              })
+            : null,
+          p_proposed_facts: recoveryArguments.p_proposed_facts ?? null,
+        });
+        if (result.error) return mapRpcError(res, result.error);
+        const applicationId = z.uuid().parse(result.data.applicationId);
+        return res.status(201).json(await getApplication(db, applicationId));
+      }
       const { data, error } = await db.rpc('create_customer_application_once', {
         p_request_id: requestId,
         p_actor_id: auth.userId,
         p_header: normalizeApplicationHeader(header),
-        p_primary: normalizeHolderOptionals(primary),
-        p_secondary: secondary ? normalizeHolderOptionals(secondary) : null,
+        p_primary: normalizeHolderOptionals({ ...primary, ...locations.primary }),
+        p_secondary: secondary
+          ? normalizeHolderOptionals({
+              ...secondary,
+              ...(locations.secondary as Record<string, unknown>),
+            })
+          : null,
       });
       if (error) throw error;
       const id = rpcId(data);
       // Creation and audit are atomic in the idempotent RPC.
       return res.status(201).json(await getApplication(db, id));
     }
-    const appGet = route(req, 'GET', /^customer-applications\/([0-9a-f-]+)$/);
+    // Accept uppercase hex too (hand-typed or copied links): ids are
+    // canonicalized to lowercase before the lookup so casing never 404s.
+    const appGet = route(req, 'GET', /^customer-applications\/([0-9a-fA-F-]+)$/);
     if (appGet) {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
-      const found = await getApplication(db, appGet[1]!);
+      const found = await getApplication(db, appGet[1]!.toLowerCase());
       return found
         ? res.status(200).json(found)
         : fail(res, 'NOT_FOUND', 'Customer application not found', 404);
@@ -735,10 +1300,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
       return res.status(200).json(after);
     }
+    const appProposal = route(
+      req,
+      'GET',
+      /^customer-applications\/([0-9a-f-]+)\/purchase-terms\/proposal$/,
+    );
+    if (appProposal) {
+      const auth = await authorizeAfHomes(req, 'sales.customers');
+      if ('error' in auth) return deny(res, auth);
+      // The candidate is a REQUEST for who to sell for, never an assertion: the
+      // RPC re-validates role, active status and downline scope.
+      const candidate = sellerCandidateQuery(req);
+      if (!candidate.ok) return fail(res, 'VALIDATION_ERROR', candidate.message, 400);
+      const { data, error } = await db.rpc('purchase_terms_proposal', {
+        p_application_id: appProposal[1],
+        p_actor_id: auth.userId,
+        p_seller_candidate: candidate.value,
+      });
+      if (error) return mapRpcError(res, error);
+      const proposal = purchaseTermsProposalSchema.safeParse(data);
+      if (!proposal.success)
+        return fail(res, 'INTERNAL', 'Purchase terms proposal is unavailable', 500);
+      const { data: seller, error: sellerError } = await db
+        .from('staff_users')
+        .select('full_name')
+        .eq('id', proposal.data.terms.sellerStaffId)
+        .maybeSingle();
+      if (sellerError) throw sellerError;
+      return res.status(200).json({
+        ...proposal.data,
+        sellerName: (seller as { full_name?: string } | null)?.full_name ?? null,
+      });
+    }
+    const appReview = route(
+      req,
+      'POST',
+      /^customer-applications\/([0-9a-f-]+)\/purchase-terms\/review$/,
+    );
+    if (appReview) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = reviewPurchaseTermsSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid purchase terms review', 400);
+      const { error } = await db.rpc('review_application_purchase_terms_once', {
+        p_request_id: parsed.data.requestId,
+        p_actor_id: auth.userId,
+        p_application_id: appReview[1],
+        p_expected_hash: parsed.data.expectedProposalHash,
+        p_reason: parsed.data.reason ?? null,
+        p_seller_candidate: parsed.data.sellerCandidateId ?? null,
+      });
+      if (error) return mapRpcError(res, error);
+      return res.status(200).json(await getApplication(db, appReview[1]!));
+    }
     const appSubmit = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/submit$/);
     if (appSubmit) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
+      const parsed = submitPurchaseApplicationSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'A request id and the proposal hash you were shown are required',
+          400,
+        );
       const before = await getApplication(db, appSubmit[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
       if (typeof before.customerId !== 'string')
@@ -759,44 +1386,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'A persisted current ID with its type is required before submission',
           400,
         );
-      const { error } = await db.rpc('submit_customer_application', {
-        p_application_id: appSubmit[1],
+      // Terms capture, the state change and the audit are one transaction in the
+      // RPC. A request id replay returns the original application.
+      const { error } = await db.rpc('submit_purchase_application_once', {
+        p_request_id: parsed.data.requestId,
         p_actor_id: auth.userId,
+        p_application_id: appSubmit[1],
+        p_expected_hash: parsed.data.expectedProposalHash,
+        p_seller_candidate: parsed.data.sellerCandidateId ?? null,
       });
-      if (error) throw error;
-      await audit(
-        db,
-        auth.userId,
-        'CUSTOMER_APPLICATION_SUBMITTED',
-        'customer_application',
-        appSubmit[1]!,
-        { status: before.status },
-        { status: 'submitted' },
-      );
+      if (error) return mapRpcError(res, error);
+      if (
+        typeof before.customerId === 'string' &&
+        governmentIdTypeSchema.safeParse(reviewed?.fields?.idType).success
+      ) {
+        await db
+          .from('customers')
+          .update({ government_id_type: reviewed?.fields?.idType })
+          .eq('id', before.customerId)
+          .is('government_id_type', null);
+      }
       return res.status(200).json(await getApplication(db, appSubmit[1]!));
     }
     const appDecision = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/decision$/);
     if (appDecision) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
-      const parsed = customerApplicationDecisionSchema.safeParse(jsonBody(req));
+      const parsed = customerApplicationDecisionSchema
+        .safeExtend({ requestId: z.string().uuid() })
+        .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid application decision', 400);
-      const ok = await transitionApplicationStatus(
-        db,
-        auth.userId,
-        appDecision[1]!,
-        parsed.data.decision,
-      );
-      if (!ok) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
+      const { error } = await db.rpc('decide_purchase_application_once', {
+        p_request_id: parsed.data.requestId,
+        p_actor_id: auth.userId,
+        p_application_id: appDecision[1],
+        p_decision: parsed.data.decision,
+      });
+      if (error) return mapRpcError(res, error);
       return res.status(200).json(await getApplication(db, appDecision[1]!));
     }
     const appReopen = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/reopen$/);
     if (appReopen) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
-      const ok = await transitionApplicationStatus(db, auth.userId, appReopen[1]!, 'draft');
-      if (!ok) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
+      const parsed = z.object({ requestId: z.string().uuid() }).safeParse(jsonBody(req));
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'A request id is required', 400);
+      const { error } = await db.rpc('decide_purchase_application_once', {
+        p_request_id: parsed.data.requestId,
+        p_actor_id: auth.userId,
+        p_application_id: appReopen[1],
+        p_decision: 'draft',
+      });
+      if (error) return mapRpcError(res, error);
       return res.status(200).json(await getApplication(db, appReopen[1]!));
     }
     const appExport = route(
@@ -832,6 +1474,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === 'reservations' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.card_sales', 'create');
       if ('error' in auth) return deny(res, auth);
+      // First-time purchase: an approved application and its EXACT frozen terms
+      // create the AF-RES with no card sale at all. The legacy sale-origin mode
+      // below is unchanged.
+      const applicationOrigin = purchaseReservationCreateSchema.safeParse(jsonBody(req));
+      if (applicationOrigin.success && applicationOrigin.data.origin === 'application') {
+        const { requestId, customerApplicationId, purchaseTermsId, scheduleNotes, ...input } =
+          applicationOrigin.data;
+        const { data, error } = await db.rpc('reserve_application_purchase_once', {
+          p_request_id: requestId,
+          p_actor_id: auth.userId,
+          p_application_id: customerApplicationId,
+          p_terms_id: purchaseTermsId ?? null,
+          p_input: { ...input, scheduleNotes },
+        });
+        if (error) return mapRpcError(res, error);
+        return res.status(201).json(await getAgreement(db, rpcId(data)));
+      }
+      // A request that declared the application origin but failed the contract is
+      // a rejected body, never a silent fall-through to the sale-origin path.
+      if ((jsonBody(req) as { origin?: unknown } | undefined)?.origin === 'application')
+        return fail(res, 'VALIDATION_ERROR', 'Invalid application reservation request', 400);
       const parsed = createReservationAgreementSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -845,6 +1508,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Choose an eligible Customer Application before creating a reservation.',
           400,
         );
+      // The legacy sale-origin form still REQUIRES a sale. The contract made the field
+      // optional so the application-origin shape can omit it entirely; this guard
+      // is where the legacy path states the requirement again.
+      if (!input.saleId)
+        return fail(res, 'VALIDATION_ERROR', 'Select a sale for this reservation.', 400);
       if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
       if (vipTier) {
         const conflict = await tierConflictForSale(db, input.saleId, vipTier);
@@ -878,6 +1546,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const auth = await authorizeAgreementMutation(req, res, db, before);
       if (!auth) return;
+      // An application-origin agreement has no sale and no editable commercial
+      // source: only agreement fields move, through the strict update contract.
+      if (before.origin === 'application') {
+        const parsed = purchaseReservationUpdateSchema.safeParse(jsonBody(req));
+        if (!parsed.success)
+          return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement update', 400);
+        const { requestId, ...input } = parsed.data;
+        const { error } = await db.rpc('transition_purchase_reservation_once', {
+          p_request_id: requestId,
+          p_actor_id: auth.userId,
+          p_reservation_id: agreementPatch[1],
+          p_action: 'save',
+          p_input: input,
+        });
+        if (error) return mapRpcError(res, error);
+        return res.status(200).json(await getAgreement(db, agreementPatch[1]!));
+      }
       const parsed = createReservationAgreementSchema.safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid reservation agreement', 400);
@@ -889,6 +1574,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         requestId: _requestId,
         ...input
       } = parsed.data;
+      // The legacy sale-origin PATCH still requires a sale; see the create guard.
+      if (!input.saleId)
+        return fail(res, 'VALIDATION_ERROR', 'Select a sale for this reservation.', 400);
       if (!(await authorizeAgreementSale(req, res, db, input.saleId))) return;
       if (vipTier) {
         const conflict = await tierConflictForSale(db, input.saleId, vipTier);
@@ -921,6 +1609,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const auth = await authorizeAgreementMutation(req, res, db, before);
       if (!auth) return;
+      if (before.origin === 'application') {
+        const { error } = await db.rpc('transition_purchase_reservation_once', {
+          p_request_id: purchaseRequestId(req),
+          p_actor_id: auth.userId,
+          p_reservation_id: agreementSubmit[1],
+          p_action: 'submit',
+          p_input: {},
+        });
+        if (error) return mapRpcError(res, error);
+        return res.status(200).json(await getAgreement(db, agreementSubmit[1]!));
+      }
       const { error } = await db.rpc('submit_reservation_agreement', {
         p_agreement_id: agreementSubmit[1],
         p_actor_id: auth.userId,
@@ -945,6 +1644,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const auth = await authorizeAgreementMutation(req, res, db, current);
       if (!auth) return;
+      if (current.origin === 'application') {
+        const { error } = await db.rpc('transition_purchase_reservation_once', {
+          p_request_id: purchaseRequestId(req),
+          p_actor_id: auth.userId,
+          p_reservation_id: agreementDecision[1],
+          p_action: parsed.data.decision === 'executed' ? 'execute' : 'cancel',
+          p_input: {},
+        });
+        if (error) return mapRpcError(res, error);
+        return res.status(200).json(await getAgreement(db, agreementDecision[1]!));
+      }
       const ok = await transitionAgreementStatus(
         db,
         auth.userId,
@@ -960,9 +1670,162 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const auth = await authorizeAgreementMutation(req, res, db, current);
       if (!auth) return;
+      if (current.origin === 'application') {
+        const { error } = await db.rpc('transition_purchase_reservation_once', {
+          p_request_id: purchaseRequestId(req),
+          p_actor_id: auth.userId,
+          p_reservation_id: agreementReopen[1],
+          p_action: 'reopen',
+          p_input: {},
+        });
+        if (error) return mapRpcError(res, error);
+        return res.status(200).json(await getAgreement(db, agreementReopen[1]!));
+      }
       const ok = await transitionAgreementStatus(db, auth.userId, agreementReopen[1]!, 'draft');
       if (!ok) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       return res.status(200).json(await getAgreement(db, agreementReopen[1]!));
+    }
+    const agreementPayments = route(req, 'GET', /^reservations\/([0-9a-f-]+)\/payments$/);
+    if (agreementPayments) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification');
+      if ('error' in auth) return deny(res, auth);
+      const current = await getAgreement(db, agreementPayments[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      if (current.origin !== 'application')
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      // One ledger. The rows are the SAME payments the queue and the report read,
+      // selected by reservation until finalization links them to the sale.
+      const { data, error } = await db
+        .from('payments')
+        .select('*')
+        .eq('reservation_id', agreementPayments[1]!)
+        .order('recorded_at', { ascending: false });
+      if (error) throw error;
+      return list(
+        res,
+        (data ?? []).map((row: Record<string, unknown>) => shapePayment(row)),
+      );
+    }
+    const agreementRecordPayment = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/payments$/);
+    if (agreementRecordPayment) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = recordPurchasePaymentSchema.safeParse(jsonBody(req));
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid payment', 400);
+      const current = await getAgreement(db, agreementRecordPayment[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      if (current.origin !== 'application')
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const { requestId, amount, paymentType, method, reference, notes, receiptStoragePath } =
+        parsed.data;
+      const { error } = await db.rpc('record_reservation_payment_once', {
+        p_request_id: requestId,
+        p_reservation_id: agreementRecordPayment[1],
+        p_actor_id: auth.userId,
+        p_input: {
+          amount,
+          paymentType,
+          method,
+          reference: reference ?? null,
+          notes: notes ?? null,
+          receiptStoragePath: receiptStoragePath ?? null,
+        },
+      });
+      if (error) return mapRpcError(res, error);
+      return res.status(201).json(await agreementFinanceSummary(db, agreementRecordPayment[1]!));
+    }
+    const paymentVerify = route(
+      req,
+      'POST',
+      /^reservations\/([0-9a-f-]+)\/payments\/([0-9a-f-]+)\/verify$/,
+    );
+    if (paymentVerify) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = verifyPurchasePaymentSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid verification decision', 400);
+      const { data: payment, error: readError } = await db
+        .from('payments')
+        .select('id')
+        .eq('id', paymentVerify[2]!)
+        .eq('reservation_id', paymentVerify[1]!)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!payment) return fail(res, 'NOT_FOUND', 'Payment not found', 404);
+      const { error } = await db.rpc('verify_purchase_payment_once', {
+        p_request_id: parsed.data.requestId,
+        p_payment_id: paymentVerify[2],
+        p_decision: parsed.data.decision,
+        p_reason: parsed.data.reason ?? null,
+        p_actor_id: auth.userId,
+      });
+      if (error) return mapRpcError(res, error);
+      return res.status(200).json(await agreementFinanceSummary(db, paymentVerify[1]!));
+    }
+    const agreementFinalize = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/finalize$/);
+    if (agreementFinalize) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = finalizeReservationPurchaseSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid finalization request', 400);
+      const current = await getAgreement(db, agreementFinalize[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      if (current.origin !== 'application')
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      // The browser sends a request id and nothing else. Every precondition -
+      // executed, approved, zero undecided payments, verified total, seller,
+      // hierarchy, exactly-one-sale - is re-derived in SQL.
+      const { data, error } = await db.rpc('finalize_reservation_purchase_once', {
+        p_request_id: parsed.data.requestId,
+        p_reservation_id: agreementFinalize[1],
+        p_actor_id: auth.userId,
+      });
+      if (error) return mapRpcError(res, error);
+      return res.status(200).json({
+        saleId: rpcId(data),
+        reservationId: agreementFinalize[1],
+        // Activation is a SEPARATE action with its own permission. Nothing here
+        // activates a membership, so nothing here may imply one.
+        activationRequired: true,
+      });
+    }
+    const agreementFinance = route(req, 'GET', /^reservations\/([0-9a-f-]+)\/finance$/);
+    if (agreementFinance) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification');
+      if ('error' in auth) return deny(res, auth);
+      const current = await getAgreement(db, agreementFinance[1]!);
+      if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      if (current.origin !== 'application')
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      return res.status(200).json(await agreementFinanceSummary(db, agreementFinance[1]!));
+    }
+    const documentExport = route(
+      req,
+      'GET',
+      /^reservations\/([0-9a-f-]+)\/documents\/(reservation|payment_recorded|payment_verified|purchase_finalized|membership_activated)\/(\d+|latest)$/,
+    );
+    if (documentExport) {
+      const kind = documentExport[2]! as PurchaseDocumentKind;
+      const auth = await authorizeAfHomes(req, documentModule(kind));
+      if ('error' in auth) return deny(res, auth);
+      const revision = documentExport[3] === 'latest' ? null : Number(documentExport[3]);
+      // FRESH authorization happens inside the RPC against the live role graph.
+      // The handler check above is UX, not the boundary.
+      const { data, error } = await db.rpc('purchase_document', {
+        p_kind: kind,
+        p_source_id: documentExport[1],
+        p_actor_id: auth.userId,
+        p_revision: revision,
+      });
+      if (error) return mapRpcError(res, error);
+      const evidence = data as PurchaseDocumentEvidence;
+      const bytes = purchaseDocumentPdf(evidence);
+      // No-store on the envelope: a reprint is a historical artefact, not a
+      // cacheable page that could outlive the permission that produced it.
+      res.setHeader('Cache-Control', 'no-store');
+      return sendFile(res, purchaseDocumentFilename(kind), 'application/pdf', bytes);
     }
     const agreementExport = route(req, 'GET', /^reservations\/([0-9a-f-]+)\/export\/(xlsx|pdf)$/);
     if (agreementExport) {
@@ -971,7 +1834,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const agreement = await getAgreement(db, agreementExport[1]!);
       if (!agreement) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const first = agreement.schedule[0] as
-        | { particular?: string; amount?: string; paymentDate?: string; remarks?: string }
+        | { particular?: string; amount?: string; paymentDate?: string }
         | undefined;
       const primary = (agreement.primary ?? {}) as Record<string, string>;
       const secondary = (agreement.secondary ?? null) as Record<string, string> | null;
@@ -985,8 +1848,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         monthly_amortization_start: String(agreement.monthlyAmortizationStart ?? ''),
         monthly_amortization_end: String(agreement.monthlyAmortizationEnd ?? ''),
         payment_due_day: String(agreement.paymentDueDay ?? ''),
-        primary_signature_status: String(agreement.primarySignatureStatus),
-        secondary_signature_status: String(agreement.secondarySignatureStatus ?? ''),
         primary_name: String(primary.name ?? ''),
         primary_address: String(primary.address ?? ''),
         primary_contact_number: String(primary.contactNumber ?? ''),
@@ -1001,9 +1862,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         schedule_particular: String(first?.particular ?? ''),
         schedule_amount: String(first?.amount ?? ''),
         schedule_payment_date: String(first?.paymentDate ?? ''),
-        schedule_remarks: String(first?.remarks ?? ''),
         payment_dates: agreement.schedule.map((line) => String(line.paymentDate ?? '')).join('|'),
-        payment_remarks: agreement.schedule.map((line) => String(line.remarks ?? '')).join('|'),
       };
       return agreementExport[2] === 'xlsx'
         ? sendFile(

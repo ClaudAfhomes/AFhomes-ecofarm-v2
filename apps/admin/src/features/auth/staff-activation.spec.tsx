@@ -212,7 +212,7 @@ describe('staff account activation', () => {
       '/admin/login',
     );
 
-    // AF Homes handlers receive bearer tokens only. The chosen password is
+    // AFHomes handlers receive bearer tokens only. The chosen password is
     // sent to Supabase Auth and never appears in an application API request.
     for (const call of fetchMock.mock.calls) {
       expect(JSON.stringify(call)).not.toContain('ValidPass123');

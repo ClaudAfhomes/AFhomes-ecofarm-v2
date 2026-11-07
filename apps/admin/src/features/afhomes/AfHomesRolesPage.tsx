@@ -1,100 +1,412 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router';
-import { Button, EmptyState, ErrorState, PageHeader, StatusChip, notifySuccess } from '@jad/ui';
-import type { AfHomesRole } from '@jad/contracts';
-import { createAfHomesRole, getAfHomesRoles, updateAfHomesRole } from './services';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { useNavigate } from 'react-router';
 import {
-  AfHomesRoleFormDialog,
-  isRoleAccessProtected,
-  type RoleFormInput,
-} from './AfHomesRoleFormDialog';
-import { useSession } from '../../lib/session';
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  FilterBar,
+  PageHeader,
+  Pagination,
+  SearchField,
+  Select,
+  Skeleton,
+  StatusChip,
+  notifySuccess,
+} from '@afhomes/ui';
+import { MODULE_CATALOG, type AfHomesRole } from '@afhomes/contracts';
+import {
+  createAfHomesRole,
+  deleteAfHomesRole,
+  getAfHomesDepartments,
+  getAfHomesRoles,
+  updateAfHomesRole,
+} from './services';
+import { AfHomesRoleFormDialog, type RoleFormInput } from './AfHomesRoleFormDialog';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import styles from './AfHomesRolesPage.module.css';
+
+const PAGE_SIZE = 10;
+
+const RoleRow = memo(function RoleRow({
+  role,
+  onEdit,
+  onDelete,
+}: {
+  role: AfHomesRole;
+  onEdit: (role: AfHomesRole) => void;
+  onDelete: (role: AfHomesRole) => void;
+}) {
+  const navigate = useNavigate();
+  const openDetail = useCallback(() => navigate(`/admin/roles/${role.id}`), [navigate, role.id]);
+  const canView = role.permissions.filter((p) => p.canView).length;
+  const share = Math.round((canView / MODULE_CATALOG.length) * 100);
+  return (
+    <tr
+      key={role.id}
+      tabIndex={0}
+      role="link"
+      aria-label={`View role ${role.name}`}
+      onClick={openDetail}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') openDetail();
+      }}
+      className={styles.clickableRow}
+    >
+      <td data-label="Role">
+        <span className={styles.roleLink}>{role.name}</span>
+      </td>
+      <td data-label="Type">
+        <StatusChip
+          label={role.isSystem ? 'System' : 'Custom'}
+          tone={role.isSystem ? 'neutral' : 'info'}
+        />
+      </td>
+      <td data-label="Status">
+        <StatusChip
+          label={role.isActive ? 'Active' : 'Inactive'}
+          tone={role.isActive ? 'success' : 'neutral'}
+        />
+      </td>
+      <td data-label="Department">{role.departmentName ?? 'Unassigned'}</td>
+      <td data-label="Assigned staff">{role.assignedCount}</td>
+      <td data-label="Permissions">
+        {role.isSystem && role.slug === 'super_admin' ? (
+          'All modules'
+        ) : (
+          <span className={styles.permissionCell}>
+            <span className={styles.permissionText}>
+              {canView} of {MODULE_CATALOG.length} modules
+            </span>
+            <span
+              className={styles.permissionMeter}
+              role="img"
+              aria-label={`${share}% of modules viewable`}
+            >
+              <span className={styles.permissionMeterFill} style={{ width: `${share}%` }} />
+            </span>
+          </span>
+        )}
+      </td>
+      <td
+        data-label="Actions"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <span className={styles.actions}>
+          <Button size="sm" variant="secondary" onClick={() => onEdit(role)}>
+            Edit
+          </Button>{' '}
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={() => onDelete(role)}
+            disabled={role.assignedCount > 0}
+            title={role.assignedCount > 0 ? 'Reassign staff before deleting.' : 'Delete this role.'}
+          >
+            Delete
+          </Button>
+        </span>
+      </td>
+    </tr>
+  );
+});
 
 export function AfHomesRolesPage() {
   const queryClient = useQueryClient();
-  const { user } = useSession();
-  const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
+  const roles = useQuery({
+    queryKey: ['afhomes', 'roles'],
+    queryFn: getAfHomesRoles,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+  const departments = useQuery({
+    queryKey: ['afhomes', 'departments'],
+    queryFn: getAfHomesDepartments,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
   const [editing, setEditing] = useState<AfHomesRole | null>(null);
   const [creating, setCreating] = useState(false);
-  const mutation = useMutation({
-    mutationFn: async (input: RoleFormInput) =>
-      editing
-        ? updateAfHomesRole(editing.id, input)
-        : createAfHomesRole({ ...input, description: input.description || undefined }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
+  const [deleting, setDeleting] = useState<AfHomesRole | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search);
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [page, setPage] = useState(1);
+
+  const resetPage = useCallback(() => setPage(1), []);
+
+  const applyListUpdate = useCallback(
+    (updater: (current: AfHomesRole[]) => AfHomesRole[]) => {
+      queryClient.setQueryData<AfHomesRole[]>(['afhomes', 'roles'], (current) =>
+        updater(current ?? []),
+      );
+    },
+    [queryClient],
+  );
+
+  const mutation = useBusinessMutation({
+    mutationFn: async (input: RoleFormInput) => {
+      if (editing) {
+        // System roles accept only the display title + department server-side
+        // (strict schema), so narrow the payload instead of sending the full
+        // form and eating a 403.
+        return editing.isSystem
+          ? updateAfHomesRole(editing.id, {
+              name: input.name,
+              departmentId: input.departmentId,
+            })
+          : updateAfHomesRole(editing.id, input);
+      }
+      return createAfHomesRole(input);
+    },
+    onSuccess: async (saved) => {
+      const wasEditing = editing !== null;
+      const savedName = wasEditing ? editing?.name : saved.name;
+      if (wasEditing) {
+        applyListUpdate((current) => current.map((r) => (r.id === saved.id ? saved : r)));
+      } else {
+        applyListUpdate((current) => [saved, ...current]);
+        resetPage();
+      }
       setCreating(false);
       setEditing(null);
-      notifySuccess({ title: 'Role updated', message: `${editing?.name ?? 'Role'} permissions updated successfully.` });
+      notifySuccess({
+        title: wasEditing ? 'Role saved' : 'Role created',
+        message: `${savedName ?? 'Role'} saved.`,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
     },
   });
+
+  const remove = useBusinessMutation({
+    mutationFn: (id: string) => deleteAfHomesRole(id),
+    onSuccess: async (_data, id) => {
+      applyListUpdate((current) => current.filter((r) => r.id !== id));
+      setDeleting(null);
+      setDeleteError(null);
+      notifySuccess({ title: 'Role deleted', message: 'Role removed.' });
+      void queryClient.invalidateQueries({ queryKey: ['afhomes', 'roles'] });
+    },
+    onError: (error) => {
+      setDeleteError(error instanceof Error ? error.message : 'Delete failed.');
+    },
+  });
+
+  const listed = useMemo(
+    () => (roles.data ?? []).filter((role) => role.slug !== 'customer'),
+    [roles.data],
+  );
+  const filtered = useMemo(
+    () =>
+      listed.filter(
+        (role) =>
+          (typeFilter === 'all' || (typeFilter === 'system') === role.isSystem) &&
+          (statusFilter === 'all' || (statusFilter === 'active') === Boolean(role.isActive)) &&
+          (departmentFilter === 'all' ||
+            (departmentFilter === 'unassigned'
+              ? role.departmentId === null
+              : role.departmentId === departmentFilter)) &&
+          `${role.name} ${role.slug}`
+            .toLowerCase()
+            .includes(debouncedSearch.trim().toLowerCase()),
+      ),
+    [listed, typeFilter, statusFilter, departmentFilter, debouncedSearch],
+  );
+  const summary = useMemo(
+    () => ({
+      total: listed.length,
+      system: listed.filter((role) => role.isSystem).length,
+      custom: listed.filter((role) => !role.isSystem).length,
+      assigned: listed.reduce((sum, role) => sum + role.assignedCount, 0),
+    }),
+    [listed],
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
+
+  const filtersActive =
+    debouncedSearch.trim() !== '' ||
+    typeFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    departmentFilter !== 'all';
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setTypeFilter('all');
+    setStatusFilter('all');
+    setDepartmentFilter('all');
+    resetPage();
+  }, [resetPage]);
+
+  const handleEdit = useCallback((role: AfHomesRole) => setEditing(role), []);
+  const handleDelete = useCallback((role: AfHomesRole) => {
+    setDeleteError(null);
+    setDeleting(role);
+  }, []);
+
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Roles & Permissions"
-        description="Server-enforced AF Homes module permissions and protected system roles"
+        description="Server controls role access only."
         actions={<Button onClick={() => setCreating(true)}>New custom role</Button>}
       />
       {roles.isPending ? (
-        <p role="status">Loading roles…</p>
+        <div role="status" aria-label="Loading roles">
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }} aria-hidden="true">
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
       ) : roles.isError ? (
         <ErrorState error={roles.error} onRetry={roles.refetch} />
-      ) : roles.data?.length === 0 ? (
-        <EmptyState title="No roles" description="Create the first custom role." />
+      ) : listed.length === 0 ? (
+        <EmptyState title="No roles" description="Create first custom role." />
       ) : (
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Assigned staff</th>
-                <th>Permissions</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {roles.data
-                ?.filter((role) => role.slug !== 'customer')
-                .map((role) => (
-                  <tr key={role.id}>
-                    <td>
-                      <Link to={`/admin/roles/${role.id}`}>
-                        <strong>{role.name}</strong>
-                      </Link>
-                      <br />
-                      <small>{role.description || role.slug}</small>
-                    </td>
-                    <td>
-                      <StatusChip
-                        label={role.isActive ? 'Active' : 'Inactive'}
-                        tone={role.isActive ? 'success' : 'neutral'}
+        <>
+          <ul className={styles.badges} aria-label="Role summary">
+            <li>
+              <StatusChip label={`Roles: ${summary.total}`} tone="neutral" icon="users" />
+            </li>
+            <li>
+              <StatusChip label={`System: ${summary.system}`} tone="neutral" icon="gear" />
+            </li>
+            <li>
+              <StatusChip label={`Custom: ${summary.custom}`} tone="info" icon="plus" />
+            </li>
+            <li>
+              <StatusChip
+                label={`Assigned staff: ${summary.assigned}`}
+                tone="success"
+                icon="user-check"
+              />
+            </li>
+          </ul>
+          <FilterBar
+            search={
+              <SearchField
+                label="Search roles"
+                placeholder="Search name, key or description"
+                value={search}
+                onChange={(value) => {
+                  setSearch(value);
+                  resetPage();
+                }}
+              />
+            }
+            filters={
+              <>
+                <Select
+                  aria-label="Filter role type"
+                  value={typeFilter}
+                  onChange={(event) => {
+                    setTypeFilter(event.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: 'all', label: 'All types' },
+                    { value: 'system', label: 'System roles' },
+                    { value: 'custom', label: 'Custom roles' },
+                  ]}
+                />
+                <Select
+                  aria-label="Filter role status"
+                  value={statusFilter}
+                  onChange={(event) => {
+                    setStatusFilter(event.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: 'all', label: 'All statuses' },
+                    { value: 'active', label: 'Active' },
+                    { value: 'inactive', label: 'Inactive' },
+                  ]}
+                />
+                <Select
+                  aria-label="Filter department"
+                  value={departmentFilter}
+                  onChange={(event) => {
+                    setDepartmentFilter(event.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: 'all', label: 'All departments' },
+                    { value: 'unassigned', label: 'Unassigned' },
+                    ...(departments.data ?? []).map((d) => ({ value: d.id, label: d.name })),
+                  ]}
+                />
+                {filtersActive ? (
+                  <Button variant="secondary" onClick={clearFilters}>
+                    Clear
+                  </Button>
+                ) : null}
+              </>
+            }
+          />
+          {filtered.length === 0 ? (
+            <EmptyState title="No roles match" description="No role matches filters." />
+          ) : (
+            <>
+              <div
+                role="region"
+                aria-label="Scrollable records"
+                tabIndex={0}
+                className={`table-scroll ${styles.tableWrap}`}
+              >
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Department</th>
+                      <th>Assigned staff</th>
+                      <th>Permissions</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((role) => (
+                      <RoleRow
+                        key={role.id}
+                        role={role}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
                       />
-                    </td>
-                    <td>{role.assignedCount}</td>
-                    <td>
-                      {role.isSystem && role.slug === 'super_admin'
-                        ? 'All modules'
-                        : `${role.permissions.filter((p) => p.canView).length} modules`}
-                    </td>
-                    <td>
-                      <Button size="sm" variant="secondary" onClick={() => setEditing(role)}>
-                        {isRoleAccessProtected(role, user?.roleSlug)
-                          ? 'View access'
-                          : 'Edit access'}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.pagination}>
+                <Pagination
+                  page={safePage}
+                  pageCount={pageCount}
+                  onChange={setPage}
+                  label="Roles pagination"
+                />
+                <p role="status">
+                  Showing {rangeStart}-{rangeEnd} of {filtered.length}
+                </p>
+              </div>
+            </>
+          )}
+        </>
       )}
       <AfHomesRoleFormDialog
         key={creating ? 'new-role' : (editing?.id ?? 'closed')}
         open={creating || editing !== null}
         role={editing}
+        departments={departments.data ?? []}
         saving={mutation.isPending}
         error={mutation.error}
         onClose={() => {
@@ -103,6 +415,27 @@ export function AfHomesRolesPage() {
           mutation.reset();
         }}
         onSave={(input) => mutation.mutate(input)}
+      />
+      <ConfirmDialog
+        open={deleting !== null}
+        onCancel={() => {
+          setDeleting(null);
+          setDeleteError(null);
+          remove.reset();
+        }}
+        onConfirm={() => {
+          if (deleting) remove.mutate(deleting.id);
+        }}
+        title="Delete role?"
+        message={
+          <div>
+            <p>Delete {deleting?.name}? System roles stay protected.</p>
+            {deleteError ? <p role="alert">{deleteError}</p> : null}
+          </div>
+        }
+        danger
+        confirmLabel="Delete role"
+        confirmLoading={remove.isPending}
       />
     </section>
   );

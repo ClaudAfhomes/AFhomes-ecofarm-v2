@@ -1,7 +1,7 @@
 ﻿import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Spinner } from '@jad/ui';
+import { Spinner } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { getAuthPortals } from '../lib/portals';
@@ -31,6 +31,8 @@ export function OstGuard({ children }: { children: ReactNode }) {
     return <Navigate to="/ost/login" replace state={{ from: location.pathname }} />;
   }
   if (portals.isLoading) return <Spinner label="Checking your OST record" />;
+  if (portals.data?.staff?.mustChangePassword)
+    return <PortalRedirect to={portalDashboard(portals.data)!} />;
   if (portals.data?.ost?.status === 'active') return <>{children}</>;
   const destination = portals.data ? portalDashboard(portals.data) : null;
   if (destination && destination !== '/ost/login') return <PortalRedirect to={destination} />;

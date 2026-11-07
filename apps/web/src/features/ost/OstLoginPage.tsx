@@ -1,10 +1,20 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Alert, AuthLayout, Button, PasswordField, TextField, TurnstileChallenge } from '@jad/ui';
+import {
+  Alert,
+  AuthLayout,
+  Button,
+  PasswordField,
+  TextField,
+  TurnstileChallenge,
+} from '@afhomes/ui';
 import { env } from '../../lib/env';
+import { CookieAuthError } from '@afhomes/shared';
 
 import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
+import { portalDashboard } from '../../lib/portal-destination';
+import { PortalRedirect } from '../../lib/PortalRedirect';
 import styles from '../customer/auth.module.css';
 
 /**
@@ -21,6 +31,7 @@ export function OstLoginPage() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [destination, setDestination] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaVersion, setCaptchaVersion] = useState(0);
   const emailRef = useRef<HTMLInputElement>(null);
@@ -41,6 +52,10 @@ export function OstLoginPage() {
       passwordRef.current?.focus();
       return;
     }
+    if (env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
+      setServerError('Complete security verification before signing in.');
+      return;
+    }
     setServerError(null);
     setPending(true);
     try {
@@ -49,6 +64,10 @@ export function OstLoginPage() {
         await signIn(email, password, captchaToken);
       } else await signIn(email, password);
       const portals = await getAuthPortals();
+      if (portals.staff?.mustChangePassword) {
+        setDestination(portalDashboard(portals));
+        return;
+      }
       if (portals.ost?.status === 'active') {
         navigate('/ost/dashboard', { replace: true });
         return;
@@ -63,8 +82,9 @@ export function OstLoginPage() {
         setServerError('We could not sign you in with that email and password.');
       }
       setPending(false);
-    } catch {
-      setServerError('We could not sign you in with that email and password.');
+    } catch (cause) {
+      setServerError(cause instanceof CookieAuthError && cause.reason !== 'rejected'
+        ? cause.message : 'We could not sign you in with that email and password.');
       setPending(false);
     } finally {
       setCaptchaToken(null);
@@ -72,13 +92,15 @@ export function OstLoginPage() {
     }
   };
 
+  if (destination) return <PortalRedirect to={destination} />;
+
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="OST Login"
-      lead="Sellers approved under a Sales Manager sign in here."
+      lead="Sign in with your OST email and password."
       brandTitle="Sell the farm you believe in."
-      brandLead="Your pipeline, your referral code, and your network - once your application is approved."
+      brandLead="Your pipeline, your referral code, and your network."
     >
       <form onSubmit={onSubmit} noValidate className={styles.form}>
         {serverError && (
@@ -132,6 +154,7 @@ export function OstLoginPage() {
 
         <div className={styles.submitRow}>
           <TurnstileChallenge
+            action="login"
             siteKey={env.VITE_TURNSTILE_SITE_KEY}
             onToken={setCaptchaToken}
             resetVersion={captchaVersion}
@@ -142,10 +165,8 @@ export function OstLoginPage() {
         </div>
 
         <p className={styles.prompt}>
-          Don&apos;t have an OST account?{' '}
-          <Link className={styles.promptLink} to="/ost/register">
-            Register as OST
-          </Link>
+          First time signing in? Use the temporary password provided by your administrator. You will
+          create your own password before accessing your account. No registration is needed.
         </p>
       </form>
     </AuthLayout>

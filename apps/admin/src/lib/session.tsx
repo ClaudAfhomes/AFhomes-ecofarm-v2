@@ -4,17 +4,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
-import type { AfHomesPermission } from '@jad/contracts';
-import { afHomesSessionSchema } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
+import { afHomesSessionSchema } from '@afhomes/contracts';
 import { protectedRequest } from './api/client';
 import { ApiError } from './api/errors';
 import { queryClient } from './query';
 import { getSupabaseClient } from './supabase';
+import { subscribeCookieAuth } from '@afhomes/shared';
+import { mongoAuth, isMongoAuth } from './cookie-auth';
 
-export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';
+export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated' | 'mfa-pending';
 /**
  * The staff principal as resolved by `GET /admin/afhomes/session`. Access is
  * decided by `afHomesPermissions` (per-module view/create/update/delete), not by
@@ -30,7 +33,7 @@ export interface SessionUser {
   afHomesPermissions: AfHomesPermission[];
   status: 'active' | 'invited' | 'inactive' | 'suspended';
   /**
-   * JAD parity: true while the account still runs on its administrator-set
+   * AFHomes pattern: true while the account still runs on its administrator-set
    * temporary password. Optional (older test fixtures omit it) - only an
    * explicit `true` gates; `undefined` behaves as `false`.
    */
@@ -50,7 +53,7 @@ interface SessionContextValue {
   sessionError: boolean;
   signIn: (email: string, password: string, captchaToken?: string) => Promise<void>;
   revalidate: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -74,14 +77,14 @@ function TestSessionProvider({
       sessionError: false,
       signIn: async () => {},
       revalidate: async () => {},
-      logout: () => {},
+      logout: async () => {},
     }),
     [user],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-export function SessionProvider({
+function LegacySessionProvider({
   initialUser,
   children,
 }: {
@@ -92,14 +95,25 @@ export function SessionProvider({
   const [status, setStatus] = useState<SessionStatus>('loading');
   const [user, setUser] = useState<SessionUser | null>(null);
   const [sessionError, setSessionError] = useState(false);
+  const resolvedUserId = useRef<string | null>(null);
+  const resolution = useRef(0);
 
   const resolve = useCallback(async () => {
+    const currentResolution = ++resolution.current;
     if (!client) {
       setUser(null);
       setStatus('unauthenticated');
       return;
     }
     const { data } = await client.auth.getSession();
+    if (currentResolution !== resolution.current) return;
+    if (resolvedUserId.current && resolvedUserId.current !== data.session?.user.id) {
+      // Local portals share a cookie; a different tab can replace the account.
+      queryClient.clear();
+      resolvedUserId.current = null;
+      setUser(null);
+      setStatus('loading');
+    }
     if (!data.session) {
       setUser(null);
       setStatus('unauthenticated');
@@ -108,6 +122,9 @@ export function SessionProvider({
     }
     try {
       const parsed = await protectedRequest('/admin/afhomes/session', afHomesSessionSchema);
+      if (currentResolution !== resolution.current) return;
+      if (resolvedUserId.current && resolvedUserId.current !== parsed.id) queryClient.clear();
+      resolvedUserId.current = parsed.id;
       setUser({
         id: parsed.id,
         name: parsed.fullName,
@@ -124,6 +141,7 @@ export function SessionProvider({
       setStatus('authenticated');
       setSessionError(false);
     } catch (error) {
+      if (currentResolution !== resolution.current) return;
       setUser(null);
       setStatus('unauthenticated');
       setSessionError(!(error instanceof ApiError && error.status === 401));
@@ -133,20 +151,44 @@ export function SessionProvider({
   useEffect(() => {
     const initialResolve = window.setTimeout(() => void resolve(), 0);
     const subscription = client?.auth.onAuthStateChange(() => void resolve()).data.subscription;
+    const onFocus = () => void resolve();
+    window.addEventListener('focus', onFocus);
+    const cookies = import.meta.env.DEV ? window.cookieStore : undefined;
+    const onCookieChange = (event: CookieChangeEvent) => {
+      if (
+        [...event.changed, ...event.deleted].some(
+          (cookie) => cookie.name?.startsWith('sb-') && cookie.name.endsWith('-auth-token'),
+        )
+      )
+        void resolve();
+    };
+    cookies?.addEventListener('change', onCookieChange);
     return () => {
       window.clearTimeout(initialResolve);
       subscription?.unsubscribe();
+      window.removeEventListener('focus', onFocus);
+      cookies?.removeEventListener('change', onCookieChange);
     };
   }, [client, resolve]);
 
-  const logout = useCallback(() => {
-    void client?.auth.signOut();
-    // Drop every cached row with the session: the next login must never see
-    // the previous user's customers, redemptions or reports, and polling
-    // queries must not keep firing against a signed-out client.
-    queryClient.clear();
-    setUser(null);
-    setStatus('unauthenticated');
+  const logout = useCallback(async () => {
+    // Awaited by callers that navigate away afterwards: Supabase revokes
+    // server-side before dropping the local session, so leaving early could
+    // strand a usable token behind (and the next entry would bounce straight
+    // back in). Local state is cleared even if the revoke throws, still
+    // inside this call, so a failed sign-out still signs out locally.
+    try {
+      await client?.auth.signOut();
+    } finally {
+      resolution.current++;
+      resolvedUserId.current = null;
+      // Drop every cached row with the session: the next login must never see
+      // the previous user's customers, redemptions or reports, and polling
+      // queries must not keep firing against a signed-out client.
+      queryClient.clear();
+      setUser(null);
+      setStatus('unauthenticated');
+    }
   }, [client]);
   const signIn = useCallback(
     async (email: string, password: string, captchaToken?: string) => {
@@ -169,4 +211,102 @@ export function SessionProvider({
   if (initialUser !== undefined)
     return <TestSessionProvider user={initialUser}>{children}</TestSessionProvider>;
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+export function SessionProvider(props: { initialUser?: SessionUser | null; children: ReactNode }) {
+  if (props.initialUser !== undefined)
+    return <TestSessionProvider user={props.initialUser}>{props.children}</TestSessionProvider>;
+  return isMongoAuth ? (
+    <MongoSessionProvider>{props.children}</MongoSessionProvider>
+  ) : (
+    <LegacySessionProvider {...props} />
+  );
+}
+function MongoSessionProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<SessionStatus>('loading'),
+    [user, setUser] = useState<SessionUser | null>(null);
+  const [sessionError, setSessionError] = useState(false),
+    identity = useRef<string | null>(null),
+    generation = useRef(0);
+  const resolve = useCallback(async () => {
+    const run = ++generation.current;
+    try {
+      const session = await mongoAuth.read();
+      if (run !== generation.current) return;
+      if (!session) {
+        if (identity.current) queryClient.clear();
+        identity.current = null;
+        setUser(null);
+        setStatus('unauthenticated');
+        setSessionError(false);
+        return;
+      }
+      if (identity.current !== session.user.id) {
+        queryClient.clear();
+        identity.current = null;
+        setUser(null);
+        setStatus('loading');
+      }
+      const view = await protectedRequest('/admin/afhomes/session', afHomesSessionSchema);
+      if (run !== generation.current) return;
+      if (identity.current !== view.id) queryClient.clear();
+      identity.current = view.id;
+      setUser({
+        id: view.id,
+        name: view.fullName,
+        email: view.email,
+        roleId: view.roleId,
+        roleSlug: view.roleSlug,
+        roleName: view.roleName,
+        afHomesPermissions: view.permissions,
+        status: view.status,
+        mustChangePassword: view.mustChangePassword,
+        testPurgeEnabled: view.testPurgeEnabled,
+        mfaRequired: view.mfaRequired,
+      });
+      setStatus('authenticated');
+      setSessionError(false);
+    } catch (error) {
+      if (run !== generation.current) return;
+      queryClient.clear();
+      identity.current = null;
+      setUser(null);
+      setStatus('unauthenticated');
+      setSessionError(!(error instanceof ApiError && error.status === 401));
+    }
+  }, []);
+  useEffect(() => {
+    const initialResolve = window.setTimeout(() => void resolve(), 0);
+    const stop = subscribeCookieAuth(() => void resolve());
+    return () => {
+      window.clearTimeout(initialResolve);
+      generation.current++;
+      stop();
+    };
+  }, [resolve]);
+  const signIn = useCallback(
+    async (email: string, password: string, captchaToken?: string) => {
+      await mongoAuth.signIn(email, password, captchaToken);
+      await resolve();
+    },
+    [resolve],
+  );
+  const logout = useCallback(async () => {
+    try {
+      await mongoAuth.signOut();
+    } finally {
+      generation.current++;
+      identity.current = null;
+      queryClient.clear();
+      setUser(null);
+      setStatus('unauthenticated');
+    }
+  }, []);
+  return (
+    <SessionContext.Provider
+      value={{ status, user, sessionError, signIn, revalidate: resolve, logout }}
+    >
+      {children}
+    </SessionContext.Provider>
+  );
 }

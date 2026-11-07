@@ -1,6 +1,74 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveRequestUrl, selectHandler } from './router.js';
+import { BUSINESS_FAMILIES, resolveRequestUrl, selectHandler } from './router.js';
+
+describe('business family prefixes', () => {
+  /**
+   * `selectHandler` returns the FIRST family whose prefix matches, so a duplicate
+   * prefix silently shadows every later family. That is not hypothetical: a second
+   * `points` family was added for points earning while `/points` already belonged
+   * to memberships.ts, so every earning route went to the wrong handler and all
+   * 39 of its unit tests still passed, because they call the handler directly and
+   * never go through the router. This is the tripwire.
+   *
+   * Two families MAY share a prefix only when each one declares its own exact
+   * `path` (`auth/customer/activate` and `auth/portals` legitimately do, and
+   * neither can shadow the other). A family WITHOUT a `path` matches the whole
+   * prefix, so it must be the only one - otherwise it swallows a sibling.
+   */
+  it('has no prefix-wide family shadowed by, or shadowing, a sibling', () => {
+    const byPrefix = new Map<string, { path?: string; i: number }[]>();
+    BUSINESS_FAMILIES.forEach((family, i) => {
+      const prefix = 'prefix' in family ? family.prefix : '';
+      const bucket = byPrefix.get(prefix) ?? [];
+      bucket.push({ path: 'path' in family ? family.path : undefined, i });
+      byPrefix.set(prefix, bucket);
+    });
+
+    for (const [prefix, bucket] of byPrefix) {
+      const wide = bucket.filter((f) => f.path === undefined);
+      if (wide.length === 0) {
+        // All path-scoped: each must own a distinct exact path, or two of them
+        // claim the same route and the first silently wins.
+        const paths = bucket.map((f) => f.path);
+        expect(
+          new Set(paths).size,
+          `prefix "${prefix}" declares duplicate exact paths`,
+        ).toBe(paths.length);
+        continue;
+      }
+      expect(
+        wide.length,
+        `prefix "${prefix}" has ${wide.length} prefix-wide families; only the first can ever be reached`,
+      ).toBe(1);
+    }
+  });
+
+  it('keeps Services earning routes disabled while preserving manual point recording', () => {
+    // The bare prefix and each sub-path must all reach points.js. A shadow would
+    // show up here as a different routeKey.
+    for (const path of [
+      '/api/v1/earning',
+      '/api/v1/earning/claim',
+      '/api/v1/earning/purchases',
+      '/api/v1/earning/purchases/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/complete',
+      '/api/v1/earning/claims',
+      '/api/v1/earning/claims/8f1c0f7e-0e4a-4a1e-9a1b-2c3d4e5f6a7b/reissue',
+      '/api/v1/earning/services',
+      '/api/v1/earning/rules',
+    ]) {
+      const q: Record<string, string | undefined> = {};
+      expect(selectHandler(path, q), path).toBeNull();
+    }
+    expect(selectHandler('/api/v1/earning/adjust', {})?.routeKey).toBe('operations.redemption/adjust');
+  });
+
+  it('leaves the pre-existing /points family with memberships', () => {
+    const q: Record<string, string | undefined> = {};
+    expect(selectHandler('/api/v1/points', q)?.routeKey).toBe('memberships/points');
+    expect(selectHandler('/api/v1/points/accounts/abc', q)?.routeKey).toBe('memberships/accounts/abc');
+  });
+});
 
 describe('selectHandler', () => {
   it('routes the health probe on both the bare and versioned paths', () => {
@@ -8,7 +76,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/health', {})?.routeKey).toBe('health');
   });
 
-  it('routes the AF Homes surface and captures the sub-path', () => {
+  it('routes the AFHomes surface and captures the sub-path', () => {
     const q: Record<string, string | undefined> = {};
     expect(selectHandler('/api/v1/admin/afhomes/session', q)?.routeKey).toBe(
       'admin/afhomes/session',
@@ -52,7 +120,7 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/points/ledger/abc', q)?.routeKey).toBe('memberships/ledger/abc');
   });
 
-  it('routes every Phase 6 CMS endpoint through the literal CMS handler', () => {
+  it('does not route CMS endpoints while its feature flag is disabled', () => {
     const q: Record<string, string | undefined> = {};
     for (const path of [
       'public',
@@ -62,8 +130,7 @@ describe('selectHandler', () => {
       'history',
       'public/pages/about-us',
     ]) {
-      expect(selectHandler(`/api/v1/cms/${path}`, q)?.routeKey).toBe(`cms/${path}`);
-      expect(q.familyPath).toBe(path);
+      expect(selectHandler(`/api/v1/cms/${path}`, q)).toBeNull();
     }
   });
 
@@ -81,13 +148,13 @@ describe('selectHandler', () => {
     expect(selectHandler('/api/v1/customers-archive', {})).toBeNull();
   });
 
-  it('requires a sub-path on the AF Homes prefix', () => {
+  it('requires a sub-path on the AFHomes prefix', () => {
     // The catch-all is `(.+)`; the bare prefix must not swallow the prefix itself.
     expect(selectHandler('/api/v1/admin/afhomes', {})).toBeNull();
     expect(selectHandler('/api/v1/admin/afhomes/', {})).toBeNull();
   });
 
-  it('returns null for the retired JAD route families', () => {
+  it('returns null for the retired predecessor route families', () => {
     for (const path of [
       '/api/v1/admin/members',
       '/api/v1/admin/queues',

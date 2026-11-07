@@ -37,7 +37,26 @@ const child = spawn(
   },
 );
 
-const code = await new Promise((resolve) => child.on('close', resolve));
+// A hard ceiling on the whole suite. A database suite that hangs reports
+// nothing at all, which is worse than a failure: it is indistinguishable from a
+// slow machine. Past this budget the child is killed, the disposable server is
+// still torn down, and the run exits non-zero so the hang is recorded as a
+// failure rather than swallowed.
+const SUITE_TIMEOUT_MS = Number(process.env.AFHOMES_DB_SUITE_TIMEOUT_MS ?? 15 * 60_000);
+let timedOut = false;
+const timer = setTimeout(() => {
+  timedOut = true;
+  console.error(`[db-test] suite exceeded ${SUITE_TIMEOUT_MS}ms; terminating`);
+  child.kill('SIGKILL');
+}, SUITE_TIMEOUT_MS);
+timer.unref?.();
 
+const code = await new Promise((resolve) => {
+  child.on('close', resolve);
+  // If the child dies without ever emitting close, settle rather than hang.
+  child.on('error', () => resolve(1));
+});
+
+clearTimeout(timer);
 await postgres.stop();
-process.exit(code ?? 1);
+process.exit(timedOut ? 124 : (code ?? 1));

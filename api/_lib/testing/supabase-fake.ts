@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { resolveCustomerCategory } from '@jad/contracts';
-import { addMoney } from '@jad/shared';
+import { resolveCustomerCategory } from '@afhomes/contracts';
+import { addMoney } from '@afhomes/shared';
 /**
  * In-memory Supabase client fake for API handler tests.
  *
- * The AF Homes handlers drive supabase-js with the fluent query builder
+ * The AFHomes handlers drive supabase-js with the fluent query builder
  * (`from().select().eq().maybeSingle()`, `insert().select().single()`, …).
  * This fake implements exactly the surface those handlers use, backed by plain
  * arrays, so tests can assert on authorization outcomes and emitted queries
@@ -28,6 +28,7 @@ export type FakeAuthUser = {
   user_metadata?: Record<string, unknown>;
   /** Verified JWT authentication method(s); active fixtures default to password. */
   amr?: (string | { method: string; timestamp: number })[];
+  aal?: 'aal1' | 'aal2';
 };
 
 /** Recorded writes, so tests can assert on side effects (audit rows, inserts). */
@@ -101,8 +102,10 @@ type Op =
   | { t: 'update'; patch: FakeRow }
   | { t: 'delete' }
   | { t: 'eq'; col: string; val: unknown }
+  | { t: 'is'; col: string; val: unknown }
   | { t: 'neq'; col: string; val: unknown }
   | { t: 'in'; col: string; vals: unknown[] }
+  | { t: 'not'; col: string; neg: Op }
   | { t: 'or'; filter: string }
   | { t: 'ilike'; col: string; pattern: string }
   | { t: 'gte'; col: string; val: unknown }
@@ -184,8 +187,29 @@ function matches(row: FakeRow, ops: Op[]): boolean {
         return row[op.col] === op.val;
       case 'neq':
         return row[op.col] !== null && row[op.col] !== undefined && row[op.col] !== op.val;
+      // `is(col, null)` is PostgREST's IS NULL and is NOT the same as
+      // `eq(col, null)`: `eq` matches only the literal JS null, so a row whose
+      // column is absent (undefined) or an empty string would slip through. The
+      // distinction is load-bearing for "no final sale yet" queries.
+      case 'is':
+        return op.val === null
+          ? row[op.col] === null || row[op.col] === undefined
+          : row[op.col] === op.val;
       case 'in':
         return op.vals.includes(row[op.col]);
+      // `not(col, 'in', ids)` is the anti-join used to hide records another
+      // workflow stage now owns. PostgREST expresses it as
+      // `id=not.in.(a,b)`, and SQL `NOT IN` is UNKNOWN - so excluded - for a
+      // NULL column. Mirroring that matters: an anti-join that silently kept
+      // NULL-keyed rows would under-exclude and the queue test would pass while
+      // filtering nothing.
+      case 'not':
+        if (op.neg.t === 'in') {
+          const value = row[op.col];
+          if (value === null || value === undefined) return false;
+          return !op.neg.vals.includes(value);
+        }
+        return !matches(row, [op.neg]);
       case 'ilike': {
         // `%` is any run, `_` any single character. The only patterns the
         // handlers build are `%term%`, so a case-insensitive `includes` of the
@@ -203,7 +227,9 @@ function matches(row: FakeRow, ops: Op[]): boolean {
       case 'lte': {
         const a = row[op.col];
         if (a === undefined || a === null) return false;
-        return String(a) <= String(op.val);
+        return op.col === 'id' && /^\d+$/.test(String(a)) && /^\d+$/.test(String(op.val))
+          ? BigInt(String(a)) <= BigInt(String(op.val))
+          : String(a) <= String(op.val);
       }
       default:
         return true;
@@ -278,6 +304,14 @@ export class FakeSupabase {
     ];
   }
 
+  /** An admin email rotation keeps the synthetic GoTrue directory consistent. */
+  private applyAuthEmail(id: string, email: string): void {
+    const seeded = this.seededAuthUsers.find((u) => u.id === id);
+    if (seeded) seeded.email = email;
+    const created = this.createdAuthUsers.find((u) => u.id === id);
+    if (created) created.email = email;
+  }
+
   /** Every row currently in a table (live reference - mutate via helpers). */
   rows(table: string): FakeRow[] {
     return (this.tables[table] ??= []);
@@ -319,6 +353,7 @@ export class FakeSupabase {
         data: {
           claims: {
             sub: user.id,
+            aal: user.aal ?? 'aal1',
             amr: user.amr ?? [{ method: 'password', timestamp: 1 }],
           },
           header: { alg: 'RS256' },
@@ -419,16 +454,43 @@ export class FakeSupabase {
        * GoTrue's admin password/metadata rotation. The secret is captured in
        * `passwordsSeen` only (the same test-only point as `createUser`); the
        * recorded call arg carries the id and non-secret flags so "no password
-       * in logs/calls" assertions remain possible.
+       * in logs/calls" assertions remain possible. An email rotation keeps the
+       * synthetic directory consistent (and refuses an address another account
+       * already holds, like live GoTrue).
        */
-      updateUserById: async (id: string, attrs: { password?: string; user_metadata?: unknown }) => {
+      updateUserById: async (
+        id: string,
+        attrs: {
+          password?: string;
+          email?: string;
+          email_confirm?: boolean;
+          user_metadata?: unknown;
+        },
+      ) => {
         this.calls.push({
           op: 'updateUserById',
           table: 'auth',
-          arg: { id, hasUserMetadata: attrs.user_metadata !== undefined },
+          arg: {
+            id,
+            hasUserMetadata: attrs.user_metadata !== undefined,
+            hasEmail: attrs.email !== undefined,
+            emailConfirmed: attrs.email_confirm === true,
+          },
         });
         if (attrs.password !== undefined) this.passwordsSeen.push(attrs.password);
         if (this.updateUserImpl) return this.updateUserImpl(id, attrs);
+        if (attrs.email !== undefined) {
+          const wanted = attrs.email.trim().toLowerCase();
+          const taken = this.authUsers().some(
+            (u) => u.id !== id && u.email.trim().toLowerCase() === wanted,
+          );
+          if (taken)
+            return {
+              data: { user: null },
+              error: authError('A user with this email address has already been registered'),
+            };
+          this.applyAuthEmail(id, attrs.email);
+        }
         return { data: { user: { id } }, error: null };
       },
     },
@@ -477,12 +539,40 @@ export class FakeSupabase {
         ops.push({ t: 'eq', col, val });
         return this;
       },
+      is(col: string, val: unknown) {
+        ops.push({ t: 'is', col, val });
+        return this;
+      },
       neq(col: string, val: unknown) {
         ops.push({ t: 'neq', col, val });
         return this;
       },
       in(col: string, vals: unknown[]) {
         ops.push({ t: 'in', col, vals });
+        return this;
+      },
+      /**
+       * Mirrors `@supabase/postgrest-js` exactly:
+       * `not(column, operator, value)`, three arguments, where `operator` is a
+       * string and `value` uses raw PostgREST syntax.
+       *
+       * This previously accepted a two-argument shape that the real client does
+       * not have, so a handler calling the wrong arity stayed green here and
+       * failed on the deployed API. An unknown operator now THROWS for the same
+       * reason the real request would fail closed.
+       */
+      not(col: string, operator: string, value: unknown) {
+        if (operator === 'in') {
+          // PostgREST writes a list as `(a,b,c)`.
+          const list = String(value).replace(/^\(|\)$/g, '');
+          ops.push({ t: 'not', col, neg: { t: 'in', col, vals: list.split(',') } });
+        } else if (operator === 'eq') {
+          ops.push({ t: 'not', col, neg: { t: 'eq', col, val: value } });
+        } else if (operator === 'is') {
+          ops.push({ t: 'not', col, neg: { t: 'is', col, val: value } });
+        } else {
+          throw new Error(`unsupported not() operator: ${operator}`);
+        }
         return this;
       },
       or(filter: string) {
@@ -564,6 +654,11 @@ export class FakeSupabase {
       } else if (write === undefined) {
         const rerr = self.errors[table];
         if (rerr) return { data: null, error: { ...rerr }, count: null };
+        const selected = ops.find((op) => op.t === 'select');
+        if (selected?.t === 'select') {
+          const columnError = self.errors[`${table}.${selected.cols}`];
+          if (columnError) return { data: null, error: { ...columnError }, count: null };
+        }
       }
       const store = self.tables[table]!;
 
@@ -595,7 +690,7 @@ export class FakeSupabase {
           for (const [col, value] of Object.entries(defaults)) {
             if (filled[col] === undefined) filled[col] = value;
           }
-          // Every AF Homes business table declares `default gen_random_uuid()`.
+          // Every AFHomes business table declares `default gen_random_uuid()`.
           // Mirroring it keeps a row inserted without an explicit `id` readable
           // straight back, exactly as it is against Postgres.
           if (filled.id === undefined) filled.id = randomUUID();
@@ -647,7 +742,14 @@ export class FakeSupabase {
             const av = a[order.col];
             const bv = b[order.col];
             if (av === bv) continue;
-            const cmp = av! > bv! ? 1 : -1;
+            const cmp =
+              order.col === 'id' && /^\d+$/.test(String(av)) && /^\d+$/.test(String(bv))
+                ? BigInt(String(av)) > BigInt(String(bv))
+                  ? 1
+                  : -1
+                : av! > bv!
+                  ? 1
+                  : -1;
             return order.asc ? cmp : -cmp;
           }
           return 0;
@@ -675,6 +777,17 @@ export class FakeSupabase {
       const selectOp = ops.find((o) => o.t === 'select') as
         { t: 'select'; cols: string; count: boolean } | undefined;
       if (selectOp) {
+        // KNOWN GAP, deliberately left as-is: this fake returns the WHOLE row and
+        // does not project to the selected columns, so a handler that spreads a
+        // selected row can leak an unselected column and no assertion here will
+        // notice. Real PostgREST projects. Fixing it properly means reimplementing
+        // its grammar (`alias:col`, casts, spread `*`) and repairing three specs
+        // whose fixtures carry a PRE-BAKED embed property that was silently masking
+        // a broken `embed()` - a real finding, but a separate piece of work.
+        //
+        // Until then, a handler that must not leak a column must not spread: pick
+        // its fields explicitly. `points.ts` does, and `points.spec.ts` asserts
+        // the requested column list directly rather than trusting the fake.
         out = out.map((row) => ({ ...row, ...self.embed(table, row, selectOp.cols, ops) }));
       }
       // Record the read shape (columns only, never row data) so tests can
@@ -719,8 +832,8 @@ export class FakeSupabase {
       const [embedTable, constraint] = target.split('!');
       const byName = (l: FakeLink) =>
         constraint && constraint !== 'inner'
-          ? l.child === parent &&
-            l.parent === embedTable &&
+          ? ((l.child === parent && l.parent === embedTable) ||
+              (l.parent === parent && l.child === embedTable)) &&
             `${l.child}_${l.fk}_fkey` === constraint
           : false;
       const asParent = (l: FakeLink) =>
@@ -776,6 +889,101 @@ export class FakeSupabase {
     const entry = (this.rpcs ?? []).find((r) => r.fn === fn);
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
+    if (!entry && fn === 'install_legacy_ost_identity') {
+      // Handler fixture only. PostgreSQL rollback/locking is proved in the local DB gate.
+      const before = structuredClone(this.tables);
+      try {
+        const app = this.rows('ost_applications').find((r) => r.id === args.p_application_id);
+        if (!app) throw { code: 'P0002', message: 'APPLICATION_NOT_FOUND' };
+        const role = this.rows('roles').find((r) => r.slug === 'ost' && r.is_active);
+        if (!role) throw { message: 'ROLE_NOT_FOUND' };
+        if (this.rows('staff_users').some((r) => r.id === args.p_auth_id || r.email === app.email))
+          throw { code: '23505', message: 'OST_IDENTITY_ALREADY_LINKED' };
+        const now = new Date().toISOString();
+        const fullName = [app.first_name, app.middle_name, app.last_name].filter(Boolean).join(' ');
+        const write = (query: ReturnType<FakeSupabase['from']>) =>
+          query.then(({ error }) => {
+            if (error) throw error;
+          });
+        const number = (await this.rpc('next_ost_number')) as { data: { ost_number: string }[] };
+        const member = {
+          id: args.p_auth_id,
+          application_id: app.id,
+          sponsor_staff_id: app.sponsor_staff_id,
+          ost_number: number.data[0].ost_number,
+          full_name: fullName,
+          email: app.email,
+          phone: app.phone,
+          status: 'active',
+          approved_by: args.p_actor_id,
+          approved_at: now,
+          created_at: now,
+        };
+        await write(
+          this.from('staff_users').insert({
+            id: args.p_auth_id,
+            email: app.email,
+            full_name: fullName,
+            status: 'invited',
+            invited_at: now,
+          }),
+        );
+        await write(
+          this.from('staff_role_assignments').insert({
+            staff_id: args.p_auth_id,
+            role_id: role.id,
+            assigned_by: args.p_actor_id,
+          }),
+        );
+        await write(
+          this.from('staff_invitations').insert({
+            email: app.email,
+            full_name: fullName,
+            role_id: role.id,
+            invited_by: args.p_actor_id,
+            auth_user_id: args.p_auth_id,
+            expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+          }),
+        );
+        await write(this.from('ost_members').insert(member));
+        await write(
+          this.from('referral_relationships').insert({
+            subject_staff_id: args.p_auth_id,
+            upline_staff_id: app.sponsor_staff_id,
+            hierarchy_role: 'ost',
+            is_authoritative: true,
+            is_active: true,
+            assigned_by: args.p_actor_id,
+          }),
+        );
+        await write(
+          this.from('ost_applications')
+            .update({ status: 'approved', reviewed_by: args.p_actor_id, reviewed_at: now })
+            .eq('id', app.id),
+        );
+        await write(
+          this.from('audit_events').insert([
+            {
+              actor_id: args.p_actor_id,
+              action: 'OST_APPLICATION_APPROVED',
+              entity_type: 'ost_application',
+              entity_id: app.id,
+            },
+            {
+              actor_id: args.p_actor_id,
+              action: 'OST_MEMBER_ACTIVATED',
+              entity_type: 'ost_member',
+              entity_id: args.p_auth_id,
+            },
+          ]),
+        );
+        return { data: member, error: null };
+      } catch (error) {
+        this.tables = before;
+        return { data: null, error };
+      }
+    }
+    if (!entry && fn === 'afhomes_admin_mfa_required') return { data: false, error: null };
     // Directory behavior is a handler fixture only; real SQL is separately executed.
     if (!entry && fn === 'match_import_emails') {
       const emails = Array.isArray(args.p_emails)
@@ -789,21 +997,38 @@ export class FakeSupabase {
       };
     }
     if (!entry && fn === 'update_operational_role') {
-      const role = this.rows('roles').find(r => r.id === args.p_role);
+      const role = this.rows('roles').find((r) => r.id === args.p_role);
       if (!role) return { data: null, error: { message: 'NOT_FOUND: Role not found' } };
       const input = args.p_input as FakeRow;
       if (this.writeErrors.role_permissions || this.writeErrors.roles)
         return { data: null, error: this.writeErrors.role_permissions ?? this.writeErrors.roles };
       if (input.name !== undefined) role.name = input.name;
-      if (input.description !== undefined) role.description = input.description;
       if (input.isActive !== undefined) role.is_active = input.isActive;
+      if (input.departmentId !== undefined) {
+        if (input.departmentId !== null) {
+          const department = this.rows('departments').find(
+            (d) => d.id === input.departmentId && d.is_active,
+          );
+          if (!department)
+            return { data: null, error: { message: 'VALIDATION_ERROR: Unknown department' } };
+        }
+        role.department_id = input.departmentId;
+      }
       if (Array.isArray(input.permissions)) {
-        this.tables.role_permissions = this.rows('role_permissions').filter(p => p.role_id !== args.p_role);
+        this.tables.role_permissions = this.rows('role_permissions').filter(
+          (p) => p.role_id !== args.p_role,
+        );
         for (const raw of input.permissions) {
           const p = raw as FakeRow;
-          const module = this.rows('modules').find(m => m.key === p.moduleKey);
-          this.rows('role_permissions').push({ role_id: args.p_role, module_id: module?.id,
-            can_view:p.canView, can_create:p.canCreate, can_update:p.canUpdate, can_delete:p.canDelete });
+          const module = this.rows('modules').find((m) => m.key === p.moduleKey);
+          this.rows('role_permissions').push({
+            role_id: args.p_role,
+            module_id: module?.id,
+            can_view: p.canView,
+            can_create: p.canCreate,
+            can_update: p.canUpdate,
+            can_delete: p.canDelete,
+          });
         }
       }
       return { data: null, error: null };
@@ -817,8 +1042,15 @@ export class FakeSupabase {
       const actorRole = this.actorRoleSlug(String(args.p_actor));
       if (
         !actorRole ||
-        !['admin', 'super_admin', 'sales_manager'].includes(actorRole) ||
-        (actorRole === 'sales_manager' && args.p_actor !== args.p_sponsor)
+        ![
+          'admin',
+          'super_admin',
+          'vice_director',
+          'senior_sales_manager',
+          'sales_manager',
+        ].includes(actorRole) ||
+        (['vice_director', 'senior_sales_manager', 'sales_manager'].includes(actorRole) &&
+          args.p_actor !== args.p_sponsor)
       ) {
         return {
           data: null,
@@ -831,7 +1063,10 @@ export class FakeSupabase {
       const sponsorIsSalesManager = this.rows('staff_role_assignments').some((a) => {
         if (a.staff_id !== args.p_sponsor) return false;
         const r = this.rows('roles').find((x) => x.id === a.role_id);
-        return r?.slug === 'sales_manager' && r?.is_active !== false;
+        return (
+          ['vice_director', 'senior_sales_manager', 'sales_manager'].includes(String(r?.slug)) &&
+          r?.is_active !== false
+        );
       });
       if (!sponsor || sponsor.status !== 'active' || !sponsorIsSalesManager) {
         return {
@@ -839,23 +1074,59 @@ export class FakeSupabase {
           error: { message: 'FORBIDDEN: Only an active Sales Manager can sponsor an OST account' },
         };
       }
-      const live = this.rows('referral_codes').filter(r => r.sponsor_staff_id === args.p_sponsor && r.is_active && Date.parse(String(r.expires_at)) > Date.now() && Number(r.use_count) < Number(r.max_uses));
-      if (live.length && !args.p_rotate) return { data:null,error:{message:'CONFLICT: An active referral code already exists. Rotate it to generate a replacement'} };
-      if (!/^[a-f0-9]{64}$/.test(String(args.p_hash)) || Number(args.p_max_uses) < 1 || Number(args.p_max_uses) > 100 || Date.parse(String(args.p_expires)) <= Date.now()) {
+      const live = this.rows('referral_codes').filter(
+        (r) =>
+          r.sponsor_staff_id === args.p_sponsor &&
+          r.is_active &&
+          Date.parse(String(r.expires_at)) > Date.now() &&
+          Number(r.use_count) < Number(r.max_uses),
+      );
+      if (live.length && !args.p_rotate)
+        return {
+          data: null,
+          error: {
+            message:
+              'CONFLICT: An active referral code already exists. Rotate it to generate a replacement',
+          },
+        };
+      if (
+        !/^[a-f0-9]{64}$/.test(String(args.p_hash)) ||
+        Number(args.p_max_uses) < 1 ||
+        Number(args.p_max_uses) > 100 ||
+        Date.parse(String(args.p_expires)) <= Date.now()
+      ) {
         return { data: null, error: { message: 'VALIDATION_ERROR: Invalid referral code' } };
       }
       // Rotation deactivates ONLY live codes, exactly like the SQL's
       // `where sponsor_staff_id = p_sponsor and is_active`. The previous fake
       // deactivated every row for the sponsor, including already-spent and
       // expired ones - so the fake silently rewrote history that SQL preserves.
-      if (args.p_rotate) for (const row of this.rows('referral_codes')) if (row.sponsor_staff_id === args.p_sponsor && row.is_active) row.is_active=false;
-      const id=randomUUID();
-      this.rows('referral_codes').push({id,code_hash:args.p_hash,code_hint:args.p_hint,sponsor_staff_id:args.p_sponsor,
-        expires_at:args.p_expires,max_uses:args.p_max_uses,use_count:0,is_active:true,created_by:args.p_actor,created_at:new Date().toISOString()});
-      this.rows('audit_events').push({id:randomUUID(),actor_id:args.p_actor,
-        action:args.p_rotate?'REFERRAL_CODE_ROTATED':'REFERRAL_CODE_ISSUED',entity_type:'referral_code',
-        entity_id:id,after_data:{sponsorStaffId:args.p_sponsor},created_at:new Date().toISOString()});
-      return {data:id,error:null};
+      if (args.p_rotate)
+        for (const row of this.rows('referral_codes'))
+          if (row.sponsor_staff_id === args.p_sponsor && row.is_active) row.is_active = false;
+      const id = randomUUID();
+      this.rows('referral_codes').push({
+        id,
+        code_hash: args.p_hash,
+        code_hint: args.p_hint,
+        sponsor_staff_id: args.p_sponsor,
+        expires_at: args.p_expires,
+        max_uses: args.p_max_uses,
+        use_count: 0,
+        is_active: true,
+        created_by: args.p_actor,
+        created_at: new Date().toISOString(),
+      });
+      this.rows('audit_events').push({
+        id: randomUUID(),
+        actor_id: args.p_actor,
+        action: args.p_rotate ? 'REFERRAL_CODE_ROTATED' : 'REFERRAL_CODE_ISSUED',
+        entity_type: 'referral_code',
+        entity_id: id,
+        after_data: { sponsorStaffId: args.p_sponsor },
+        created_at: new Date().toISOString(),
+      });
+      return { data: id, error: null };
     }
 
     if (!entry && fn === 'resolve_membership_code') {
@@ -956,11 +1227,14 @@ export class FakeSupabase {
                   ? 'fully_paid'
                   : 'partially_paid',
             verified_paid: paid,
+            frozen_total: Number(sale?.cash_price_snapshot ?? 0),
           };
         })
         .filter(
           (r) =>
+            (!filters.id || r.id === filters.id) &&
             (!filters.status || r.status === filters.status) &&
+            (!filters.payment || r.payment_status === filters.payment) &&
             (!filters.category || r.derivedCategory === filters.category) &&
             (!filters.tier || r.tier === filters.tier) &&
             (!filters.membersOnly || r.membership_id) &&
@@ -978,6 +1252,65 @@ export class FakeSupabase {
       );
       return { data: records.map((record) => ({ record, total_count: total })), error: null };
     }
+    if (!entry && fn === 'purge_customer') {
+      // Mirror of public.purge_customer so handler tests can exercise the
+      // cascade without a live database. The real SQL is the authority.
+      const id = args.p_customer_id;
+      if (!id) return { data: null, error: { message: 'p_customer_id is required' } };
+      if (!this.rows('customers').some((r) => r.id === id))
+        return { data: null, error: { code: 'P0002', message: 'customer not found' } };
+      const saleIds = this.rows('card_sales')
+        .filter((r) => r.customer_id === id)
+        .map((r) => r.id);
+      this.tables.identity_documents = this.rows('identity_documents').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_onboarding_tokens = this.rows('customer_onboarding_tokens').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.payments = this.rows('payments').filter(
+        (r) => r.customer_id !== id && !saleIds.includes(r.sale_id),
+      );
+      this.tables.commissions = this.rows('commissions').filter(
+        (r) => !saleIds.includes(r.sale_id),
+      );
+      this.tables.redemptions = this.rows('redemptions').filter((r) => r.customer_id !== id);
+      this.tables.redemption_quotes = this.rows('redemption_quotes').filter(
+        (r) => r.approval_customer_id !== id,
+      );
+      const membershipIds = this.rows('memberships')
+        .filter((r) => r.customer_id === id)
+        .map((r) => r.id);
+      const accountIds = this.rows('points_accounts')
+        .filter((r) => membershipIds.includes(r.membership_id))
+        .map((r) => r.id);
+      this.tables.points_ledger = this.rows('points_ledger').filter(
+        (r) => !accountIds.includes(r.account_id),
+      );
+      this.tables.points_accounts = this.rows('points_accounts').filter(
+        (r) => !membershipIds.includes(r.membership_id),
+      );
+      this.tables.memberships = this.rows('memberships').filter((r) => r.customer_id !== id);
+      this.tables.reservation_agreements = this.rows('reservation_agreements').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_application_purchase_terms = this.rows(
+        'customer_application_purchase_terms',
+      ).filter((r) => r.customer_id !== id);
+      this.tables.customer_applications = this.rows('customer_applications').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.customer_import_rows = this.rows('customer_import_rows').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.purchases = this.rows('purchases').filter((r) => r.customer_id !== id);
+      this.tables.earning_claims = this.rows('earning_claims').filter(
+        (r) => r.customer_id !== id,
+      );
+      this.tables.card_sales = this.rows('card_sales').filter((r) => r.customer_id !== id);
+      this.tables.customers = this.rows('customers').filter((r) => r.id !== id);
+      return { data: null, error: null };
+    }
     if (!entry) return { data: null, error: { code: '42883', message: `${fn} does not exist` } };
     return {
       data: typeof entry.result === 'function' ? entry.result(args) : entry.result,
@@ -994,11 +1327,11 @@ export function makeRes() {
   const state = {
     status: 200,
     body: undefined as unknown,
-    headers: {} as Record<string, string>,
+    headers: {} as Record<string, string | string[]>,
     ended: false,
   };
   const res = {
-    setHeader(name: string, value: string) {
+    setHeader(name: string, value: string | string[]) {
       state.headers[name.toLowerCase()] = value;
     },
     status(code: number) {

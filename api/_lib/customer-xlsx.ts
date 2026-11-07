@@ -1,5 +1,6 @@
 import { inflateRawSync } from 'node:zlib';
 import { SaxesParser } from 'saxes';
+import { crc32 } from './report-export.js';
 
 /** Resource budgets apply before allocation/decompression, not after row parsing. */
 export const XLSX_LIMITS = {
@@ -13,6 +14,7 @@ export const XLSX_LIMITS = {
   text: 4096,
   rows: 5001,
   entries: 128,
+  sheets: 16,
 } as const;
 type Node = { name: string; attrs: Record<string, string>; text: string; children: Node[] };
 function xml(bytes: Uint8Array): Node {
@@ -55,17 +57,24 @@ function xml(bytes: Uint8Array): Node {
   return root;
 }
 const children = (node: Node, name: string) => node.children.filter((n) => n.name === name);
+
+export function readWorkbookCustomProperties(parts: Map<string, Uint8Array>): Map<string, string> {
+  const bytes = parts.get('docProps/custom.xml');
+  const properties = new Map<string, string>();
+  if (!bytes) return properties;
+  const root = xml(bytes);
+  if (root.name !== 'Properties') throw new Error('Invalid workbook custom properties');
+  for (const property of children(root, 'property')) {
+    const name = property.attrs.name;
+    if (!name) throw new Error('Workbook property name is required');
+    if (properties.has(name)) throw new Error('Duplicate workbook property: ' + name);
+    properties.set(name, property.children.length === 1 ? property.children[0]!.text.trim() : '');
+  }
+  return properties;
+}
 const descendants = (node: Node, name: string): Node[] =>
   node.children.flatMap((n) => [...(n.name === name ? [n] : []), ...descendants(n, name)]);
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-function zip(bytes: Uint8Array): Map<string, Uint8Array> {
+export function readWorkbookParts(bytes: Uint8Array): Map<string, Uint8Array> {
   if (bytes.length > XLSX_LIMITS.upload) throw new Error('Spreadsheet upload limit exceeded');
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = -1;
@@ -127,8 +136,21 @@ function zip(bytes: Uint8Array): Map<string, Uint8Array> {
   }
   return out;
 }
-export function readXlsx(bytes: Uint8Array): string[][] {
-  const parts = zip(bytes);
+export function readWorkbook(
+  bytes: Uint8Array | Map<string, Uint8Array>,
+  selected?: readonly string[],
+  requireSingleSheet = selected === undefined,
+  ignoredFormulaColumns: Readonly<Record<string, readonly number[]>> = {},
+  formulaCell?: (
+    sheet: string,
+    column: number,
+    row: number,
+    formula: string,
+    cached: string,
+  ) => string,
+  referenceOnlySheets: readonly string[] = [],
+): Map<string, string[][]> {
+  const parts = bytes instanceof Map ? bytes : readWorkbookParts(bytes);
   const part = (name: string) => {
     const p = parts.get(name);
     if (!p) throw new Error('Spreadsheet part is missing: ' + name);
@@ -137,62 +159,141 @@ export function readXlsx(bytes: Uint8Array): string[][] {
   const book = part('xl/workbook.xml'),
     rels = part('xl/_rels/workbook.xml.rels');
   const sheets = descendants(book, 'sheet');
-  if (sheets.length !== 1)
+  if (sheets.length < 1 || sheets.length > XLSX_LIMITS.sheets)
+    throw new Error('Spreadsheet sheet limit exceeded');
+  if (requireSingleSheet && sheets.length !== 1)
     throw new Error(
       'Import requires exactly one worksheet; multiple payment sheets are not supported',
     );
-  const id = sheets[0]!.attrs['r:id'];
-  const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
-  if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
-    throw new Error('Unsupported worksheet relationship');
-  const target = rel.attrs.Target ?? '';
-  if (target.startsWith('/') || target.includes('..') || target.includes('\\'))
-    throw new Error('Unsafe worksheet target');
-  const strings = parts.has('xl/sharedStrings.xml')
-    ? children(part('xl/sharedStrings.xml'), 'si').map((si) =>
-        descendants(si, 't')
-          .map((t) => t.text)
-          .join(''),
-      )
-    : [];
-  if (strings.length > XLSX_LIMITS.strings || strings.some((s) => s.length > XLSX_LIMITS.text))
-    throw new Error('Shared strings limit exceeded');
-  const sheet = part('xl/' + target);
-  if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
-    throw new Error('Unsupported worksheet structure');
-  const rows = children(children(sheet, 'sheetData')[0]!, 'row');
-  if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
-  let cellCount = 0;
-  const matrix: string[][] = [];
-  for (const row of rows) {
-    const cells: string[] = [];
-    for (const c of children(row, 'c')) {
-      if (++cellCount > XLSX_LIMITS.cells) throw new Error('Worksheet cell limit exceeded');
-      const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(c.attrs.r ?? '');
-      if (!match) throw new Error('Malformed worksheet cell reference');
-      let col = 0;
-      for (const l of match[1]!) col = col * 26 + l.charCodeAt(0) - 64;
-      if (col > XLSX_LIMITS.columns) throw new Error('Worksheet column limit exceeded');
-      if (cells[col - 1] !== undefined) throw new Error('Duplicate worksheet cell');
-      if (children(c, 'f').length)
-        throw new Error('Formula cells are unsupported; export values only');
-      const value = children(c, 'v')[0]?.text ?? '';
-      if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
-        throw new Error('Invalid shared-string index');
-      let text =
-        c.attrs.t === 's'
-          ? strings[Number(value)]
-          : c.attrs.t === 'inlineStr'
-            ? descendants(c, 't')
-                .map((t) => t.text)
-                .join('')
-            : value;
-      if (text === undefined || text.length > XLSX_LIMITS.text)
-        throw new Error('Invalid or oversized worksheet value');
-      cells[col - 1] = text.trim();
+  if (selected && selected.some((name) => !sheets.some((s) => s.attrs.name === name)))
+    throw new Error(
+      'Missing required worksheet: ' +
+        selected.filter((name) => !sheets.some((s) => s.attrs.name === name)).join(', '),
+    );
+  const result = new Map<string, string[][]>();
+  for (const selectedSheet of sheets) {
+    const name = selectedSheet.attrs.name ?? '';
+    if (selected && !selected.includes(name)) continue;
+    if (result.has(name)) throw new Error('Duplicate worksheet name');
+    const id =
+      selectedSheet.attrs['r:id'] ??
+      Object.entries(selectedSheet.attrs).find(([key]) => key.endsWith(':id'))?.[1];
+    const rel = children(rels, 'Relationship').find((r) => r.attrs.Id === id);
+    if (!rel || rel.attrs.TargetMode === 'External' || !rel.attrs.Type?.endsWith('/worksheet'))
+      throw new Error('Unsupported worksheet relationship');
+    const target = rel.attrs.Target ?? '';
+    if (
+      target.includes('..') ||
+      target.includes('\\') ||
+      (target.startsWith('/') && !target.startsWith('/xl/'))
+    )
+      throw new Error('Unsafe worksheet target');
+    const strings = parts.has('xl/sharedStrings.xml')
+      ? children(part('xl/sharedStrings.xml'), 'si').map((si) =>
+          descendants(si, 't')
+            .map((t) => t.text)
+            .join(''),
+        )
+      : [];
+    if (strings.length > XLSX_LIMITS.strings || strings.some((s) => s.length > XLSX_LIMITS.text))
+      throw new Error('Shared strings limit exceeded');
+    const sheet = part(target.startsWith('/xl/') ? target.slice(1) : 'xl/' + target);
+    if (sheet.name !== 'worksheet' || children(sheet, 'sheetData').length !== 1)
+      throw new Error('Unsupported worksheet structure');
+    // Geographic lists can be wide; they are never imported or evaluated.
+    if (referenceOnlySheets.includes(name)) {
+      if (descendants(sheet, 'f').length) throw new Error('Formula on a reference worksheet');
+      result.set(name, []);
+      continue;
     }
-    matrix.push(Array.from({ length: cells.length }, (_, i) => cells[i] ?? ''));
+    const rows = children(children(sheet, 'sheetData')[0]!, 'row');
+    if (rows.length > XLSX_LIMITS.rows) throw new Error('Spreadsheet row limit exceeded');
+    let cellCount = 0;
+    const matrix: string[][] = [];
+    for (const row of rows) {
+      const rowIndex = row.attrs.r === undefined ? matrix.length : Number(row.attrs.r) - 1;
+      if (
+        !Number.isInteger(rowIndex) ||
+        rowIndex < 0 ||
+        rowIndex >= XLSX_LIMITS.rows ||
+        matrix[rowIndex]
+      )
+        throw new Error('Invalid or duplicate worksheet row reference');
+      const cells: string[] = [];
+      for (const c of children(row, 'c')) {
+        if (++cellCount > XLSX_LIMITS.cells) throw new Error('Worksheet cell limit exceeded');
+        const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(c.attrs.r ?? '');
+        if (!match) throw new Error('Malformed worksheet cell reference');
+        if (Number(match[2]) !== rowIndex + 1)
+          throw new Error('Worksheet cell/row reference mismatch');
+        let col = 0;
+        for (const l of match[1]!) col = col * 26 + l.charCodeAt(0) - 64;
+        if (col > XLSX_LIMITS.columns) throw new Error('Worksheet column limit exceeded');
+        if (cells[col - 1] !== undefined) throw new Error('Duplicate worksheet cell');
+        if (children(c, 'f').length) {
+          // Derived workbook columns are recomputed by their importer, never evaluated here.
+          if (ignoredFormulaColumns[name]?.includes(col)) {
+            cells[col - 1] = formulaCell
+              ? formulaCell(
+                  name,
+                  col,
+                  rowIndex + 1,
+                  children(c, 'f')[0]!.text,
+                  children(c, 'v')[0]?.text ?? '',
+                )
+              : '';
+            continue;
+          }
+          // Age is discarded; postal caches are unverified candidate text. Nothing is evaluated.
+          if (
+            selected &&
+            ((name === 'Primary' && [9, 17].includes(col)) ||
+              (name === 'Supplementary' && [7, 15].includes(col)))
+          ) {
+            const postal =
+              (name === 'Primary' && col === 17) || (name === 'Supplementary' && col === 15);
+            cells[col - 1] = postal ? (children(c, 'v')[0]?.text ?? '') : '';
+            continue;
+          }
+          throw new Error('Formula cells are unsupported outside company age/postal columns');
+        }
+        const value = children(c, 'v')[0]?.text ?? '';
+        if (c.attrs.t === 's' && !/^(0|[1-9][0-9]*)$/.test(value))
+          throw new Error('Invalid shared-string index');
+        const text =
+          c.attrs.t === 's'
+            ? strings[Number(value)]
+            : c.attrs.t === 'inlineStr'
+              ? descendants(c, 't')
+                  .map((t) => t.text)
+                  .join('')
+              : value;
+        if (text === undefined || text.length > XLSX_LIMITS.text)
+          throw new Error('Invalid or oversized worksheet value');
+        cells[col - 1] = selected ? text : text.trim();
+      }
+      matrix[rowIndex] = Array.from({ length: cells.length }, (_, i) => cells[i] ?? '');
+    }
+    if (!matrix.length) throw new Error('Spreadsheet has no rows');
+    result.set(
+      name,
+      Array.from({ length: matrix.length }, (_, i) => matrix[i] ?? []),
+    );
   }
-  if (!matrix.length) throw new Error('Spreadsheet has no rows');
-  return matrix;
+  return result;
+}
+
+/**
+ * Multi-sheet reader for generated/whole workbooks (sectioned templates).
+ * Every sheet is returned in workbook order, with the same budgets and
+ * cell-safety rules as `readWorkbook`; README-style sheets are the caller's
+ * to ignore. Values are trimmed here (`readWorkbook` keeps selected-sheet
+ * text verbatim, because a company workbook cell is data, not display text).
+ */
+export function readXlsxSheets(bytes: Uint8Array): { name: string; matrix: string[][] }[] {
+  return [...readWorkbook(bytes, undefined, false)].map(([name, matrix]) => ({ name, matrix }));
+}
+
+export function readXlsx(bytes: Uint8Array): string[][] {
+  return readWorkbook(bytes).values().next().value!;
 }

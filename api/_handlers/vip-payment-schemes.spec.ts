@@ -155,7 +155,13 @@ type State = { status: number; body: unknown };
 
 async function call(
   family: keyof typeof handlers,
-  options: { path: string; method?: string; token?: string; body?: unknown; query?: Record<string, string> },
+  options: {
+    path: string;
+    method?: string;
+    token?: string;
+    body?: unknown;
+    query?: Record<string, string>;
+  },
 ): Promise<State> {
   const { res, state } = makeRes();
   await handlers[family](
@@ -176,7 +182,10 @@ const err = (body: unknown) => (body as { error: { code: string; message: string
 const CUSTOMERS = [
   CUSTOMER.prospect,
   CUSTOMER.prospectTwo,
-  ...Array.from({ length: 10 }, (_, i) => `aaaaaaaa-0000-4000-8000-0000000001${String(i + 1).padStart(2, '0')}`),
+  ...Array.from(
+    { length: 10 },
+    (_, i) => `aaaaaaaa-0000-4000-8000-0000000001${String(i + 1).padStart(2, '0')}`,
+  ),
 ];
 let customerCursor = 0;
 const nextCustomer = () => CUSTOMERS[customerCursor++ % CUSTOMERS.length]!;
@@ -228,15 +237,105 @@ describe('VIP sale creation freezes scheme economics', () => {
   });
 
   it.each([
-    ['Bronze Move A', PRODUCT.bronze, 'move_a', '54000.00', '10000.00', 4, '11000.00', 84, '2160.00'],
-    ['Silver Move A', PRODUCT.silver, 'move_a', '192000.00', '10000.00', 4, '45500.00', 144, '7680.00'],
-    ['Bronze installment', PRODUCT.bronze, 'installment_4_month', '72000.00', '10000.00', 4, '15500.00', 84, '2880.00'],
-    ['Silver installment', PRODUCT.silver, 'installment_4_month', '240000.00', '10000.00', 4, '57500.00', 144, '9600.00'],
-    ['Gold installment', PRODUCT.gold, 'installment_4_month', '390000.00', '10000.00', 4, '95000.00', 264, '15600.00'],
-    ['Silver B1', PRODUCT.silver, 'move_b1_40_12', '240000.00', '96000.00', 12, '12000.00', 144, '9600.00'],
-    ['Gold B1', PRODUCT.gold, 'move_b1_40_12', '390000.00', '156000.00', 12, '19500.00', 264, '15600.00'],
-    ['Silver B2', PRODUCT.silver, 'move_b2_25_12', '240000.00', '60000.00', 12, '15000.00', 144, '9600.00'],
-    ['Gold B2', PRODUCT.gold, 'move_b2_25_12', '390000.00', '97500.00', 12, '24375.00', 264, '15600.00'],
+    [
+      'Bronze Move A',
+      PRODUCT.bronze,
+      'move_a',
+      '54000.00',
+      '10000.00',
+      4,
+      '11000.00',
+      84,
+      '2160.00',
+    ],
+    [
+      'Silver Move A',
+      PRODUCT.silver,
+      'move_a',
+      '192000.00',
+      '10000.00',
+      4,
+      '45500.00',
+      144,
+      '7680.00',
+    ],
+    [
+      'Bronze installment',
+      PRODUCT.bronze,
+      'installment_4_month',
+      '72000.00',
+      '10000.00',
+      4,
+      '15500.00',
+      84,
+      '2880.00',
+    ],
+    [
+      'Silver installment',
+      PRODUCT.silver,
+      'installment_4_month',
+      '240000.00',
+      '10000.00',
+      4,
+      '57500.00',
+      144,
+      '9600.00',
+    ],
+    [
+      'Gold installment',
+      PRODUCT.gold,
+      'installment_4_month',
+      '390000.00',
+      '10000.00',
+      4,
+      '95000.00',
+      264,
+      '15600.00',
+    ],
+    [
+      'Silver B1',
+      PRODUCT.silver,
+      'move_b1_40_12',
+      '240000.00',
+      '96000.00',
+      12,
+      '12000.00',
+      144,
+      '9600.00',
+    ],
+    [
+      'Gold B1',
+      PRODUCT.gold,
+      'move_b1_40_12',
+      '390000.00',
+      '156000.00',
+      12,
+      '19500.00',
+      264,
+      '15600.00',
+    ],
+    [
+      'Silver B2',
+      PRODUCT.silver,
+      'move_b2_25_12',
+      '240000.00',
+      '60000.00',
+      12,
+      '15000.00',
+      144,
+      '9600.00',
+    ],
+    [
+      'Gold B2',
+      PRODUCT.gold,
+      'move_b2_25_12',
+      '390000.00',
+      '97500.00',
+      12,
+      '24375.00',
+      264,
+      '15600.00',
+    ],
   ])(
     '%s freezes total/initial/months/monthly/validity/commission',
     async (_name, productId, scheme, total, initial, months, monthly, validity, commission) => {
@@ -336,7 +435,7 @@ describe('VIP sale creation freezes scheme economics', () => {
     const rows = (report.body as { data: Record<string, unknown>[] }).data;
     const row = rows.find((r) => r.frozenPrice === '240000.00');
     expect(row).toMatchObject({
-      paymentScheme: 'Move B1 — 40% DP + 12 Months',
+      paymentScheme: 'Move B1: 40% DP + 12 Months',
       reservationFee: '10000.00',
       requiredDown: '96000.00',
       installmentMonths: 12,

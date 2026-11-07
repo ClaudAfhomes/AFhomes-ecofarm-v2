@@ -1,6 +1,6 @@
 import { customerDirectory } from '../_lib/customer-directory.js';
 /**
- * AF Homes customer master records.
+ * AFHomes customer master records.
  *
  * Sensitive fields are write-only: `governmentIdNumber` is accepted on create
  * and update, stored, and NEVER returned. The read model exposes a mask.
@@ -10,13 +10,12 @@ import { z } from 'zod';
 import {
   createCustomerSchema,
   maskGovernmentId,
-  normalizeAddressField,
   normalizePersonName,
   normalizePhilippinePhone,
   normalizePostalCode,
   updateCustomerSchema,
   customerCategorySchema,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { isSellingRole } from '../_lib/commerce.js';
@@ -30,7 +29,6 @@ import {
   isoOrNull,
   jsonBody,
   type Db,
-  list,
   mapRpcError,
   method,
   route,
@@ -39,6 +37,7 @@ import {
   subPath,
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
+import { storageClient } from '../_lib/storage.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const fullName = (row: Record<string, unknown>) =>
@@ -62,23 +61,91 @@ export function customerHasActiveMembership(row: Record<string, unknown>): boole
   return list.some((membership) => membership.status === 'active');
 }
 
-const toCustomer = (row: Record<string, unknown>) => ({
+const toCustomer = (row: Record<string, unknown>, options: { includeTin?: boolean } = {}) => ({
   id: row.id,
   customerNumber: row.customer_number,
   // The customer's own Customer Code, distinct from the Customer ID above.
   // Returned to authorized staff only; it authorizes nothing.
   customerCode: (row.customer_code as string | null | undefined) ?? null,
   fullName: fullName(row),
+  firstName: isoOrNull(row.first_name),
+  middleName: isoOrNull(row.middle_name),
+  lastName: isoOrNull(row.last_name),
+  suffix: isoOrNull(row.suffix),
   email: row.email,
   phone: row.phone,
+  landline: isoOrNull(row.landline),
   dateOfBirth: isoOrNull(row.birth_date),
   gender: isoOrNull(row.gender),
   address: row.address ?? null,
   governmentIdType: isoOrNull(row.government_id_type),
   governmentIdMasked:
     isoOrNull(row.government_id_masked) ?? maskGovernmentId(isoOrNull(row.government_id_number)),
+  // Company-stated membership fields. TIN values are masked on list, create
+  // and update reads. The single-record detail read opts in to the raw value
+  // so the edit dialog can show the current TIN; audits never carry it.
+  tinNumberMasked: maskGovernmentId(isoOrNull(row.tin_number)),
+  ...(options.includeTin
+    ? {
+        tinNumber: isoOrNull(row.tin_number),
+        supplementaryTinNumber: isoOrNull(row.supplementary_tin_number),
+      }
+    : {}),
+  raNumber: isoOrNull(row.ra_number),
+  companyStatus: isoOrNull(row.company_status),
+  citizenship: isoOrNull(row.citizenship),
+  civilStatus: isoOrNull(row.civil_status),
+  occupationBusinessName: isoOrNull(row.occupation_business_name),
+  officeBusinessAddress: isoOrNull(row.office_business_address),
+  employedPosition: isoOrNull(row.employed_position),
+  supplementaryFullName: isoOrNull(row.supplementary_full_name),
+  supplementaryAddress: isoOrNull(row.supplementary_address),
+  supplementaryBirthday: isoOrNull(row.supplementary_birthday),
+  supplementaryGender: isoOrNull(row.supplementary_gender),
+  supplementaryCitizenship: isoOrNull(row.supplementary_citizenship),
+  supplementaryCivilStatus: isoOrNull(row.supplementary_civil_status),
+  supplementaryTinNumberMasked: maskGovernmentId(isoOrNull(row.supplementary_tin_number)),
+  supplementaryMobile: isoOrNull(row.supplementary_mobile),
+  supplementaryEmail: isoOrNull(row.supplementary_email),
+  supplementaryLandline: isoOrNull(row.supplementary_landline),
+  supplementaryOccupationBusinessName: isoOrNull(row.supplementary_occupation_business_name),
+  supplementaryOfficeAddress: isoOrNull(row.supplementary_office_address),
+  supplementaryPosition: isoOrNull(row.supplementary_position),
+  svdName: isoOrNull(row.svd_name),
+  ssmName: isoOrNull(row.ssm_name),
+  smName: isoOrNull(row.sm_name),
+  referrerName: isoOrNull(row.referrer_name),
+  vipRecommenderName: isoOrNull(row.vip_recommender_name),
+  relatedContactNo: isoOrNull(row.related_contact_no),
+  relatedEmail: isoOrNull(row.related_email),
+  statedVipPackage: isoOrNull(row.stated_vip_package),
+  statedPaymentTerms: isoOrNull(row.stated_payment_terms),
+  statedRegularPrice: isoOrNull(row.stated_regular_price),
+  statedDiscount: isoOrNull(row.stated_discount),
+  statedTotalAmount: isoOrNull(row.stated_total_amount),
+  statedRf: isoOrNull(row.stated_rf),
+  statedPaymentType: isoOrNull(row.stated_payment_type),
+  statedRefNo: isoOrNull(row.stated_ref_no),
+  statedPaymentDate: isoOrNull(row.stated_payment_date),
+  vipCardNumber: typeof row.vip_card_number === 'string' ? row.vip_card_number : null,
   status: row.status,
   hasActiveMembership: customerHasActiveMembership(row),
+  // Membership facts mirrored from general Customer Lookup. The directory RPC
+  // carries them (tier, member_status, expires_at, memberships embed); raw
+  // table rows (e.g. right after create) simply have none, hence nulls.
+  tier: (row.tier as string | null | undefined) ?? null,
+  membershipStatus:
+    ((row.memberships as { status?: unknown } | null | undefined)?.status as string | undefined) ??
+    isoOrNull(row.member_status),
+  membershipExpiresAt: isoOrNull(row.expires_at),
+  paymentStatus:
+    (row.payment_status as 'no_payment' | 'partially_paid' | 'fully_paid' | null | undefined) ??
+    null,
+  verifiedPaid: (row.verified_paid as string | null | undefined) ?? '0.00',
+  frozenTotal:
+    row.frozen_total === null || row.frozen_total === undefined ? '0.00' : String(row.frozen_total),
+  openReservationTotal: String(row.open_reservation_total ?? '0.00'),
+  openReservationPaid: String(row.open_reservation_paid ?? '0.00'),
   derivedCategory: row.derivedCategory,
   portalAccountActivated:
     typeof row.auth_user_id === 'string' && row.auth_user_id.trim().length > 0,
@@ -90,6 +157,8 @@ const toCustomer = (row: Record<string, unknown>) => ({
 const listQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   status: z.string().trim().max(30).optional(),
+  payment: z.enum(['no_payment', 'partially_paid', 'fully_paid']).optional(),
+  companyStatus: z.string().trim().max(30).optional(),
   category: customerCategorySchema.optional(),
   tier: z.enum(['GOLD', 'SILVER', 'BRONZE']).optional(),
   seller: z.string().uuid().optional(),
@@ -121,7 +190,7 @@ const parseListQuery = (req: VercelRequest) => listQuerySchema.safeParse(req.que
  * Customer/card-sale referrer validation.
  *
  * The registering seller is the referrer of record, so they must hold a role
- * allowed to register and sell AF Homes VIP cards (VD, SSM, SM, OST, Admin,
+ * allowed to register and sell AFHomes VIP cards (VD, SSM, SM, OST, Admin,
  * Super Admin - see `SELLING_ROLES` in `commerce.ts`). This is deliberately
  * NOT the OST sponsorship check: an OST referral code requires an active
  * Sales Manager, while a customer referral requires a seller of record.
@@ -132,29 +201,6 @@ export function validateCustomerSaleReferrer(roleSlug: string): string | null {
     'Customer registration requires a selling role ' +
     '(Vice Director, Senior Sales Manager, Sales Manager, OST, Admin or Super Admin).'
   );
-}
-
-async function hasReference(db: Db, table: string, column: string, id: string) {
-  const { data, error } = await db.from(table).select('id').eq(column, id).limit(1);
-  if (error) throw error;
-  return (data ?? []).length > 0;
-}
-
-async function customerDeleteBlockers(db: Db, id: string): Promise<string[]> {
-  const checks: Array<[string, string, string]> = [
-    ['sales', 'card_sales', 'customer_id'],
-    ['payments', 'payments', 'customer_id'],
-    ['memberships', 'memberships', 'customer_id'],
-    ['redemptions', 'redemptions', 'customer_id'],
-    ['documents', 'identity_documents', 'customer_id'],
-  ];
-  const results = await Promise.all(
-    checks.map(async ([label, table, column]) => ({
-      label,
-      blocked: await hasReference(db, table, column, id),
-    })),
-  );
-  return results.filter((result) => result.blocked).map((result) => result.label);
 }
 
 async function removeCustomerAuth(db: Db, authUserId: string | null | undefined) {
@@ -205,7 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Customer/card-sale referrer validation. The registering seller is the
       // referrer of record, so they must hold a role allowed to register and
-      // sell AF Homes VIP cards (VD, SSM, SM, OST, Admin, Super Admin). This
+      // sell AFHomes VIP cards (VD, SSM, SM, OST, Admin, Super Admin). This
       // is deliberately NOT the OST sponsorship check: an OST referral code
       // requires an active Sales Manager, while a customer referral requires
       // a seller of record. Never route this flow through `validateOstSponsor`.
@@ -217,6 +263,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = createCustomerSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid customer details', 400);
       const input = parsed.data;
+
+      // BR-RATE-06: invalid inputs generate no customer number. A duplicate
+      // government ID or email is checked before the sequence is consumed, so
+      // a rejected registration burns no number. The unique constraint on the
+      // insert below stays as the race net for concurrent duplicates.
+      if (input.governmentIdNumber) {
+        const { data: govDup, error: govError } = await db
+          .from('customers')
+          .select('id')
+          .eq('government_id_number', input.governmentIdNumber)
+          .maybeSingle();
+        if (govError) throw govError;
+        if (govDup)
+          return fail(
+            res,
+            'CONFLICT',
+            'A customer with that government ID or email already exists',
+            409,
+          );
+      }
+      if (input.email) {
+        const { data: emailDup, error: emailError } = await db
+          .from('customers')
+          .select('id')
+          .eq('email', input.email)
+          .maybeSingle();
+        if (emailError) throw emailError;
+        if (emailDup)
+          return fail(
+            res,
+            'CONFLICT',
+            'A customer with that government ID or email already exists',
+            409,
+          );
+      }
 
       const { data: sequence, error: seqError } = await db.rpc('next_customer_number');
       if (seqError) return mapRpcError(res, seqError);
@@ -235,6 +316,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         gender: input.gender ?? null,
         email: input.email,
         phone: input.phone,
+        landline: input.landline ?? null,
         address: {
           ...input.address,
           postalCode: input.address.postalCode
@@ -243,6 +325,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         government_id_type: input.governmentIdType ?? null,
         government_id_number: input.governmentIdNumber ?? null,
+        // Company-stated membership fields, stored verbatim (migration
+        // 20261130000001). TIN values are write-only: masked on read, never
+        // logged (see toCustomer + audit call below).
+        ra_number: input.raNumber ?? null,
+        company_status: input.companyStatus ?? null,
+        citizenship: input.citizenship ?? null,
+        civil_status: input.civilStatus ?? null,
+        tin_number: input.tinNumber ?? null,
+        occupation_business_name: input.occupationBusinessName ?? null,
+        office_business_address: input.officeBusinessAddress ?? null,
+        employed_position: input.employedPosition ?? null,
+        supplementary_full_name:
+          input.supplementaryFullName === undefined
+            ? null
+            : normalizePersonName(input.supplementaryFullName),
+        supplementary_address: input.supplementaryAddress ?? null,
+        supplementary_birthday: input.supplementaryBirthday ?? null,
+        supplementary_gender: input.supplementaryGender ?? null,
+        supplementary_citizenship: input.supplementaryCitizenship ?? null,
+        supplementary_civil_status: input.supplementaryCivilStatus ?? null,
+        supplementary_tin_number: input.supplementaryTinNumber ?? null,
+        supplementary_mobile:
+          input.supplementaryMobile === undefined
+            ? null
+            : (normalizePhilippinePhone(input.supplementaryMobile) ?? input.supplementaryMobile),
+        supplementary_email: input.supplementaryEmail ?? null,
+        supplementary_landline: input.supplementaryLandline ?? null,
+        supplementary_occupation_business_name: input.supplementaryOccupationBusinessName ?? null,
+        supplementary_office_address: input.supplementaryOfficeAddress ?? null,
+        supplementary_position: input.supplementaryPosition ?? null,
+        svd_name: input.svdName ?? null,
+        ssm_name: input.ssmName ?? null,
+        sm_name: input.smName ?? null,
+        referrer_name: input.referrerName ?? null,
+        vip_recommender_name: input.vipRecommenderName ?? null,
+        related_contact_no:
+          input.relatedContactNo === undefined
+            ? null
+            : (normalizePhilippinePhone(input.relatedContactNo) ?? input.relatedContactNo),
+        related_email: input.relatedEmail ?? null,
+        // Company-stated package/payment facts, verbatim. Never inputs to
+        // server-computed totals; activation and verification read payment
+        // rows only (migration 20261130000001).
+        stated_vip_package: input.statedVipPackage ?? null,
+        stated_payment_terms: input.statedPaymentTerms ?? null,
+        stated_regular_price: input.statedRegularPrice ?? null,
+        stated_discount: input.statedDiscount ?? null,
+        stated_total_amount: input.statedTotalAmount ?? null,
+        stated_rf: input.statedRf ?? null,
+        stated_payment_type: input.statedPaymentType ?? null,
+        stated_ref_no: input.statedRefNo ?? null,
+        stated_payment_date: input.statedPaymentDate ?? null,
         registration_source: 'seller_created',
         created_by: auth.userId,
         // The registering seller is the referrer of record. Server-resolved
@@ -256,6 +390,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data, error } = await db.from('customers').insert(row).select('*').single();
       if (error) {
+        if (
+          (error as { constraint?: string }).constraint ===
+            'customers_company_customer_id_unique' ||
+          String(error.message).includes('customers_company_customer_id_unique')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'That Customer ID/RA No. already belongs to an existing customer. Review that customer instead of creating another.',
+            409,
+          );
         if ((error as { code?: string }).code === '23505')
           return fail(
             res,
@@ -283,14 +428,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (detail) {
       const auth = await authorizeAfHomes(req, 'sales.customers');
       if ('error' in auth) return deny(res, auth);
-      const { data, error } = await db
-        .from('customers')
-        .select('*, memberships(id,status)')
-        .eq('id', detail[1]!)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      return res.status(200).json(toCustomer(data as Record<string, unknown>));
+      // Same RPC as the list, narrowed to one row, so the detail view can
+      // never disagree with the directory about derived category, membership
+      // state, or the masked government ID (the only form ever returned).
+      // TIN is the one opt-in exception: the edit dialog needs the current
+      // value to show it locked, so the single-record read includes it raw.
+      const directory = await customerDirectory(db, { id: detail[1] });
+      const row = directory[0];
+      if (!row) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
+      return res.status(200).json(toCustomer(row.record, { includeTin: true }));
     }
 
     const update = route(req, 'PATCH', /^([0-9a-f-]+)$/);
@@ -310,6 +456,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
 
       const p = parsed.data;
+      if (p.vipCardNumber !== undefined && p.vipCardNumber !== (before.vip_card_number ?? null))
+        return fail(
+          res,
+          'CONFLICT',
+          'VIP card numbers are server-issued and cannot be edited. Use certified import to preserve an existing historical number.',
+          409,
+        );
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (p.firstName !== undefined) patch.first_name = p.firstName;
       if (p.middleName !== undefined)
@@ -318,8 +471,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.suffix !== undefined)
         patch.suffix = p.suffix === null ? null : normalizePersonName(p.suffix);
       if (p.gender !== undefined) patch.gender = p.gender;
+      if (p.dateOfBirth !== undefined) patch.birth_date = p.dateOfBirth;
       if (p.email !== undefined) patch.email = p.email;
       if (p.phone !== undefined) patch.phone = normalizePhilippinePhone(p.phone) ?? p.phone;
+      if (p.landline !== undefined) patch.landline = p.landline;
       if (p.address !== undefined)
         patch.address = {
           ...p.address,
@@ -329,11 +484,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       if (p.governmentIdType !== undefined) patch.government_id_type = p.governmentIdType;
       if (p.governmentIdNumber !== undefined) patch.government_id_number = p.governmentIdNumber;
+      if (p.raNumber !== undefined) patch.ra_number = p.raNumber;
+      if (p.companyStatus !== undefined) patch.company_status = p.companyStatus;
+      if (p.citizenship !== undefined) patch.citizenship = p.citizenship;
+      if (p.civilStatus !== undefined) patch.civil_status = p.civilStatus;
+      if (p.tinNumber !== undefined) patch.tin_number = p.tinNumber;
+      if (p.occupationBusinessName !== undefined)
+        patch.occupation_business_name = p.occupationBusinessName;
+      if (p.officeBusinessAddress !== undefined)
+        patch.office_business_address = p.officeBusinessAddress;
+      if (p.employedPosition !== undefined) patch.employed_position = p.employedPosition;
+      if (p.supplementaryFullName !== undefined)
+        patch.supplementary_full_name =
+          p.supplementaryFullName === null ? null : normalizePersonName(p.supplementaryFullName);
+      if (p.supplementaryAddress !== undefined)
+        patch.supplementary_address = p.supplementaryAddress;
+      if (p.supplementaryBirthday !== undefined)
+        patch.supplementary_birthday = p.supplementaryBirthday;
+      if (p.supplementaryGender !== undefined) patch.supplementary_gender = p.supplementaryGender;
+      if (p.supplementaryCitizenship !== undefined)
+        patch.supplementary_citizenship = p.supplementaryCitizenship;
+      if (p.supplementaryCivilStatus !== undefined)
+        patch.supplementary_civil_status = p.supplementaryCivilStatus;
+      if (p.supplementaryTinNumber !== undefined)
+        patch.supplementary_tin_number = p.supplementaryTinNumber;
+      if (p.supplementaryMobile !== undefined)
+        patch.supplementary_mobile =
+          p.supplementaryMobile === null
+            ? null
+            : (normalizePhilippinePhone(p.supplementaryMobile) ?? p.supplementaryMobile);
+      if (p.supplementaryEmail !== undefined) patch.supplementary_email = p.supplementaryEmail;
+      if (p.supplementaryLandline !== undefined)
+        patch.supplementary_landline = p.supplementaryLandline;
+      if (p.supplementaryOccupationBusinessName !== undefined)
+        patch.supplementary_occupation_business_name = p.supplementaryOccupationBusinessName;
+      if (p.supplementaryOfficeAddress !== undefined)
+        patch.supplementary_office_address = p.supplementaryOfficeAddress;
+      if (p.supplementaryPosition !== undefined)
+        patch.supplementary_position = p.supplementaryPosition;
+      if (p.svdName !== undefined) patch.svd_name = p.svdName;
+      if (p.ssmName !== undefined) patch.ssm_name = p.ssmName;
+      if (p.smName !== undefined) patch.sm_name = p.smName;
+      if (p.referrerName !== undefined) patch.referrer_name = p.referrerName;
+      if (p.vipRecommenderName !== undefined) patch.vip_recommender_name = p.vipRecommenderName;
+      if (p.relatedContactNo !== undefined)
+        patch.related_contact_no =
+          p.relatedContactNo === null
+            ? null
+            : (normalizePhilippinePhone(p.relatedContactNo) ?? p.relatedContactNo);
+      if (p.relatedEmail !== undefined) patch.related_email = p.relatedEmail;
+      if (p.statedVipPackage !== undefined) patch.stated_vip_package = p.statedVipPackage;
+      if (p.statedPaymentTerms !== undefined) patch.stated_payment_terms = p.statedPaymentTerms;
+      if (p.statedRegularPrice !== undefined) patch.stated_regular_price = p.statedRegularPrice;
+      if (p.statedDiscount !== undefined) patch.stated_discount = p.statedDiscount;
+      if (p.statedTotalAmount !== undefined) patch.stated_total_amount = p.statedTotalAmount;
+      if (p.statedRf !== undefined) patch.stated_rf = p.statedRf;
+      if (p.statedPaymentType !== undefined) patch.stated_payment_type = p.statedPaymentType;
+      if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
+      if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
+      if (p.vipCardNumber !== undefined) patch.vip_card_number = p.vipCardNumber;
+      // Auto-generate a VIP card number when none exists and none was supplied.
+      if (p.vipCardNumber === undefined) {
+        const { data: existing } = await db
+          .from('customers')
+          .select('vip_card_number,tier,stated_vip_package')
+          .eq('id', id)
+          .single();
+        if (!existing?.vip_card_number) {
+          const tier = (
+            typeof existing?.stated_vip_package === 'string'
+              ? existing.stated_vip_package
+              : typeof existing?.tier === 'string'
+                ? existing.tier
+                : 'BRONZE'
+          ).toUpperCase();
+          const { data: gen } = await db.rpc('generate_vip_card_number', { p_tier: tier });
+          if (typeof gen === 'string') patch.vip_card_number = gen;
+        }
+      }
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 
       const { error: writeError } = await db.from('customers').update(patch).eq('id', id);
       if (writeError) {
+        if (String(writeError.message).includes('customers_company_customer_id_unique'))
+          return fail(
+            res,
+            'CONFLICT',
+            'That Customer ID/RA No. already belongs to another customer.',
+            409,
+          );
         if ((writeError as { code?: string }).code === '23505')
           return fail(res, 'CONFLICT', 'That government ID is already registered', 409);
         throw writeError;
@@ -504,60 +744,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ deactivated: true });
     }
 
-    const anonymize = route(req, 'POST', /^([0-9a-f-]+)\/anonymize$/);
-    if (anonymize) {
-      const auth = await authorizeAfHomes(req, 'sales.customers', 'delete');
+    const reactivate = route(req, 'POST', /^([0-9a-f-]+)\/reactivate$/);
+    if (reactivate) {
+      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
       if ('error' in auth) return deny(res, auth);
-      if (auth.roleSlug !== 'super_admin')
-        return fail(res, 'FORBIDDEN', 'Only Super Admin can anonymize customers', 403);
-      const id = anonymize[1]!;
+      const id = reactivate[1]!;
       const { data: before, error: readError } = await db
         .from('customers')
-        .select('*')
+        .select('id,status')
         .eq('id', id)
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      const suffix = id.replace(/-/g, '').slice(0, 20);
-      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
-      const { error } = await db
+      if (before.status !== 'suspended')
+        return fail(res, 'CONFLICT', 'Only a suspended customer can be reactivated', 409);
+      const { data: updated, error } = await db
         .from('customers')
-        .update({
-          first_name: 'Deleted',
-          middle_name: null,
-          last_name: 'Customer',
-          suffix: null,
-          email: `deleted+${suffix}@invalid.local`,
-          phone: '0000000',
-          birth_date: null,
-          gender: null,
-          address: {},
-          government_id_type: null,
-          government_id_number: null,
-          notes: null,
-          auth_user_id: null,
-          status: 'cancelled',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
+        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('status', 'suspended')
+        .select('id')
+        .maybeSingle();
       if (error) throw error;
-      await removeCustomerAuth(db, before.auth_user_id);
+      if (!updated)
+        return fail(res, 'CONFLICT', 'Only a suspended customer can be reactivated', 409);
       await audit(
         db,
         auth.userId,
-        'CUSTOMER_ANONYMIZED',
+        'CUSTOMER_REACTIVATED',
         'customer',
         id,
-        {
-          status: before.status,
-        },
-        {
-          status: 'cancelled',
-          directProfilePiiRemoved: true,
-          identityDocumentsRetainedPendingPolicy: true,
-        },
+        { status: 'suspended' },
+        { status: 'active' },
       );
-      return res.status(200).json({ anonymized: true });
+      return res.status(200).json({ reactivated: true });
     }
 
     const remove = route(req, 'DELETE', /^([0-9a-f-]+)$/);
@@ -574,19 +794,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      const blockers = await customerDeleteBlockers(db, id);
-      if (blockers.length)
-        return res.status(409).json({
-          error: {
-            code: 'PROTECTED_HISTORY',
-            message:
-              'This customer has historical business records and cannot be permanently deleted. Deactivate or anonymize the account instead.',
-            details: { canDelete: false, blockers },
-          },
-        });
-      await db.from('customer_onboarding_tokens').delete().eq('customer_id', id);
-      const { error: deleteError } = await db.from('customers').delete().eq('id', id);
-      if (deleteError) throw deleteError;
+      // Collect storage paths before any deletion so files can be purged even
+      // after the DB rows are gone. Identity documents and payment receipts
+      // are both removed; storage removal runs first so a failure leaves the
+      // database intact and the purge can be retried.
+      const { data: identityDocs, error: identityDocsReadError } = await db
+        .from('identity_documents')
+        .select('storage_path')
+        .eq('customer_id', id);
+      if (identityDocsReadError) throw identityDocsReadError;
+      const { data: customerPayments, error: paymentsReadError } = await db
+        .from('payments')
+        .select('receipt_storage_path')
+        .eq('customer_id', id);
+      if (paymentsReadError) throw paymentsReadError;
+      const pathsByBucket = new Map<string, string[]>();
+      const collectPath = (storagePath: unknown) => {
+        const value = String(storagePath ?? '');
+        const slash = value.indexOf('/');
+        if (slash <= 0) return;
+        const bucket = value.slice(0, slash);
+        const objectPath = value.slice(slash + 1);
+        const bucketPaths = pathsByBucket.get(bucket) ?? [];
+        bucketPaths.push(objectPath);
+        pathsByBucket.set(bucket, bucketPaths);
+      };
+      for (const row of (identityDocs ?? []) as Array<{ storage_path?: unknown }>)
+        collectPath(row.storage_path);
+      for (const row of (customerPayments ?? []) as Array<{ receipt_storage_path?: unknown }>)
+        collectPath(row.receipt_storage_path);
+      const storage = storageClient();
+      let identityDocumentsPurged = (identityDocs ?? []).length;
+      let receiptsPurged = 0;
+      if (storage && pathsByBucket.size > 0) {
+        for (const [bucket, paths] of pathsByBucket) {
+          const removed = await storage.from(bucket).remove(paths);
+          if (removed.error) throw removed.error;
+        }
+        receiptsPurged = (customerPayments ?? []).filter(
+          (row: { receipt_storage_path?: unknown }) => row.receipt_storage_path,
+        ).length;
+      }
+      // Transactional cascade of every dependent record. The SECURITY DEFINER
+      // function runs as service role and deletes in dependency order; a
+      // failure rolls back the whole purge so no half-deleted customer remains.
+      const { error: purgeError } = await db.rpc('purge_customer', {
+        p_customer_id: id,
+      });
+      if (purgeError) throw purgeError;
       await removeCustomerAuth(db, before.auth_user_id);
       await audit(
         db,
@@ -597,14 +852,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         {
           customerNumber: before.customer_number,
         },
-        { deleted: true },
+        {
+          deleted: true,
+          identityDocumentsPurged,
+          receiptsPurged,
+        },
       );
       return res.status(200).json({ deleted: true });
     }
 
     return fail(res, 'NOT_FOUND', 'Customer endpoint not found', 404);
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error('[api] customers:', error instanceof Error ? error.message : error);
     mapRpcError(res, error as { message?: string });
   }

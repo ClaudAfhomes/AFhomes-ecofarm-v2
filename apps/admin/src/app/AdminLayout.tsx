@@ -1,16 +1,24 @@
-import { useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
-import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@jad/ui';
+import { Suspense, useMemo, useState } from 'react';
+import { Outlet, useLocation } from 'react-router';
+import { AppShell, Breadcrumbs, ConfirmDialog, Icon, Skeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
-import { logoutPathForRole } from '../lib/portal';
-import { breadcrumbItems, navItemsForPermissions } from './navigation';
+import { logoutUrlForRole } from '../lib/portal';
+import {
+  breadcrumbItems,
+  canAccessNavTarget,
+  navItemsForPermissions,
+  istNavItemsForPermissions,
+} from './navigation';
+import { AdminForbiddenPage } from './AdminForbiddenPage';
 import styles from './AdminLayout.module.css';
-import { staffPortalPath, operationsPath } from '@jad/contracts';
+import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
+import { useProfilePhoto } from '../features/account/profile-photo';
+import logo from '../assets/logo.png';
 
 export function AdminLayout() {
-  const { user, logout } = useSession();
+  const photo = useProfilePhoto();
+  const { user, logout, sessionError, revalidate } = useSession();
   const location = useLocation();
-  const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(
     () =>
@@ -20,38 +28,84 @@ export function AdminLayout() {
       })),
     [location.pathname, user?.roleSlug],
   );
-  // JAD parity: while the temporary password is still in force the normal
+  // AFHomes pattern: while the temporary password is still in force the normal
   // navigation stays hidden (RequireRole parks the session on My Account).
   const gated = user?.mustChangePassword === true;
+  const ist = isIstRole(user?.roleSlug);
+  const navigation = ist ? istNavItemsForPermissions : navItemsForPermissions;
+  const portalTarget = (target: string) => {
+    const path = staffPortalPath(user?.roleSlug, target);
+    if (!ist || (target !== '/admin' && !target.startsWith('/admin/ist/'))) return path;
+    const params = new URLSearchParams(location.search);
+    params.delete('page');
+    const query = params.toString();
+    return `${path}${query ? `?${query}` : ''}`;
+  };
+  // Denied paths render standalone: no sidebar, no topbar, professional card.
+  // RequireRole still guards the route; this only removes the shell chrome.
+  const denied =
+    user &&
+    !gated &&
+    !canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname));
+  if (denied) {
+    return <AdminForbiddenPage retry={sessionError ? () => void revalidate() : undefined} />;
+  }
   return (
     <>
       <AppShell
         brand={
           <div className={styles.brandBlock}>
+            <img src={logo} alt="AFhomes logo" />
             <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>AF Homes</span>
-              <span className={styles.brandText}>Ecofarm Operations</span>
+              <span className={styles.brandName}>AFhomes</span>
+              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
             </div>
           </div>
         }
         navItems={
           gated
             ? []
-            : navItemsForPermissions(user?.afHomesPermissions).map((item) => ({
+            : navigation(user?.afHomesPermissions).map((item) => ({
                 ...item,
-                to: staffPortalPath(user?.roleSlug, item.to),
+                to: portalTarget(item.to),
                 dropdown: item.dropdown?.map((child) =>
                   'to' in child
-                    ? { ...child, to: staffPortalPath(user?.roleSlug, child.to) }
+                    ? { ...child, to: portalTarget(child.to) }
                     : child,
                 ),
               }))
         }
-        navLabel="AF Homes administration"
+        topbarLeading={
+          <div className={styles.topbarBrand}>
+            <img src={logo} alt="" />
+            <div className={styles.brandTextBlock}>
+              <span className={styles.brandName}>AFhomes</span>
+              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+            </div>
+          </div>
+        }
+        navLabel="AFhomes administration"
         menuLabel="Open navigation"
         menuPosition="right"
+        sidebarFooter={
+          <button
+            type="button"
+            className={styles.logoutButton}
+            title="Log Out"
+            aria-label="Log Out"
+            onClick={() => setConfirm(true)}
+          >
+            <span className={styles.logoutIcon} aria-hidden="true">
+              <Icon name="logout" size={18} />
+            </span>
+            <span className="sidebar-footer-label" aria-hidden="true">
+              Log Out
+            </span>
+          </button>
+        }
         topbarActions={
           <UserMenu
+            photoUrl={photo.photo.data?.url}
             name={user?.name}
             role={user?.roleName}
             items={[
@@ -65,28 +119,38 @@ export function AdminLayout() {
             ]}
           />
         }
-        topbarLeading={
-          <div className={styles.topbarBrand} aria-hidden="true">
-            <span className={styles.topbarWordmark}>{crumbs?.at(-1)?.label ?? 'AF Homes'}</span>
-          </div>
-        }
       >
         <div className={styles.content}>
           {crumbs ? <Breadcrumbs items={crumbs} /> : null}
-          <Outlet />
+          {/* Route pages load on demand: the shell stays mounted while the
+          page chunk loads, so navigation never blanks. */}
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading page">
+                <Skeleton />
+                <Skeleton />
+                <Skeleton />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </AppShell>
       <ConfirmDialog
         open={confirm}
         onCancel={() => setConfirm(false)}
         onConfirm={() => {
-          const target = logoutPathForRole(user?.roleSlug);
+          // Sign-out leaves the staff console for the web-hosted entries
+          // (`:5173/...` locally, same origin in production). The sign-out is
+          // awaited first so no usable session survives the unload - otherwise
+          // the entry would bounce straight back into the console.
+          const target = logoutUrlForRole(user?.roleSlug);
           setConfirm(false);
-          logout();
-          navigate(target);
+          void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
-        message="Sign out of AF Homes administration?"
+        message="Sign out of AFhomes administration?"
         confirmLabel="Sign out"
         cancelLabel="Cancel"
       />

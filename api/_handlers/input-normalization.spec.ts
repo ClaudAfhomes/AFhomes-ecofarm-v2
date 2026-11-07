@@ -5,7 +5,7 @@
  * canonicalize to +63, and invalid names/phones/dates are refused with 400.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { submitOstApplicationSchema } from '@jad/contracts';
+import { submitOstApplicationSchema } from '@afhomes/contracts';
 
 import { phase2World, phase2WorldTokens } from '../_lib/testing/phase2-fixtures.js';
 import { TOKEN, UUID } from '../_lib/testing/fixtures.js';
@@ -134,8 +134,11 @@ describe('other writers normalize through the same contracts', () => {
             lastName: 'jimenez',
             firstName: 'claud',
             middleName: 'mars',
-            suffix: 'jr',
+            suffix: 'Jr.',
             birthDate: '1990-05-04',
+            sex: 'Male',
+            civilStatus: 'Married',
+            citizenship: 'Filipino',
             permanentAddressLine1: '123 main st',
             permanentAddressLine2: 'unit 2, 123 rizal st.',
             officeBusinessAddress: 'office at rizal st.',
@@ -163,22 +166,29 @@ describe('other writers normalize through the same contracts', () => {
     );
     const primary = (call?.arg as Record<string, Record<string, unknown>>).p_primary;
     expect(primary).toMatchObject({
-      lastName: 'jimenez',
-      firstName: 'claud',
-      middleName: 'mars',
-      suffix: 'jr',
-      cityMunicipality: 'QUEZON CITY',
-      permanentAddressLine2: 'UNIT 2, 123 RIZAL ST.',
+      // Names and street lines are Title Case now; the city/province names keep
+      // the authority's own casing and the upper-cased work fields keep theirs.
+      lastName: 'Jimenez',
+      firstName: 'Claud',
+      middleName: 'Mars',
+      suffix: 'Jr.',
+      sex: 'Male',
+      civilStatus: 'Married',
+      citizenship: 'Filipino',
+      cityMunicipality: 'quezon city',
+      province: 'metro manila',
+      permanentAddressLine1: '123 Main St',
+      permanentAddressLine2: 'Unit 2, 123 Rizal St.',
       officeBusinessAddress: 'OFFICE AT RIZAL ST.',
       occupationBusinessName: 'SARI-SARI STORE OWNER',
       employedPosition: 'STORE KEEPER',
-      printedName: 'claud jimenez',
+      printedName: 'Claud Jimenez',
       mobile: '+639171234567',
       email: 'claud@example.com',
     });
   });
 
-  it('import rows uppercase names and canonicalize phones', () => {
+  it('import rows use Proper Case and preserve eleven-digit phones', () => {
     const ctx = {
       membershipByNumber: new Map(),
       customerByNumber: new Map(),
@@ -198,10 +208,10 @@ describe('other writers normalize through the same contracts', () => {
       '2026-10-02',
     );
     expect(v.errors).toEqual([]);
-    expect(v.normalized?.person.firstName).toBe('juan');
-    expect(v.normalized?.person.lastName).toBe('dela cruz');
+    expect(v.normalized?.person.firstName).toBe('Juan');
+    expect(v.normalized?.person.lastName).toBe('Dela Cruz');
     expect(v.normalized?.person.email).toBe('juan@example.com');
-    expect(v.normalized?.person.phone).toBe('+639185550101');
+    expect(v.normalized?.person.phone).toBe('09185550101');
     const bad = validateImportRow(
       3,
       {

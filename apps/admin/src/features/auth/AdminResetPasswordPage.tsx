@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import { validateRecoveryPassword } from '@jad/shared';
-import { Alert, AuthLayout, Button, PasswordField } from '@jad/ui';
+import { validateRecoveryPassword } from '@afhomes/shared';
+import { Alert, AuthLayout, Button, PasswordField, Skeleton } from '@afhomes/ui';
 
 import { getSupabaseClient } from '../../lib/supabase';
+import { isMongoAuth, mongoAuth } from '../../lib/cookie-auth';
+import { CookiePasswordResetForm } from '@afhomes/ui';
 import styles from './AdminLoginPage.module.css';
 
 type Phase = 'checking' | 'ready' | 'invalid' | 'done';
@@ -27,7 +29,7 @@ type Phase = 'checking' | 'ready' | 'invalid' | 'done';
  * The `portal` prop reuses this page for the staff entry: the user returns to
  * the Staff Login, never the Administration Login.
  */
-export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
+function LegacyAdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
   const loginPath = portal === 'staff' ? '/staff/login' : '/admin/login';
   const forgotPath = portal === 'staff' ? '/staff/forgot-password' : '/admin/forgot-password';
   // An explicit `?error=` from Supabase wins over any coincidental session:
@@ -123,7 +125,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Choose a new password"
       brandTitle="Grow with the farm you own a card in."
       brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
@@ -140,9 +142,11 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
           </p>
         </div>
       ) : phase === 'checking' ? (
-        <p className={styles.prompt} role="status">
-          Checking your recovery link…
-        </p>
+        <div role="status" aria-label="Checking your recovery link">
+          <Skeleton style={{ height: 40 }} />
+          <Skeleton style={{ height: 40 }} />
+          <span className="sr-only">Checking your recovery link…</span>
+        </div>
       ) : phase === 'ready' ? (
         <form onSubmit={onSubmit} className={styles.form} noValidate>
           {serverError && (
@@ -175,7 +179,7 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
             At least 10 characters, with a lowercase letter, an uppercase letter and a digit.
           </p>
           <div className={styles.submitRow}>
-            <Button type="submit" loading={pending} disabled={pending}>
+            <Button type="submit" loading={pending} loadingLabel="Updating…" disabled={pending}>
               Update password
             </Button>
           </div>
@@ -193,6 +197,27 @@ export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' 
         </div>
       )}
     </AuthLayout>
+  );
+}
+
+export function AdminResetPasswordPage({ portal = 'admin' }: { portal?: 'admin' | 'staff' }) {
+  return isMongoAuth ? (
+    <AuthLayout
+      eyebrow="AFhomes Ecofarm"
+      title="Choose a new password"
+      brandTitle="Grow with the farm you own a card in."
+      brandLead="Staff console for card sales, payments, memberships, redemptions, and the sales network."
+    >
+      <CookiePasswordResetForm
+        loginHref={portal === 'staff' ? '/staff/login' : '/admin/login'}
+        validate={validateRecoveryPassword}
+        reset={async (token, password) => {
+          await mongoAuth.request('/reset-password', { token, newPassword: password });
+        }}
+      />
+    </AuthLayout>
+  ) : (
+    <LegacyAdminResetPasswordPage portal={portal} />
   );
 }
 

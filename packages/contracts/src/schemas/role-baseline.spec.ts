@@ -106,6 +106,25 @@ describe('default role permission baseline', () => {
     expect(granted.has('governance.customer_import')).toBe(false);
   });
 
+  it('classifies Customer Lookup as a migration-seeded grant for the GSD desk', () => {
+    // The screen is its own module rather than a reuse of the redemption till
+    // key: the desk keeps the till key and gains this one, and the reviewed
+    // Phase-2 matrix is not rewritten to carry it.
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({
+      moduleKey: 'operations.customer_lookup',
+      roles: ['employee', 'admin'],
+    });
+    const granted = new Set(
+      Object.values(DEFAULT_ROLE_BASELINE).flatMap((grants) => grants.map((g) => g.moduleKey)),
+    );
+    expect(granted.has('operations.customer_lookup')).toBe(false);
+    // Sellers and finance never had the lookup and must not gain it by drift.
+    for (const role of ['finance', 'hr', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const)
+      expect(DEFAULT_ROLE_BASELINE[role].map((grant) => grant.moduleKey)).not.toContain(
+        'operations.customer_lookup',
+      );
+  });
+
   it('gives sellers no sales.uplines row (they must never assign an upline)', () => {
     for (const role of ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const) {
       const keys = DEFAULT_ROLE_BASELINE[role].map((grant) => grant.moduleKey);

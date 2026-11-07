@@ -1,16 +1,24 @@
+import { serviceRefundRowSchema } from '@afhomes/contracts';
 /**
  * Customer portal API calls. Every function is thin: the path, the HTTP verb and
  * the contract schema, nothing else. No business rule and no authorization
  * decision lives in the browser.
  */
 import {
+  pointApprovalSchema,
+  pointApprovalDecisionResultSchema,
   customerActivationResultSchema,
   customerCredentialsSchema,
   customerMembershipSchema,
   customerPaymentSchema,
-  customerPointsEntrySchema,
+  customerPointsLedgerSchema,
+  pointsBalanceSummarySchema,
   customerPointsSummarySchema,
   customerProfileSchema,
+  claimEarningPointsResultSchema,
+  earningClaimPreviewSchema,
+  type ClaimEarningPointsRequest,
+  type ClaimEarningPointsResult,
   type CustomerActivationRequest,
   type CustomerActivationResult,
   type CustomerCredentials,
@@ -18,8 +26,9 @@ import {
   type CustomerPayment,
   type CustomerPointsEntry,
   type CustomerPointsSummary,
+  type PointsBalanceSummary,
   type CustomerProfile,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { request, requestList } from '../../lib/api/client';
 
@@ -44,11 +53,34 @@ export const getCustomerProfile = (): Promise<CustomerProfile> =>
 export const getCustomerMembership = (): Promise<CustomerMembership> =>
   request('/customer/membership', customerMembershipSchema);
 
+/**
+ * The LEGACY points summary. Its shape is frozen because deployed clients already
+ * validate against it; nothing here may be removed or re-interpreted.
+ */
 export const getCustomerPoints = (): Promise<CustomerPointsSummary> =>
   request('/customer/points', customerPointsSummarySchema);
 
-export const getCustomerPointsLedger = (): Promise<CustomerPointsEntry[]> =>
-  requestList('/customer/points/ledger', customerPointsEntrySchema);
+/**
+ * The member's points POSITION: balance, spendable, and remaining annual earning
+ * capacity, with reversal debt separate.
+ *
+ * A separate endpoint from `getCustomerPoints` on purpose - see the API notes.
+ * Every figure is computed in SQL; the browser does no points arithmetic.
+ */
+export const getCustomerPointsPosition = (): Promise<PointsBalanceSummary> =>
+  request('/customer/points/position', pointsBalanceSummarySchema);
+
+export const getCustomerPointsLedgerPage = (cursor?: string, redemptionsOnly = false) => {
+  const params = new URLSearchParams();
+  if (cursor) params.set('cursor', cursor);
+  if (redemptionsOnly) params.set('entryType', 'redemption');
+  return request(
+    '/customer/points/ledger' + (params.size ? '?' + params.toString() : ''),
+    customerPointsLedgerSchema,
+  );
+};
+export const getCustomerPointsLedger = async (): Promise<CustomerPointsEntry[]> =>
+  (await getCustomerPointsLedgerPage()).data;
 
 export const getCustomerPayments = (): Promise<CustomerPayment[]> =>
   requestList('/customer/payments', customerPaymentSchema);
@@ -61,4 +93,45 @@ export const getCustomerPayments = (): Promise<CustomerPayment[]> =>
 export const reissueCardCredentials = (): Promise<CustomerCredentials> =>
   request('/customer/membership/credentials', customerCredentialsSchema, { method: 'POST' });
 
-export type { CustomerProfile, CustomerMembership, CustomerPointsSummary, CustomerPointsEntry, CustomerPayment, CustomerCredentials };
+/**
+ * Redeem an earning claim the member was given - the QR scan, or the typed
+ * fallback code.
+ *
+ * The body carries ONLY the credential. The member's identity comes from the
+ * session, and the server refuses a claim belonging to anyone else. So this
+ * cannot award points to a different account no matter what the caller sends.
+ *
+ * NOT auto-retried: a claim is single-use, and a retried request would turn a
+ * success whose response was lost into a confusing "already used" error.
+ */
+export const claimEarningPoints = (
+  body: ClaimEarningPointsRequest,
+): Promise<ClaimEarningPointsResult> =>
+  request('/earning/claim', claimEarningPointsResultSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const previewEarningClaim = (body: ClaimEarningPointsRequest) =>
+  request('/earning/claim/preview', earningClaimPreviewSchema, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export type {
+  CustomerProfile,
+  CustomerMembership,
+  CustomerPointsSummary,
+  CustomerPointsEntry,
+  CustomerPayment,
+  CustomerCredentials,
+};
+
+export const getPointApprovals = () => requestList('/earning/approvals', pointApprovalSchema);
+export const decidePointApproval = (quoteId: string, approve: boolean) =>
+  request('/earning/approvals/' + quoteId + '/decision', pointApprovalDecisionResultSchema, {
+    method: 'POST',
+    body: JSON.stringify({ approve }),
+  });
+
+export const getCustomerRefunds = () => requestList('/customer/refunds', serviceRefundRowSchema);

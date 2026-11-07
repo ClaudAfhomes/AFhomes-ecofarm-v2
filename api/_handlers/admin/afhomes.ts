@@ -1,3 +1,5 @@
+import { projectDashboard } from '../../_lib/dashboard-projection.js';
+import { storedAccreditationNumbers } from '../../_lib/accreditation-numbers.js';
 import {
   afHomesModuleKeySchema,
   changeAfHomesStaffPasswordSchema,
@@ -5,7 +7,10 @@ import {
   createAfHomesStaffSchema,
   updateAfHomesStaffProfileSchema,
   type AfHomesPermission,
-} from '@jad/contracts';
+  staffSaleInvolvementSchema,
+  publicVerificationSettingsSchema,
+  updatePublicVerificationSettingsSchema,
+} from '@afhomes/contracts';
 import { z } from 'zod';
 
 import {
@@ -16,7 +21,8 @@ import {
 } from '../../_lib/afhomes-access.js';
 import { toErrorEnvelope } from '../../_lib/envelope.js';
 import type { VercelRequest, VercelResponse } from '../../_lib/http.js';
-import { anonClient, serviceClient } from '../../_lib/rest.js';
+import { anonClient, serviceClient, userClient } from '../../_lib/rest.js';
+import { extractBearerToken } from '../../_lib/token.js';
 
 // All database access in this handler uses the server-only service client after authorization.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,16 +63,25 @@ async function audit(
 }
 
 async function roleCatalog(db: Db) {
-  const [{ data: roles, error }, { data: modules }, { data: grants }, { data: assignments }] =
-    await Promise.all([
-      db.from('roles').select('*').order('name'),
-      db.from('modules').select('id,key').eq('is_active', true),
-      db.from('role_permissions').select('*'),
-      db.from('staff_role_assignments').select('role_id'),
-    ]);
+  const [
+    { data: roles, error },
+    { data: modules },
+    { data: grants },
+    { data: assignments },
+    { data: departments },
+  ] = await Promise.all([
+    db.from('roles').select('*').order('name'),
+    db.from('modules').select('id,key').eq('is_active', true),
+    db.from('role_permissions').select('*'),
+    db.from('staff_role_assignments').select('role_id'),
+    db.from('departments').select('id,name'),
+  ]);
   if (error) throw error;
   const moduleById = new Map(
     (modules ?? []).map((m: { id: string; key: string }) => [m.id, m.key]),
+  );
+  const deptById = new Map(
+    (departments ?? []).map((d: { id: string; name: string }) => [String(d.id), d.name]),
   );
   const counts = new Map<string, number>();
   for (const row of assignments ?? []) counts.set(row.role_id, (counts.get(row.role_id) ?? 0) + 1);
@@ -74,9 +89,10 @@ async function roleCatalog(db: Db) {
     id: role.id,
     slug: role.slug,
     name: role.name,
-    description: role.description ?? null,
     isSystem: role.is_system,
     isActive: role.is_active,
+    departmentId: (role.department_id as string | null | undefined) ?? null,
+    departmentName: deptById.get(String(role.department_id)) ?? null,
     assignedCount: counts.get(String(role.id)) ?? 0,
     permissions: (grants ?? [])
       .filter((g: Record<string, unknown>) => g.role_id === role.id)
@@ -116,7 +132,7 @@ async function replaceRolePermissions(db: Db, roleId: string, permissions: AfHom
   if (insertError) throw insertError;
 }
 
-async function staffCatalog(db: Db) {
+async function staffCatalog(db: Db, includeAccreditation = false) {
   const [
     { data: staff, error },
     { data: assignments },
@@ -145,7 +161,7 @@ async function staffCatalog(db: Db) {
   const assignmentByStaff = new Map(
     (assignments ?? []).map((a: { staff_id: string; role_id: string }) => [a.staff_id, a.role_id]),
   );
-  return (staff ?? []).flatMap((row: Record<string, unknown>) => {
+  const rows = (staff ?? []).flatMap((row: Record<string, unknown>) => {
     const roleId = assignmentByStaff.get(String(row.id));
     const role = roleById.get(roleId) as { name: string } | undefined;
     if (!roleId || !role) return [];
@@ -177,6 +193,19 @@ async function staffCatalog(db: Db) {
       },
     ];
   });
+  if (!includeAccreditation) return rows;
+  const eligible: string[] = [];
+  for (const row of rows) {
+    const role = roleById.get(row.roleId) as { slug: string } | undefined;
+    if (
+      role &&
+      ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(role.slug)
+    )
+      eligible.push(String(row.id));
+  }
+  const numbers = await storedAccreditationNumbers(db, eligible);
+  for (const row of rows) row.aaNumber = numbers.get(String(row.id)) ?? null;
+  return rows;
 }
 
 async function hasReference(db: Db, table: string, column: string, id: string) {
@@ -189,50 +218,19 @@ async function hasReference(db: Db, table: string, column: string, id: string) {
   return (data ?? []).length > 0;
 }
 
-export const STAFF_DELETE_BLOCKER_CHECKS: ReadonlyArray<
-  readonly [label: string, table: string, column: string]
-> = [
-  ['sales', 'card_sales', 'seller_staff_id'],
-  ['sales', 'card_sales', 'created_by'],
-  ['commissions', 'commissions', 'beneficiary_staff_id'],
-  ['commissions', 'commissions', 'qualified_by'],
-  ['commissions', 'commissions', 'paid_by'],
-  ['genealogy', 'referral_relationships', 'subject_staff_id'],
-  ['genealogy', 'referral_relationships', 'upline_staff_id'],
-  ['genealogy', 'referral_relationships', 'assigned_by'],
-  ['genealogy', 'card_sale_hierarchy_snapshots', 'ancestor_staff_id'],
-  ['customer referrals', 'customers', 'referred_by_staff_id'],
-  ['customer records', 'customers', 'created_by'],
-  ['OST records', 'ost_members', 'id'],
-  ['OST records', 'referral_codes', 'sponsor_staff_id'],
-  ['OST records', 'referral_codes', 'created_by'],
-  ['OST records', 'ost_applications', 'sponsor_staff_id'],
-  ['OST records', 'ost_applications', 'reviewed_by'],
-  ['OST records', 'ost_members', 'sponsor_staff_id'],
-  ['OST records', 'ost_members', 'approved_by'],
-  ['redemptions', 'redemptions', 'redeemed_by'],
-  ['redemptions', 'redemptions', 'voided_by'],
-  ['documents', 'identity_documents', 'uploaded_by'],
-  ['documents', 'identity_documents', 'reviewed_by'],
-  ['payments', 'payments', 'recorded_by'],
-  ['payments', 'payments', 'verified_by'],
-  ['memberships', 'memberships', 'activated_by'],
-  ['memberships', 'memberships', 'card_issued_by'],
-  ['qualification reviews', 'final_qualifications', 'reviewed_by'],
-  ['points history', 'points_ledger', 'actor_id'],
-  ['customer onboarding', 'customer_onboarding_tokens', 'created_by'],
-  ['CMS history', 'cms_documents', 'created_by'],
-  ['CMS history', 'cms_documents', 'updated_by'],
-  ['CMS history', 'cms_documents', 'published_by'],
-  ['CMS history', 'cms_document_versions', 'created_by'],
-  ['CMS history', 'cms_pages', 'created_by'],
-  ['CMS history', 'cms_pages', 'updated_by'],
-  ['CMS history', 'cms_pages', 'published_by'],
-  ['CMS history', 'cms_page_versions', 'created_by'],
-  ['CMS history', 'cms_media_assets', 'created_by'],
-  ['audit history', 'audit_events', 'actor_id'],
-  ['staff invitations', 'staff_invitations', 'invited_by'],
-];
+export { STAFF_DELETE_BLOCKER_CHECKS } from '../../_lib/staff-history.js';
+import { STAFF_DELETE_BLOCKER_CHECKS } from '../../_lib/staff-history.js';
+
+async function isCommissionRuleTarget(db: Db, id: string): Promise<boolean> {
+  const { data, error } = await db
+    .from('commission_rules')
+    .select('target_id')
+    .eq('target_id', id)
+    .in('target_type', ['staff', 'ost'])
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
 
 async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
   const results = await Promise.all(
@@ -241,6 +239,8 @@ async function staffDeleteBlockers(db: Db, id: string): Promise<string[]> {
       blocked: await hasReference(db, table, column, id),
     })),
   );
+  if (await isCommissionRuleTarget(db, id))
+    results.push({ label: 'commission rules', blocked: true });
   return [...new Set(results.filter((result) => result.blocked).map((result) => result.label))];
 }
 
@@ -374,11 +374,17 @@ async function planTestPurge(
     ['memberships', 'activated_by', 'membership'],
     ['redemptions', 'redeemed_by', 'redemption'],
     ['commissions', 'beneficiary_staff_id', 'commission'],
+    ['commission_rules', 'created_by', 'commission rule'],
+    ['commission_rules', 'updated_by', 'commission rule'],
   ];
   for (const [table, column, kind] of mustSurvive) {
     if (await hasReference(db, table, column, targetId)) {
       block(`a ${kind} record references this account and must be preserved`);
     }
+  }
+
+  if (await isCommissionRuleTarget(db, targetId)) {
+    block('a commission rule targets this account and must be preserved');
   }
 
   // Genealogy: the target's own placement row is their history (purged);
@@ -508,13 +514,26 @@ async function staffRole(db: Db, id: string) {
   return role;
 }
 
-function cents(values: unknown[]) {
-  let total = 0n;
-  for (const value of values) {
-    const match = String(value ?? '0').match(/^(\d+)(?:\.(\d{1,2}))?$/);
-    if (match) total += BigInt(match[1]!) * 100n + BigInt((match[2] ?? '').padEnd(2, '0'));
-  }
-  return `${total / 100n}.${String(total % 100n).padStart(2, '0')}`;
+/**
+ * Head departure: a suspended, inactive or deactivated head stops being
+ * anyone's upline. Their direct downline edges are retired (is_active=false)
+ * so the genealogy display walks through to the next higher ACTIVE head
+ * (OST -> SM -> SVD when the SSM leaves). The stored upline is kept, so a
+ * reinstated head reappears without reassignment and the upline desk can
+ * re-point anyone deliberately. One way only: returning heads never pull
+ * reassigned sellers back.
+ *
+ * Returns the retired edge count for the audit trail.
+ */
+async function retireDownlineEdges(db: Db, staffId: string): Promise<number> {
+  const { data, error } = await db
+    .from('referral_relationships')
+    .update({ is_active: false })
+    .eq('upline_staff_id', staffId)
+    .eq('is_active', true)
+    .select('subject_staff_id');
+  if (error) throw error;
+  return (data ?? []).length;
 }
 
 async function dashboard(db: Db, range: string) {
@@ -537,131 +556,52 @@ async function dashboard(db: Db, range: string) {
     db.from('ost_applications').select('status'),
     db.from('staff_users').select('status'),
   ]);
-  const verifiedStatuses = new Set([
-    'payment_verified',
-    'final_qualification_pending',
-    'qualified',
-    'activated',
-  ]);
-  const verifiedSales = (sales ?? []).filter((s: { status: string }) =>
-    verifiedStatuses.has(s.status),
-  ).length;
-  const verifiedPayments = (payments ?? []).filter(
-    (p: { status: string }) => p.status === 'verified',
-  );
-  const daysByRange: Record<string, number> = { today: 1, week: 7, month: 31, year: 366 };
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - (daysByRange[range] ?? daysByRange.month!) + 1);
-  cutoff.setUTCHours(0, 0, 0, 0);
-  const trend = new Map<
-    string,
-    {
-      period: string;
-      verifiedSales: number;
-      collections: string;
-      activatedCards: number;
-      pointsRedeemed: number;
-      collectionValues: unknown[];
-    }
-  >();
-  const pointFor = (value: unknown) => {
-    if (!value) return undefined;
-    const date = new Date(String(value));
-    if (Number.isNaN(date.valueOf()) || date < cutoff) return undefined;
-    const period = date.toISOString().slice(0, 10);
-    let point = trend.get(period);
-    if (!point) {
-      point = {
-        period,
-        verifiedSales: 0,
-        collections: '0.00',
-        activatedCards: 0,
-        pointsRedeemed: 0,
-        collectionValues: [],
-      };
-      trend.set(period, point);
-    }
-    return point;
-  };
-  for (const sale of sales ?? []) {
-    if (verifiedStatuses.has(sale.status)) {
-      const point = pointFor(sale.created_at);
-      if (point) point.verifiedSales += 1;
-    }
-  }
-  for (const payment of verifiedPayments) {
-    const point = pointFor(payment.verified_at);
-    if (point) point.collectionValues.push(payment.amount);
-  }
-  for (const membership of memberships ?? []) {
-    if (membership.status === 'active') {
-      const point = pointFor(membership.activated_at);
-      if (point) point.activatedCards += 1;
-    }
-  }
-  const trendPoints = [...trend.values()]
-    .sort((a, b) => a.period.localeCompare(b.period))
-    .map(({ collectionValues, ...point }) => ({ ...point, collections: cents(collectionValues) }));
-  return {
-    totals: {
-      verifiedSales,
-      verifiedCollections: cents(verifiedPayments.map((p: { amount: string }) => p.amount)),
-      activeMemberships: (memberships ?? []).filter(
-        (m: { status: string }) => m.status === 'active',
-      ).length,
-      pendingAccounts: (sales ?? []).filter((s: { status: string }) => s.status === 'pending')
-        .length,
-      downPaymentAccounts: (sales ?? []).filter(
-        (s: { status: string }) => s.status === 'down_payment',
-      ).length,
-      overdueAccounts: (sales ?? []).filter((s: { status: string }) => s.status === 'overdue')
-        .length,
-      pointsIssued: (memberships ?? []).reduce(
-        (sum: number, m: { points_balance: number }) => sum + Number(m.points_balance ?? 0),
-        0,
-      ),
-      pointsRedeemed: 0,
-      pendingQualifications: (qualifications ?? []).filter(
-        (q: { status: string }) => q.status === 'pending',
-      ).length,
-      earnedUnpaidCommissions: cents(
-        (commissions ?? [])
-          .filter((c: { status: string }) => c.status === 'earned')
-          .map((c: { amount: string }) => c.amount),
-      ),
-      activeSellers: (ost ?? []).filter((o: { status: string }) => o.status === 'active').length,
-      inactiveSellers: (ost ?? []).filter((o: { status: string }) => o.status !== 'active').length,
-      activeEmployees: (staff ?? []).filter((s: { status: string }) => s.status === 'active')
-        .length,
-      inactiveEmployees: (staff ?? []).filter((s: { status: string }) => s.status !== 'active')
-        .length,
-    },
-    queues: {
-      paymentVerification: (payments ?? []).filter(
-        (p: { status: string }) => p.status === 'recorded',
-      ).length,
-      cardActivation: (sales ?? []).filter((s: { status: string }) => s.status === 'qualified')
-        .length,
-      finalQualification: (sales ?? []).filter(
-        (s: { status: string }) => s.status === 'final_qualification_pending',
-      ).length,
-      ostRegistrations: (ostApplications ?? []).filter((application: { status: string }) =>
-        ['submitted', 'under_review'].includes(application.status),
-      ).length,
-      commissionPayouts: (commissions ?? []).filter(
-        (c: { status: string }) => c.status === 'earned',
-      ).length,
-    },
-    trend: trendPoints,
-  };
+  return projectDashboard({ sales: sales ?? [], payments: payments ?? [], memberships: memberships ?? [], qualifications: qualifications ?? [], commissions: commissions ?? [], ost: ost ?? [], ostApplications: ostApplications ?? [], staff: staff ?? [] }, range);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const db = serviceClient() as Db;
-  if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+  const svc = serviceClient() as Db | null;
+  // Preview holds no service role: GET endpoints read through the caller's
+  // own RLS-scoped rows (SELECT-only browser grants plus has_permission
+  // policies, exactly as designed). Every mutation stays service-only: staff
+  // invitation and password rotation need the Auth admin API, and governance
+  // writes are deliberately not exposed to browser roles.
+  const db = (svc ?? userClient(extractBearerToken(req) ?? '')) as Db;
+  const keyless = !svc;
   const path = String(req.query.afPath ?? '');
   const method = req.method ?? 'GET';
   try {
+    if (path === 'public-verification-settings') {
+      if (!['GET', 'PUT'].includes(method)) return fail(res, 'NOT_FOUND', 'Route not found.', 404);
+      const principal = await authorizeAfHomes(
+        req, 'governance.config', method === 'GET' ? 'view' : 'update',
+      );
+      if ('error' in principal)
+        return res.status(principal.error.status).json({ error: principal.error.error });
+      if (!['admin', 'super_admin'].includes(principal.roleSlug))
+        return fail(res, 'FORBIDDEN', 'Administrator access is required.', 403);
+      if (!svc) return fail(res, 'INTERNAL', 'Settings storage is unavailable.', 503);
+      let result;
+      if (method === 'GET') result = await svc.rpc('get_public_verification_settings');
+      else {
+        const parsed = updatePublicVerificationSettingsSchema.safeParse(req.body);
+        if (!parsed.success)
+          return fail(res, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Check the settings.', 400);
+        const { expectedRevision, ...fields } = parsed.data;
+        result = await svc.rpc('update_public_verification_settings', {
+          p_actor: principal.userId,
+          p_input: fields,
+          p_expected_revision: expectedRevision,
+        });
+      }
+      if (result.error?.code === '23505')
+        return fail(res, 'CONFLICT', 'Settings changed. Reload before saving again.', 409);
+      if (result.error?.code === '42501')
+        return fail(res, 'FORBIDDEN', 'Settings access was refused.', 403);
+      if (result.error) return fail(res, 'INTERNAL', 'Settings could not be loaded or saved.', 503);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json(publicVerificationSettingsSchema.parse(result.data));
+    }
     if (path === 'account-activation' && method === 'GET') {
       const candidate = await resolveStaffAccountSetup(req);
       if ('error' in candidate)
@@ -690,7 +630,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         mfaRequired: principal.mfaRequired ?? false,
       });
     }
-    // My Account display-name update (JAD parity: PATCH /admin/session).
+    if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
+    // Mutations need the service role (Auth admin API, governance writes).
+    if (keyless && method !== 'GET')
+      return fail(res, 'INTERNAL', 'This operation requires an isolated configured backend.', 503);
+    // My Account display-name update (AFHomes pattern: PATCH /admin/session).
     // Self-service: resolves the principal directly so it stays reachable
     // while `mustChangePassword` gates every module-guarded endpoint.
     if (path === 'session' && method === 'PATCH') {
@@ -733,7 +677,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         permissions: principal.permissions,
       });
     }
-    // My Account / forced first-login password change (JAD parity:
+    // My Account / forced first-login password change (AFHomes pattern:
     // POST /admin/session/password). Verifies the current password with a
     // fresh `signInWithPassword` (Supabase does not require it by default),
     // rotates via the Admin API, then clears the temporary-password flag.
@@ -793,6 +737,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid role input', 400);
       if (!permissionsAreSubset(parsed.data.permissions, auth.permissions))
         return fail(res, 'FORBIDDEN', 'Cannot grant permissions you do not possess', 403);
+      const { data: department } = await db
+        .from('departments')
+        .select('id')
+        .eq('id', parsed.data.departmentId)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!department) return fail(res, 'VALIDATION_ERROR', 'Unknown department', 400);
       const slug = parsed.data.name
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
@@ -802,7 +753,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .insert({
           slug,
           name: parsed.data.name,
-          description: parsed.data.description ?? null,
+          department_id: parsed.data.departmentId,
           is_system: false,
           is_active: parsed.data.isActive,
         })
@@ -836,7 +787,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!before) return fail(res, 'NOT_FOUND', 'Role not found', 404);
       if (before.is_system) {
         const title = z
-          .object({ name: z.string().trim().min(1).max(100) })
+          .object({
+            name: z.string().trim().min(1).max(100),
+            departmentId: z.string().uuid().optional(),
+          })
           .strict()
           .safeParse(req.body);
         if (
@@ -850,9 +804,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'System access and protected role titles cannot be changed',
             403,
           );
+        if (title.data.departmentId) {
+          const { data: department } = await db
+            .from('departments')
+            .select('id')
+            .eq('id', title.data.departmentId)
+            .eq('is_active', true)
+            .maybeSingle();
+          if (!department) return fail(res, 'VALIDATION_ERROR', 'Unknown department', 400);
+        }
         const { error } = await db
           .from('roles')
-          .update({ name: title.data.name, updated_at: new Date().toISOString() })
+          .update({
+            name: title.data.name,
+            department_id: title.data.departmentId ?? before.department_id ?? null,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', id);
         if (error) throw error;
         await audit(
@@ -861,8 +828,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'ROLE_DISPLAY_TITLE_UPDATED',
           'role',
           id,
-          { name: before.name },
-          { name: title.data.name },
+          { name: before.name, department_id: before.department_id ?? null },
+          {
+            name: title.data.name,
+            department_id: title.data.departmentId ?? before.department_id ?? null,
+          },
         );
         return res
           .status(200)
@@ -900,6 +870,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await audit(db, auth.userId, 'ROLE_UPDATED', 'role', id, before, parsed.data);
       return res.status(200).json((await roleCatalog(db)).find((r: { id: string }) => r.id === id));
     }
+    if (roleMatch && method === 'DELETE') {
+      const auth = await authorizeAfHomes(req, 'organization.roles', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = roleMatch[1]!;
+      const { data: before } = await db.from('roles').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Role not found', 404);
+      if (before.is_system || ['admin', 'super_admin', 'customer'].includes(String(before.slug)))
+        return fail(res, 'FORBIDDEN', 'System roles cannot be deleted', 403);
+      const { data: assigned } = await db
+        .from('staff_role_assignments')
+        .select('role_id')
+        .eq('role_id', id);
+      if ((assigned ?? []).length > 0) return fail(res, 'CONFLICT', 'Role has assigned staff', 409);
+      const { error: permError } = await db.from('role_permissions').delete().eq('role_id', id);
+      if (permError) throw permError;
+      const { error: roleError } = await db.from('roles').delete().eq('id', id);
+      if (roleError) throw roleError;
+      await audit(db, auth.userId, 'ROLE_DELETED', 'role', id, before, null);
+      return res.status(200).json({ deleted: true });
+    }
     const roleAudit = path.match(/^roles\/([0-9a-f-]+)\/audit$/);
     if (roleAudit && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'governance.audit');
@@ -936,37 +926,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })),
       );
     }
+    /**
+     * Departments are named by operators; the `code` column is a derived
+     * slug the UI never shows. It stays in storage (NOT NULL UNIQUE) but is
+     * never accepted from the client: create derives it from the name and
+     * rename leaves it untouched, so a rename can never collide or orphan.
+     */
+    const toDepartmentRow = (
+      d: Record<string, unknown>,
+      staff: { department_id: string }[] | null,
+    ) => ({
+      id: d.id,
+      code: d.code,
+      name: d.name,
+      isActive: d.is_active,
+      staffCount: (staff ?? []).filter((s) => s.department_id === d.id).length,
+      createdAt: d.created_at,
+      updatedAt: d.updated_at,
+    });
+    const deriveDepartmentCode = (name: string): string | null => {
+      const slug = name
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 32);
+      const code = /^[A-Z]/.test(slug) ? slug : `DEPT_${slug}`;
+      return /^[A-Z][A-Z0-9_]{1,31}$/.test(code) ? code : null;
+    };
     if (path === 'departments' && method === 'POST') {
       const auth = await authorizeAfHomes(req, 'organization.departments', 'create');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
       const parsed = z
-        .object({
-          code: z.string().regex(/^[A-Z][A-Z0-9_]{1,31}$/),
-          name: z.string().trim().min(2).max(80),
-        })
+        .object({ name: z.string().trim().min(2).max(80) })
+        .strict()
         .safeParse(req.body);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
+      const code = deriveDepartmentCode(parsed.data.name);
+      if (!code) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
       const { data, error } = await db
         .from('departments')
-        .insert({ ...parsed.data, is_active: true })
+        .insert({ code, name: parsed.data.name, is_active: true })
         .select('*')
         .single();
-      if (error) return fail(res, 'CONFLICT', 'Department code or name already exists', 409);
-      await audit(db, auth.userId, 'DEPARTMENT_CREATED', 'department', data.id, null, parsed.data);
-      return res.status(201).json({
-        id: data.id,
-        code: data.code,
+      if (error) return fail(res, 'CONFLICT', 'Department name already exists', 409);
+      await audit(db, auth.userId, 'DEPARTMENT_CREATED', 'department', data.id, null, {
         name: data.name,
-        isActive: data.is_active,
-        staffCount: 0,
-        createdAt: data.created_at,
-        updatedAt: data.updated_at,
       });
+      const { data: staff } = await db.from('staff_users').select('department_id');
+      return res.status(201).json(toDepartmentRow(data, staff as { department_id: string }[]));
+    }
+    const departmentMatch = path.match(/^departments\/([0-9a-f-]+)$/);
+    if (departmentMatch && method === 'PATCH') {
+      const auth = await authorizeAfHomes(req, 'organization.departments', 'update');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = departmentMatch[1]!;
+      const parsed = z
+        .object({ name: z.string().trim().min(2).max(80) })
+        .strict()
+        .safeParse(req.body);
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid department input', 400);
+      const { data: before } = await db.from('departments').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Department not found', 404);
+      const { data, error } = await db
+        .from('departments')
+        .update({ name: parsed.data.name, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (error) return fail(res, 'CONFLICT', 'Department name already exists', 409);
+      await audit(db, auth.userId, 'DEPARTMENT_UPDATED', 'department', id, before, {
+        name: parsed.data.name,
+      });
+      const { data: staff } = await db.from('staff_users').select('department_id');
+      return res.status(200).json(toDepartmentRow(data, staff as { department_id: string }[]));
+    }
+    if (departmentMatch && method === 'DELETE') {
+      const auth = await authorizeAfHomes(req, 'organization.departments', 'delete');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const id = departmentMatch[1]!;
+      const { data: before } = await db.from('departments').select('*').eq('id', id).maybeSingle();
+      if (!before) return fail(res, 'NOT_FOUND', 'Department not found', 404);
+      const { data: assigned } = await db.from('staff_users').select('id').eq('department_id', id);
+      if ((assigned ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Department has assigned staff', 409);
+      const { data: assignedRoles } = await db.from('roles').select('id').eq('department_id', id);
+      if ((assignedRoles ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Department has assigned roles', 409);
+      const { error } = await db.from('departments').delete().eq('id', id);
+      if (error) throw error;
+      await audit(db, auth.userId, 'DEPARTMENT_DELETED', 'department', id, before, null);
+      return res.status(200).json({ deleted: true });
     }
     if (path === 'staff' && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'organization.staff');
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
-      return list(res, await staffCatalog(db));
+      return list(res, await staffCatalog(db, req.query.includeAccreditation === '1'));
     }
     if (path === 'staff' && method === 'POST') {
       const auth = await authorizeAfHomes(req, 'organization.staff', 'create');
@@ -977,6 +1031,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (r: { id: string }) => r.id === parsed.data.roleId,
       );
       if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
+      if (target.slug === 'ost')
+        return fail(
+          res,
+          'CONFLICT',
+          'Create OST accounts through official OST registration and approval.',
+          409,
+        );
       if (target.slug === 'customer')
         return fail(
           res,
@@ -993,7 +1054,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Cannot assign a role with permissions you do not possess',
           403,
         );
-      // JAD parity: the Auth identity is created server-side with an
+      // AFHomes pattern: the Auth identity is created server-side with an
       // administrator-set temporary password (`auth.admin.createUser`), never
       // through the invitation callback. The account starts `active` but
       // gated on `must_change_password` until the forced first-login change.
@@ -1064,6 +1125,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!entry) return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
       return res.status(200).json(entry);
     }
+    const staffSales = path.match(/^staff\/([0-9a-f-]+)\/sales-involvement$/);
+    if (staffSales && method === 'GET') {
+      const auth = await authorizeAfHomes(req, 'organization.staff');
+      if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
+      const customerAuth = await authorizeAfHomes(req, 'sales.customers');
+      if ('error' in customerAuth)
+        return res.status(customerAuth.error.status).json({ error: customerAuth.error.error });
+      const parsed = z
+        .object({
+          id: z.string().uuid(),
+          limit: z.coerce.number().int().min(1).max(100).default(25),
+          offset: z.coerce.number().int().min(0).default(0),
+        })
+        .safeParse({ ...req.query, id: staffSales[1] });
+      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid involvement query', 400);
+      const { data, error } = await db.rpc('staff_sales_involvement', {
+        p_actor_id: auth.userId,
+        p_staff_id: parsed.data.id,
+        p_limit: parsed.data.limit,
+        p_offset: parsed.data.offset,
+      });
+      if (error) {
+        if (error.message?.includes('STAFF_NOT_FOUND'))
+          return fail(res, 'NOT_FOUND', 'Staff member not found', 404);
+        throw error;
+      }
+      return list(res, z.array(staffSaleInvolvementSchema).parse(data ?? []));
+    }
     const staffAudit = path.match(/^staff\/([0-9a-f-]+)\/audit$/);
     if (staffAudit && method === 'GET') {
       const auth = await authorizeAfHomes(req, 'organization.staff');
@@ -1116,6 +1205,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const target = (await roleCatalog(db)).find(
           (role: { id: string }) => role.id === parsed.data.roleId,
         );
+        if (
+          parsed.data.roleId !== before.roleId &&
+          (target?.slug === 'ost' || targetRole?.slug === 'ost')
+        )
+          return fail(
+            res,
+            'CONFLICT',
+            'Use the controlled OST accreditation workflow for role changes.',
+            409,
+          );
         if (!target?.isActive) return fail(res, 'VALIDATION_ERROR', 'Role is not active', 400);
         if (target.slug === 'customer')
           return fail(
@@ -1138,6 +1237,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         profilePatch.department_id = parsed.data.departmentId;
       if (parsed.data.status !== undefined) profilePatch.status = parsed.data.status;
       await db.from('staff_users').update(profilePatch).eq('id', id);
+      // Leaving heads retire their downline edges (see retireDownlineEdges):
+      // the genealogy then reads through to the next higher active head.
+      let retiredEdges = 0;
+      if (parsed.data.status !== undefined && parsed.data.status !== 'active') {
+        retiredEdges = await retireDownlineEdges(db, id);
+      }
       if (parsed.data.restrictions) {
         const { data: modules } = await db.from('modules').select('id,key');
         const idByKey = new Map(
@@ -1165,7 +1270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (error) throw error;
         }
       }
-      await audit(db, auth.userId, 'STAFF_ACCESS_UPDATED', 'staff_user', id, before, parsed.data);
+      await audit(db, auth.userId, 'STAFF_ACCESS_UPDATED', 'staff_user', id, before, {
+        ...parsed.data,
+        retiredDownlineEdges: retiredEdges,
+      });
       return res
         .status(200)
         .json((await staffCatalog(db)).find((staff: { id: string }) => staff.id === id));
@@ -1198,8 +1306,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update({ status: 'inactive', updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) throw error;
+      const retiredEdges = await retireDownlineEdges(db, id);
       await audit(db, auth.userId, 'STAFF_DEACTIVATED', 'staff_user', id, before, {
         status: 'inactive',
+        retiredDownlineEdges: retiredEdges,
       });
       return res.status(200).json({ deactivated: true });
     }
@@ -1379,7 +1489,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ('error' in auth) return res.status(auth.error.status).json({ error: auth.error.error });
       return res.status(200).json(await dashboard(db, String(req.query.range ?? 'month')));
     }
-    return fail(res, 'NOT_FOUND', 'AF Homes endpoint not found', 404);
+    return fail(res, 'NOT_FOUND', 'AFHomes endpoint not found', 404);
   } catch (error) {
     console.error('[afhomes-api]', describeServerError(error));
     return fail(res, 'INTERNAL', 'Internal server error', 500);

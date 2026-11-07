@@ -1,5 +1,6 @@
+import { saleListQuerySchema, toSale, type SaleMoney } from '../_lib/sale-model.js';
 /**
- * AF Homes card sales, payments, and activation.
+ * AFHomes card sales, payments, and activation.
  *
  * Three rules this handler exists to enforce:
  *  1. Seller identity comes from the resolved principal. `sellerStaffId` in the
@@ -15,10 +16,11 @@ import {
   recordPaymentSchema,
   verifyPaymentSchema,
   activateSaleSchema,
+  canTransitionSale,
   hierarchyAllowsUpline,
   paymentSchemeLabel,
   SALE_ACTIVATABLE,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {
@@ -51,13 +53,7 @@ import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
-const listQuerySchema = z.object({
-  status: z.string().trim().max(40).optional(),
-  customerId: z.string().uuid().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
-});
-const parseListQuery = (req: VercelRequest) => listQuerySchema.safeParse(req.query);
+const parseListQuery = (req: VercelRequest) => saleListQuerySchema.safeParse(req.query);
 
 /** Staff ids the actor may sell on behalf of: themselves plus their downline. */
 async function downlineOf(db: Db, uplineId: string): Promise<string[]> {
@@ -108,7 +104,7 @@ async function loadSaleView(db: Db, id: string) {
   return data as Record<string, unknown> | null;
 }
 
-type SaleMoney = { paidAmount: string; balance: string };
+
 
 async function moneyBySale(
   db: Db,
@@ -186,52 +182,6 @@ function saleInScope(
   return row.seller_staff_id === scope.auth.userId || row.seller_ost_id === scope.auth.userId;
 }
 
-const toSale = (row: Record<string, unknown>, money?: SaleMoney) => {
-  const customer = (row.customers ?? {}) as Record<string, unknown>;
-  const product = (row.card_plans ?? {}) as Record<string, unknown>;
-  const seller = (row.staff_users ?? {}) as Record<string, unknown>;
-  const months =
-    row.installment_months_snapshot === null || row.installment_months_snapshot === undefined
-      ? null
-      : Number(row.installment_months_snapshot);
-  const validity =
-    row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
-      ? null
-      : Number(row.validity_months_snapshot);
-  return {
-    id: row.id,
-    saleNumber: row.sale_number,
-    customerId: row.customer_id,
-    customerName:
-      [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
-        .filter((p) => typeof p === 'string' && p)
-        .join(' ') || 'Unknown customer',
-    productId: row.plan_id,
-    productName: product.name ?? 'Unknown product',
-    productCode: product.code ?? '',
-    status: row.status,
-    sellerStaffId: isoOrNull(row.seller_staff_id),
-    sellerName: isoOrNull(seller.full_name),
-    cashPrice: row.cash_price_snapshot ?? row.cash_price ?? '0.00',
-    minimumDownPayment: row.minimum_down_payment_snapshot ?? '0.00',
-    paymentScheme: row.payment_scheme ?? 'spot_cash',
-    reservationFee: row.reservation_fee_snapshot ?? '0.00',
-    requiredInitial: row.required_initial_snapshot ?? row.minimum_down_payment_snapshot ?? '0.00',
-    installmentMonths: months,
-    monthlyAmount: (row.monthly_amount_snapshot as string | null | undefined) ?? null,
-    validityMonths: validity,
-    yearlyPoints: row.yearly_points_snapshot ?? 0,
-    commissionRate: row.commission_rate_snapshot ?? '0.0400',
-    expectedCommission: row.expected_commission_snapshot ?? '0.00',
-    paidAmount: money?.paidAmount ?? '0.00',
-    balance: money?.balance ?? String(row.cash_price_snapshot ?? row.cash_price ?? '0.00'),
-    spotCashDeadline: isoOrNull(row.spot_cash_deadline),
-    submittedAt: isoOrNull(row.submitted_at),
-    paymentVerifiedAt: isoOrNull(row.payment_verified_at),
-    activatedAt: isoOrNull(row.activated_at),
-    createdAt: isoOrNull(row.created_at) ?? '',
-  };
-};
 
 /** Current money state for an idempotent verification retry (no RPC, no audit). */
 async function idempotentVerifyResult(db: Db, saleId: string) {
@@ -281,7 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === '' && method(req) === 'GET') {
       const parsed = parseListQuery(req);
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
-      const { status, customerId, limit, offset } = parsed.data;
+      const { status, customerId, productId, limit, offset } = parsed.data;
 
       // A seller sees only their own sales. Finance/activation staff see every
       // sale. RLS already narrows this; the explicit seller filter makes the
@@ -297,6 +247,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       if (status) query = query.eq('status', status);
       if (customerId) query = query.eq('customer_id', customerId);
+      if (productId) query = query.eq('plan_id', productId);
       if (!canSeeAll) query = query.eq('seller_staff_id', auth.userId);
 
       const { data, error, count } = await query
@@ -414,6 +365,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('is_active', true)
         .maybeSingle();
 
+      // BR-RATE-06: invalid inputs generate no sale number. The scheme is
+      // resolved (and can reject) before the sequence is consumed, so a
+      // rejected scheme never burns a number. The VIP Stage 1 rule holds:
+      // the client selects only the scheme code and every figure is resolved
+      // server-side, so a tampered body cannot change what a sale costs.
+      // Bronze B1/B2 is rejected here - the UI hiding those options is never
+      // the control.
+      const scheme = resolveSchemeEconomics(
+        {
+          cashPrice: product.cash_price,
+          installmentPrice: product.installment_price,
+          reservationFee: product.reservation_fee,
+          spotCashDays: product.spot_cash_days,
+          standardInstallmentMonths: product.standard_installment_months,
+          validityYears: product.validity_years,
+          moveAEnabled: product.move_a_enabled,
+          moveB1Enabled: product.move_b1_enabled,
+          moveB2Enabled: product.move_b2_enabled,
+        },
+        input.paymentScheme,
+      );
+      if ('error' in scheme) {
+        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
+          return fail(
+            res,
+            'CONFLICT',
+            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
+            409,
+          );
+        }
+        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
+          return fail(
+            res,
+            'CONFLICT',
+            'The installment price is not configured for this card plan',
+            409,
+          );
+        }
+        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
+      }
+
       const { data: sequence, error: seqError } = await db.rpc('next_sale_number');
       if (seqError) return mapRpcError(res, seqError);
       // next_sale_number() is RETURNS TABLE, so live PostgREST answers with a
@@ -449,43 +441,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         yearlyPoints: product.yearly_points,
         commissionRate: resolvedCommissionRate,
       });
-      // VIP Stage 1: the client selects only the scheme code. Every figure is
-      // resolved server-side from the plan row and frozen below, so a tampered
-      // body cannot change what a sale costs. Bronze B1/B2 is rejected here -
-      // the UI hiding those options is never the control.
-      const scheme = resolveSchemeEconomics(
-        {
-          cashPrice: product.cash_price,
-          installmentPrice: product.installment_price,
-          reservationFee: product.reservation_fee,
-          spotCashDays: product.spot_cash_days,
-          standardInstallmentMonths: product.standard_installment_months,
-          validityYears: product.validity_years,
-          moveAEnabled: product.move_a_enabled,
-          moveB1Enabled: product.move_b1_enabled,
-          moveB2Enabled: product.move_b2_enabled,
-        },
-        input.paymentScheme,
-      );
-      if ('error' in scheme) {
-        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
-          return fail(
-            res,
-            'CONFLICT',
-            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
-            409,
-          );
-        }
-        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
-          return fail(
-            res,
-            'CONFLICT',
-            'The installment price is not configured for this card plan',
-            409,
-          );
-        }
-        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
-      }
+      // VIP Stage 1 figures ride in their own columns; the frozen SELECTED
+      // total below is the commercial record.
       const schemeTerms = snapshotSchemeTerms(scheme.economics);
       // The frozen SELECTED total is the commercial record: commission basis
       // and every payment threshold derive from it, never from the live plan.
@@ -655,9 +612,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('sale_id', salePayments[1]!)
         .order('recorded_at', { ascending: false });
       if (error) throw error;
+      const rows = (data ?? []) as Record<string, unknown>[];
+      // Resolve actor UUIDs to display names in one lookup. IDs stay the
+      // source of truth; unknown or removed staff read as null upstream.
+      const actorIds = [
+        ...new Set(
+          rows
+            .flatMap((row) => [row.recorded_by, row.verified_by])
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      let names = new Map<string, string>();
+      if (actorIds.length > 0) {
+        const { data: staff, error: staffError } = await db
+          .from('staff_users')
+          .select('id, full_name')
+          .in('id', actorIds);
+        if (staffError) throw staffError;
+        names = new Map(
+          ((staff ?? []) as Record<string, unknown>[]).map((member) => [
+            String(member.id),
+            String(member.full_name ?? ''),
+          ]),
+        );
+      }
       return list(
         res,
-        (data ?? []).map((row: Record<string, unknown>) => ({
+        rows.map((row: Record<string, unknown>) => ({
           id: row.id,
           paymentNumber: (row.payment_number as string | null | undefined) ?? null,
           saleId: row.sale_id,
@@ -671,6 +652,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           rejectionReason: isoOrNull(row.rejection_reason),
           recordedBy: row.recorded_by,
           verifiedBy: isoOrNull(row.verified_by),
+          recordedByName: names.get(String(row.recorded_by)) ?? null,
+          verifiedByName:
+            typeof row.verified_by === 'string' ? (names.get(row.verified_by) ?? null) : null,
           recordedAt: isoOrNull(row.recorded_at) ?? '',
           verifiedAt: isoOrNull(row.verified_at),
         })),
@@ -960,6 +944,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         alreadyActive: row.already_active === true,
         onboarding,
       });
+    }
+
+    /* ---------------- cancel (draft only, never destroy) ---------------- */
+    const cancel = route(req, 'POST', /^([0-9a-f-]+)\/cancel$/);
+    if (cancel) {
+      const auth = await authorizeAfHomes(req, 'sales.card_sales', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const scope = await resolveSaleScope(req);
+      const id = cancel[1]!;
+      const { data: sale, error: saleError } = await db
+        .from('card_sales')
+        .select('id, status, seller_staff_id, seller_ost_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (saleError) throw saleError;
+      if (!sale) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      const row = sale as Record<string, unknown>;
+      // Same no-probe convention as the detail read: an out-of-scope sale
+      // reads as missing rather than forbidden.
+      if (
+        !scope.canSeeAll &&
+        row.seller_staff_id !== auth.userId &&
+        row.seller_ost_id !== auth.userId
+      )
+        return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      const status = String(row.status ?? '');
+      // Draft-only by business rule: a sale that has moved is corrected
+      // through payments/activation flows, never by cancelling.
+      if (status !== 'draft')
+        return fail(res, 'CONFLICT', `Only draft sales can be cancelled (status "${status}")`, 409);
+      if (!canTransitionSale(status as never, 'cancelled'))
+        return fail(res, 'CONFLICT', `Sale cannot move to cancelled from "${status}"`, 409);
+      for (const paymentStatus of ['recorded', 'verified']) {
+        const { data: payment, error: paymentError } = await db
+          .from('payments')
+          .select('id')
+          .eq('sale_id', id)
+          .eq('status', paymentStatus)
+          .limit(1);
+        if (paymentError) throw paymentError;
+        if ((payment ?? []).length > 0)
+          return fail(res, 'CONFLICT', 'Sale has payments and cannot be cancelled', 409);
+      }
+      const { data: membership, error: membershipError } = await db
+        .from('memberships')
+        .select('id')
+        .eq('sale_id', id)
+        .limit(1);
+      if (membershipError) throw membershipError;
+      if ((membership ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Sale has a membership and cannot be cancelled', 409);
+      const { data: commissions, error: commissionsError } = await db
+        .from('commissions')
+        .select('id')
+        .eq('sale_id', id)
+        .neq('status', 'cancelled')
+        .limit(1);
+      if (commissionsError) throw commissionsError;
+      if ((commissions ?? []).length > 0)
+        return fail(res, 'CONFLICT', 'Sale has commissions and cannot be cancelled', 409);
+      const { data: cancelled, error: cancelError } = await db
+        .from('card_sales')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('status', 'draft')
+        .select('id')
+        .maybeSingle();
+      if (cancelError) throw cancelError;
+      if (!cancelled)
+        return fail(
+          res,
+          'CONFLICT',
+          'Sale changed during cancellation. Refresh and try again.',
+          409,
+        );
+      await audit(
+        db,
+        auth.userId,
+        'SALE_CANCELLED',
+        'sale',
+        id,
+        { status },
+        { status: 'cancelled' },
+      );
+      const view = await loadSaleView(db, id);
+      if (!view) return fail(res, 'INTERNAL', 'Sale was cancelled but could not be read back', 500);
+      const money = await moneyBySale(db, [view]);
+      return res.status(200).json(toSale(view, money.get(id)));
     }
 
     return fail(res, 'NOT_FOUND', 'Sale endpoint not found', 404);

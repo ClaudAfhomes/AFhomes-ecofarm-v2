@@ -36,3 +36,20 @@ describe('mapRpcError hierarchy codes (D4)', () => {
     expect((state.body as { error: { code: string } }).error.code).toBe('INTERNAL');
   });
 });
+
+describe('operational sale reference conflicts', () => {
+  it('maps SQLSTATE 42501 SALE_REFERENCE_CONFLICT to a controlled 409', () => {
+    const { res, state } = capture();
+    mapRpcError(res, { code: '42501', message: 'SALE_REFERENCE_CONFLICT' });
+    expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({ error: { code: 'CONFLICT' } });
+    expect(JSON.stringify(state.body)).not.toContain('42501');
+    expect(JSON.stringify(state.body)).not.toContain('SALE_REFERENCE_CONFLICT');
+  });
+  it('does not turn an unrelated permission failure into success or conflict', () => {
+    const { res, state } = capture();
+    mapRpcError(res, { code: '42501', message: 'permission denied for function unexpected' });
+    expect(state.status).toBe(500);
+    expect(state.body).toMatchObject({ error: { code: 'INTERNAL' } });
+  });
+});

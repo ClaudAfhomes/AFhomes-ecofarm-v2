@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - payments, activation, memberships, points, commissions.
+ * AFHomes Phase 2 - payments, activation, memberships, points, commissions.
  */
 import { z } from 'zod';
 
@@ -33,6 +33,9 @@ export const paymentSchema = z.object({
   rejectionReason: z.string().nullable(),
   recordedBy: z.string().uuid(),
   verifiedBy: z.string().uuid().nullable(),
+  /** Display names resolved server-side; UUIDs stay the source of truth. */
+  recordedByName: z.string().nullable().optional(),
+  verifiedByName: z.string().nullable().optional(),
   recordedAt: z.string(),
   verifiedAt: z.string().nullable(),
 });
@@ -204,6 +207,10 @@ export const commissionSchema = z.object({
 export type Commission = z.infer<typeof commissionSchema>;
 
 export const commissionRuleTargetSchema = z.enum(['role', 'staff', 'ost']);
+/** A commission rate is a fraction of the sale: 0 to 1 (1 = 100%). */
+const commissionRateSchema = exactDecimalRateSchema.refine((rate) => Number(rate) <= 1, {
+  message: 'Rate cannot exceed 1',
+});
 export const commissionRuleSchema = z.object({
   id: z.string().uuid(),
   targetType: commissionRuleTargetSchema,
@@ -227,7 +234,7 @@ export const createCommissionRuleSchema = z
   .object({
     targetType: commissionRuleTargetSchema,
     targetId: z.string().uuid(),
-    rate: exactDecimalRateSchema,
+    rate: commissionRateSchema,
     effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     effectiveUntil: z
       .string()
@@ -244,7 +251,7 @@ export const createCommissionRuleSchema = z
   });
 export const updateCommissionRuleSchema = z
   .object({
-    rate: exactDecimalRateSchema.optional(),
+    rate: commissionRateSchema.optional(),
     effectiveFrom: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -265,6 +272,69 @@ export const updateCommissionRuleSchema = z
 export type CommissionRule = z.infer<typeof commissionRuleSchema>;
 export type CreateCommissionRuleRequest = z.infer<typeof createCommissionRuleSchema>;
 export type UpdateCommissionRuleRequest = z.infer<typeof updateCommissionRuleSchema>;
+
+/**
+ * Commission roster: every active seller with their sales activity and the rate
+ * that would apply to their next sale. `source` says where that rate comes from:
+ * their own rule (`custom`), their position default (`position`) or nothing (`none`, 0%).
+ */
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const commissionRosterQuerySchema = z.object({
+  search: z.string().trim().max(100).optional(),
+  position: z.string().trim().max(60).optional(),
+  sales: z.enum(['all', 'with', 'without']).default('all'),
+  needsRate: z.enum(['true', 'false']).default('false'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export const commissionRosterMemberSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  positionSlug: z.string(),
+  positionName: z.string(),
+  salesCount: z.number().int().nonnegative(),
+  lastSaleAt: z.string().nullable(),
+  rate: exactDecimalRateSchema,
+  source: z.enum(['custom', 'position', 'none']),
+  ruleId: z.string().uuid().nullable(),
+});
+export const commissionRosterPositionSchema = z.object({
+  roleId: z.string().uuid(),
+  slug: z.string(),
+  name: z.string(),
+  memberCount: z.number().int().nonnegative(),
+  defaultRuleId: z.string().uuid().nullable(),
+  defaultRate: exactDecimalRateSchema.nullable(),
+});
+export const commissionRosterSchema = z.object({
+  positions: z.array(commissionRosterPositionSchema),
+  members: z.array(commissionRosterMemberSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+  needsRateCount: z.number().int().nonnegative(),
+});
+export const bulkCommissionRuleSchema = z
+  .object({
+    memberIds: z.array(z.string().uuid()).min(1).max(200),
+    rate: commissionRateSchema,
+    // Always open-ended: it replaces whatever personal rule is running from this date.
+    effectiveFrom: dateOnly,
+  })
+  .refine((v) => new Set(v.memberIds).size === v.memberIds.length, {
+    message: 'Members must be unique',
+    path: ['memberIds'],
+  });
+export const bulkCommissionRuleResultSchema = z.object({
+  created: z.number().int().nonnegative(),
+  replaced: z.number().int().nonnegative(),
+});
+export type CommissionRosterQuery = z.infer<typeof commissionRosterQuerySchema>;
+export type CommissionRosterMember = z.infer<typeof commissionRosterMemberSchema>;
+export type CommissionRosterPosition = z.infer<typeof commissionRosterPositionSchema>;
+export type CommissionRoster = z.infer<typeof commissionRosterSchema>;
+export type BulkCommissionRuleRequest = z.infer<typeof bulkCommissionRuleSchema>;
+export type BulkCommissionRuleResult = z.infer<typeof bulkCommissionRuleResultSchema>;
 
 /**
  * Explicit qualification decision. This is the ONLY way a commission reaches

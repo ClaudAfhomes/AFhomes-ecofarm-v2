@@ -77,6 +77,10 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'primary_address_line_2',
   'primary_city_municipality',
   'primary_province',
+  // Appended, never reordered: the province column keeps its position so an
+  // existing downloaded workbook still lines up. Optional on import, so a file
+  // produced before the structured selectors existed still loads.
+  'primary_barangay',
   'primary_postal_code',
   'primary_landline',
   'primary_mobile',
@@ -99,6 +103,7 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'secondary_address_line_2',
   'secondary_city_municipality',
   'secondary_province',
+  'secondary_barangay',
   'secondary_postal_code',
   'secondary_landline',
   'secondary_mobile',
@@ -118,8 +123,6 @@ export const CUSTOMER_IMPORT_HEADERS = [
   'acquisition_channels',
   'consent_acknowledged',
   'acknowledgement_date',
-  'primary_signature_status',
-  'secondary_signature_status',
   'valid_id_received',
   'reservation_payment_proof_received',
 ] as const;
@@ -134,8 +137,6 @@ export const IST_IMPORT_HEADERS = [
   'monthly_amortization_start',
   'monthly_amortization_end',
   'payment_due_day',
-  'primary_signature_status',
-  'secondary_signature_status',
   'primary_name',
   'primary_address',
   'primary_contact_number',
@@ -150,9 +151,7 @@ export const IST_IMPORT_HEADERS = [
   'schedule_particular',
   'schedule_amount',
   'schedule_payment_date',
-  'schedule_remarks',
   'payment_dates',
-  'payment_remarks',
 ] as const;
 
 const textColumns = (headers: readonly string[]): XlsxColumn[] =>
@@ -197,7 +196,7 @@ function storedZipEntry(bytes: Uint8Array, wanted: string): string | null {
     const name = decoder.decode(bytes.slice(at + 30, at + 30 + nameLength));
     const start = at + 30 + nameLength + extraLength;
     if (name === wanted) {
-      if (method !== 0) throw new Error('Only AF Homes generated XLSX files are supported');
+      if (method !== 0) throw new Error('Only AFHomes generated XLSX files are supported');
       return decoder.decode(bytes.slice(start, start + size));
     }
     at = start + size;
@@ -205,7 +204,7 @@ function storedZipEntry(bytes: Uint8Array, wanted: string): string | null {
   return null;
 }
 
-/** Parse the first data row of an AF Homes generated XLSX. Never saves it. */
+/** Parse the first data row of an AFHomes generated XLSX. Never saves it. */
 export function parseFormXlsx(bytes: Uint8Array): Record<string, string> {
   const xml = storedZipEntry(bytes, 'xl/worksheets/sheet1.xml');
   if (!xml) throw new Error('Spreadsheet worksheet is missing');
@@ -250,7 +249,6 @@ const requiredIst = [
   'vip_tier',
   'reservation_date',
   'agreement_date',
-  'primary_signature_status',
   'primary_name',
   'primary_address',
   'primary_contact_number',
@@ -357,16 +355,6 @@ export function validateFormImport(
     errors.push({ field: 'sale_id', message: 'Must be a sale UUID' });
   if (fields.customer_application_id && !UUID_RE.test(fields.customer_application_id))
     errors.push({ field: 'customer_application_id', message: 'Must be an application UUID' });
-  if (
-    fields.primary_signature_status &&
-    !['pending', 'received'].includes(fields.primary_signature_status)
-  )
-    errors.push({ field: 'primary_signature_status', message: 'Must be pending or received' });
-  if (
-    fields.secondary_signature_status &&
-    !['pending', 'received'].includes(fields.secondary_signature_status)
-  )
-    errors.push({ field: 'secondary_signature_status', message: 'Must be pending or received' });
   if (fields.payment_due_day && !/^(0?[1-9]|[12][0-9]|3[01])$/.test(fields.payment_due_day))
     errors.push({ field: 'payment_due_day', message: 'Must be 1-31' });
   if (fields.schedule_amount && !/^\d+(\.\d{1,2})?$/.test(fields.schedule_amount))
@@ -440,7 +428,7 @@ export function officialFormPdf(
   const section = (name: string) => rows.push([name, '']);
   if (kind === 'reservation_agreement') {
     const tier = fields.tier ?? fields.card_tier ?? fields.vip_tier ?? 'BRONZE';
-    section('AF HOMES ECOFARM');
+    section('AFHOMES ECOFARM');
     rows.push(['document', title]);
     section('RESERVATION HEADER');
     for (const key of [
@@ -501,9 +489,7 @@ export function officialFormPdf(
       'schedule_particular',
       'schedule_amount',
       'schedule_payment_date',
-      'schedule_remarks',
       'payment_dates',
-      'payment_remarks',
     ])
       if (fields[key] !== undefined) rows.push([label(key), fields[key] ?? '']);
     rows.push([
@@ -511,8 +497,7 @@ export function officialFormPdf(
       'Scheduled obligations only. Actual received payments live in the payments table.',
     ]);
     section('CERTIFICATION AND SIGNATURES');
-    rows.push(['primary signature', fields.primary_signature_status ?? 'pending']);
-    rows.push(['secondary signature', fields.secondary_signature_status ?? '']);
+
     rows.push([
       'certification',
       'I certify the information is true and consent to verification and processing.',
@@ -522,7 +507,7 @@ export function officialFormPdf(
     rows.push(['authorized seller line', '________________________  Date: __________']);
   } else {
     const tier = fields.card_tier ?? 'BRONZE';
-    section('AF HOMES ECOFARM');
+    section('AFHOMES ECOFARM');
     rows.push(['document', title]);
     section('PRIMARY CARDHOLDER');
     for (const [key, value] of Object.entries(fields))
@@ -551,8 +536,7 @@ export function officialFormPdf(
     section('CERTIFICATION');
     rows.push(['consent acknowledged', fields.consent_acknowledged ?? '']);
     rows.push(['acknowledgement date', fields.acknowledgement_date ?? '']);
-    rows.push(['primary signature', fields.primary_signature_status ?? 'pending']);
-    rows.push(['secondary signature', fields.secondary_signature_status ?? '']);
+
     section('RESERVATION REQUIREMENTS');
     rows.push(['valid id received', fields.valid_id_received ?? '']);
     rows.push([
@@ -561,7 +545,7 @@ export function officialFormPdf(
     ]);
   }
   return toPdf({
-    title: `AF Homes Ecofarm\n${title}`,
+    title: `AFHomes Ecofarm\n${title}`,
     generatedAt: new Date().toISOString(),
     scopeLabel: 'Official form',
     windowLabel: 'Transaction snapshot',

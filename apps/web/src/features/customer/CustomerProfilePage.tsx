@@ -1,16 +1,17 @@
-import { ErrorState, StatusChip, type StatusTone, Button } from '@jad/ui';
+import { ErrorState, StatusChip, type StatusTone, Button } from '@afhomes/ui';
 import { useState } from 'react';
 
 import { useCustomerProfileQuery } from './queries';
 import { isForbidden } from './http';
 import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
+import { ProfilePhotoCard } from './ProfilePhotoCard';
 
 /**
  * The member's own profile.
  *
- * This is a READ-ONLY view by design, and the read model it renders is the
+ * Identity details remain READ-ONLY, and the read model it renders is the
  * narrow one the API returns. There is no edit form, so there is no question of a
- * browser writing to `customers`.
+ * browser writing to `customers`. Profile photos use a separate authorized Storage API.
  *
  * Deliberately absent, and never fetched: the government ID number, the
  * government ID type, identity document storage paths, the staff member who
@@ -63,6 +64,7 @@ export function CustomerProfilePage() {
 
   return (
     <>
+      <ProfilePhotoCard />
       <Card title="Your details">
         <FieldList>
           <Field label="Customer ID" value={customer.customerNumber} />
@@ -101,7 +103,7 @@ export function CustomerProfilePage() {
           />
         </FieldList>
         <p className={styles.notice}>
-          To correct any of these, contact AF Homes Ecofarm. Your account details are maintained by
+          To correct any of these, contact AFhomes Ecofarm. Your account details are maintained by
           the branch that registered you.
         </p>
       </Card>
@@ -117,7 +119,10 @@ export function CustomerProfilePage() {
       <Card title="Account">
         <FieldList>
           <Field label="Account created" value={formatDate(customer.updatedAt)} />
-          <Field label="Portal access" value={customer.status === 'active' ? 'Active' : customer.status} />
+          <Field
+            label="Portal access"
+            value={customer.status === 'active' ? 'Active' : customer.status}
+          />
         </FieldList>
       </Card>
     </>

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { dashboardQueuesSchema } from '@jad/contracts';
+import { dashboardQueuesSchema } from '@afhomes/contracts';
 import {
   STAFF2,
   TOKEN,
@@ -63,7 +63,7 @@ const member = (id: string, status: string) => ({
 
 beforeEach(() => install());
 
-describe('GET /queues/dashboard (JAD QueueCard parity)', () => {
+describe('GET /queues/dashboard (AFHomes queue-card pattern)', () => {
   it('routes through the queues family without a router change', () => {
     expect(selectHandler('/api/v1/queues/dashboard', {})?.routeKey).toBe('queues/dashboard');
   });

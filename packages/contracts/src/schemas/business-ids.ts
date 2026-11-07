@@ -1,5 +1,5 @@
 /**
- * AF Homes public business IDs (AF-*).
+ * AFHomes public business IDs (AF-*).
  *
  * Single source for the AF-* vocabulary shared by handlers, the client and
  * tests. The database remains authoritative for generation

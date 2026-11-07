@@ -1,0 +1,50 @@
+.body {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.body p {
+  margin: 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.hint {
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #aaa);
+}
+.approval {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.approval input {
+  margin-top: 0.25rem;
+  flex: 0 0 auto;
+}
+.tableWrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.tableWrap table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+}
+.tableWrap th,
+.tableWrap td {
+  padding: 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border-default);
+  overflow-wrap: anywhere;
+}
+.tableWrap ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+.tableWrap code {
+  user-select: all;
+}

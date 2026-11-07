@@ -3,7 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { AfHomesStaffPage } from './AfHomesStaffPage';
-import { afHomesRoleSchema } from '@jad/contracts';
+import { afHomesRoleSchema } from '@afhomes/contracts';
 import { getAfHomesRoles } from './services';
 
 vi.mock('./services', () => ({
@@ -23,9 +23,10 @@ it('excludes Customer from staff provisioning without removing valid staff roles
     id: '00000000-0000-4000-8000-000000000001',
     slug: 'employee',
     name: 'Employee',
-    description: null,
     isSystem: true,
     isActive: true,
+    departmentId: null,
+    departmentName: null,
     assignedCount: 0,
     permissions: [],
     createdAt: '2026-10-01',

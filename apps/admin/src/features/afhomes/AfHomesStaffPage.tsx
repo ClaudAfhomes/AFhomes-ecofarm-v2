@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -15,28 +16,33 @@ import {
   PasswordField,
   SearchField,
   Select,
+  Skeleton,
   StatusChip,
   TextField,
-} from '@jad/ui';
-import { PERSON_NAME_RE, type AfHomesStaff } from '@jad/contracts';
+} from '@afhomes/ui';
+import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
+import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import styles from './AfHomesStaffPage.module.css';
 import {
   createAfHomesStaff,
-  deactivateAfHomesStaff,
   deleteAfHomesStaff,
   getAfHomesDepartments,
   getAfHomesRoles,
   getAfHomesStaff,
-  isTestStaffEmail,
-  purgeTestAfHomesStaff,
   updateAfHomesStaff,
 } from './services';
 
 const PAGE_SIZE = 10;
 
-type Restriction = AfHomesStaff['restrictions'][number];
+/**
+ * Sales-hierarchy roles live in genealogy / the sale-team desk, never in the
+ * Staff directory. They are filtered out of the list, the role filter and the
+ * create/edit role pickers. The server stays the authority; this is UX only.
+ */
+const HIERARCHY_SLUGS = ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'];
 
 function statusTone(status: AfHomesStaff['status']): 'success' | 'danger' | 'neutral' {
   return status === 'active' ? 'success' : status === 'suspended' ? 'danger' : 'neutral';
@@ -46,11 +52,21 @@ export function AfHomesStaffPage() {
   const client = useQueryClient();
   const navigate = useNavigate();
   const { user } = useSession();
-  const staff = useQuery({ queryKey: ['afhomes', 'staff'], queryFn: getAfHomesStaff });
-  const roles = useQuery({ queryKey: ['afhomes', 'roles'], queryFn: getAfHomesRoles });
+  const staff = useQuery({
+    queryKey: ['afhomes', 'staff'],
+    queryFn: getAfHomesStaff,
+    // Refetches keep the previous directory visible instead of blanking it.
+    placeholderData: keepPreviousData,
+  });
+  const roles = useQuery({
+    queryKey: ['afhomes', 'roles'],
+    queryFn: getAfHomesRoles,
+    placeholderData: keepPreviousData,
+  });
   const departments = useQuery({
     queryKey: ['afhomes', 'departments'],
     queryFn: getAfHomesDepartments,
+    placeholderData: keepPreviousData,
   });
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
@@ -64,16 +80,14 @@ export function AfHomesStaffPage() {
   const [departmentId, setDepartmentId] = useState('');
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [editing, setEditing] = useState<AfHomesStaff | null>(null);
-  const [restrictions, setRestrictions] = useState<Restriction[]>([]);
   const [accountAction, setAccountAction] = useState<{
-    kind: 'deactivate' | 'delete';
     staff: AfHomesStaff;
   } | null>(null);
   const [confirmation, setConfirmation] = useState('');
-  const [purgeTarget, setPurgeTarget] = useState<AfHomesStaff | null>(null);
-  const [purgeConfirmation, setPurgeConfirmation] = useState('');
-  const canPurgeTest = user?.roleSlug === 'super_admin' && user.testPurgeEnabled === true;
+  const [editor, setEditor] = useState<AfHomesStaff | null>(null);
+  const [editRoleId, setEditRoleId] = useState('');
+  const [editDepartmentId, setEditDepartmentId] = useState('');
+  const [editStatus, setEditStatus] = useState<'active' | 'suspended'>('active');
 
   const resetCreate = () => {
     setFullName('');
@@ -109,7 +123,7 @@ export function AfHomesStaffPage() {
     temporaryPassword.length >= 8 &&
     temporaryPassword === confirmPassword;
 
-  const create = useMutation({
+  const create = useBusinessMutation({
     mutationFn: () =>
       createAfHomesStaff({
         fullName: fullName.trim(),
@@ -128,17 +142,9 @@ export function AfHomesStaffPage() {
       });
     },
   });
-  const update = useMutation({
-    mutationFn: () => updateAfHomesStaff(editing!.id, { restrictions }),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
-      setEditing(null);
-    },
-  });
-  const changeAccount = useMutation({
+  const changeAccount = useBusinessMutation({
     mutationFn: async () => {
-      if (accountAction?.kind === 'delete') await deleteAfHomesStaff(accountAction.staff.id);
-      else await deactivateAfHomesStaff(accountAction!.staff.id);
+      await deleteAfHomesStaff(accountAction!.staff.id);
     },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
@@ -146,53 +152,59 @@ export function AfHomesStaffPage() {
       setConfirmation('');
     },
   });
-  const purgeTestAccount = useMutation({
-    mutationFn: () => purgeTestAfHomesStaff(purgeTarget!.id),
+  const saveEditor = useBusinessMutation({
+    mutationFn: () =>
+      updateAfHomesStaff(editor!.id, {
+        roleId: editRoleId,
+        departmentId: editDepartmentId || null,
+        status: editStatus,
+      }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['afhomes', 'staff'] });
-      setPurgeTarget(null);
-      setPurgeConfirmation('');
+      setEditor(null);
+      notifySuccess({ title: 'Staff updated', message: 'Staff record saved.' });
     },
   });
+  const openEditor = (member: AfHomesStaff) => {
+    setEditor(member);
+    setEditRoleId(member.roleId);
+    setEditDepartmentId(member.departmentId ?? '');
+    setEditStatus(member.status === 'suspended' ? 'suspended' : 'active');
+    saveEditor.reset();
+  };
+  const roleSlugById = useMemo(
+    () => new Map((roles.data ?? []).map((role) => [role.id, role.slug] as const)),
+    [roles.data],
+  );
+  const isHierarchy = (item: AfHomesStaff) =>
+    HIERARCHY_SLUGS.includes(roleSlugById.get(item.roleId) ?? '');
+  const isSuperAdmin = (item: AfHomesStaff) => roleSlugById.get(item.roleId) === 'super_admin';
   const filtered = useMemo(
     () =>
       staff.data?.filter(
         (item) =>
+          !isHierarchy(item) &&
           (status === 'all' || item.status === status) &&
           (roleFilter === 'all' || item.roleId === roleFilter) &&
-          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''} ${item.salesNumber ?? ''}`
+          `${item.fullName} ${item.email} ${item.employeeNumber ?? ''}`
             .toLowerCase()
             .includes(debouncedSearch.toLowerCase()),
       ) ?? [],
-    [staff.data, status, roleFilter, debouncedSearch],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [staff.data, status, roleFilter, debouncedSearch, roles.data],
   );
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const activeRoles = roles.data?.filter((role) => role.isActive && role.slug !== 'customer') ?? [];
+  // Staff pickers never offer hierarchy roles or Customer: those accounts are
+  // managed in genealogy / the sale-team desk, not here.
+  const assignableRoles = activeRoles.filter((role) => !HIERARCHY_SLUGS.includes(role.slug));
+  const selectedRole = assignableRoles.find((role) => role.id === roleId);
+  const selectedRoleDescription = selectedRole
+    ? `${selectedRole.assignedCount} staff hold this role.`
+    : null;
   const filtersActive = search !== '' || status !== 'all' || roleFilter !== 'all';
-  const openRestrictions = (member: AfHomesStaff) => {
-    const role = roles.data?.find((item) => item.id === member.roleId);
-    setRestrictions(
-      (role?.permissions ?? [])
-        .filter((p) => p.canView)
-        .map(
-          (p) =>
-            member.restrictions.find((r) => r.moduleKey === p.moduleKey) ?? {
-              moduleKey: p.moduleKey,
-              denyView: false,
-              denyCreate: false,
-              denyUpdate: false,
-              denyDelete: false,
-            },
-        ),
-    );
-    setEditing(member);
-  };
-  const toggle = (key: string, field: keyof Omit<Restriction, 'moduleKey'>) =>
-    setRestrictions((current) =>
-      current.map((item) => (item.moduleKey === key ? { ...item, [field]: !item[field] } : item)),
-    );
   const clearFilters = () => {
     setSearch('');
     setStatus('all');
@@ -200,15 +212,15 @@ export function AfHomesStaffPage() {
     setPage(1);
   };
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader
         title="Staff"
-        description="Admin users and their roles (role changes are audited)"
+        description="Staff accounts and assigned roles."
         actions={
           <Button
             onClick={() => {
               resetCreate();
-              setRoleId(activeRoles[0]?.id ?? '');
+              setRoleId(assignableRoles[0]?.id ?? '');
               setCreateOpen(true);
             }}
           >
@@ -220,12 +232,13 @@ export function AfHomesStaffPage() {
         search={
           <SearchField
             label="Search staff"
-            placeholder="Search name, email or AF ID"
+            placeholder="Search name, email or code"
             value={search}
             onChange={(value) => {
               setSearch(value);
               setPage(1);
             }}
+            busy={staff.isFetching && !staff.isPending}
           />
         }
         filters={
@@ -239,7 +252,7 @@ export function AfHomesStaffPage() {
               }}
               options={[
                 { value: 'all', label: 'All roles' },
-                ...activeRoles.map((r) => ({ value: r.id, label: r.name })),
+                ...assignableRoles.map((r) => ({ value: r.id, label: r.name })),
               ]}
             />
             <Select
@@ -249,7 +262,7 @@ export function AfHomesStaffPage() {
                 setStatus(e.target.value);
                 setPage(1);
               }}
-              options={['all', 'invited', 'active', 'inactive', 'suspended'].map((value) => ({
+              options={['all', 'active', 'suspended'].map((value) => ({
                 value,
                 label: value[0]!.toUpperCase() + value.slice(1),
               }))}
@@ -263,7 +276,15 @@ export function AfHomesStaffPage() {
         }
       />
       {staff.isPending ? (
-        <p role="status">Loading staff…</p>
+        <div role="status" aria-label="Loading staff" className={styles.tableWrap}>
+          <div style={{ display: 'grid', gap: 'var(--space-3)' }} aria-hidden="true">
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+            <Skeleton style={{ height: 48 }} />
+          </div>
+        </div>
       ) : staff.isError ? (
         <ErrorState error={staff.error} onRetry={staff.refetch} />
       ) : filtered.length === 0 ? (
@@ -275,15 +296,22 @@ export function AfHomesStaffPage() {
         />
       ) : (
         <>
-          <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
+          <div
+            role="region"
+            aria-label="Scrollable records"
+            tabIndex={0}
+            className={`table-scroll ${styles.tableWrap}`}
+          >
             <table>
               <thead>
                 <tr>
+                  <th>Code</th>
                   <th>Name</th>
+                  <th>Email</th>
                   <th>Role</th>
                   <th>Status</th>
                   <th>Added</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,69 +325,52 @@ export function AfHomesStaffPage() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') navigate(`/admin/staff/${item.id}`);
                     }}
-                    style={{ cursor: 'pointer' }}
+                    className={styles.clickable}
                   >
-                    <td>
-                      <strong>{item.fullName}</strong>
-                      <br />
-                      <small>{item.email}</small>
-                      {item.employeeNumber ? (
-                        <>
-                          <br />
-                          <small>{item.employeeNumber}</small>
-                        </>
-                      ) : null}
-                      {item.salesNumber ? (
-                        <>
-                          <br />
-                          <small>{item.salesNumber}</small>
-                        </>
-                      ) : null}
+                    <td data-label="Code">
+                      <span className={styles.codeCell}>{item.employeeNumber ?? '—'}</span>
                     </td>
-                    <td>
+                    <td data-label="Name">
+                      <span className={styles.identityCell}>
+                        <span className={styles.identityAvatar} aria-hidden="true">
+                          {(item.fullName.trim().charAt(0) || '-').toUpperCase()}
+                        </span>
+                        <span className={styles.identityName}>{item.fullName}</span>
+                      </span>
+                    </td>
+                    <td data-label="Email">
+                      <span className={styles.emailCell}>{item.email}</span>
+                    </td>
+                    <td data-label="Role">
                       <StatusChip label={item.roleName} tone="neutral" />
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StatusChip label={item.status} tone={statusTone(item.status)} />
                     </td>
-                    <td>
-                      <small>
-                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
-                      </small>
+                    <td data-label="Added">
+                      <small>{item.createdAt ? formatDate(item.createdAt) : '-'}</small>
                     </td>
-                    <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <Button size="sm" variant="secondary" onClick={() => openRestrictions(item)}>
-                        Restrictions
-                      </Button>
-                      {item.id !== user?.id && item.status !== 'inactive' ? (
+                    <td
+                      data-label="Actions"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {!(isSuperAdmin(item) && user?.roleSlug !== 'super_admin') ? (
+                        <Button size="sm" variant="secondary" onClick={() => openEditor(item)}>
+                          Edit
+                        </Button>
+                      ) : null}
+                      {user?.roleSlug === 'super_admin' &&
+                      item.id !== user.id &&
+                      !isSuperAdmin(item) ? (
                         <>
                           {' '}
                           <Button
                             size="sm"
                             variant="danger"
-                            onClick={() => setAccountAction({ kind: 'deactivate', staff: item })}
+                            onClick={() => setAccountAction({ staff: item })}
                           >
-                            Deactivate
-                          </Button>
-                        </>
-                      ) : null}
-                      {user?.roleSlug === 'super_admin' && item.id !== user.id ? (
-                        <>
-                          {' '}
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => setAccountAction({ kind: 'delete', staff: item })}
-                          >
-                            Delete Permanently
-                          </Button>
-                        </>
-                      ) : null}
-                      {canPurgeTest && item.id !== user?.id && isTestStaffEmail(item.email) ? (
-                        <>
-                          {' '}
-                          <Button size="sm" variant="danger" onClick={() => setPurgeTarget(item)}>
-                            Purge Test Account
+                            Delete
                           </Button>
                         </>
                       ) : null}
@@ -369,12 +380,14 @@ export function AfHomesStaffPage() {
               </tbody>
             </table>
           </div>
-          <p role="status">
-            {filtered.length} staff member(s) · page {safePage} of {pageCount}
-          </p>
-          {pageCount > 1 ? (
-            <Pagination page={safePage} pageCount={pageCount} onChange={setPage} />
-          ) : null}
+          <div className={styles.pagination}>
+            <Pagination
+              page={safePage}
+              pageCount={pageCount}
+              onChange={setPage}
+              label="Staff pagination"
+            />
+          </div>
         </>
       )}
       <Dialog
@@ -392,122 +405,151 @@ export function AfHomesStaffPage() {
           </>
         }
       >
-        <div style={{ display: 'grid', gap: 12 }}>
-          <TextField
-            id="staff-name"
-            name="staff-name"
-            label="Full name"
-            value={fullName}
-            suggestName
-            normalize={(value) => normalizeLiveHumanField('fullName', value)}
-            onChange={setFullName}
-            error={createErrors.fullName}
-            autoComplete="name"
-          />
-          <TextField
-            id="staff-email"
-            name="staff-email"
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-            error={createErrors.email}
-          />
-          <label>
-            Department
-            <Select
-              value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
-              options={[
-                { value: '', label: 'Unassigned' },
-                ...(departments.data ?? [])
-                  .filter((d) => d.isActive)
-                  .map((d) => ({ value: d.id, label: d.name })),
-              ]}
-            />
-          </label>
-          <label>
-            Role
-            <Select
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-              options={activeRoles.map((r) => ({ value: r.id, label: r.name }))}
-            />
-          </label>
-          <PasswordField
-            id="staff-temp-password"
-            label="Temporary password"
-            value={temporaryPassword}
-            onChange={setTemporaryPassword}
-            autoComplete="new-password"
-            hint="At least 8 characters. Share it with the new member directly — it is never emailed or stored."
-            error={createErrors.temporaryPassword}
-          />
-          <PasswordField
-            id="staff-temp-password-confirm"
-            label="Confirm temporary password"
-            value={confirmPassword}
-            onChange={setConfirmPassword}
-            autoComplete="new-password"
-            error={createErrors.confirmPassword}
-          />
+        <div className={styles.dialogBody}>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>Identity</legend>
+            <p className={styles.sectionHint}>Who this account belongs to.</p>
+            <div className={styles.formFields}>
+              <TextField
+                id="staff-name"
+                name="staff-name"
+                label="Full name"
+                value={fullName}
+                suggestName
+                normalize={(value) => normalizeLiveHumanField('fullName', value)}
+                onChange={setFullName}
+                error={createErrors.fullName}
+                autoComplete="name"
+              />
+              <TextField
+                id="staff-email"
+                name="staff-email"
+                label="Email"
+                type="email"
+                value={email}
+                onChange={setEmail}
+                autoComplete="email"
+                error={createErrors.email}
+              />
+            </div>
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>Assignment</legend>
+            <p className={styles.sectionHint}>Exactly one role and one department.</p>
+            <div className={styles.formFields}>
+              <label className={styles.fieldLabel}>
+                Department
+                <Select
+                  value={departmentId}
+                  onChange={(e) => setDepartmentId(e.target.value)}
+                  options={[
+                    { value: '', label: 'Unassigned' },
+                    ...(departments.data ?? [])
+                      .filter((d) => d.isActive)
+                      .map((d) => ({ value: d.id, label: d.name })),
+                  ]}
+                />
+              </label>
+              <label className={styles.fieldLabel}>
+                Role
+                <Select
+                  value={roleId}
+                  onChange={(e) => setRoleId(e.target.value)}
+                  options={assignableRoles.map((r) => ({ value: r.id, label: r.name }))}
+                />
+              </label>
+              {selectedRoleDescription ? (
+                <p className={styles.roleHint}>{selectedRoleDescription}</p>
+              ) : null}
+            </div>
+          </fieldset>
+          <fieldset className={styles.formSection}>
+            <legend className={styles.sectionTitle}>First sign-in</legend>
+            <p className={styles.sectionHint}>Member sets own password later.</p>
+            <div className={styles.formFields}>
+              <PasswordField
+                id="staff-temp-password"
+                label="Temporary password"
+                value={temporaryPassword}
+                onChange={setTemporaryPassword}
+                autoComplete="new-password"
+                hint="At least 8 characters. Share it privately only."
+                error={createErrors.temporaryPassword}
+              />
+              <PasswordField
+                id="staff-temp-password-confirm"
+                label="Confirm temporary password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
+                error={createErrors.confirmPassword}
+              />
+            </div>
+          </fieldset>
           <Alert variant="info" title="First login">
-            The new member signs in with this password and must set their own before the admin panel
-            unlocks.
+            First sign-in needs password change.
           </Alert>
           {create.error ? <p role="alert">{create.error.message}</p> : null}
         </div>
       </Dialog>
       <Dialog
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        title={`Restrict ${editing?.fullName ?? 'staff access'}`}
+        open={editor !== null}
+        onClose={() => setEditor(null)}
+        title={`Edit ${editor?.fullName ?? 'staff'}`}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setEditing(null)}>
+            <Button variant="secondary" onClick={() => setEditor(null)}>
               Cancel
             </Button>
-            <Button disabled={update.isPending} onClick={() => update.mutate()}>
-              Save restrictions
+            <Button
+              disabled={saveEditor.isPending || !editRoleId}
+              onClick={() => saveEditor.mutate()}
+            >
+              Save
             </Button>
           </>
         }
       >
-        <p>Overrides can only remove access granted by the role.</p>
-        <div role="region" aria-label="Scrollable records" tabIndex={0} className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Module</th>
-                <th>Deny view</th>
-                <th>Deny create</th>
-                <th>Deny update</th>
-                <th>Deny delete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {restrictions.map((r) => (
-                <tr key={r.moduleKey}>
-                  <td>{r.moduleKey}</td>
-                  {(['denyView', 'denyCreate', 'denyUpdate', 'denyDelete'] as const).map(
-                    (field) => (
-                      <td key={field}>
-                        <input
-                          type="checkbox"
-                          aria-label={`${r.moduleKey} ${field}`}
-                          checked={r[field]}
-                          onChange={() => toggle(r.moduleKey, field)}
-                        />
-                      </td>
-                    ),
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className={styles.dialogBody}>
+          <div className={styles.formFields}>
+            <label className={styles.fieldLabel}>
+              Role
+              <Select
+                aria-label="Edit role"
+                value={editRoleId}
+                onChange={(e) => setEditRoleId(e.target.value)}
+                options={assignableRoles.map((r) => ({ value: r.id, label: r.name }))}
+              />
+            </label>
+            <label className={styles.fieldLabel}>
+              Department
+              <Select
+                aria-label="Edit department"
+                value={editDepartmentId}
+                onChange={(e) => setEditDepartmentId(e.target.value)}
+                options={[
+                  { value: '', label: 'Unassigned' },
+                  ...(departments.data ?? [])
+                    .filter((d) => d.isActive)
+                    .map((d) => ({ value: d.id, label: d.name })),
+                ]}
+              />
+            </label>
+            <label className={styles.fieldLabel}>
+              Status
+              <Select
+                aria-label="Edit status"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value as 'active' | 'suspended')}
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'suspended', label: 'Suspended' },
+                ]}
+              />
+            </label>
+          </div>
+          {saveEditor.error ? <p role="alert">{saveEditor.error.message}</p> : null}
         </div>
-        {update.error ? <p role="alert">{update.error.message}</p> : null}
       </Dialog>
       <ConfirmDialog
         open={accountAction !== null}
@@ -516,67 +558,24 @@ export function AfHomesStaffPage() {
           setConfirmation('');
         }}
         onConfirm={() => changeAccount.mutate()}
-        title={
-          accountAction?.kind === 'delete'
-            ? 'Permanently Delete Staff Account'
-            : 'Deactivate Staff Account'
-        }
+        title="Delete Staff Account"
         message={
           <div>
-            <p>
-              {accountAction?.kind === 'delete'
-                ? 'This action permanently removes the login/account if no protected business records exist. This cannot be undone.'
-                : 'This user will no longer be able to access the AF Homes staff system. Historical records will remain.'}
-            </p>
-            {accountAction?.kind === 'delete' ? (
-              <label>
-                Type DELETE to confirm
-                <input
-                  aria-label="Type DELETE to confirm staff deletion"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
-              </label>
-            ) : null}
+            <p>Remove login if records allow. This cannot be undone.</p>
+            <TextField
+              id="staff-delete-confirm"
+              name="deleteConfirm"
+              label="Type DELETE to confirm staff deletion"
+              value={confirmation}
+              onChange={setConfirmation}
+            />
             {changeAccount.error ? <p role="alert">{changeAccount.error.message}</p> : null}
           </div>
         }
         danger
-        confirmLabel={accountAction?.kind === 'delete' ? 'Delete Permanently' : 'Confirm'}
-        confirmDisabled={accountAction?.kind === 'delete' && confirmation !== 'DELETE'}
+        confirmLabel="Delete"
+        confirmDisabled={confirmation !== 'DELETE'}
         confirmLoading={changeAccount.isPending}
-      />
-      <ConfirmDialog
-        open={purgeTarget !== null}
-        onCancel={() => {
-          setPurgeTarget(null);
-          setPurgeConfirmation('');
-        }}
-        onConfirm={() => purgeTestAccount.mutate()}
-        title="Purge Test Account"
-        message={
-          <div>
-            <p>
-              TEST DATA PURGE. This permanently deletes the test account
-              {purgeTarget ? ` ${purgeTarget.email}` : ''} and related test records. This action
-              cannot be undone. Real business data is never purged: anything shared or non-test
-              blocks the purge instead.
-            </p>
-            <label>
-              Type PURGE to confirm
-              <input
-                aria-label="Type PURGE to confirm test account purge"
-                value={purgeConfirmation}
-                onChange={(event) => setPurgeConfirmation(event.target.value)}
-              />
-            </label>
-            {purgeTestAccount.error ? <p role="alert">{purgeTestAccount.error.message}</p> : null}
-          </div>
-        }
-        danger
-        confirmLabel="Purge Test Account"
-        confirmDisabled={purgeConfirmation !== 'PURGE'}
-        confirmLoading={purgeTestAccount.isPending}
       />
     </section>
   );

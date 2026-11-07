@@ -4,8 +4,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../test/utils';
 import App from '../app/App';
+import { requestList } from '../lib/api/client';
+vi.mock('../lib/api/client', async (original) => ({ ...(await original()), requestList: vi.fn() }));
+// A real response has already been through serviceCatalogItemSchema, so every
+// defaulted field is present. The mock replaces requestList wholesale, which
+// skips that parse: a fixture missing them would test nothing real.
+const PUBLISHED_SERVICE = {
+  id: 'abaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  code: 'AF-SVC-ONE',
+  name: 'Published wellness visit',
+  description: 'A persisted service description',
+  summary: 'A short summary',
+  category: 'Wellness',
+  location: 'Laguna',
+  pricingUnit: 'person',
+  highlights: ['Guided therapy'],
+  basePrice: '1500.00',
+  isActive: true,
+  published: true,
+  availability: 'available',
+  photos: [],
+};
 
 beforeEach(() => {
+  vi.mocked(requestList).mockResolvedValue([PUBLISHED_SERVICE]);
   // motion's whileInView needs IntersectionObserver; jsdom has none.
   vi.stubGlobal(
     'IntersectionObserver',
@@ -40,9 +62,7 @@ describe('public route coverage', () => {
     const { main } = await chrome();
     expect(within(main).getByText(marker, { exact: false })).toBeInTheDocument();
     // Marketing shell: brand nav + footer, never the portal shell.
-    expect(
-      screen.getByRole('link', { name: 'AFhomes — Home Away From Home' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'AFhomes — Home Away From Home' })).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).toBeInTheDocument();
   });
 
@@ -98,18 +118,16 @@ describe('public route coverage', () => {
     await vi.waitFor(() => expect(document.title).toContain('Page not found'), {
       timeout: 20000,
     });
-    expect(document.querySelector('meta[name="robots"]')).toHaveAttribute('content', 'noindex, follow');
+    expect(document.querySelector('meta[name="robots"]')).toHaveAttribute(
+      'content',
+      'noindex, follow',
+    );
   });
 
-  it('does not port the old standalone admin', async () => {
+  it('serves the local-dev staff entry on /admin/login, not the marketing 404', async () => {
     renderWithProviders(<App />, { route: '/admin/login' });
-    expect(
-      await screen.findByRole(
-        'heading',
-        { name: 'This page is taking a rest day.' },
-        { timeout: 20000 },
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });
 });
 
@@ -128,9 +146,10 @@ describe('header and navigation', () => {
       expect(screen.getAllByRole('link', { name: label })[0]).toBeInTheDocument();
     }
     // No standalone "Home" link: the brand mark links home.
-    expect(
-      screen.getByRole('link', { name: 'AFhomes — Home Away From Home' }),
-    ).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'AFhomes — Home Away From Home' })).toHaveAttribute(
+      'href',
+      '/',
+    );
     expect(screen.getByText('Important Notice')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
   });
@@ -153,6 +172,27 @@ describe('header and navigation', () => {
     // The menu plays its exit transition first.
     await waitForElementToBeRemoved(() => screen.queryByRole('dialog'), { timeout: 20000 });
   });
+
+  it('exposes member Sign In and Sign Up entries that route to the portal', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />, { route: '/' });
+    await chrome();
+    // jsdom matchMedia never matches desktop, so the entries live in the menu.
+    await user.click(screen.getByRole('button', { name: 'Open menu' }));
+    const dialog = await screen.findByRole('dialog');
+    const signIn = within(dialog).getByRole('link', { name: 'Sign In' });
+    expect(signIn).toHaveAttribute('href', '/customer/login');
+    expect(within(dialog).getByRole('link', { name: 'Sign Up' })).toHaveAttribute(
+      'href',
+      '/customer/activate',
+    );
+    // Staff/admin entries stay URL-only: never advertised in the public nav.
+    expect(within(dialog).queryByRole('link', { name: /staff/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('link', { name: /admin/i })).not.toBeInTheDocument();
+    await user.click(signIn);
+    expect(await screen.findByLabelText(/Email/)).toBeInTheDocument();
+    expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
+  });
 });
 
 describe('homepage critical sections', () => {
@@ -160,7 +200,9 @@ describe('homepage critical sections', () => {
     renderWithProviders(<App />, { route: '/' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines')).toBeInTheDocument();
+    expect(
+      scope.getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines'),
+    ).toBeInTheDocument();
     expect(scope.getByText('A pioneer in homestyle hospitality')).toBeInTheDocument();
     expect(scope.getByText('A destination, arriving in chapters.')).toBeInTheDocument();
     // All three VIP tiers load asynchronously from the static content.
@@ -170,22 +212,48 @@ describe('homepage critical sections', () => {
     expect(screen.getByText('Important Notice')).toBeInTheDocument();
   });
 
-  it('lists the three experiences with their actions', async () => {
+  it('lists published services from the catalog with their detail action', async () => {
     renderWithProviders(<App />, { route: '/experiences' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByRole('link', { name: /Discover the Hotel/ })).toHaveAttribute(
+    expect(await scope.findByRole('link', { name: /View service/ })).toHaveAttribute(
       'href',
-      '/experiences/smart-wellness-hotel',
+      '/experiences/' + PUBLISHED_SERVICE.id,
     );
-    expect(scope.getByRole('link', { name: /Discover ALM/ })).toHaveAttribute(
-      'href',
-      '/experiences/alm-japanese-restaurant',
-    );
-    expect(scope.getByRole('link', { name: /Discover the Resort/ })).toHaveAttribute(
-      'href',
-      '/experiences/hotspring-ecofarm-resort',
-    );
+    expect(scope.getByRole('heading', { name: PUBLISHED_SERVICE.name })).toBeInTheDocument();
+    expect(requestList).toHaveBeenCalledWith('/earning/public/services', expect.anything());
+  });
+  it('keeps the three CMS experiences when the services API fails', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences' });
+    const { main } = await chrome();
+    const scope = within(main);
+    // Original destination content is synchronous and must survive an API outage.
+    expect(await scope.findByText('AFhomes Smart Wellness Hotel')).toBeInTheDocument();
+    expect(scope.getByText('AFhomes ALM Japanese Restaurant')).toBeInTheDocument();
+    expect(scope.getByText('AFhomes Hotspring & Ecofarm Resort')).toBeInTheDocument();
+  });
+  it('renders a CMS detail slug when the services API fails', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences/alm-japanese-restaurant' });
+    const { main } = await chrome();
+    expect(
+      await within(main).findAllByText('The art of Japanese dining.', { exact: false }),
+    ).not.toHaveLength(0);
+  });
+  it('keeps CMS experiences when no service is published', async () => {
+    vi.mocked(requestList).mockResolvedValue([]);
+    renderWithProviders(<App />, { route: '/experiences' });
+    const { main } = await chrome();
+    const scope = within(main);
+    // An empty catalog hides the additive section, never the destinations.
+    expect(await scope.findByText('AFhomes Smart Wellness Hotel')).toBeInTheDocument();
+    expect(screen.queryByText('Experiences coming soon')).not.toBeInTheDocument();
+  });
+  it('offers retry when published services cannot be loaded', async () => {
+    vi.mocked(requestList).mockRejectedValue(new Error('Catalog offline'));
+    renderWithProviders(<App />, { route: '/experiences' });
+    expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
 
@@ -194,10 +262,9 @@ describe('contact and inquiry form', () => {
     renderWithProviders(<App />, { route: '/contact' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(scope.getByRole('link', { name: /claudmarsjimenez.afhomes@gmail.com/i })).toHaveAttribute(
-      'href',
-      expect.stringContaining('mailto:'),
-    );
+    expect(
+      scope.getByRole('link', { name: /info@afhomes\.com\.ph/ }),
+    ).toHaveAttribute('href', 'mailto:info@afhomes.com.ph');
     expect(scope.getByLabelText(/Name/)).toBeInTheDocument();
     expect(scope.getByLabelText(/Message/)).toBeInTheDocument();
     expect(scope.getByRole('button', { name: /Send message/ })).toBeInTheDocument();
@@ -227,9 +294,9 @@ describe('contact and inquiry form', () => {
       await user.click(screen.getByRole('button', { name: /Send message/ }));
 
       expect(await screen.findByText('Request saved locally.')).toBeInTheDocument();
-      expect(
-        (window.location as unknown as { href: string }).href,
-      ).toMatch(/^mailto:claudmarsjimenez\.afhomes@gmail\.com\?/);
+      expect((window.location as unknown as { href: string }).href).toMatch(
+        /^mailto:info@afhomes\.com\.ph\?/,
+      );
       const outbox = JSON.parse(localStorage.getItem('afhomes.inquiries.v1') ?? '[]') as {
         name: string;
       }[];
@@ -264,7 +331,9 @@ describe('stories, FAQ, and VIP pages', () => {
     renderWithProviders(<App />, { route: '/faq' });
     const { main } = await chrome();
     const scope = within(main);
-    expect(await scope.findByText('Who is the AFhomes Group?', undefined, { timeout: 20000 })).toBeInTheDocument();
+    expect(
+      await scope.findByText('Who is the AFhomes Group?', undefined, { timeout: 20000 }),
+    ).toBeInTheDocument();
     await user.click(scope.getByRole('tab', { name: /VIP Privilege/ }));
     expect(
       await scope.findByText('What is the purpose of the VIP Privilege Program?', undefined, {
@@ -319,9 +388,15 @@ describe('route precedence', () => {
     // The guard bounces to the sign-in screen, which carries its own heading
     // alongside the hero - assert the sign-in specifically.
     expect(
-      await screen.findByRole('heading', { name: 'Sign in to your card', level: 2 }),
+      await screen.findByRole('heading', { name: 'Sign in to your card', level: 1 }),
     ).toBeInTheDocument();
     expect(document.querySelector('.afh-public')).not.toBeInTheDocument();
     expect(screen.queryByText('This page is taking a rest day.')).not.toBeInTheDocument();
   });
+});
+
+// Preserve source-module behavior tests with explicit feature-on fixtures.
+vi.mock('@afhomes/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@afhomes/shared')>();
+  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
 });

@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router';
+import { Navigate, Route, Routes } from 'react-router';
 
-import { NotFound } from '@jad/ui';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
+import { FEATURE_FLAGS } from '@afhomes/shared';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
 import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
@@ -13,15 +14,21 @@ import { CustomerPaymentsPage } from '../features/customer/CustomerPaymentsPage'
 import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
 import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
 import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemptionsPage';
+import { AdminEntryPage, StaffLoginEntryPage } from '../features/staff/StaffEntryPage';
 import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { OstLoginPage } from '../features/ost/OstLoginPage';
 import { OstDashboardPage } from '../features/ost/OstDashboardPage';
+import { OstSalesPage } from '../features/ost/OstSalesPage';
+import { OstCommissionsPage } from '../features/ost/OstCommissionsPage';
+import { OstAccreditationPage } from '../features/ost/OstAccreditationPage';
+import { OstProfilePage } from '../features/ost/OstProfilePage';
 import { OstRenewalPage } from '../features/ost/OstRenewalPage';
 import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
 import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
 import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
+import { OstLayout } from './OstLayout';
 import { OstGuard } from './OstGuard';
 
 const HomePage = lazy(() =>
@@ -40,6 +47,7 @@ const StoryDetailPage = lazy(() => import('../marketing/pages/StoryDetail'));
 const FAQPage = lazy(() => import('../marketing/pages/FAQ'));
 const CompliancePage = lazy(() => import('../marketing/pages/Compliance'));
 const ContactPage = lazy(() => import('../marketing/pages/Contact'));
+const SaleTeamSearchPage = lazy(() => import('../marketing/pages/SaleTeamSearch'));
 const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
 
 /**
@@ -50,7 +58,7 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
  * auth (`/customer/login`, activate, recovery) and the OST portal
  * (`/ost/login`, `/ost/register`, `/ost/dashboard`) are public by necessity;
  * the customer portal stays guarded behind `CustomerLayout`, the OST portal
- * behind `OstGuard`, and each portal keeps its own `*` fallback.
+ * behind `OstLayout`, and each portal keeps its own `*` fallback.
  *
  * Route precedence note: static segments (`/customer/...`, `/ost/...`)
  * always outrank the root `*`, so public routes can never swallow them — and
@@ -58,6 +66,8 @@ const MarketingNotFoundPage = lazy(() => import('../marketing/pages/NotFound'));
  */
 export default function App() {
   return (
+    <>
+    <ScrollToTop />
     <Routes>
       <Route
         element={
@@ -79,10 +89,19 @@ export default function App() {
         <Route path="faq" element={<FAQPage />} />
         <Route path="compliance" element={<CompliancePage />} />
         <Route path="contact" element={<ContactPage />} />
+        <Route path="sale-team-search" element={<SaleTeamSearchPage />} />
         <Route path=":slug" element={<CmsPage />} />
       </Route>
 
       <Route path="/customer/login" element={<CustomerLoginPage />} />
+      {/* Local-dev staff entry (see StaffEntryPage). Production serves
+          `/admin/*` from the admin bundle via vercel.json, so these web routes
+          are a dev convenience: sign in here, continue on the staff console
+          origin. Bare paths render the matching login (never a dashboard). */}
+      <Route path="/admin/login" element={<AdminEntryPage />} />
+      <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+      <Route path="/staff/login" element={<StaffLoginEntryPage />} />
+      <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
       <Route path="/customer/activate" element={<CustomerActivatePage />} />
       {/* Phase 16 recovery: public by necessity, alongside login/activate.
           Static segments outrank the marketing `:slug`, so these can never be
@@ -103,20 +122,26 @@ export default function App() {
       <Route path="/ost/login" element={<OstLoginPage />} />
       <Route path="/ost/forgot-password" element={<OstForgotPasswordPage />} />
       <Route path="/ost/reset-password" element={<OstResetPasswordPage />} />
+      <Route path="/ost/change-password" element={<OstResetPasswordPage firstLogin />} />
       <Route
-        path="/ost/dashboard"
+        path="/ost"
         element={
-          <OstGuard>
-            <OstDashboardPage />
-          </OstGuard>
+          <OstLayout />
         }
-      />
+      >
+        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route path="dashboard" element={<OstDashboardPage />} />
+        <Route path="sales" element={<OstSalesPage />} />
+        <Route path="commissions" element={<OstCommissionsPage />} />
+        <Route path="accreditation" element={<OstAccreditationPage />} />
+        <Route path="profile" element={<OstProfilePage />} />
+      </Route>
 
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<CustomerDashboardPage />} />
         <Route path="membership" element={<CustomerMembershipPage />} />
-        <Route path="points" element={<CustomerPointsPage />} />
-        <Route path="redemptions" element={<CustomerRedemptionsPage />} />
+        <Route path="points" element={FEATURE_FLAGS.services ? <CustomerPointsPage /> : <NotFound />} />
+        <Route path="redemptions" element={FEATURE_FLAGS.redemption ? <CustomerRedemptionsPage /> : <NotFound />} />
         <Route path="payments" element={<CustomerPaymentsPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
         <Route path="*" element={<NotFound />} />
@@ -124,5 +149,6 @@ export default function App() {
 
       <Route path="*" element={<MarketingNotFoundPage />} />
     </Routes>
+    </>
   );
 }

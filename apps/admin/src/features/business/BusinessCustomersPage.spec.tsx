@@ -1,24 +1,23 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AfHomesPermission, Customer } from '@jad/contracts';
+import type { AfHomesPermission, Customer } from '@afhomes/contracts';
 
 import { BusinessCustomersPage } from './BusinessCustomersPage';
 import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
-import {
-  getCardProducts,
-  getCustomers,
-  issueCustomerAccountActivation,
-} from './services';
+import { deleteCustomer, getCardProducts, getCustomersPage, issueCustomerAccountActivation, reactivateCustomer } from './services';
 
 vi.mock('./services', () => ({
-  anonymizeCustomer: vi.fn(),
   createCustomer: vi.fn(),
   deactivateCustomer: vi.fn(),
+  reactivateCustomer: vi.fn(),
   deleteCustomer: vi.fn(),
   getCardProducts: vi.fn(),
   getCustomers: vi.fn(),
+  getCustomersPage: vi.fn(),
+  getCustomerById: vi.fn(),
   issueCustomerAccountActivation: vi.fn(),
   getOfficialFormTemplate: vi.fn(),
   previewOfficialFormImport: vi.fn(),
@@ -27,6 +26,12 @@ vi.mock('./services', () => ({
 vi.mock('../../lib/api/client', () => ({
   requestList: vi.fn().mockResolvedValue([]),
   setApiAccessTokenForTests: vi.fn(),
+}));
+
+// The applications view is its own page component, covered by its own spec.
+// Here it only has to be a distinguishable branch of the customers screen.
+vi.mock('./official-forms-applications', () => ({
+  CustomerApplicationsPage: () => <h2>Customer Applications</h2>,
 }));
 
 const grant = (
@@ -54,6 +59,13 @@ const STAFF: SessionUser = {
 
 const SUPER: SessionUser = { ...STAFF, id: 'u-super', roleSlug: 'super_admin' };
 
+/** STAFF plus the import workspace grant, so the gated action can be proven. */
+const IMPORTER: SessionUser = {
+  ...STAFF,
+  id: 'u-import',
+  afHomesPermissions: [...STAFF.afHomesPermissions, grant('governance.customer_import')],
+};
+
 const row = (extra: Record<string, unknown> = {}) =>
   ({
     id: 'c-1',
@@ -69,37 +81,114 @@ const row = (extra: Record<string, unknown> = {}) =>
     ...extra,
   }) as unknown as Customer;
 
+const pageOf = (rows: Customer[], total: number) => ({ data: rows, total });
+
 beforeEach(() => {
-  vi.mocked(getCustomers).mockReset();
+  vi.mocked(getCustomersPage).mockReset();
   vi.mocked(getCardProducts).mockResolvedValue([]);
   vi.mocked(issueCustomerAccountActivation).mockResolvedValue({
     activationUrl: 'https://example.test/activate',
   } as never);
 });
 
-describe('BusinessCustomersPage row actions', () => {
-  it('keeps the primary action visible and secondary actions behind the overflow', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+describe('BusinessCustomersPage views', () => {
+  it('shows the people list by default', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New application' })).toBeInTheDocument();
-    // Secondary workflow actions are not loose buttons anymore.
+  });
+
+  it('opens the applications view straight from the URL', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, {
+      user: STAFF,
+      route: '/admin/customers?view=applications',
+    });
     expect(
-      screen.queryByRole('button', { name: 'Deactivate account' }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole('heading', { name: 'Customer Applications' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('MARIA SANTOS')).not.toBeInTheDocument();
+  });
+
+  it('opens the applications view from its own address', async () => {
+    // The sidebar entry targets this path, so it must open the view itself.
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, {
+      user: STAFF,
+      route: '/admin/customers/applications',
+    });
     expect(
-      screen.queryByRole('button', { name: /activation link/i }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole('heading', { name: 'Customer Applications' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('MARIA SANTOS')).not.toBeInTheDocument();
+  });
+
+  it('offers create and import/export on the customers screen', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: IMPORTER });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /import \/ export/i })).toBeInTheDocument();
+  });
+
+  it('hides import/export from a principal without the customer-import grant', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /import \/ export/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('BusinessCustomersPage row actions', () => {
+  it('requires typed DELETE and refreshes business and lookup caches after permanent deletion', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    vi.mocked(deleteCustomer).mockReset().mockResolvedValue({ deleted: true });
+    const { client } = renderWithProviders(<BusinessCustomersPage />, { user: SUPER });
+    client.setQueryData(['business', 'sales'], ['stale']);
+    client.setQueryData(['customer-lookup', 'MARIA'], ['stale']);
+    client.setQueryData(['memberships', 'active'], ['stale']);
+    await screen.findByText('MARIA SANTOS');
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
+    const dialog = screen.getByRole('dialog', { name: 'Permanently Delete Customer Account' });
+    const confirm = within(dialog).getByRole('button', { name: 'Delete permanently' });
+    expect(confirm).toBeDisabled();
+    const input = within(dialog).getByLabelText(/Type DELETE/);
+    await user.type(input, 'DETELE');
+    expect(confirm).toBeDisabled();
+    expect(deleteCustomer).not.toHaveBeenCalled();
+    await user.clear(input);
+    await user.type(input, 'DELETE');
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([], 0));
+    await user.click(confirm);
+    await screen.findByText('No customers found.');
+    expect(deleteCustomer).toHaveBeenCalledExactlyOnceWith('c-1');
+    expect(client.getQueryState(['business', 'sales'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['customer-lookup', 'MARIA'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['memberships', 'active'])?.isInvalidated).toBe(true);
+  });
+  it('keeps row actions behind the overflow so the table stays narrow', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
+    // No loose per-row buttons anymore - everything lives in the menu, and
+    // the application entry point is gone entirely.
+    expect(screen.queryByRole('button', { name: 'New application' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deactivate account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /activation link/i })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    expect(screen.queryByRole('menuitem', { name: 'New application' })).not.toBeInTheDocument();
   });
 
   it('opens the overflow with authorized actions and keeps danger distinct', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     const issue = screen.getByRole('menuitem', { name: 'Issue / Reissue activation link' });
     const deactivate = screen.getByRole('menuitem', { name: 'Deactivate account' });
     expect(issue).toBeInTheDocument();
@@ -107,58 +196,229 @@ describe('BusinessCustomersPage row actions', () => {
     expect(deactivate.className).not.toBe(issue.className);
     // Escape dismisses and focus returns to the trigger.
     await user.keyboard('{Escape}');
-    await waitFor(() =>
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument(),
-    );
-    expect(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    ).toHaveFocus();
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'More actions for CUS-000001' })).toHaveFocus();
   });
 
   it('hides super-admin actions from ordinary staff', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     expect(screen.queryByRole('menuitem', { name: 'Anonymize' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('menuitem', { name: 'Delete permanently' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete permanently' })).not.toBeInTheDocument();
   });
 
   it('offers separated destructive actions to the super admin', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row()]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: SUPER });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
     // The guarded confirm dialog owns the destructive decision.
     expect(await screen.findByText('Permanently Delete Customer Account')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Delete permanently' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeInTheDocument();
   });
 
-  it('disables deactivation for suspended customers inside the menu', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([row({ status: 'suspended' })]);
+  it('hides deactivation for non-active customers inside the menu and offers activation instead', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole('button', { name: 'More actions for CUS-000001' }),
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    expect(screen.queryByRole('menuitem', { name: 'Deactivate account' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Activate account' })).toBeInTheDocument();
+  });
+
+  it('hides activation for an active customer inside the menu', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    expect(screen.queryByRole('menuitem', { name: 'Activate account' })).not.toBeInTheDocument();
+  });
+
+  it('reactivates a suspended customer and refreshes the directory', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row({ status: 'suspended' })], 1));
+    vi.mocked(reactivateCustomer).mockResolvedValue({ reactivated: true } as never);
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Activate account' }));
+    const dialog = screen.getByRole('dialog', { name: 'Activate Customer Account' });
+    // Admins must be told up front that login access is not restored automatically.
+    expect(within(dialog).getByText(/issue a new activation link/i)).toBeInTheDocument();
+    const callsBefore = vi.mocked(getCustomersPage).mock.calls.length;
+    await user.click(within(dialog).getByRole('button', { name: 'Activate account' }));
+    await waitFor(() => expect(reactivateCustomer).toHaveBeenCalledExactlyOnceWith('c-1'));
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.length).toBeGreaterThan(callsBefore),
     );
-    expect(screen.getByRole('menuitem', { name: 'Deactivate account' })).toBeDisabled();
   });
 
   it('reports an empty directory with the canonical copy', async () => {
-    vi.mocked(getCustomers).mockResolvedValue([]);
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([], 0));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     expect(await screen.findByText('No customers found.')).toBeInTheDocument();
+  });
+});
+
+describe('BusinessCustomersPage directory table', () => {
+  it('shows only the requested columns: name, payment, tier, status, actions', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf(
+        [
+          row({
+            customerCode: 'AF-CC-1A2B3C4D',
+            tier: 'GOLD',
+            frozenTotal: '60000.00',
+            verifiedPaid: '60000.00',
+          }),
+          row({
+            id: 'c-2',
+            customerNumber: 'CUS-000002',
+            fullName: 'JOSE RIZAL',
+            frozenTotal: '60000.00',
+            verifiedPaid: '15000.00',
+          }),
+        ],
+        2,
+      ),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    for (const header of ['Name', 'Payment Status', 'VIP Tier', 'Status', 'Actions']) {
+      expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
+    }
+    for (const gone of ['Customer ID', 'Email', 'Government ID', 'Category', 'Phone']) {
+      expect(screen.queryByRole('columnheader', { name: gone })).not.toBeInTheDocument();
+    }
+    // Email, masked ID, code, number and phone leave the table.
+    expect(screen.queryByText('maria@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText('••••1234')).not.toBeInTheDocument();
+    expect(screen.queryByText('AF-CC-1A2B3C4D')).not.toBeInTheDocument();
+    expect(screen.queryByText('CUS-000001')).not.toBeInTheDocument();
+    expect(screen.queryByText('+639171234567')).not.toBeInTheDocument();
+    // Total == Paid with zero Balance reads as Fully Paid; a remaining
+    // balance with Paid below Total reads as Unsettled.
+    expect(screen.getAllByText('Not Recorded')).toHaveLength(2);
+    // Scoped to the table: the tier filter also renders a GOLD option.
+    expect(within(screen.getByRole('table')).getByText('GOLD')).toBeInTheDocument();
+  });
+
+  it('fetches 10-row pages and walks them with the shared pagination', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 25));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(vi.mocked(getCustomersPage).mock.calls[0]![0]).toMatchObject({
+      limit: 10,
+      offset: 0,
+    });
+    // Pagination keeps working without a record counter: turning the page
+    // re-fetches with the next offset.
+    expect(screen.getByRole('navigation', { name: 'Customers pagination' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Page 1' })).toBeDisabled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls[1]![0]).toMatchObject({
+        limit: 10,
+        offset: 10,
+      }),
+    );
+  });
+
+  it('filters by status and payment without category or sort controls', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.queryByLabelText('Customer category')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sort customers')).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Customer status'), 'active');
+    await user.selectOptions(screen.getByLabelText('Payment status'), 'FULLY PAID');
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
+        status: 'active',
+        companyStatus: 'FULLY PAID',
+        offset: 0,
+      }),
+    );
+  });
+
+  it('searches live without a Search button', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('MARIA SANTOS');
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Search customers'), 'maria');
+    await waitFor(() =>
+      expect(vi.mocked(getCustomersPage).mock.calls.at(-1)![0]).toMatchObject({
+        search: 'maria',
+      }),
+    );
+  });
+
+  it('navigates to the detail view when a row is activated', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customers" element={<BusinessCustomersPage />} />
+        <Route path="/admin/customers/:id" element={<p>detail view</p>} />
+      </Routes>,
+      { user: STAFF, route: '/admin/customers' },
+    );
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('link', { name: 'View customer CUS-000001' }));
+    expect(await screen.findByText('detail view')).toBeInTheDocument();
+  });
+
+  it('keeps row-menu actions off the detail route', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/customers" element={<BusinessCustomersPage />} />
+        <Route path="/admin/customers/:id" element={<p>detail view</p>} />
+      </Routes>,
+      { user: STAFF, route: '/admin/customers' },
+    );
+    await screen.findByText('MARIA SANTOS');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'More actions for CUS-000001' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Deactivate account' }));
+    expect(await screen.findByText('Deactivate Customer Account')).toBeInTheDocument();
+    expect(screen.queryByText('detail view')).not.toBeInTheDocument();
+  });
+
+  it('falls back to company-stated values when no membership/settlement data exists', async () => {
+    vi.mocked(getCustomersPage).mockResolvedValue(
+      pageOf(
+        [
+          row({
+            id: 'c-3',
+            customerNumber: 'CUS-000003',
+            fullName: 'JUAN DELA CRUZ',
+            companyStatus: 'Cancelled',
+            statedVipPackage: 'SILVER',
+            tier: null,
+            frozenTotal: '0.00',
+            verifiedPaid: '0.00',
+          }),
+        ],
+        1,
+      ),
+    );
+    renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
+    await screen.findByText('JUAN DELA CRUZ');
+    expect(within(screen.getByRole('table')).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText('SILVER')).toBeInTheDocument();
+    expect(screen.queryByText('Unsettled')).not.toBeInTheDocument();
   });
 });

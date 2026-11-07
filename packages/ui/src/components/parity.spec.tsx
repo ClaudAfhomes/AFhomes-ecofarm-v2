@@ -16,25 +16,24 @@ import {
   TextField,
 } from '../index';
 
-const renderWithRouter = (ui: ReactElement) =>
-  render(<MemoryRouter>{ui}</MemoryRouter>);
+const renderWithRouter = (ui: ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
-describe('AuthLayout (JAD parity shell)', () => {
+describe('AuthLayout (AFHomes auth shell)', () => {
   it('renders the mobile masthead, brand panel, and a single h1', () => {
     render(
-      <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFhomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
     expect(screen.getByRole('heading', { level: 1, name: 'Staff sign in' })).toBeInTheDocument();
     // Mobile masthead + desktop brand panel + form eyebrow share the eyebrow text.
-    expect(screen.getAllByText('AF Homes Ecofarm').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('AFhomes Ecofarm').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Grow.')).toBeInTheDocument();
   });
 
   it('marks every auth screen noindex, nofollow', () => {
     render(
-      <AuthLayout eyebrow="AF Homes Ecofarm" title="Staff sign in" brandTitle="Grow.">
+      <AuthLayout eyebrow="AFhomes Ecofarm" title="Staff sign in" brandTitle="Grow.">
         <form />
       </AuthLayout>,
     );
@@ -47,7 +46,7 @@ describe('AuthLayout (JAD parity shell)', () => {
   it('supports the wide form panel and lead text', () => {
     const { container } = render(
       <AuthLayout
-        eyebrow="AF Homes Ecofarm"
+        eyebrow="AFhomes Ecofarm"
         title="Activate your account"
         lead="Use your code."
         brandTitle="Brand."
@@ -58,6 +57,26 @@ describe('AuthLayout (JAD parity shell)', () => {
     );
     expect(screen.getByText('Use your code.')).toBeInTheDocument();
     expect(container.querySelector('[class*="formPanelWide"]')).not.toBeNull();
+  });
+
+  it('renders the breadcrumb slot at the very top of the form card', () => {
+    render(
+      <AuthLayout
+        eyebrow="AFhomes Ecofarm"
+        title="Staff sign in"
+        brandTitle="Grow."
+        breadcrumb={
+          <nav aria-label="Breadcrumb">
+            <span aria-current="page">Staff Login</span>
+          </nav>
+        }
+      >
+        <form />
+      </AuthLayout>,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    const heading = screen.getByRole('heading', { level: 1, name: 'Staff sign in' });
+    expect(nav.compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });
 
@@ -133,7 +152,7 @@ describe('Alert', () => {
   });
 });
 
-describe('MetricCard (JAD QueueCard grammar)', () => {
+describe('MetricCard (AFHomes queue-card pattern)', () => {
   it('renders icon, value, label, and description', () => {
     renderWithRouter(
       <MetricCard label="Pending payments" value={7} icon="clock" description="Awaiting review" />,
@@ -176,6 +195,36 @@ describe('FilterBar', () => {
     expect(screen.getByLabelText('Search')).toBeInTheDocument();
     expect(screen.getByLabelText('Status')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument();
+  });
+
+  it('renders no disclosure toggle unless filters are collapsible', () => {
+    render(
+      <FilterBar
+        search={<input aria-label="Search" />}
+        filters={<select aria-label="Status" />}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /filters/i })).toBeNull();
+  });
+
+  it('toggles collapsible filters between Expand and Collapse', async () => {
+    const user = userEvent.setup();
+    render(
+      <FilterBar
+        search={<input aria-label="Search" />}
+        filters={<select aria-label="Status" />}
+        filtersToggleLabel="Expand Filters"
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: 'Expand Filters' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Collapse Filters' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    // The filters themselves stay mounted for desktop; only the toggle flips.
+    expect(screen.getByLabelText('Status')).toBeInTheDocument();
   });
 });
 

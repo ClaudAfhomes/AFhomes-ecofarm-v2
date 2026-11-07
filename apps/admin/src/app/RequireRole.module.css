@@ -1,12 +1,23 @@
 .loading {
   display: grid;
-  place-items: center;
   gap: var(--space-4);
-  min-height: 70vh;
+  align-content: start;
   width: 100%;
-  padding: var(--space-8) var(--space-4);
+  min-width: 0;
 }
 
-.loadingSpinner {
-  color: var(--color-brand-primary);
+.loadingHero {
+  height: 7rem;
+  border-radius: var(--radius-lg);
+}
+
+.loadingGrid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+.loadingCard {
+  min-height: 10.5rem;
+  border-radius: var(--radius-md);
 }

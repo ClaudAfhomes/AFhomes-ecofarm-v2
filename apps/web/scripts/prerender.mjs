@@ -82,6 +82,11 @@ const routes = [
     'Contact AFhomes',
     'Contact the AFhomes team about resort, wellness, dining, VIP and reservation inquiries.',
   ],
+  [
+    '/sale-team-search',
+    'Verify a sales team member',
+    'Verify current IST and OST accreditation using an AA number.',
+  ],
 ];
 
 const globalSeo = { ...defaults };
@@ -108,7 +113,9 @@ function replaceTag(html, pattern, tag) {
 for (const [path, fallbackTitle, fallbackDescription] of routes) {
   const saved = pageSeo.find((item) => item.path === path);
   const title =
-    path === '/' && !saved?.seoTitle ? globalSeo.siteTitle : titleFor(saved?.seoTitle || fallbackTitle);
+    path === '/' && !saved?.seoTitle
+      ? globalSeo.siteTitle
+      : titleFor(saved?.seoTitle || fallbackTitle);
   const description = saved?.metaDescription || fallbackDescription || globalSeo.metaDescription;
   const canonical = `${baseUrl}${path === '/' ? '/' : path}`;
   const socialTitle = saved?.openGraphTitle || title;

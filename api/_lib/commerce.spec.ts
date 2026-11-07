@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 2 - commerce rules.
+ * AFHomes Phase 2 - commerce rules.
  *
  * The financial rules that must never be wrong: exact-decimal commission, the
  * minimum down payment, the 7-day spot-cash window, product sellability, and

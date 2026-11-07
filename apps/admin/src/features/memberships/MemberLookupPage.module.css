@@ -1,43 +1,542 @@
-.search {
-  display: flex;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
+/* Customer Lookup (GSD / Employee desk): live-search result cards with the
+   member's actual VIP card artwork. Each card is themed by tier through
+   `data-tier` — GOLD / SILVER / BRONZE / NONE — so the tier reads off color
+   as well as text. */
+
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
 }
-.member {
-  margin-bottom: var(--space-4);
-  padding: var(--space-5);
-  background: var(--color-bg-surface-raised);
+
+.search {
+  margin-bottom: var(--space-1);
+}
+
+/* Suggestion dropdown anchor: the list hangs off the search box. */
+.suggestWrap {
+  position: relative;
+}
+
+.suggestList {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + var(--space-1));
+  z-index: var(--z-topbar);
+  display: grid;
+  gap: 2px;
+  max-height: 19rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.suggestOption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.suggestOption[data-active='true'],
+.suggestOption:hover {
+  background-color: var(--color-brand-soft);
+}
+
+.suggestName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.suggestName .mark,
+.mark {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+  font-weight: 800;
+  border-radius: 2px;
+  padding-inline: 1px;
+}
+
+.suggestMeta {
+  flex-shrink: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.suggestHint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.results {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Result card: artwork rail beside the record. The wash, border, category
+   chip and icon tiles all key off the same tier color below. */
+.member {
+  --tier-strong: var(--color-text-secondary);
+  --tier-accent: var(--color-border-strong);
+  --tier-wash: var(--color-bg-subtle);
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  border: 1px solid var(--tier-accent);
+  border-radius: var(--radius-lg, var(--radius-md));
+  background:
+    linear-gradient(180deg, var(--tier-wash) 0%, var(--color-bg-surface-raised) 30%),
+    var(--color-bg-surface-raised);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+.member:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member,
+  .member:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+.member[data-tier='GOLD'] {
+  --tier-strong: var(--color-accent-strong);
+  --tier-accent: var(--color-accent);
+  --tier-wash: var(--color-accent-soft);
+}
+
+.member[data-tier='SILVER'] {
+  --tier-strong: var(--color-text-secondary);
+  --tier-accent: #9aa5b1;
+  --tier-wash: #edf1f5;
+}
+
+.member[data-tier='BRONZE'] {
+  --tier-strong: #7c4f21;
+  --tier-accent: #a06a32;
+  --tier-wash: #f7ece0;
+}
+
+.member[data-tier='NONE'] {
+  --tier-strong: var(--color-text-muted);
+  --tier-accent: var(--color-border-default);
+  --tier-wash: var(--color-bg-subtle);
+}
+
+.artWrap {
+  min-width: 0;
+  min-height: 100%;
+  background-color: var(--tier-wash);
+}
+
+/* Clickable flip card: front = VIP card, back = government ID. */
+.flipWrap {
+  position: relative;
+  width: 100%;
+  min-height: 168px;
+  perspective: 1000px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.flipInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 168px;
+  transition: transform 500ms ease;
+  transform-style: preserve-3d;
+}
+
+.flipInner.flipped {
+  transform: rotateY(180deg);
+}
+
+.flipFront,
+.flipBack {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--tier-wash);
+}
+
+.flipBack {
+  transform: rotateY(180deg);
+}
+
+.flipWrap:focus-visible {
+  outline: 2px solid var(--tier-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Points stat row: three compact stat tiles spanning the full details width. */
+.pointsGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-surface-raised, var(--color-bg-surface));
+}
+.pointsGrid .fact {
+  flex: 1 1 calc(33.333% - var(--space-2));
+  min-width: 0;
+}
+
+.pointsGrid .fact {
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+}
+
+.pointsGrid .fact dt {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pointsGrid .fact dd {
+  font-size: var(--text-h4, var(--text-body));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The base `.fact:last-child` rule clears the row divider; tiles keep all
+   four sides. Later in source order + higher specificity wins. */
+.pointsGrid .fact:last-child {
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.capsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, var(--color-bg-surface-raised, #f8f9fa) 0%, var(--color-bg-surface) 100%);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.capCard {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.capLabel {
+  font-size: var(--text-caption, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.capValue {
+  font-size: var(--text-h3, 20px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #111827);
+}
+
+.capsGrid[data-tier='GOLD'] .capValue { color: #b45309; }
+.capsGrid[data-tier='SILVER'] .capValue { color: #475569; }
+.capsGrid[data-tier='BRONZE'] .capValue { color: #92400e; }
+
+/* Contain, never cover: the whole card face stays visible, letterboxed on
+   the tier wash. Nothing on the printed card is ever cropped away. */
+.art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 168px;
+  object-fit: contain;
+  object-position: center;
+}
+
+.artPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 168px;
+  padding: var(--space-4);
+  color: var(--tier-strong);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  text-align: center;
+}
+
+.cardBody {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.cardBody h2 {
+  margin: 0;
+  font-size: var(--text-h2, var(--text-h3));
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+/* Inline, not flex: a wrapped name keeps the badge after its last word. */
+.nameRow svg {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* Name left, tier badge right on one row; wraps gracefully on narrow cards. */
+.cardTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.category {
+  margin: 0;
+  justify-self: start;
+  padding: 2px var(--space-3);
+  border: 1px solid var(--tier-accent);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-bg-surface-raised);
+  color: var(--tier-strong);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* (h2 styling above) */
+
+.identifiers {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.member h2 {
-  margin: 0;
-  font-size: var(--text-h3);
-}
+
 .details {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
-  gap: var(--space-4);
-  margin-bottom: 0;
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin: var(--space-3) 0 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-surface);
 }
+
+.fact {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle, var(--color-border-default));
+}
+
+.fact:last-child {
+  border-bottom: 0;
+}
+
+.factIcon {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .fact {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+  .details dt {
+    font-size: var(--text-caption);
+  }
+}
+
+.factText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .details dt {
   font-size: var(--text-body-s);
   color: var(--color-text-secondary);
 }
+
 .details dd {
-  margin: var(--space-1) 0 0;
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
 }
+
 .points {
   font-size: var(--text-metric);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-@media (max-width: 639px) {
-  .search {
-    flex-direction: column;
+
+/* Skeleton mirrors the card shape so first paint already holds the layout. */
+.artSkeleton {
+  height: 100%;
+  min-height: 168px;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sunken) 25%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: lookup-shimmer 1.4s ease infinite;
+}
+
+.skeletonLine,
+.skeletonTitle,
+.skeletonChip,
+.factSkeletonIcon {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-sunken) 25%,
+    var(--color-border-subtle) 50%,
+    var(--color-bg-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: lookup-shimmer 1.4s ease infinite;
+}
+
+.skeletonLine {
+  height: 14px;
+}
+
+.skeletonTitle {
+  height: 26px;
+}
+
+/* Category pill placeholder: same pill footprint as the tier chip. */
+.skeletonChip {
+  height: 18px;
+  border-radius: var(--radius-pill);
+}
+
+/* Fact icon-tile placeholder: same 32px tile as the loaded fact rows. */
+.factSkeletonIcon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+/* Skeleton suggestion rows are placeholders, never picks. */
+.suggestOption[aria-hidden='true'] {
+  cursor: default;
+}
+
+@keyframes lookup-shimmer {
+  from {
+    background-position: 200% 0;
   }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artSkeleton,
+  .skeletonLine,
+  .skeletonTitle,
+  .skeletonChip,
+  .factSkeletonIcon {
+    animation: none;
+  }
+}
+
+@media (max-width: 639px) {
   .member {
+    grid-template-columns: 1fr;
+  }
+
+  .art,
+  .artPlaceholder,
+  .artSkeleton {
+    min-height: 0;
+  }
+
+  .art {
+    aspect-ratio: 16 / 9;
+    max-height: 180px;
+  }
+
+  /* The skeleton artwork follows the loaded art onto the stacked mobile
+     layout instead of collapsing to zero height. */
+  .artSkeleton {
+    aspect-ratio: 16 / 9;
+    max-height: 180px;
+  }
+
+  /* The flip card follows the same stacked mobile footprint as the art. */
+  .flipWrap,
+  .flipInner {
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    max-height: 220px;
+  }
+
+  .cardBody {
     padding: var(--space-4);
   }
 }

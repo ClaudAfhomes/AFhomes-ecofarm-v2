@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addMoney, compareMoney, divideMoneyExact, formatMoney, isExactDecimal, subtractMoney } from '../src/index';
+import { addMoney, compareMoney, divideMoneyExact, formatMoney, formatMoneyOrDash, isExactDecimal, subtractMoney } from '../src/index';
 
 describe('isExactDecimal', () => {
   it('accepts integers and exact decimals', () => {
@@ -32,6 +32,24 @@ describe('formatMoney', () => {
     expect(() => formatMoney('1.234')).toThrow();
     expect(() => formatMoney('abc')).toThrow();
     expect(() => formatMoney(1 as unknown as string)).toThrow();
+  });
+});
+
+describe('formatMoneyOrDash', () => {
+  it('renders nullish as a placeholder', () => {
+    expect(formatMoneyOrDash(null)).toBe('—');
+    expect(formatMoneyOrDash(undefined)).toBe('—');
+  });
+
+  it('delegates present values to the single fail-loud formatter', () => {
+    expect(formatMoneyOrDash('60000.00')).toBe('₱60,000.00');
+    expect(formatMoneyOrDash('30000')).toBe('₱30,000.00');
+    expect(formatMoneyOrDash('1000000.5')).toBe('₱1,000,000.50');
+  });
+
+  it('stays fail-loud on malformed input (a lenient reimplementation fails this)', () => {
+    expect(() => formatMoneyOrDash('much')).toThrow();
+    expect(() => formatMoneyOrDash('1.234')).toThrow();
   });
 });
 

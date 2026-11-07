@@ -2,7 +2,6 @@ import { Outlet, useLocation } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { Navbar } from "../../components/layout/Navbar";
 import { Footer } from "../../components/layout/Footer";
-import { ScrollToTop } from "../../components/layout/ScrollToTop";
 import { CursorDot } from "../../components/ui/CursorDot";
 import { EASE } from "../../lib/motion";
 import { CmsMediaSections } from "../../components/ui/CmsMediaSections";
@@ -12,7 +11,6 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <ScrollToTop />
       <CursorDot />
       <a
         href="#site-content"

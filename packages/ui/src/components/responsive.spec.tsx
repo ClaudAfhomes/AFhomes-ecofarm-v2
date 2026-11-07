@@ -1,5 +1,5 @@
 /**
- * AF Homes Phase 33 - shared responsive contracts.
+ * AFHomes Phase 33 - shared responsive contracts.
  *
  * jsdom performs no layout, so these tests pin the STRUCTURAL contracts that
  * make the CSS responsive rules work: drawer-vs-sidebar switching, dialog

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 import { actionAllowed, permissionsAreSubset } from './afhomes-access.js';
 
 const held: AfHomesPermission[] = [
@@ -12,7 +12,7 @@ const held: AfHomesPermission[] = [
   },
 ];
 
-describe('AF Homes server authorization', () => {
+describe('AFHomes server authorization', () => {
   it('denies direct URL actions not granted by the effective matrix', () => {
     expect(actionAllowed(held[0], 'view')).toBe(true);
     expect(actionAllowed(held[0], 'update')).toBe(false);

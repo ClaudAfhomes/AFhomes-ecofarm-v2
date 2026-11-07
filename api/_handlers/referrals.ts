@@ -1,5 +1,5 @@
 /**
- * AF Homes referral / upline relationships (VD -> SSM -> SM -> OST).
+ * AFHomes referral / upline relationships (VD -> SSM -> SM -> OST).
  *
  * Once a relationship is authoritative the subject can no longer move
  * themselves: the create and correct paths both require `sales.uplines`, a
@@ -7,7 +7,7 @@
  * the relationship id they were created under, so a later correction never
  * rewrites past attribution.
  */
-import { createReferralSchema, correctReferralSchema, hierarchyAllowsUpline } from '@jad/contracts';
+import { createReferralSchema, correctReferralSchema, hierarchyAllowsUpline } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import {

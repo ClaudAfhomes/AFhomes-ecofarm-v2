@@ -1,6 +1,6 @@
 /**
  * Phase 15 report API client. Every call goes through `lib/api/client` and is
- * validated against `@jad/contracts`. Exports arrive as base64-in-JSON
+ * validated against `@afhomes/contracts`. Exports arrive as base64-in-JSON
  * envelopes; this module turns them back into downloads. The browser never
  * computes a report row - it only renders what the scoped server query
  * returned.
@@ -12,10 +12,10 @@ import {
   type AuditResponse,
   type ReportExport,
   type ReportResponse,
-} from '@jad/contracts';
+} from '@afhomes/contracts';
 import { protectedRequest as request } from '../../lib/api/client';
-import { formatDateTime } from '../../lib/format';
-import { formatMoney, formatPoints } from '../business/format';
+import { formatDateTime, humanizeToken } from '../../lib/format';
+import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 
 export type ReportFilters = {
   from?: string;
@@ -73,11 +73,11 @@ export const exportAudit = (
 
 /** Render a raw report cell: dates, money strings, and points read naturally. */
 export function formatCell(key: string, value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'number') {
     if (/points|spent|balance|count|qty|descendants|downline|sales|entries/i.test(key)) {
-      return formatPoints(value);
+      return formatCountOrDash(value);
     }
     return String(value);
   }
@@ -91,18 +91,14 @@ export function formatCell(key: string, value: unknown): string {
     /^(0|[1-9][0-9]*)\.\d{2}$/.test(value) &&
     /price|paid|remaining|value|amount|total|fee|down|monthly/i.test(key)
   ) {
-    return formatMoney(value);
+    return formatMoneyOrDash(value);
   }
   if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return formatDateTime(value);
   return value;
 }
 
 export function humanizeReportLabel(value: string): string {
-  return value
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .toLowerCase()
-    .replace(/^./, (c) => c.toUpperCase());
+  return humanizeToken(value);
 }
 
 export { envelopeBlob as exportToBlob, downloadFile as downloadExport } from '../../lib/download';

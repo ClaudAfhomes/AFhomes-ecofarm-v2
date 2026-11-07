@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { customerApplicationSchema, reservationAgreementSchema } from '@jad/contracts';
+import { customerApplicationSchema, reservationAgreementSchema } from '@afhomes/contracts';
 import { setApiAccessTokenForTests } from '../../lib/api/client';
 import { getCustomerApplications, getReservationAgreements } from './services';
 
@@ -55,6 +55,9 @@ describe('real summary response contract regression', () => {
         createdBy: null,
         createdAt: base.created_at,
         submittedAt: null,
+        // The list summary also resolves the seller display name; a row without
+        // one normalizes to null rather than dropping the key.
+        sellerName: null,
         status: 'draft',
       },
     ]);
@@ -70,8 +73,6 @@ describe('real summary response contract regression', () => {
         reservationNumber: 'IST-QA-1',
         paymentScheme: 'spot_cash',
         totalPrice: '312000.00',
-        primarySignatureStatus: 'received',
-        secondarySignatureStatus: null,
         hasSecondaryHolder: false,
         saleId: id,
         tier: 'GOLD',
@@ -80,6 +81,9 @@ describe('real summary response contract regression', () => {
         createdAt: base.created_at,
         submittedAt: null,
         status: 'draft',
+        paymentStatus: null,
+        verifiedTotal: null,
+        fullyPaid: false,
       },
     ]);
   });

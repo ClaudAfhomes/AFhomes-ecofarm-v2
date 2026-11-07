@@ -8,7 +8,7 @@
  * labelled so a drift from `role-baseline.ts` is visible here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportExportSchema, reportResponseSchema } from '@jad/contracts';
+import { reportExportSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
   CUSTOMER,
@@ -50,7 +50,12 @@ function grant(
   });
 }
 
-function install() {
+function install(
+  options: {
+    errors?: Record<string, { code: string; message: string }>;
+    links?: { child: string; parent: string; fk: string }[];
+  } = {},
+) {
   const now = new Date().toISOString();
   const tables = phase2World({
     card_sales: [
@@ -244,7 +249,7 @@ function install() {
       },
     ],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens(), ...options });
   const db = holder.db as FakeSupabase;
   // Production-baseline grants the shared fixtures predate or narrow down.
   for (const role of [ROLE2.viceDirector, ROLE2.seniorSalesManager, ROLE2.salesManager]) {
@@ -643,7 +648,7 @@ describe('exports from the scoped query', () => {
     );
     const doc = Buffer.from(pdf.content, 'base64').toString('latin1');
     expect(doc.startsWith('%PDF')).toBe(true);
-    expect(doc).toContain('AF Homes - memberships report');
+    expect(doc).toContain('AFHomes - memberships report');
   });
 
   it('rejects an unknown format instead of defaulting', async () => {
@@ -656,6 +661,28 @@ describe('exports from the scoped query', () => {
 });
 
 describe('audit center', () => {
+  it('resolves the actor role through staff_id even when assigned_by points to the same staff table', async () => {
+    const db = install({
+      errors: {
+        'staff_users.id,full_name,staff_role_assignments(roles(name))': {
+          code: 'PGRST201',
+          message: 'Ambiguous staff role relationship',
+        },
+      },
+      links: [
+        { child: 'staff_role_assignments', parent: 'staff_users', fk: 'assigned_by' },
+        { child: 'staff_role_assignments', parent: 'staff_users', fk: 'staff_id' },
+        { child: 'staff_role_assignments', parent: 'roles', fk: 'role_id' },
+      ],
+    });
+    for (const assignment of db.rows('staff_role_assignments'))
+      assignment.roles = db.rows('roles').find((role) => role.id === assignment.role_id);
+    const state = await get('audit', TOKEN.superAdmin, { actor: UUID.superAdminStaff });
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      data: [expect.objectContaining({ actorRole: 'Super Admin' })],
+    });
+  });
   it('opens for Super Admin and explicitly granted Admin, nobody else', async () => {
     expect((await get('audit', TOKEN.superAdmin)).status).toBe(200);
     expect((await get('audit', TOKEN.admin)).status).toBe(200);
@@ -698,9 +725,9 @@ describe('safety and wiring', () => {
     expect(JSON.stringify(state.body)).not.toContain('secret database detail');
   });
 
-  it('dispatches through the real router with the deployed route key', async () => {
-    expect(selectHandler('/api/v1/reports/sales', {})?.routeKey).toBe('reports/sales');
-    expect(selectHandler('/api/v1/reports/audit', {})?.routeKey).toBe('reports/audit');
+  it('keeps Reports disabled through the real router even for Super Admin', async () => {
+    expect(selectHandler('/api/v1/reports/sales', {})).toBeNull();
+    expect(selectHandler('/api/v1/reports/audit', {})).toBeNull();
     const { res, state } = makeRes();
     const handled = await routeRequest(
       {
@@ -711,8 +738,7 @@ describe('safety and wiring', () => {
       } as never,
       res as never,
     );
-    expect(handled).toBe(true);
-    expect(state.status).toBe(200);
+    expect(handled).toBe(false);
   });
 
   it('ships no migration: Phase 15 reads only columns earlier phases own', async () => {
@@ -849,6 +875,88 @@ describe('combined outstanding search filters', () => {
     );
     expect(result.data.length).toBeGreaterThan(0);
     expect(result.data.every((row) => row.isActive === true)).toBe(true);
+  });
+});
+
+describe('Payments report with reservation-origin rows', () => {
+  const RESERVATION = 'eeeeeeee-0000-4000-8000-0000000000e1';
+  const RES_PAYMENT = 'eeeeeeee-0000-4000-8000-0000000000e2';
+
+  function seedReservationPayment(overrides: FakeRow = {}) {
+    const db = holder.db as FakeSupabase;
+    db.rows('reservation_agreements').push({
+      id: RESERVATION,
+      reservation_number: 'AF-RES-ZZZZZ',
+      customer_id: CUSTOMER.active,
+      origin: 'application',
+      status: 'executed',
+      sale_id: null,
+      ...overrides,
+    });
+    db.rows('payments').push({
+      id: RES_PAYMENT,
+      origin: 'reservation',
+      sale_id: null,
+      reservation_id: RESERVATION,
+      customer_id: CUSTOMER.active,
+      amount: '10000.00',
+      payment_type: 'down_payment',
+      method: 'cash',
+      reference: 'RES-REF-1',
+      status: 'verified',
+      recorded_by: STAFF2.finance,
+      verified_by: STAFF2.finance,
+      recorded_at: new Date('2026-05-01T00:00:00.000Z').toISOString(),
+      verified_at: new Date('2026-05-01T00:00:00.000Z').toISOString(),
+    });
+  }
+
+  it('includes a pre-sale payment and reports the reservation it belongs to', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
+    const row = report.data.find((item) => item.saleNumber === 'AF-RES-ZZZZZ');
+    expect(row).toBeDefined();
+    expect(row).toMatchObject({ amount: '10000.00', status: 'verified', reference: 'RES-REF-1' });
+    // The money is in the totals, not only in the row list.
+    expect(report.meta.total).toBeGreaterThan(1);
+  });
+
+  it('finds a pre-sale payment by its reservation number', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse(
+      (await get('payments', TOKEN.superAdmin, { search: 'AF-RES-ZZZZZ' })).body,
+    );
+    expect(report.data).toHaveLength(1);
+    expect(report.data[0]!.saleNumber).toBe('AF-RES-ZZZZZ');
+  });
+
+  it('counts a finalization-linked row ONCE, not once per branch', async () => {
+    const db = holder.db as FakeSupabase;
+    seedReservationPayment();
+    // Finalization links the SAME row to the sale: it now matches both reads.
+    const payment = db.rows('payments').find((row) => row.id === RES_PAYMENT)!;
+    payment.sale_id = SALE.downPaid;
+    const report = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
+    expect(report.data.filter((item) => item.reference === 'RES-REF-1')).toHaveLength(1);
+  });
+
+  it('hides pre-sale rows from a scope-limited caller', async () => {
+    seedReservationPayment();
+    const report = reportResponseSchema.parse((await get('payments', TOKEN2.salesManager)).body);
+    expect(report.data.some((item) => item.saleNumber === 'AF-RES-ZZZZZ')).toBe(false);
+  });
+
+  it('does not read pre-sale rows for a plan or seller filter', async () => {
+    seedReservationPayment();
+    (holder.db as FakeSupabase).errors.payments = {
+      code: '22P02',
+      message: 'must not query payments',
+    };
+    const absent = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    for (const query of [{ planId: absent }, { seller: absent }] as Record<string, string>[]) {
+      const result = await get('payments', TOKEN.superAdmin, query);
+      expect(result.status).toBe(200);
+    }
   });
 });
 

@@ -5,8 +5,8 @@ import {
   buildRecoveryRedirect,
   classifyRecoveryRequestError,
   isValidRecoveryEmail,
-} from '@jad/shared';
-import { Alert, AuthLayout, Button, TextField } from '@jad/ui';
+} from '@afhomes/shared';
+import { Alert, AuthLayout, Button, TextField } from '@afhomes/ui';
 
 import { env } from '../../lib/env';
 import { getSupabaseClient } from '../../lib/supabase';
@@ -71,7 +71,7 @@ export function OstForgotPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="AF Homes Ecofarm"
+      eyebrow="AFhomes Ecofarm"
       title="Reset your password"
       lead="Enter your OST email and we will send you a link to choose a new password."
       brandTitle="Sell the farm you believe in."

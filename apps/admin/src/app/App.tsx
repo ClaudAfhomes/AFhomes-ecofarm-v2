@@ -1,35 +1,220 @@
-import { CustomerLookupPage } from '../features/memberships/CustomerLookupPage';
-import { MemberLookupPage } from '../features/memberships/MemberLookupPage';
+import { lazy } from 'react';
+const PublicVerificationSettingsPage = lazy(() =>
+  import('../features/afhomes/PublicVerificationSettingsPage').then((m) => ({
+    default: m.PublicVerificationSettingsPage,
+  })),
+);
+
+// Route pages load on demand: one chunk per feature module.
+// Auth screens, layout, and guards stay eager for first paint.
+const CustomerLookupPage = lazy(() =>
+  import('../features/memberships/CustomerLookupPage').then((m) => ({
+    default: m.CustomerLookupPage,
+  })),
+);
+const MemberLookupPage = lazy(() =>
+  import('../features/memberships/MemberLookupPage').then((m) => ({ default: m.MemberLookupPage })),
+);
+const AfHomesDashboardPage = lazy(() =>
+  import('../features/afhomes/AfHomesDashboardPage').then((m) => ({
+    default: m.AfHomesDashboardPage,
+  })),
+);
+const AfHomesDepartmentsPage = lazy(() =>
+  import('../features/afhomes/AfHomesDepartmentsPage').then((m) => ({
+    default: m.AfHomesDepartmentsPage,
+  })),
+);
+const AfHomesRoleDetailPage = lazy(() =>
+  import('../features/afhomes/AfHomesRoleDetailPage').then((m) => ({
+    default: m.AfHomesRoleDetailPage,
+  })),
+);
+const AfHomesRolesPage = lazy(() =>
+  import('../features/afhomes/AfHomesRolesPage').then((m) => ({ default: m.AfHomesRolesPage })),
+);
+const AfHomesStaffDetailPage = lazy(() =>
+  import('../features/afhomes/AfHomesStaffDetailPage').then((m) => ({
+    default: m.AfHomesStaffDetailPage,
+  })),
+);
+const AfHomesStaffPage = lazy(() =>
+  import('../features/afhomes/AfHomesStaffPage').then((m) => ({ default: m.AfHomesStaffPage })),
+);
+const BusinessActivationQueuePage = lazy(() =>
+  import('../features/business/BusinessActivationQueuePage').then((m) => ({
+    default: m.BusinessActivationQueuePage,
+  })),
+);
+const BusinessCommissionsPage = lazy(() =>
+  import('../features/business/BusinessCommissionsPage').then((m) => ({
+    default: m.BusinessCommissionsPage,
+  })),
+);
+const CommissionSettingsPage = lazy(() =>
+  import('../features/business/CommissionSettingsPage').then((m) => ({
+    default: m.CommissionSettingsPage,
+  })),
+);
+const BusinessCustomersPage = lazy(() =>
+  import('../features/business/BusinessCustomersPage').then((m) => ({
+    default: m.BusinessCustomersPage,
+  })),
+);
+const CustomerDetailPage = lazy(() =>
+  import('../features/business/CustomerDetailPage').then((m) => ({
+    default: m.CustomerDetailPage,
+  })),
+);
+const CustomerImportExportPage = lazy(() =>
+  import('../features/business/CustomerImportExportPage').then((m) => ({
+    default: m.CustomerImportExportPage,
+  })),
+);
+const BusinessFinanceQueuePage = lazy(() =>
+  import('../features/business/BusinessFinanceQueuePage').then((m) => ({
+    default: m.BusinessFinanceQueuePage,
+  })),
+);
+const BusinessPointsPage = lazy(() =>
+  import('../features/business/BusinessPointsPage').then((m) => ({
+    default: m.BusinessPointsPage,
+  })),
+);
+const UseVipPointsPage = lazy(() =>
+  import('../features/business/UseVipPointsPage').then((m) => ({ default: m.UseVipPointsPage })),
+);
+const PointsRulesPage = lazy(() =>
+  import('../features/business/PointsRulesPage').then((m) => ({ default: m.PointsRulesPage })),
+);
+const SalesRecordsPage = lazy(() =>
+  import('../features/business/SalesRecordsPage').then((m) => ({ default: m.SalesRecordsPage })),
+);
+const PurchasePaymentsPage = lazy(() =>
+  import('../features/business/PurchasePaymentsPage').then((m) => ({
+    default: m.PurchasePaymentsPage,
+  })),
+);
+const BusinessProductsPage = lazy(() =>
+  import('../features/business/BusinessProductsPage').then((m) => ({
+    default: m.BusinessProductsPage,
+  })),
+);
+const PaymentSchemeGuidePage = lazy(() =>
+  import('../features/business/PaymentSchemeGuidePage').then((m) => ({
+    default: m.PaymentSchemeGuidePage,
+  })),
+);
+const CustomerApplicationEditorPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.CustomerApplicationEditorPage,
+  })),
+);
+const ReservationAgreementEditorPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.ReservationAgreementEditorPage,
+  })),
+);
+const ReservationAgreementsPage = lazy(() =>
+  import('../features/business/OfficialFormsPages').then((m) => ({
+    default: m.ReservationAgreementsPage,
+  })),
+);
+const LegacyRedemptionHistoryPage = lazy(() =>
+  import('../features/redemption/LegacyRedemptionHistoryPage').then((m) => ({
+    default: m.LegacyRedemptionHistoryPage,
+  })),
+);
+const RedemptionHistoryPage = lazy(() =>
+  import('../features/redemption/RedemptionHistoryPage').then((m) => ({
+    default: m.RedemptionHistoryPage,
+  })),
+);
+const RedemptionWorkflowPage = lazy(() =>
+  import('../features/redemption/RedemptionWorkflowPage').then((m) => ({
+    default: m.RedemptionWorkflowPage,
+  })),
+);
+const MyAccountPage = lazy(() =>
+  import('../features/account/MyAccountPage').then((m) => ({ default: m.MyAccountPage })),
+);
+const CmsDocumentPage = lazy(() =>
+  import('../features/cms/CmsDocumentPage').then((m) => ({ default: m.CmsDocumentPage })),
+);
+const CmsHistoryPage = lazy(() =>
+  import('../features/cms/CmsHistoryPage').then((m) => ({ default: m.CmsHistoryPage })),
+);
+const CmsMediaPage = lazy(() =>
+  import('../features/cms/CmsMediaPage').then((m) => ({ default: m.CmsMediaPage })),
+);
+const CmsPagesPage = lazy(() =>
+  import('../features/cms/CmsPagesPage').then((m) => ({ default: m.CmsPagesPage })),
+);
+const GenealogyPage = lazy(() =>
+  import('../features/genealogy/GenealogyPage').then((m) => ({ default: m.GenealogyPage })),
+);
+const GenealogyDetailsPage = lazy(() =>
+  import('../features/genealogy/GenealogyDetailsPage').then((m) => ({
+    default: m.GenealogyDetailsPage,
+  })),
+);
+const MembersPage = lazy(() =>
+  import('../features/network-members/MembersPage').then((m) => ({ default: m.MembersPage })),
+);
+// ID documents are no longer reviewed on their own screen: the uploaded scan
+// follows the status of the customer application that created it. The image is
+// still loaded on the customer record via the (kept) current/access-url
+// endpoints, but there is no list or review route any more.
+const MembershipCardPrintPage = lazy(() =>
+  import('../features/memberships/MembershipCardPrintPage').then((m) => ({
+    default: m.MembershipCardPrintPage,
+  })),
+);
+const MembershipDetailPage = lazy(() =>
+  import('../features/memberships/MembershipDetailPage').then((m) => ({
+    default: m.MembershipDetailPage,
+  })),
+);
+const MembershipsPage = lazy(() =>
+  import('../features/memberships/MembershipsPage').then((m) => ({ default: m.MembershipsPage })),
+);
+const OstApplicationDetailPage = lazy(() =>
+  import('../features/ost/OstApplicationDetailPage').then((m) => ({
+    default: m.OstApplicationDetailPage,
+  })),
+);
+const OstApplicationsPage = lazy(() =>
+  import('../features/ost/OstApplicationsPage').then((m) => ({ default: m.OstApplicationsPage })),
+);
+const OstManualRegistrationPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({
+    default: m.OstManualRegistrationPage,
+  })),
+);
+const OstAccreditationHistoryPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({
+    default: m.OstAccreditationHistoryPage,
+  })),
+);
+const OstImportExportPage = lazy(() =>
+  import('../features/ost/OstAccreditationPages').then((m) => ({ default: m.OstImportExportPage })),
+);
+const OstReferralCodesPage = lazy(() =>
+  import('../features/ost/OstReferralCodesPage').then((m) => ({ default: m.OstReferralCodesPage })),
+);
+const AuditPage = lazy(() =>
+  import('../features/reports/AuditPage').then((m) => ({ default: m.AuditPage })),
+);
+const ReportsPage = lazy(() =>
+  import('../features/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })),
+);
+
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { staffPortalPath } from '@jad/contracts';
+import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
-import { NotFound } from '@jad/ui';
-import { AfHomesDashboardPage } from '../features/afhomes/AfHomesDashboardPage';
-import { AfHomesDepartmentsPage } from '../features/afhomes/AfHomesDepartmentsPage';
-import { AfHomesRoleDetailPage } from '../features/afhomes/AfHomesRoleDetailPage';
-import { AfHomesRolesPage } from '../features/afhomes/AfHomesRolesPage';
-import { AfHomesStaffDetailPage } from '../features/afhomes/AfHomesStaffDetailPage';
-import { AfHomesStaffPage } from '../features/afhomes/AfHomesStaffPage';
-import { BusinessActivationQueuePage } from '../features/business/BusinessActivationQueuePage';
-import { BusinessCommissionsPage } from '../features/business/BusinessCommissionsPage';
-import { CommissionSettingsPage } from '../features/business/CommissionSettingsPage';
-import { BusinessCustomersPage } from '../features/business/BusinessCustomersPage';
-import { CustomerImportExportPage } from '../features/business/CustomerImportExportPage';
-import { BusinessFinanceQueuePage } from '../features/business/BusinessFinanceQueuePage';
-import { BusinessProductsPage } from '../features/business/BusinessProductsPage';
-import { BusinessSalesPage } from '../features/business/BusinessSalesPage';
-import { PaymentSchemeGuidePage } from '../features/business/PaymentSchemeGuidePage';
-import {
-  CustomerApplicationEditorPage,
-  CustomerApplicationsPage,
-  ReservationAgreementEditorPage,
-  ReservationAgreementsPage,
-} from '../features/business/OfficialFormsPages';
-import { RedemptionCatalogPage } from '../features/redemption/RedemptionCatalogPage';
-import { RedemptionHistoryPage } from '../features/redemption/RedemptionHistoryPage';
-import { RedemptionWorkflowPage } from '../features/redemption/RedemptionWorkflowPage';
+import { NotFound, ScrollToTop } from '@afhomes/ui';
 import {
   AdminForgotPasswordPage,
   StaffForgotPasswordPage,
@@ -41,32 +226,13 @@ import {
   AdminResetPasswordPage,
   StaffResetPasswordPage,
 } from '../features/auth/AdminResetPasswordPage';
-import { MyAccountPage } from '../features/account/MyAccountPage';
-import { CmsDocumentPage } from '../features/cms/CmsDocumentPage';
-import { CmsHistoryPage } from '../features/cms/CmsHistoryPage';
-import { CmsMediaPage } from '../features/cms/CmsMediaPage';
-import { CmsPagesPage } from '../features/cms/CmsPagesPage';
-import { GenealogyPage } from '../features/genealogy/GenealogyPage';
-import { GenealogyDetailsPage } from '../features/genealogy/GenealogyDetailsPage';
-import { DocumentsPage } from '../features/documents/DocumentsPage';
-import { DocumentReviewPage } from '../features/documents/DocumentReviewPage';
-import { MembershipCardPrintPage } from '../features/memberships/MembershipCardPrintPage';
-import { MembershipDetailPage } from '../features/memberships/MembershipDetailPage';
-import { MembershipsPage } from '../features/memberships/MembershipsPage';
-import { OstApplicationDetailPage } from '../features/ost/OstApplicationDetailPage';
-import { OstApplicationsPage } from '../features/ost/OstApplicationsPage';
-import { OstMembersPage } from '../features/ost/OstMembersPage';
-import {
-  OstManualRegistrationPage,
-  OstAccreditationHistoryPage,
-  OstImportExportPage,
-} from '../features/ost/OstAccreditationPages';
-import { OstReferralCodesPage } from '../features/ost/OstReferralCodesPage';
-import { AuditPage } from '../features/reports/AuditPage';
-import { ReportsPage } from '../features/reports/ReportsPage';
 import { AdminLayout } from './AdminLayout';
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
+import { isIstRole } from '@afhomes/contracts';
+
+const IstPortalPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstPortalPage })));
+const IstAccreditationPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstAccreditationPage })));
 
 const protectedPage = (page: ReactNode) => <RequireRole>{page}</RequireRole>;
 
@@ -77,10 +243,13 @@ export default function App() {
     location.pathname,
   );
   const canonical = staffPortalPath(user?.roleSlug, location.pathname);
+  if (status === 'authenticated' && user?.roleSlug === 'ost' && !publicAuth)
+    return <Navigate replace to="/staff/login" />;
   if (status === 'authenticated' && !publicAuth && canonical !== location.pathname)
     return <Navigate replace to={`${canonical}${location.search}${location.hash}`} />;
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <Routes>
         {roleRoutes(
           <>
@@ -98,14 +267,21 @@ export default function App() {
             <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
             <Route element={<AdminLayout />}>
               {/* GSD / Employee customer desk. Read-only, and gated on the same
-          `operations.redemption` view the nav uses, so hiding the link and
+          `operations.customer_lookup` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
-      <Route path="/admin/customer-lookup" element={protectedPage(<CustomerLookupPage />)} />
-      {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
+              <Route
+                path="/admin/customer-lookup"
+                element={protectedPage(<CustomerLookupPage />)}
+              />
+              {/* Member TRANSACTION lookup: shows Membership Codes, reachable from
           Redemption rather than from the global nav. */}
-      <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
-              <Route path="/admin" element={protectedPage(<AfHomesDashboardPage />)} />
-              <Route path="/admin/sales" element={protectedPage(<BusinessSalesPage />)} />
+              <Route path="/admin/member-lookup" element={protectedPage(<MemberLookupPage />)} />
+              <Route path="/admin" element={protectedPage(isIstRole(user?.roleSlug) ? <IstPortalPage /> : <AfHomesDashboardPage />)} />
+              <Route path="/admin/ist/my-sales" element={protectedPage(<IstPortalPage view="my-sales" />)} />
+              <Route path="/admin/ist/team-sales" element={protectedPage(<IstPortalPage view="team-sales" />)} />
+              <Route path="/admin/ist/my-commissions" element={protectedPage(<IstPortalPage view="my-commissions" />)} />
+              <Route path="/admin/ist/team-commissions" element={protectedPage(<IstPortalPage view="team-commissions" />)} />
+              <Route path="/admin/ist/accreditation" element={protectedPage(<IstAccreditationPage />)} />
               {/* Internal IST payment-scheme reference. Gated on the
               sales.card_sales nav key like the sales list; customers and
               anonymous visitors never reach the staff app at all. */}
@@ -114,20 +290,40 @@ export default function App() {
                 element={protectedPage(<PaymentSchemeGuidePage />)}
               />
               <Route path="/admin/customers" element={protectedPage(<BusinessCustomersPage />)} />
+              {/*
+                The customer area is exactly THREE screens: main (list), create,
+                and detail. The create screen IS the application builder - the
+                builder is what creates the customer, so a separate
+                "/admin/customers/create" page would be a second form for one
+                action. The main screen carries two views, People and
+                Applications, on two real addresses so the sidebar can highlight
+                whichever is on screen. The retired
+                `/admin/customers/applications/*` addresses below redirect rather
+                than 404, because operators have them bookmarked.
+              */}
               <Route
-                path="/admin/customers/import-export"
+                path="/admin/customers/new"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
+              <Route path="/admin/customers/:id" element={protectedPage(<CustomerDetailPage />)} />
+              <Route
+                path="/admin/customers/applications"
+                element={protectedPage(<BusinessCustomersPage />)}
+              />
+              <Route
+                path="/admin/customers/applications/import-export"
                 element={protectedPage(<CustomerImportExportPage />)}
               />
               <Route
-                path="/admin/customers/applications"
-                element={protectedPage(<CustomerApplicationsPage />)}
-              />
-              <Route
                 path="/admin/customers/applications/new"
-                element={protectedPage(<CustomerApplicationEditorPage />)}
+                element={<Navigate to={`/admin/customers/new${location.search}${location.hash}`} replace />}
               />
               <Route
                 path="/admin/customers/applications/:id"
+                element={protectedPage(<CustomerApplicationEditorPage />)}
+              />
+              <Route
+                path="/admin/customers/applications/:id/edit"
                 element={protectedPage(<CustomerApplicationEditorPage />)}
               />
               <Route
@@ -155,9 +351,29 @@ export default function App() {
                 path="/admin/finance/commissions"
                 element={protectedPage(<BusinessCommissionsPage />)}
               />
+              {/* Order is irrelevant to React Router (static segments outrank the
+                  bare prefix), but the deeper path is listed first so it reads as
+                  a child of Earn Points. */}
+              <Route path="/admin/points/records" element={protectedPage(<SalesRecordsPage />)} />
+              <Route path="/admin/points/rules" element={protectedPage(<PointsRulesPage />)} />
+              <Route path="/admin/points/use" element={protectedPage(<UseVipPointsPage />)} />
+              <Route
+                path="/admin/points/discount"
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
+              <Route
+                path="/admin/points/payments"
+                element={protectedPage(<PurchasePaymentsPage />)}
+              />
+              <Route path="/admin/points" element={protectedPage(<BusinessPointsPage />)} />
+              {/* Canonical Commission Settings live at /admin/commissions/settings
+              (the Finance sidebar entry). This /finance/ twin exists only so
+              old bookmarks keep working; it redirects instead of rendering so
+              the sidebar guard and breadcrumb resolve the canonical entry and
+              its `network.commissions` key - never the Finance parent prefix. */}
               <Route
                 path="/admin/finance/commissions/settings"
-                element={protectedPage(<CommissionSettingsPage />)}
+                element={protectedPage(<Navigate replace to="/admin/commissions/settings" />)}
               />
               <Route
                 path="/admin/commissions/settings"
@@ -175,13 +391,21 @@ export default function App() {
               />
               <Route
                 path="/admin/redemption/items"
-                element={protectedPage(<RedemptionCatalogPage />)}
+                element={protectedPage(<Navigate replace to="/admin/redemption" />)}
+              />
+              <Route
+                path="/admin/redemption/legacy-history"
+                element={protectedPage(<LegacyRedemptionHistoryPage />)}
               />
               <Route path="/admin/staff" element={protectedPage(<AfHomesStaffPage />)} />
               <Route path="/admin/genealogy" element={protectedPage(<GenealogyPage />)} />
               <Route
                 path="/admin/genealogy/:staffId"
                 element={protectedPage(<GenealogyDetailsPage />)}
+              />
+              <Route
+                path="/admin/network/members"
+                element={protectedPage(<MembersPage />)}
               />
               {/* OST onboarding. Each route is gated on its own module key via
               ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree.
@@ -207,7 +431,6 @@ export default function App() {
                 path="/admin/ost/applications/:id"
                 element={protectedPage(<OstApplicationDetailPage />)}
               />
-              <Route path="/admin/ost/members" element={protectedPage(<OstMembersPage />)} />
               <Route
                 path="/admin/ost/referral-code"
                 element={protectedPage(<OstReferralCodesPage />)}
@@ -220,10 +443,9 @@ export default function App() {
                 path="/admin/memberships/:id"
                 element={protectedPage(<MembershipDetailPage />)}
               />
-              {/* ID documents. Gated on the sales.id_documents nav key; the server
-              re-checks scope and never returns paths, hashes or raw ID numbers. */}
-              <Route path="/admin/documents" element={protectedPage(<DocumentsPage />)} />
-              <Route path="/admin/documents/:id" element={protectedPage(<DocumentReviewPage />)} />
+              {/* ID documents are no longer reviewed on their own screen; the scan
+              travels with the customer application that created it. The upload and
+              current/access-url endpoints remain for intake and display. */}
               <Route
                 path="/admin/memberships/:id/card"
                 element={protectedPage(<MembershipCardPrintPage />)}
@@ -233,6 +455,7 @@ export default function App() {
                 element={protectedPage(<AfHomesDepartmentsPage />)}
               />
               <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
+              <Route path="/admin/settings/public-verification" element={protectedPage(<PublicVerificationSettingsPage />)} />
               {/* My Account: the forced first-login password change lives here, so
               the guard must let a gated session through (see RequireRole). */}
               <Route path="/admin/profile" element={protectedPage(<MyAccountPage />)} />
@@ -244,6 +467,8 @@ export default function App() {
               <Route path="/admin/audit" element={protectedPage(<AuditPage />)} />
               <Route path="/admin/cms" element={<Navigate to="/admin/cms/pages" replace />} />
               <Route path="/admin/cms/pages" element={protectedPage(<CmsPagesPage />)} />
+              <Route path="/admin/cms/faq" element={protectedPage(<CmsDocumentPage title="FAQ" description="Questions and answers for the public website." documentKey="faq" />)} />
+              <Route path="/admin/cms/vip" element={protectedPage(<CmsDocumentPage title="VIP Website Content" description="Marketing names and imagery; operational entitlements are read-only." documentKey="vip" />)} />
               <Route path="/admin/cms/media" element={protectedPage(<CmsMediaPage />)} />
               <Route
                 path="/admin/cms/stories"
@@ -270,7 +495,8 @@ export default function App() {
                 element={protectedPage(
                   <CmsDocumentPage
                     title="Site Settings"
-                    description="Site identity, contact details, navigation and footer content."
+                    description="Site identity, public contacts, navigation and footer content."
+                    mode="site"
                     documentKey="site"
                   />,
                 )}
@@ -279,9 +505,10 @@ export default function App() {
                 path="/admin/cms/seo"
                 element={protectedPage(
                   <CmsDocumentPage
-                    title="Page Content and SEO"
-                    description="Structured copy and page-level metadata for the Phase 3 templates."
-                    documentKey="pageContent"
+                    title="SEO"
+                    mode="seo"
+                    description="Global and page-specific search and sharing metadata."
+                    documentKey="site"
                   />,
                 )}
               />

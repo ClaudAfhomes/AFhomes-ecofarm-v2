@@ -1,5 +1,5 @@
 /**
- * Shared plumbing for the AF Homes API handlers.
+ * Shared plumbing for the AFHomes API handlers.
  *
  * Keeps the sub-path dispatch, error envelope, audit insert, and JSON body
  * reading in one place so every Phase 2 handler behaves identically: same error
@@ -19,8 +19,9 @@ export function fail(
   code: FailureCode,
   message: string,
   status: number,
+  details?: unknown,
 ): void {
-  const envelope = toErrorEnvelope(code, message, status);
+  const envelope = toErrorEnvelope(code, message, status, details);
   res.status(envelope.status).json({ error: envelope.error });
 }
 
@@ -96,11 +97,55 @@ export async function audit(
  * Map a Postgres RPC error onto a client error. The raw driver message is
  * logged server-side only - it can name relations, columns, and constraints.
  */
-export function mapRpcError(res: VercelResponse, error: { message?: string } | null): void {
+export function mapRpcError(
+  res: VercelResponse,
+  error: { message?: string; code?: string } | null,
+): void {
   const message = String(error?.message ?? '');
   const [code] = message.split(':');
 
   const byCode: Record<string, [FailureCode, number]> = {
+    STAY_SERVICE_DATES_REQUIRED: ['VALIDATION_ERROR', 400],
+    INSUFFICIENT_DAY_ALLOWANCE: ['CONFLICT', 409],
+    LEGACY_REDEMPTION_DATES_REQUIRED: ['CONFLICT', 409],
+    IMPORT_MEMBERSHIP_DATES_REQUIRED: ['CONFLICT', 409],
+    IMPORT_MEMBERSHIP_DATES_CONFLICT: ['CONFLICT', 409],
+    IMPORT_MEMBERSHIP_HISTORY_CONFLICT: ['CONFLICT', 409],
+    IMPORT_POINTS_BASELINE_CONFLICT: ['CONFLICT', 409],
+    IMPORT_POINTS_EXISTING_HISTORY_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_VIP_NUMBER_CONFLICT: ['CONFLICT', 409],
+    IMPORT_VIP_NUMBER_FORMAT_CONFLICT: ['VALIDATION_ERROR', 400],
+    IMPORT_VIP_TERM_CONFLICT: ['CONFLICT', 409],
+    IMPORT_VIP_CLASSIFICATION_UNSUPPORTED: ['CONFLICT', 409],
+    IMPORT_VIP_CLASSIFICATION_CONFLICT: ['CONFLICT', 409],
+    IMPORT_VIP_CLASSIFICATION_INVALID: ['VALIDATION_ERROR', 400],
+    IMPORT_VIP_EXISTING_EVIDENCE_REQUIRED: ['CONFLICT', 409],
+    VIP_CARD_NUMBER_IMMUTABLE: ['CONFLICT', 409],
+    VIP_CARD_NUMBER_ALREADY_ISSUED: ['CONFLICT', 409],
+    IMPORT_TARGET_CHANGED: ['CONFLICT', 409],
+    IMPORT_SOURCE_CHANGED: ['CONFLICT', 409],
+    IMPORT_SOURCE_IDENTITY_CONFLICT: ['CONFLICT', 409],
+    IMPORT_IDENTITY_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_CUSTOMER_FIELD_CONFLICT: ['CONFLICT', 409],
+    IMPORT_REFERRAL_CONFLICT: ['CONFLICT', 409],
+    IMPORT_GENEALOGY_CONFLICT: ['CONFLICT', 409],
+    IMPORT_UNKNOWN_CUSTOMER_ID: ['CONFLICT', 409],
+    COMPANY_CUSTOMER_ID_RANGE_EXHAUSTED: ['CONFLICT', 409],
+    IMPORT_SOURCE_FORBIDDEN: ['FORBIDDEN', 403],
+    IMPORT_ROW_NOT_FOUND: ['NOT_FOUND', 404],
+    IMPORT_CLAIM_NOT_FOUND: ['NOT_FOUND', 404],
+    IMPORT_CLAIM_ALREADY_RECORDED: ['CONFLICT', 409],
+    IMPORT_CLAIM_INVALID: ['VALIDATION_ERROR', 400],
+    IMPORT_PURCHASE_REFERENCE_REQUIRED: ['VALIDATION_ERROR', 400],
+    IMPORT_HISTORICAL_TERMS_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_RESERVATION_REFERENCE_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_STAFF_REVIEW_REQUIRED: ['CONFLICT', 409],
+    IMPORT_APPLICATION_ALREADY_LINKED: ['CONFLICT', 409],
+    IMPORT_PROOF_REQUIRED: ['CONFLICT', 409],
+    IMPORT_PROOF_CHANGED: ['CONFLICT', 409],
+    IMPORT_PAYMENT_MATCH_CONFLICT: ['CONFLICT', 409],
+    IMPORT_PAYMENT_RECONCILIATION_REQUIRED: ['CONFLICT', 409],
+    IMPORT_CLAIM_REJECTED: ['CONFLICT', 409],
     SALE_NOT_FOUND: ['NOT_FOUND', 404],
     PAYMENT_NOT_FOUND: ['NOT_FOUND', 404],
     ACTOR_REQUIRED: ['UNAUTHORIZED', 401],
@@ -130,11 +175,45 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
     SECONDARY_HOLDER_GOLD_ONLY: ['VALIDATION_ERROR', 400],
     PRIMARY_HOLDER_REQUIRED: ['VALIDATION_ERROR', 400],
     APPLICATION_REVIEW_INCOMPLETE: ['VALIDATION_ERROR', 400],
+    PRIMARY_SIGNATURE_REQUIRED: ['VALIDATION_ERROR', 400],
+    SECONDARY_SIGNATURE_REQUIRED: ['VALIDATION_ERROR', 400],
+    INVALID_AGREEMENT_ACTION: ['VALIDATION_ERROR', 400],
+    RESERVATION_ORIGIN_INVALID: ['CONFLICT', 409],
     APPLICATION_NOT_EDITABLE: ['CONFLICT', 409],
+    // Application-first purchase flow. A stale proposal is a CONFLICT, never a
+    // silent accept of figures the reviewer never saw, and the review-required
+    // state is a conflict too: the operator must confirm terms explicitly.
+    PURCHASE_PROPOSAL_CHANGED: ['CONFLICT', 409],
+    PURCHASE_TERMS_REVIEW_REQUIRED: ['CONFLICT', 409],
+    PURCHASE_TERMS_VERSION_CONFLICT: ['CONFLICT', 409],
+    APPLICATION_NOT_APPROVED: ['CONFLICT', 409],
+    RESERVATION_ALREADY_EXISTS: ['CONFLICT', 409],
+    REVIEW_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    RESERVATION_FEE_INVALID: ['CONFLICT', 409],
+    SCHEME_SCHEDULE_UNAVAILABLE: ['CONFLICT', 409],
+    RESERVATION_NOT_EXECUTED: ['CONFLICT', 409],
+    RESERVATION_FINALIZED: ['CONFLICT', 409],
+    RESERVATION_NOT_FULLY_PAID: ['CONFLICT', 409],
+    RESERVATION_UNDECIDED_PAYMENTS: ['CONFLICT', 409],
+    RESERVATION_ALREADY_FINALIZED: ['CONFLICT', 409],
+    APPLICATION_ALREADY_FINALIZED: ['CONFLICT', 409],
+    SALE_ALREADY_EXISTS: ['CONFLICT', 409],
+    SALE_REFERENCE_CONFLICT: ['CONFLICT', 409],
+    PURCHASE_TERMS_IDENTITY_INVALID: ['CONFLICT', 409],
+    // The partial unique index is the guard, so the domain answer comes from the
+    // constraint name Postgres reports rather than from a second check in SQL.
+    payments_reservation_reference_unique: ['CONFLICT', 409],
+    REJECTION_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    CUSTOMER_NOT_ELIGIBLE: ['CONFLICT', 409],
+    PLAN_NOT_ACTIVE: ['CONFLICT', 409],
+    SELLER_INACTIVE: ['FORBIDDEN', 403],
+    SELLER_ROLE_NOT_A_SELLER: ['FORBIDDEN', 403],
+    SELLER_NOT_IN_YOUR_DOWNLINE: ['FORBIDDEN', 403],
     AGREEMENT_NOT_EDITABLE: ['CONFLICT', 409],
     AGREEMENT_SALE_IMMUTABLE: ['CONFLICT', 409],
     INVALID_APPLICATION_TRANSITION: ['CONFLICT', 409],
     INVALID_AGREEMENT_TRANSITION: ['CONFLICT', 409],
+    INVALID_CAPTURE_KIND: ['VALIDATION_ERROR', 400],
     SALE_COMPLETE_HIERARCHY_REQUIRED: ['CONFLICT', 409],
     SALE_HIERARCHY_TOO_DEEP: ['CONFLICT', 409],
     SALE_SELLER_REQUIRED: ['VALIDATION_ERROR', 400],
@@ -173,7 +252,34 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
     );
   if (code === 'DOCUMENT_NOT_FOUND') return fail(res, 'NOT_FOUND', 'Document not found', 404);
   const mapped = byCode[code ?? ''];
-  // eslint-disable-next-line no-console
+  const importMessages: Record<string, string> = {
+    IMPORT_RESERVATION_REFERENCE_REVIEW_REQUIRED:
+      'The existing reservation reference was not found for this customer, or has no compatible application. Review the exact reservation reference; no replacement application was created.',
+    IMPORT_TARGET_CHANGED:
+      'The customer, genealogy or payment record changed after review. Reload and review the current details before retrying.',
+    IMPORT_SOURCE_CHANGED:
+      'The import source changed after review. Reload its preview before retrying.',
+    IMPORT_SOURCE_IDENTITY_CONFLICT:
+      'This purchase reference is already linked to different source details. Review the existing purchase; no duplicate was created.',
+    IMPORT_CUSTOMER_FIELD_CONFLICT:
+      'Imported customer details conflict with the current record. Review the highlighted fields; current values were preserved.',
+    IMPORT_PURCHASE_REFERENCE_REQUIRED:
+      'Enter the actual purchase reference. Reuse the same reference for the same purchase.',
+    IMPORT_HISTORICAL_TERMS_REVIEW_REQUIRED:
+      'The workbook price, reservation fee, plan or payment terms disagree with the current approved offer. Historical terms need authorized review; no terms were replaced.',
+    IMPORT_STAFF_REVIEW_REQUIRED:
+      'The registered sales identity or genealogy changed or conflicts with the workbook. Review the actual staff placement.',
+    IMPORT_APPLICATION_ALREADY_LINKED:
+      'This purchase already has an application. Reload and continue the existing application.',
+    IMPORT_GENEALOGY_CONFLICT:
+      'Referrer and VIP Recommender belong to different VD genealogy trees. Correct the attribution before importing.',
+    IMPORT_PAYMENT_RECONCILIATION_REQUIRED:
+      'A payment with matching receipt details already exists. Link that payment, or explain why this is a distinct payment.',
+    IMPORT_PAYMENT_MATCH_CONFLICT:
+      'The selected payment belongs to different purchase details or has a conflicting amount or method. No payment was linked.',
+    IMPORT_PROOF_REQUIRED: 'Upload and review a valid private receipt before accepting this claim.',
+    IMPORT_PROOF_CHANGED: 'The receipt upload changed. Reload and review the current receipt.',
+  };
   console.error('[api] rpc error:', message);
   if (mapped)
     return fail(
@@ -181,7 +287,7 @@ export function mapRpcError(res: VercelResponse, error: { message?: string } | n
       mapped[0],
       code === 'SALE_COMPLETE_HIERARCHY_REQUIRED'
         ? 'Complete the seller hierarchy before creating this sale.'
-        : code!.replace(/_/g, ' ').toLowerCase(),
+        : (importMessages[code ?? ''] ?? code!.replace(/_/g, ' ').toLowerCase()),
       mapped[1],
     );
 

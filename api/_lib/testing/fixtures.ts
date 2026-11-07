@@ -1,13 +1,13 @@
 /**
- * Canonical AF Homes fixtures for handler tests.
+ * Canonical AFHomes fixtures for handler tests.
  *
- * Mirrors the shape produced by `supabase/migrations/20260926023325_afhomes_phase1_foundation.sql`:
- * 22 modules, 10 system roles, 5 departments, and the `staff_users` /
- * `staff_role_assignments` / `role_permissions` / `staff_permission_restrictions`
- * links the resolver walks. Nothing here is production data - ids are stable
- * literals so assertions can name them.
+ * Mirrors the shape produced by the Phase 1 migration plus the later module
+ * seeds that the console depends on: modules, 10 system roles, departments,
+ * and the `staff_users` / `staff_role_assignments` / `role_permissions` /
+ * `staff_permission_restrictions` links the resolver walks. Nothing here is
+ * production data - ids are stable literals so assertions can name them.
  */
-import type { AfHomesPermission } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
 
 import type { FakeRow, FakeTables } from './supabase-fake.js';
 
@@ -32,6 +32,8 @@ export const MODULE_KEYS = [
   'network.withdrawals',
   'operations.redemption',
   'operations.catalog',
+  'operations.sales',
+  'operations.customer_lookup',
   'governance.audit',
   'governance.config',
 ] as const satisfies readonly AfHomesPermission['moduleKey'][];
@@ -55,6 +57,7 @@ export const UUID = {
     executive: '00000000-0000-4000-8000-000000000bb1',
     sales: '00000000-0000-4000-8000-000000000bb2',
     retired: '00000000-0000-4000-8000-000000000bb3',
+    admins: '00000000-0000-4000-8000-000000000bb4',
   },
   customRole: '00000000-0000-4000-8000-000000000cc1',
 } as const;
@@ -107,6 +110,14 @@ export function departmentsTable(): FakeRow[] {
       created_at: '2026-09-01T00:00:00.000Z',
       updated_at: '2026-09-01T00:00:00.000Z',
     },
+    {
+      id: UUID.department.admins,
+      code: 'ADMINS',
+      name: 'Admins',
+      is_active: true,
+      created_at: '2026-09-01T00:00:00.000Z',
+      updated_at: '2026-09-01T00:00:00.000Z',
+    },
   ];
 }
 
@@ -116,7 +127,7 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.superAdmin,
       slug: 'super_admin',
       name: 'Super Admin',
-      description: 'Full access',
+      department_id: UUID.department.admins,
       is_system: true,
       is_active: true,
       created_at: '2026-09-01T00:00:00.000Z',
@@ -126,7 +137,7 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.admin,
       slug: 'admin',
       name: 'Admin',
-      description: 'Operations admin',
+      department_id: UUID.department.admins,
       is_system: true,
       is_active: true,
       created_at: '2026-09-01T00:00:00.000Z',
@@ -136,7 +147,6 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.finance,
       slug: 'finance',
       name: 'Finance',
-      description: 'Finance operator',
       is_system: true,
       is_active: true,
       created_at: '2026-09-01T00:00:00.000Z',
@@ -146,7 +156,6 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.employee,
       slug: 'employee',
       name: 'Employee',
-      description: 'Base staff role',
       is_system: true,
       is_active: true,
       created_at: '2026-09-01T00:00:00.000Z',
@@ -156,7 +165,6 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.custom,
       slug: 'sales_manager',
       name: 'Sales Manager',
-      description: 'Custom role',
       is_system: false,
       is_active: true,
       created_at: '2026-09-02T00:00:00.000Z',
@@ -166,7 +174,6 @@ export function rolesTable(): FakeRow[] {
       id: UUID.role.retired,
       slug: 'retired_role',
       name: 'Retired Role',
-      description: 'Inactive role',
       is_system: false,
       is_active: false,
       created_at: '2026-09-02T00:00:00.000Z',

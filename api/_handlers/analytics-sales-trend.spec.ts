@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { salesTrendReportSchema } from '@jad/contracts';
+import { salesTrendReportSchema } from '@afhomes/contracts';
 import {
   SALE,
   STAFF2,
@@ -22,7 +22,7 @@ function install() {
     ost_applications: [],
     final_qualifications: [],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens() });
+  holder.db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }], tables, tokens: phase2WorldTokens() });
   return holder.db as FakeSupabase;
 }
 
@@ -81,7 +81,7 @@ function activeSale(over: Record<string, unknown> = {}) {
 
 beforeEach(() => install());
 
-describe('GET /analytics/sales-trend (JAD Sales Overview parity)', () => {
+describe('GET /analytics/sales-trend (AFHomes Sales Overview pattern)', () => {
   it('routes through the analytics family without a router change', () => {
     const match = selectHandler('/api/v1/analytics/sales-trend', {});
     expect(match?.routeKey).toBe('analytics/sales-trend');
@@ -195,7 +195,7 @@ describe('GET /analytics/sales-trend (JAD Sales Overview parity)', () => {
   });
 
   it('does not leak database internals on failure', async () => {
-    holder.db = new FakeSupabase({
+    holder.db = new FakeSupabase({ rpcs: [{ fn: 'account_imported_sales', result: [] }],
       tables: phase2World({ card_sale_hierarchy_snapshots: [], redemptions: [] }),
       tokens: phase2WorldTokens(),
       errors: { card_sales: { message: 'secret database detail' } },

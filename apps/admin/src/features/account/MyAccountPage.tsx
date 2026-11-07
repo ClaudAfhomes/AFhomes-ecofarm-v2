@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Alert,
   Button,
@@ -12,21 +12,27 @@ import {
   PasswordField,
   StatusChip,
   TextField,
-} from '@jad/ui';
+} from '@afhomes/ui';
 import { useSession } from '../../lib/session';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { changeAfHomesStaffPassword, updateAfHomesStaffProfile } from '../afhomes/services';
+import styles from './MyAccountPage.module.css';
+import { SaleTeamAccreditationCard } from '../afhomes/SaleTeamAccreditationCard';
+import { ProfilePhotoEditor } from '@afhomes/ui';
+import { useProfilePhoto } from './profile-photo';
+import { logoutPathForRole } from '../../lib/portal';
 
 /**
- * My Account (JAD parity, `/admin/profile`): the signed-in staff
+ * My Account (AFHomes pattern, `/admin/profile`): the signed-in staff
  * member's identity plus the display-name and password workflows. While
  * `mustChangePassword` is set the rest of the admin panel stays locked and
  * this page is the only destination, so the password card is the forced
  * first-login change.
  */
 export function MyAccountPage() {
+  const photo = useProfilePhoto();
   const navigate = useNavigate();
-  const { user, revalidate } = useSession();
+  const { user, revalidate, logout } = useSession();
   const mustChangePassword = user?.mustChangePassword === true;
   const [name, setName] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -37,47 +43,62 @@ export function MyAccountPage() {
   const passwordsMatch = newPassword === confirmPassword;
   const passwordValid = currentPassword.length > 0 && newPassword.length >= 8 && passwordsMatch;
 
-  const profile = useMutation({
+  const profile = useBusinessMutation({
     mutationFn: () => updateAfHomesStaffProfile({ name: displayName.trim() }),
     onSuccess: async () => {
       await revalidate();
     },
   });
-  const password = useMutation({
+  const password = useBusinessMutation({
     mutationFn: () => changeAfHomesStaffPassword({ currentPassword, newPassword }),
     onSuccess: async () => {
-      // Capture the gate BEFORE the refresh: a forced change that cleared the
-      // server flag must leave this screen. Navigating to the dashboard is
-      // safe either way - if the flag were somehow still set, the guard
-      // parks the session right back here instead of stranding it.
       const wasForced = mustChangePassword;
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      await revalidate();
-      if (wasForced) navigate('/admin', { replace: true });
+      if (wasForced) {
+        const login = logoutPathForRole(user?.roleSlug);
+        try { await logout(); } finally { navigate(login, { replace: true }); }
+      } else await revalidate();
     },
   });
 
   return (
-    <section>
+    <section className={styles.page}>
       <PageHeader title="My Account" description="Your staff identity and sign-in" />
       {mustChangePassword ? (
         <Alert variant="warning" title="Set a new password to continue">
           Your account still uses the temporary password an administrator set. Choose your own
-          password below — the rest of the admin panel unlocks once it is changed.
+          password below - the rest of the admin panel unlocks once it is changed.
         </Alert>
       ) : null}
-      <div style={{ display: 'grid', gap: 16 }}>
+      <div className={styles.stack}>
+        <ProfilePhotoEditor
+          photo={photo.photo.data}
+          loading={photo.photo.isPending}
+          error={photo.photo.error?.message}
+          onRefresh={() => void photo.photo.refetch()}
+          onUpload={(data) =>
+            user
+              ? photo.upload.mutateAsync({ dataBase64: data, expectedUserId: user.id })
+              : Promise.reject(new Error('Sign in again before uploading.'))
+          }
+          onRemove={user ? () => photo.remove.mutateAsync() : undefined}
+        />
+        {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
+          user?.roleSlug ?? '',
+        ) ? (
+          <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} />
+        ) : null}
         <DetailCard>
           <DetailCardTitle>Profile</DetailCardTitle>
           <DetailFieldGrid>
-            <DetailField label="Email">{user?.email ?? '—'}</DetailField>
+            <DetailField label="Email">{user?.email ?? '-'}</DetailField>
             <DetailField label="Role">
-              <StatusChip label={user?.roleName ?? '—'} tone="neutral" />
+              <StatusChip label={user?.roleName ?? '-'} tone="neutral" />
             </DetailField>
           </DetailFieldGrid>
-          <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+          <div className={styles.formGrid}>
             <TextField
               id="account-display-name"
               name="account-display-name"
@@ -109,7 +130,7 @@ export function MyAccountPage() {
           <DetailCardTitle>
             {mustChangePassword ? 'Set a new password' : 'Change password'}
           </DetailCardTitle>
-          <div style={{ display: 'grid', gap: 12 }}>
+          <div className={styles.section}>
             <PasswordField
               id="account-current-password"
               label="Current password"

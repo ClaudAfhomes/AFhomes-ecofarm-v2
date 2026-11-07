@@ -3,14 +3,16 @@ import {
   birthDateSchema,
   emailSchema,
   normalizeAddressField,
+  normalizeGeographicName,
   normalizePersonName,
-  optionalPersonNameSchema,
   optionalContactNumberSchema,
   optionalLandlineSchema,
   personNameSchema,
   phoneSchema,
+  toTitleCase,
   PERSON_NAME_RE,
 } from './input.js';
+import { geographicCodeSchema } from './address.js';
 import { exactDecimalStringSchema } from './money.js';
 import {
   customerApplicationStatusSchema,
@@ -31,7 +33,82 @@ export const acquisitionChannelSchema = z.enum([
   'FB Ads',
 ]);
 
+/**
+ * Fixed pick-lists for the application holder. The values ARE the stored
+ * text, so a dropdown option and a saved record can never disagree.
+ * `undefined` (or a blank) is the honest "not provided" state.
+ *
+ * Sex and civil status are the two closed sets the operator chooses from, not
+ * a census: a cardholder is recorded under one of the values below, so anything
+ * outside them is a mis-key rather than a real answer.
+ */
+export const SUFFIX_OPTIONS = ['Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
+export const SEX_OPTIONS = ['Male', 'Female'] as const;
+export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated'] as const;
+/**
+ * The customer-workbook IMPORT vocabulary only. The application holder types a
+ * citizenship instead (see `applicationHolderSchema.citizenship`), so a
+ * spreadsheet can still carry the closed set the authority's template defines
+ * while the form accepts any nationality the holder actually holds.
+ */
+export const CITIZENSHIP_OPTIONS = ['Filipino', 'Dual Citizen', 'Foreign National'] as const;
+export const suffixOptionSchema = z.enum(SUFFIX_OPTIONS);
+export const sexOptionSchema = z.enum(SEX_OPTIONS);
+export const civilStatusOptionSchema = z.enum(CIVIL_STATUS_OPTIONS);
+
+/** Blank pick-list values are "not provided", never an invalid choice. */
+const blankToUndefinedOption = (value: unknown) =>
+  typeof value === 'string' && !value.trim() ? undefined : value;
+
+/**
+ * A Philippine TIN: 9 digits (3-3-3), optionally with a branch suffix, dashes
+ * optional. Letters are never part of a TIN.
+ */
+export const tinNumberSchema = z.preprocess(
+  blankToUndefinedOption,
+  z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^\d{3}-?\d{3}-?\d{3}(-\d{3,5})?$/, 'Use a 9-digit TIN, for example 123-456-789')
+    .optional(),
+);
+
+/** Title-cased person-name part for application holders. */
+const holderName = personNameSchema.transform(toTitleCase);
+const optionalHolderName = z
+  .string()
+  .trim()
+  .max(80)
+  .refine((value) => value === '' || PERSON_NAME_RE.test(value), {
+    message: 'Use letters, spaces, apostrophes and hyphens only - no numbers',
+  })
+  .transform((value) => (value ? toTitleCase(value) : value))
+  .optional();
+
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/**
+ * Oldest age an application holder may be recorded at. A cardholder holds a
+ * membership they pay for and use, so a birth date that puts them far past
+ * working age is a keying error, not a real customer.
+ *
+ * Scoped to the application holder on purpose: members, OST applicants and the
+ * workbook import keep the shared `isPlausibleBirthDate` lifetime, and no
+ * historical record is rewritten.
+ */
+export const OLDEST_HOLDER_AGE = 75;
+
+const oldestHolderBirthDate = (): string => {
+  const today = new Date().toISOString().slice(0, 10);
+  return `${Number(today.slice(0, 4)) - OLDEST_HOLDER_AGE}${today.slice(4)}`;
+};
+
+/** `birthDateSchema` plus the working-age ceiling for a cardholder. */
+export const holderBirthDateSchema = birthDateSchema.refine(
+  (value) => value >= oldestHolderBirthDate(),
+  { message: `Holder must be ${OLDEST_HOLDER_AGE} or younger` },
+);
 
 /**
  * Blank selector values (`""`) must never reach a UUID validator: an unchosen
@@ -46,44 +123,93 @@ const optionalUuid = z.preprocess(blankToUndefined, z.string().uuid().optional()
 
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  lastName: personNameSchema,
-  firstName: personNameSchema,
-  middleName: optionalPersonNameSchema,
-  suffix: z.string().trim().max(20).optional(),
-  birthDate: birthDateSchema,
-  sex: z.string().trim().max(30).optional(),
-  citizenship: z.string().trim().max(80).optional(),
-  civilStatus: z.string().trim().max(40).optional(),
-  permanentAddressLine1: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .transform((v) => normalizeAddressField(v)),
-  permanentAddressLine2: z.string().trim().max(200).transform(normalizeAddressField).optional(),
-  cityMunicipality: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .transform((v) => normalizeAddressField(v)),
-  province: z
-    .string()
-    .trim()
-    .min(1)
-    .max(100)
-    .transform((v) => normalizeAddressField(v)),
+  lastName: holderName,
+  firstName: holderName,
+  middleName: optionalHolderName,
+  suffix: z.preprocess(
+    (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
+    z.preprocess(blankToUndefinedOption, suffixOptionSchema.optional()),
+  ),
+  birthDate: holderBirthDateSchema,
+  sex: z.preprocess(blankToUndefinedOption, sexOptionSchema.optional()),
+  /**
+   * Typed, not chosen. Citizenship is a nationality, and the closed set the
+   * workbook template uses does not cover the people who actually apply: a
+   * holder may be any dual national or foreign national, so restricting the
+   * field would refuse a legitimate applicant. Letters, spaces and the
+   * punctuation a country name actually uses; blank stays "not provided".
+   */
+  citizenship: z.preprocess(
+    blankToUndefinedOption,
+    z
+      .string()
+      .trim()
+      .max(80, 'Citizenship is too long')
+      .regex(
+        /^[\p{L}][\p{L}\p{M}'’. \-]*$/u,
+        'Use letters, spaces, apostrophes, hyphens and periods only',
+      )
+      .optional(),
+  ),
+  civilStatus: z.preprocess(blankToUndefinedOption, civilStatusOptionSchema.optional()),
+  permanentAddressLine1: z.string().trim().min(1).max(200).transform(toTitleCase),
+  permanentAddressLine2: z.string().trim().max(200).transform(toTitleCase).optional(),
+  /**
+   * The official geography. These three names come from the Philippine statistics
+   * authority rather than from a person typing, so they keep the authority's
+   * casing - see `normalizeGeographicName`. The street lines above stay
+   * user-entered and keep the upper-case convention.
+   */
+  cityMunicipality: z.string().trim().min(1).max(100).transform(normalizeGeographicName),
+  province: z.string().trim().min(1).max(100).transform(normalizeGeographicName),
+  barangay: z.string().trim().max(100).transform(normalizeGeographicName).optional(),
+  /**
+   * The verified PSGC codes, which are the actual geographic identity. All three
+   * or none: a half-verified hierarchy would persist a parent/child pair that
+   * nobody confirmed. All absent is legitimate, and is every record created
+   * before the structured selectors existed.
+   */
+  provinceCode: geographicCodeSchema.optional(),
+  cityMunicipalityCode: geographicCodeSchema.optional(),
+  barangayCode: geographicCodeSchema.optional(),
   postalCode: z.string().trim().max(20).optional(),
   landline: optionalLandlineSchema,
   mobile: phoneSchema,
   email: emailSchema,
-  tinNumber: z.string().trim().max(40).optional(),
+  tinNumber: tinNumberSchema,
+  raNumber: z.string().trim().max(40).optional(),
   occupationBusinessName: z.string().trim().max(160).transform(normalizeAddressField).optional(),
   officeBusinessAddress: z.string().trim().max(300).transform(normalizeAddressField).optional(),
   businessIndustry: z.string().trim().max(120).optional(),
   employedPosition: z.string().trim().max(120).transform(normalizeAddressField).optional(),
-  printedName: z.string().trim().min(1).max(180).transform(normalizePersonName),
+  printedName: z.string().trim().min(1).max(180).transform(toTitleCase),
 });
+
+/**
+ * A company-stated field that is genuinely optional. Blank and whitespace-only
+ * both mean "not stated" and collapse to `undefined`, so an empty form cell
+ * never stores "" and never clears a value already on the record.
+ */
+const optionalCompanyText = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().max(160).optional(),
+);
+
+/**
+ * Company-stated money is EXACT-DECIMAL TEXT, never a float and never a number.
+ * Same shape `private.money()` and the `amount` helpers accept, so a value that
+ * renders on the paper form is a value the system can re-read.
+ */
+const optionalCompanyMoney = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/).optional(),
+);
+
+/** Write-only government ID number; blank is "not supplied", never a clear. */
+const optionalGovernmentIdNumber = z.preprocess(
+  (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
+  z.string().trim().min(4).max(40).optional(),
+);
 
 const customerApplicationInputSchema = z.object({
   /** Required by POST creation; existing-record PATCH does not require a token. */
@@ -93,9 +219,55 @@ const customerApplicationInputSchema = z.object({
   planId: requiredUuid,
   tier: vipTierSchema,
   paymentScheme: paymentSchemeSchema,
+  /**
+   * COMPANY-STATED package and payment block, verbatim from the company master
+   * list (its "VIP Package" columns), plus the two record identifiers.
+   *
+   * `customers` is the single source for these: they are deliberately NOT
+   * stored on `customer_applications`. `register_customer_application_once`
+   * copies them onto the customer row in the same transaction that creates it,
+   * which is why the create form can collect them and the detail page can show
+   * them without the application ever owning a second copy.
+   *
+   * Nothing here is server-authoritative. No total, discount or price is ever
+   * computed FROM these columns - money comes from `card_sales` and the
+   * VERIFIED payments, exactly as before.
+   */
+  raNumber: optionalCompanyText,
+  companyStatus: optionalCompanyText,
+  statedVipPackage: optionalCompanyText,
+  statedPaymentTerms: optionalCompanyText,
+  statedRegularPrice: optionalCompanyMoney,
+  statedDiscount: optionalCompanyMoney,
+  statedTotalAmount: optionalCompanyMoney,
+  statedRf: optionalCompanyMoney,
+  statedPaymentType: optionalCompanyText,
+  statedRefNo: optionalCompanyText,
+  statedPaymentDate: dateSchema.optional(),
+  /**
+   * The government ID number captured during the application. Write-only:
+   * `save_customer_application` mirrors it onto `customers` and no read path
+   * returns it. The type is mirrored from the uploaded document instead.
+   */
+  governmentIdNumber: optionalGovernmentIdNumber,
   primary: applicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: applicationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
+  /** The Sales Manager of record (SM column on the paper form). */
   salesManagerName: z.string().trim().max(160).optional(),
+  /**
+   * The referral chain as Organization linkage, one id per level. Blank (or
+   * absent) is "not named". When an id is supplied the server resolves the
+   * matching *_name snapshot itself and ignores client text for it, so the
+   * snapshot can never disagree with the linkage; without an id the legacy
+   * text behavior applies.
+   */
+  svdStaffId: optionalUuid,
+  ssmStaffId: optionalUuid,
+  smStaffId: optionalUuid,
+  referrerStaffId: optionalUuid,
+  /** The referral chain above the seller: SVD, SSM, SM, Referrer. */
+  svdName: z.string().trim().max(160).optional(),
+  ssmName: z.string().trim().max(160).optional(),
   vipRecommenderName: z.string().trim().max(160).optional(),
   recommenderContact: optionalContactNumberSchema,
   recommenderEmail: z.preprocess(
@@ -106,13 +278,45 @@ const customerApplicationInputSchema = z.object({
   acquisitionChannels: z.array(acquisitionChannelSchema).max(7).default([]),
   consentAcknowledged: z.boolean(),
   acknowledgedAt: dateSchema,
-  primarySignatureStatus: signatureStatusSchema,
+  primarySignatureStatus: signatureStatusSchema.optional(),
   secondarySignatureStatus: signatureStatusSchema.optional(),
   validIdReceived: z.boolean(),
   reservationPaymentProofReceived: z.boolean(),
 });
+/**
+ * Codes arrive as a verified triple or not at all, and this is checked per
+ * HOLDER rather than once for the application: a primary with codes and a
+ * secondary without them is a real, reachable state, and each is judged on its
+ * own. That the triple is internally CONSISTENT is the server's job - it has to
+ * re-resolve it against the authoritative hierarchy, which no client check can
+ * substitute for.
+ */
+const validateHolderLocationCodes = (
+  holder:
+    { provinceCode?: string; cityMunicipalityCode?: string; barangayCode?: string } | undefined,
+  path: string,
+  ctx: z.RefinementCtx,
+) => {
+  if (!holder) return;
+  const present = [holder.provinceCode, holder.cityMunicipalityCode, holder.barangayCode].filter(
+    Boolean,
+  ).length;
+  if (present !== 0 && present !== 3) {
+    ctx.addIssue({
+      code: 'custom',
+      path: [path, 'provinceCode'],
+      message: 'Provide all three location codes together, or none for a legacy free-text address',
+    });
+  }
+};
+
 const validateApplicationHolders = (
-  value: { tier: string; secondary?: unknown; secondarySignatureStatus?: unknown },
+  value: {
+    tier: string;
+    secondary?: unknown;
+    secondarySignatureStatus?: unknown;
+    primary?: unknown;
+  },
   ctx: z.RefinementCtx,
 ) => {
   if (value.secondary && value.tier !== 'GOLD')
@@ -127,6 +331,16 @@ const validateApplicationHolders = (
       path: ['secondarySignatureStatus'],
       message: 'Secondary signature requires a secondary holder',
     });
+  validateHolderLocationCodes(
+    value.primary as { provinceCode?: string } | undefined,
+    'primary',
+    ctx,
+  );
+  validateHolderLocationCodes(
+    value.secondary as { provinceCode?: string } | undefined,
+    'secondary',
+    ctx,
+  );
 };
 export const createCustomerApplicationSchema = customerApplicationInputSchema.superRefine(
   validateApplicationHolders,
@@ -138,23 +352,54 @@ export const registerCustomerApplicationSchema = customerApplicationInputSchema
   .superRefine(validateApplicationHolders);
 export type RegisterCustomerApplicationRequest = z.infer<typeof registerCustomerApplicationSchema>;
 
-export const customerApplicationSchema = createCustomerApplicationSchema.extend({
-  id: z.string().uuid(),
-  applicationNumber: z.string(),
-  vipAmount: exactDecimalStringSchema,
-  discountPercent: z.number().int().min(0).max(100),
-  validityYears: z.number().int().positive(),
-  yearlyPoints: z.number().int().nonnegative(),
-  annualPointsTranches: z.number().int().positive(),
-  holderLimit: z.number().int().min(1).max(2),
-  status: customerApplicationStatusSchema,
-  createdBy: z.string().uuid().optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  submittedAt: z.string().nullable(),
-  approvedAt: z.string().nullable(),
-  rejectedAt: z.string().nullable(),
+/**
+ * A holder AS STORED. The write schema above enforces today's pick-lists, but
+ * a record written before them (a free-text `M`, an undotted `Jr`) must still
+ * READ back: historical records are never rewritten, so the read schema drops
+ * only the pick-list and TIN constraints while keeping every structural one.
+ */
+export const storedApplicationHolderSchema = applicationHolderSchema.extend({
+  suffix: z.string().max(20).optional(),
+  sex: z.string().max(30).optional(),
+  citizenship: z.string().max(80).optional(),
+  civilStatus: z.string().max(40).optional(),
+  tinNumber: z.string().max(40).optional(),
+  raNumber: z.string().max(40).optional(),
 });
+
+export const customerApplicationSchema = customerApplicationInputSchema
+  .extend({
+    acknowledgedAt: dateSchema.nullable(),
+    id: z.string().uuid(),
+    applicationNumber: z.string(),
+    primary: storedApplicationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
+    secondary: storedApplicationHolderSchema
+      .extend({ holderType: z.literal('SECONDARY') })
+      .optional(),
+    vipAmount: exactDecimalStringSchema,
+    discountPercent: z.number().int().min(0).max(100),
+    validityYears: z.number().int().positive(),
+    yearlyPoints: z.number().int().nonnegative(),
+    annualPointsTranches: z.number().int().positive(),
+    holderLimit: z.number().int().min(1).max(2),
+    status: customerApplicationStatusSchema,
+    /**
+     * The exact frozen terms this application points at, or null before any terms
+     * were captured.
+     *
+     * An IDENTIFIER, not a figure: it tells the UI which record a reservation would
+     * be built from, and the server revalidates it against the immutable row before
+     * writing anything. Null is the honest "Purchase Terms Review Required" state.
+     */
+    purchaseTermsId: z.string().uuid().nullable().optional(),
+    createdBy: z.string().uuid().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    submittedAt: z.string().nullable(),
+    approvedAt: z.string().nullable(),
+    rejectedAt: z.string().nullable(),
+  })
+  .superRefine(validateApplicationHolders);
 
 /** Staff review decision. `approved`/`rejected` leave `submitted` only; `cancelled` is terminal. */
 export const customerApplicationDecisionSchema = z.object({
@@ -162,22 +407,36 @@ export const customerApplicationDecisionSchema = z.object({
   notes: z.string().trim().min(5).max(500).optional(),
 });
 
+export const SCHEDULE_PARTICULAR_OPTIONS = [
+  'Reservation fee',
+  'Down payment',
+  'Installment',
+  'Balance',
+  'Spot cash',
+  'Monthly amortization',
+] as const;
+export type ScheduleParticular = (typeof SCHEDULE_PARTICULAR_OPTIONS)[number];
+
 export const agreementPaymentInputSchema = z.object({
-  particular: z.string().trim().min(1).max(120),
+  particular: z.enum(SCHEDULE_PARTICULAR_OPTIONS),
   amount: exactDecimalStringSchema,
   paymentDate: dateSchema.optional(),
-  remarks: z.string().trim().max(300).optional(),
 });
 
 export const reservationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  name: z
-    .string()
-    .trim()
-    .min(1)
-    .max(180)
-    .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
-    .transform(normalizePersonName),
+  // Historical application suffixes used N/A for an absent suffix. Normalize
+  // only that exact trailing marker; all other name validation remains intact.
+  name: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim().replace(/\s+n\/a$/i, '') : value),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(180)
+      .regex(PERSON_NAME_RE, 'Use letters, spaces, apostrophes and hyphens only - no numbers')
+      .transform(normalizePersonName),
+  ),
   address: z
     .string()
     .trim()
@@ -192,7 +451,13 @@ export const reservationHolderSchema = z.object({
 export const createReservationAgreementSchema = z
   .object({
     requestId: z.string().uuid().optional(),
-    saleId: requiredUuid,
+    /**
+     * Required for the LEGACY sale-origin form, absent for an application-origin
+     * reservation. `purchaseReservationCreateSchema` is the application-origin
+     * contract and carries no sale id at all, so the two shapes cannot be
+     * confused for one another.
+     */
+    saleId: optionalUuid,
     customerApplicationId: optionalUuid,
     /**
      * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
@@ -206,25 +471,22 @@ export const createReservationAgreementSchema = z
     monthlyAmortizationStart: dateSchema.optional(),
     monthlyAmortizationEnd: dateSchema.optional(),
     paymentDueDay: z.number().int().min(1).max(31).optional(),
-    primarySignatureStatus: signatureStatusSchema,
-    secondarySignatureStatus: signatureStatusSchema.optional(),
     primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
     secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
     scheduleNotes: z.array(agreementPaymentInputSchema).max(24).default([]),
-  })
-  .superRefine((value, ctx) => {
-    if (!value.secondary && value.secondarySignatureStatus)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['secondarySignatureStatus'],
-        message: 'Secondary signature requires a secondary holder',
-      });
   });
 
 export const reservationAgreementSchema = z.object({
   id: z.string().uuid(),
   reservationNumber: z.string(),
-  saleId: z.string().uuid(),
+  /**
+   * Null for an application-origin reservation.
+   *
+   * A first-time purchase has NO card sale until Finance finalizes it, and
+   * calling that reservation a sale before the money is verified is exactly the
+   * confusion this flow exists to remove.
+   */
+  saleId: optionalUuid,
   tier: vipTierSchema,
   totalPrice: exactDecimalStringSchema,
   reservationFee: exactDecimalStringSchema,
@@ -248,8 +510,6 @@ export const reservationAgreementSchema = z.object({
   monthlyAmortizationStart: dateSchema.optional(),
   monthlyAmortizationEnd: dateSchema.optional(),
   paymentDueDay: z.number().int().min(1).max(31).optional(),
-  primarySignatureStatus: signatureStatusSchema,
-  secondarySignatureStatus: signatureStatusSchema.optional(),
   primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
   secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
   schedule: z.array(
@@ -273,9 +533,35 @@ export const officialFormListQuerySchema = z.object({
   status: z.string().trim().max(30).optional(),
   tier: vipTierSchema.optional(),
   seller: z.string().uuid().optional(),
+  saleId: z.string().uuid().optional(),
+  /**
+   * Every application belonging to one customer, newest first.
+   *
+   * This is the lookup behind the customer workspace: the customer page owns
+   * its applications, so it must be able to ask "this person's applications"
+   * without pulling the whole paginated list and filtering in the browser.
+   * Ignored for reservation agreements, which hang off an APPLICATION rather
+   * than a customer.
+   */
+  customerId: z.string().uuid().optional(),
   from: dateSchema.optional(),
   to: dateSchema.optional(),
   search: z.string().trim().max(100).optional(),
+  /**
+   * Operational queue, not a data filter.
+   *
+   * `application_work` returns only applications that still require APPLICATION
+   * work: once a live reservation exists, the reservation/payment stage owns the
+   * customer. It is opt-in and omitted by default, so history stays reachable.
+   *
+   * `reservation_work` returns only agreements that still require IST RESERVATION
+   * work. An EXECUTED agreement is finalized: Finance owns collection from then
+   * on, so it leaves this queue exactly as an application leaves the application
+   * queue. Also opt-in, also never destructive.
+   */
+  queue: z.enum(['application_work', 'reservation_work']).optional(),
+  /** Reservations created from this application (application-origin link). */
+  application: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -293,11 +579,13 @@ export const customerApplicationListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     application_number: z.string(),
+    seller_name: z.string().nullable().optional(),
     status: customerApplicationStatusSchema,
   })
   .transform((row) => ({
     id: row.id,
     applicationNumber: row.application_number,
+    sellerName: row.seller_name ?? null,
     tier: row.tier_snapshot,
     applicantName: row.applicant_name,
     createdBy: row.created_by,
@@ -309,13 +597,14 @@ export const reservationAgreementListItemSchema = z
   .object({
     ...officialFormSummaryFields,
     reservation_number: z.string(),
-    sale_id: z.string().uuid(),
+    sale_id: z.string().uuid().nullable(),
     payment_scheme_snapshot: paymentSchemeSchema,
     total_price_snapshot: exactDecimalStringSchema,
-    primary_signature_status: signatureStatusSchema,
-    secondary_signature_status: signatureStatusSchema.nullable(),
     has_secondary_holder: z.boolean(),
     status: reservationAgreementStatusSchema,
+    payment_status: z.string().nullable().optional(),
+    verified_total: exactDecimalStringSchema.optional(),
+    fully_paid: z.boolean().optional(),
   })
   .transform((row) => ({
     id: row.id,
@@ -323,8 +612,8 @@ export const reservationAgreementListItemSchema = z
     saleId: row.sale_id,
     paymentScheme: row.payment_scheme_snapshot,
     totalPrice: row.total_price_snapshot,
-    primarySignatureStatus: row.primary_signature_status,
-    secondarySignatureStatus: row.secondary_signature_status,
+    verifiedTotal: row.verified_total ?? null,
+    fullyPaid: row.fully_paid ?? false,
     hasSecondaryHolder: row.has_secondary_holder,
     tier: row.tier_snapshot,
     applicantName: row.applicant_name,
@@ -332,6 +621,7 @@ export const reservationAgreementListItemSchema = z
     createdAt: row.created_at,
     submittedAt: row.submitted_at,
     status: row.status,
+    paymentStatus: row.payment_status ?? null,
   }));
 export type CustomerApplicationListItem = z.infer<typeof customerApplicationListItemSchema>;
 export type ReservationAgreementListItem = z.infer<typeof reservationAgreementListItemSchema>;
@@ -343,7 +633,16 @@ export const formImportPreviewSchema = z.object({
   requiresReview: z.literal(true),
 });
 
-export type ApplicationHolder = z.infer<typeof applicationHolderSchema>;
+/**
+ * The UI draft shape for an application holder.
+ *
+ * Deliberately the STORED (loosened) shape rather than the strict write
+ * schema's output: a form loads records written before today's pick-lists, so
+ * it must be able to hold `M` or an undotted `Jr` long enough to show them.
+ * Every write still parses through `createCustomerApplicationSchema`, which is
+ * where the pick-lists and the TIN rule are enforced.
+ */
+export type ApplicationHolder = z.infer<typeof storedApplicationHolderSchema>;
 export type CreateCustomerApplicationRequest = z.infer<typeof createCustomerApplicationSchema>;
 export type CustomerApplication = z.infer<typeof customerApplicationSchema>;
 export type CustomerApplicationDecision = z.infer<typeof customerApplicationDecisionSchema>;

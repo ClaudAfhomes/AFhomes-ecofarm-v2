@@ -44,9 +44,10 @@ export { Dialog } from './components/Dialog.js';
 export type { DialogProps } from './components/Dialog.js';
 export { ConfirmDialog } from './components/ConfirmDialog.js';
 export type { ConfirmDialogProps } from './components/ConfirmDialog.js';
-export { notifyError, notifySuccess, notifyWarning } from './notify.js';
+export { notifyConfirm, notifyError, notifySuccess, notifyWarning } from './notify.js';
 export type { NotifyInput } from './notify.js';
 export { Skeleton } from './components/Skeleton.js';
+export { ScrollToTop } from './components/ScrollToTop.js';
 export { Spinner } from './components/Spinner.js';
 export type { SpinnerProps, SpinnerSize } from './components/Spinner.js';
 export { Alert } from './components/Alert.js';
@@ -57,8 +58,19 @@ export { FormField, FieldError } from './components/FormField.js';
 export type { FormFieldProps, FieldErrorProps } from './components/FormField.js';
 export { TextField } from './components/TextField.js';
 export type { TextFieldProps } from './components/TextField.js';
+export { TextAreaField } from './components/TextAreaField.js';
+export type { TextAreaFieldProps } from './components/TextAreaField.js';
+export { DateField } from './components/DateField.js';
+export type { DateFieldProps } from './components/DateField.js';
+export { FileField } from './components/FileField.js';
+export type { FileFieldProps } from './components/FileField.js';
 export { PasswordField } from './components/PasswordField.js';
 export type { PasswordFieldProps } from './components/PasswordField.js';
+export { PasswordChecklist } from './components/PasswordChecklist.js';
+export type {
+  PasswordChecklistItem,
+  PasswordChecklistProps,
+} from './components/PasswordChecklist.js';
 export { MetricCard } from './components/MetricCard.js';
 export type { MetricCardProps } from './components/MetricCard.js';
 export { FilterBar } from './components/FilterBar.js';
@@ -79,6 +91,12 @@ export { QrCode, downloadQrImage } from './components/QrCode.js';
 export type { QrCodeProps } from './components/QrCode.js';
 export { Select } from './components/Select.js';
 export type { SelectOption, SelectProps } from './components/Select.js';
+export { Combobox } from './components/Combobox.js';
+export type { ComboboxOption, ComboboxProps } from './components/Combobox.js';
+export { rankOptions, normalizeForMatch, RANK } from './combobox-rank.js';
+export type { Rankable } from './combobox-rank.js';
+export { tierArtwork, tierLabel } from './tier-artwork.js';
+export type { VipTier } from './tier-artwork.js';
 export {
   DetailGrid,
   DetailCard,
@@ -89,11 +107,26 @@ export {
   DetailMockNote,
 } from './components/DetailCard.js';
 export { UserMenu, getInitials } from './components/UserMenu.js';
+export { ProfilePhotoEditor } from './components/ProfilePhotoEditor.js';
 export type { UserMenuItem, UserMenuProps } from './components/UserMenu.js';
 export { OverflowMenu } from './components/OverflowMenu.js';
 export type { OverflowMenuItem, OverflowMenuProps } from './components/OverflowMenu.js';
 
 export { NormalizedInput } from './components/NormalizedInput.js';
 export { OstOfficialFields } from './components/OstOfficialFields.js';
+export { AccreditationId } from './components/AccreditationId.js';
+export { VerifiedBadge } from './components/VerifiedBadge.js';
 export { IdCapturePicker } from './components/IdCapturePicker.js';
 export { TurnstileChallenge } from './components/TurnstileChallenge.js';
+
+export { useQrScanner, defaultDecoder } from './hooks/useQrScanner.js';
+export type {
+  ScannerStatus,
+  FrameDecoder,
+  QrScannerControls,
+  UseQrScannerResult,
+} from './hooks/useQrScanner.js';
+export { OstAddressFields, emptyOstAddress } from './components/OstAddressFields';
+export type { OstAddressSelection } from './components/OstAddressFields';
+export { CookiePasswordResetForm } from './components/CookiePasswordResetForm';
+export { SalesParticipationList } from './components/SalesParticipationList';

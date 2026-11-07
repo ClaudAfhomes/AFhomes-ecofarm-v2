@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## Branch integration (6 November 2026)
+
+This checkout is `claud/supabase`. Application code is integrated from
+`origin/develop` at `e759f69`; the active backend remains Supabase Postgres,
+Supabase Auth and private Supabase Storage through `api/_lib/router.ts`.
+`pnpm dev` uses Turborepo and `api/dev-server.ts`, not the MongoDB launcher.
+`VITE_AUTH_PROVIDER=mongodb` is rejected by the public environment contract.
+MongoDB source, tests and imported notes are reference material for this branch;
+do not adopt their Atlas, Better Auth or DigitalOcean operating instructions.
+The package namespace is now `@afhomes/*` (older examples below use `@jad/*`).
+The phase summaries below describe the original foundation; current source,
+contracts and migrations contain subsequent work imported from `develop`.
+No imported migration is assumed applied. Never modify existing administrators
+or run remote writes, migrations, bootstrap, deployment, commit or push without
+explicit authorization. Generated graph reports and MongoDB operator guides
+are excluded from this integration.
+
 pnpm + Turborepo monorepo for the **AF Homes Ecofarm** platform (membership-card
 business). Stack: **React 19 + Vite 8 SPAs → TanStack Query → Vercel Functions
 REST API → Supabase Postgres + Supabase Auth**.

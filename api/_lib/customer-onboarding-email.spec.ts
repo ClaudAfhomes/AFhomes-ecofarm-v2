@@ -49,7 +49,7 @@ describe('customer onboarding email', () => {
           SMTP_USER: 'mailer',
           SMTP_PASSWORD: 'server-secret',
           SMTP_FROM: 'no-reply@example.com',
-          SMTP_FROM_NAME: 'AF Homes',
+          SMTP_FROM_NAME: 'AFHomes',
         },
         createTransport,
       ),
