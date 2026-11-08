@@ -19,6 +19,10 @@ export function AdminLayout() {
   const photo = useProfilePhoto();
   const { user, logout, sessionError, revalidate } = useSession();
   const location = useLocation();
+  const applicationWorkspace = [
+    '/admin/customers/new',
+    '/admin/customers/applications/new',
+  ].includes(operationsPath(location.pathname));
   const [confirm, setConfirm] = useState(false);
   const crumbs = useMemo(
     () =>
@@ -53,14 +57,27 @@ export function AdminLayout() {
   return (
     <>
       <AppShell
+        compactWorkspace={applicationWorkspace}
+        topbarContext={
+          applicationWorkspace ? (
+            <span className={styles.workspaceCrumbs}>
+              Sales <span aria-hidden="true">›</span> Customers <span aria-hidden="true">›</span>{' '}
+              <strong>New application</strong>
+            </span>
+          ) : undefined
+        }
         brand={
-          <div className={styles.brandBlock}>
-            <img src={logo} alt="AFhomes logo" />
-            <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>AFhomes</span>
-              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+          applicationWorkspace ? (
+            <img src={logo} alt="AFhomes logo" className={styles.workspaceLogo} />
+          ) : (
+            <div className={styles.brandBlock}>
+              <img src={logo} alt="AFhomes logo" />
+              <div className={styles.brandTextBlock}>
+                <span className={styles.brandName}>AFhomes</span>
+                <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+              </div>
             </div>
-          </div>
+          )
         }
         navItems={
           gated
@@ -69,24 +86,24 @@ export function AdminLayout() {
                 ...item,
                 to: portalTarget(item.to),
                 dropdown: item.dropdown?.map((child) =>
-                  'to' in child
-                    ? { ...child, to: portalTarget(child.to) }
-                    : child,
+                  'to' in child ? { ...child, to: portalTarget(child.to) } : child,
                 ),
               }))
         }
         topbarLeading={
-          <div className={styles.topbarBrand}>
-            <img src={logo} alt="" />
-            <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>AFhomes</span>
-              <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+          applicationWorkspace ? undefined : (
+            <div className={styles.topbarBrand}>
+              <img src={logo} alt="" />
+              <div className={styles.brandTextBlock}>
+                <span className={styles.brandName}>AFhomes</span>
+                <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+              </div>
             </div>
-          </div>
+          )
         }
         navLabel="AFhomes administration"
         menuLabel="Open navigation"
-        menuPosition="right"
+        menuPosition={applicationWorkspace ? 'left' : 'right'}
         sidebarFooter={
           <button
             type="button"
@@ -121,7 +138,7 @@ export function AdminLayout() {
         }
       >
         <div className={styles.content}>
-          {crumbs ? <Breadcrumbs items={crumbs} /> : null}
+          {crumbs && !applicationWorkspace ? <Breadcrumbs items={crumbs} /> : null}
           {/* Route pages load on demand: the shell stays mounted while the
           page chunk loads, so navigation never blanks. */}
           <Suspense

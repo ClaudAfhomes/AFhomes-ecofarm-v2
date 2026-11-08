@@ -1,7 +1,36 @@
 .review {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-5, 20px);
   width: 100%;
+}
+.review > header,
+.documentActions,
+.documentHint,
+.holder {
+  grid-column: 1 / -1;
+}
+.documentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.documentHint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin: -8px 0 0;
+}
+.paperPreview {
+  display: grid;
+  gap: 16px;
+  padding: 12px;
+  background: var(--color-bg-sunken);
+}
+.paperPreview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border-default);
 }
 .review header h2 {
   margin: 0 0 8px;
@@ -14,10 +43,14 @@
 }
 .holder {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-5, 20px);
 }
+.holder > h2 {
+  grid-column: 1 / -1;
+}
 .section {
-  padding: var(--space-5, 20px);
+  padding: 16px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg, 12px);
   background: var(--color-bg-surface-raised);
@@ -36,7 +69,7 @@
 }
 .details {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px 24px;
   margin: 0;
 }
@@ -64,6 +97,10 @@
   }
 }
 @media (max-width: 520px) {
+  .review,
+  .holder {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .details {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -73,4 +110,18 @@
   .heading {
     align-items: start;
   }
+}
+
+/* Only the application paper preview uses the approved V4 document dimensions. */
+:global([role='dialog']):has(.paperPreview) {
+  width:min(1020px,100%);
+  height:min(95vh,1200px);
+  max-height:95vh;
+  border-radius:13px;
+}
+.paperPreview { background:#e4e9e4; padding:24px; }
+.paperPreview img { width:min(100%,720px); justify-self:center; box-shadow:0 8px 30px #23432c3d; background:#fff; }
+@media(max-width:740px) {
+  :global([role='dialog']):has(.paperPreview) { width:calc(100% - 16px); }
+  .paperPreview { padding:10px; }
 }

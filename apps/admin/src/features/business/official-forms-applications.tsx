@@ -1,3 +1,7 @@
+import { downloadFile } from '../../lib/download';
+import { draftReservationPaper, reservationPdf, printReservation } from './reservation-print';
+import { type ApplicationRaDraft, applicationRaDraftSchema } from '@afhomes/contracts';
+import { ApplicationRaReview, suggestedRaTerms } from './ApplicationRaReview';
 /**
 
  * Customer-application pages.
@@ -57,6 +61,7 @@ import {
   ErrorState,
   FilterBar,
   Icon,
+  type IconName,
   PageHeader,
   Pagination,
   SearchField,
@@ -66,6 +71,7 @@ import {
   TextField,
 } from '@afhomes/ui';
 import { TierBadge } from './TierBadge';
+import v4 from './CustomerApplicationV4.module.css';
 import { tierArtwork } from '@afhomes/ui';
 import styles from './OfficialFormsPages.module.css';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
@@ -97,7 +103,7 @@ import {
 
 import { ApplicationChoiceCards } from './ApplicationChoiceCards';
 import { ApplicationReview } from './ApplicationReview';
-import { resolveApplicationNetwork } from './application-network';
+import { ApplicationProgress } from './ApplicationProgress';
 import { getGenealogy } from '../genealogy/services';
 import { filterGovernmentIdInput } from '../../lib/normalize';
 
@@ -105,6 +111,8 @@ import {
   today,
   emptyHolder,
   HolderFields,
+  HOLDER_SECTIONS,
+  holderSectionBlocker,
   QUEUE_PAGE_SIZE,
   APPLICATION_STATUS_TONES,
   RecommenderFields,
@@ -413,6 +421,17 @@ export function humanizeApplicationIssues(issues: { path: PropertyKey[]; message
  * next step instead. Returns `undefined` for unknown errors so the shared
  * generic message applies.
  */
+/** One icon per government ID type, matching the reference's own tile
+ * glyphs (which reused one glyph across more than one type too - exact
+ * per-type icon variety was never the point, a recognizable tile is). */
+const GOVERNMENT_ID_TYPE_ICONS: Record<GovernmentIdType, IconName> = {
+  philippine_id: 'file-text',
+  drivers_license: 'image',
+  passport: 'file-text',
+  tax_id: 'file-text',
+  other: 'file-text',
+};
+
 function describeApplicationLoadError(error: unknown): string | undefined {
   if (error instanceof ApiNetworkError)
     return 'Check your connection and try again. If this continues, contact AFhomes support.';
@@ -604,7 +623,6 @@ export function CustomerApplicationEditorPage() {
   const [customerId, setCustomerId] = useState(() =>
     isNew && !importRowId ? '' : (applicationSearch.get('customerId') ?? ''),
   );
-  const [networkKind, setNetworkKind] = useState<'OST' | 'IST'>('OST');
   // The picker resolves against the authoritative record, and a prefill click
   // is only accepted for the customer it was started for.
   const selectedCustomerRef = useRef(customerId);
@@ -615,6 +633,7 @@ export function CustomerApplicationEditorPage() {
     'spot_cash' | 'move_a' | 'installment_4_month' | 'move_b1_40_12' | 'move_b2_25_12'
   >('spot_cash');
   const [primary, setPrimary] = useState(() => emptyHolder('PRIMARY'));
+  const [holderSection, setHolderSection] = useState('personal');
   const [raNumberMode, setRaNumberMode] = useState<'automatic' | 'manual'>('automatic');
   const [secondary, setSecondary] = useState<ApplicationHolder | null>(null);
   const [meta, setMeta] = useState({
@@ -626,7 +645,17 @@ export function CustomerApplicationEditorPage() {
     recommenderContact: '',
     recommenderEmail: '',
     acknowledgedAt: importRowId ? '' : today(),
+    // `referrerAaNumber` and `recommenderStaffId` are local-only - the
+    // request schemas don't declare them, so Zod strips both before
+    // anything is sent. `recommenderAaNumber` IS declared and IS sent,
+    // transiently, so the server can re-verify the same-team rule itself.
+    referrerAaNumber: '',
+    recommenderAaNumber: '',
+    recommenderStaffId: '',
   });
+  const [raDraft, setRaDraft] = useState<ApplicationRaDraft>({});
+  const [raTermsSource, setRaTermsSource] = useState('');
+  const [networkTeamError, setNetworkTeamError] = useState('');
   const [channels, setChannels] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
   const [validId, setValidId] = useState(false);
@@ -686,6 +715,8 @@ export function CustomerApplicationEditorPage() {
       const raw = sessionStorage.getItem(DRAFT_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw) as Record<string, unknown>;
+      if (draft.raDraft) setRaDraft(draft.raDraft as ApplicationRaDraft);
+      if (typeof draft.raTermsSource === 'string') setRaTermsSource(draft.raTermsSource);
       if (draft.primary) setPrimary(draft.primary as typeof primary);
       if (draft.secondary !== undefined) setSecondary(draft.secondary as ApplicationHolder | null);
       if (draft.meta) setMeta(draft.meta as typeof meta);
@@ -694,8 +725,6 @@ export function CustomerApplicationEditorPage() {
       if (typeof draft.paymentScheme === 'string')
         setPaymentScheme(draft.paymentScheme as typeof paymentScheme);
       if (importRowId && typeof draft.customerId === 'string') setCustomerId(draft.customerId);
-      if (draft.networkKind === 'OST' || draft.networkKind === 'IST')
-        setNetworkKind(draft.networkKind);
       if (typeof draft.planId === 'string') setPlanId(draft.planId);
       if (draft.raNumberMode === 'automatic' || draft.raNumberMode === 'manual')
         setRaNumberMode(draft.raNumberMode);
@@ -720,6 +749,7 @@ export function CustomerApplicationEditorPage() {
       sessionStorage.setItem(
         DRAFT_KEY,
         JSON.stringify({
+          raDraft, raTermsSource,
           primary,
           secondary,
           meta,
@@ -732,13 +762,13 @@ export function CustomerApplicationEditorPage() {
           idType,
           idNumber,
           activeStep,
-          networkKind,
         }),
       );
     } catch {
       /* ignore storage errors */
     }
   }, [
+    raDraft, raTermsSource,
     isNew,
     primary,
     secondary,
@@ -752,7 +782,6 @@ export function CustomerApplicationEditorPage() {
     idType,
     idNumber,
     activeStep,
-    networkKind,
   ]);
   // Track successful submission to hide the ID verification note in the Certify step.
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
@@ -956,26 +985,6 @@ export function CustomerApplicationEditorPage() {
     enabled: isNew && !importRowId && activeStep >= 3,
     retry: false,
   });
-  let networkError = '';
-  const referringMember =
-    networkKind === 'OST'
-      ? meta.referrerStaffId
-      : meta.smStaffId || meta.ssmStaffId || meta.svdStaffId;
-  if (isNew && !importRowId && referringMember) {
-    try {
-      const resolved = resolveApplicationNetwork(network.data ?? [], referringMember);
-      if (
-        Object.entries(resolved.chain).some(
-          ([key, value]) => meta[key as keyof typeof resolved.chain] !== value,
-        )
-      )
-        networkError =
-          'The network relationship changed. Return to Network and select the referring member again.';
-    } catch (error) {
-      networkError =
-        error instanceof Error ? error.message : 'Review the referring member and Direct Head.';
-    }
-  }
   const optionalPhonesValid =
     [meta.recommenderContact].every(
       (value) => optionalContactNumberSchema.safeParse(value).success,
@@ -1000,7 +1009,7 @@ export function CustomerApplicationEditorPage() {
   if (!primaryComplete) blockers.push('Complete primary holder fields.');
   if (secondary && !applicationHolderSchema.safeParse(secondary).success)
     blockers.push('Complete secondary holder fields.');
-  if (networkError) blockers.push(networkError);
+  if (isNew && !importRowId && networkTeamError) blockers.push(networkTeamError);
   if (importRowId) {
     if (!mayLoadImport)
       blockers.push('Customer import access is required to review this purchase.');
@@ -1032,6 +1041,8 @@ export function CustomerApplicationEditorPage() {
       setTier(app.tier);
       setPaymentScheme(app.paymentScheme);
       setPrimary(app.primary);
+      setRaDraft(app.raDraft ?? {});
+      setRaTermsSource(`${app.planId}:${app.paymentScheme}`);
       setSecondary(app.secondary ?? null);
       setMeta({
         svdStaffId: app.svdStaffId ?? '',
@@ -1042,6 +1053,11 @@ export function CustomerApplicationEditorPage() {
         recommenderContact: app.recommenderContact ?? '',
         recommenderEmail: app.recommenderEmail ?? '',
         acknowledgedAt: app.acknowledgedAt ?? '',
+        // Edit mode never uses the AA-number flow (`networkSelection` is
+        // only ever true for a brand-new application), so these stay blank.
+        referrerAaNumber: '',
+        recommenderAaNumber: '',
+        recommenderStaffId: '',
       });
       setChannels(app.acquisitionChannels);
       setConsent(app.consentAcknowledged);
@@ -1050,7 +1066,20 @@ export function CustomerApplicationEditorPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [existing.data]);
+  const currentRaSource = `${planId}:${paymentScheme}`;
+  const raDefaults = suggestedRaTerms(plans.data?.find(p => p.id === planId), paymentScheme);
+  const effectiveRaDraft = raTermsSource === currentRaSource ? raDraft : { ...raDraft, ...raDefaults };
+  const changeRaDraft = (value: ApplicationRaDraft) => { setRaTermsSource(currentRaSource); setRaDraft(value); };
+  const printRaDraft = async () => {
+    const checked = applicationRaDraftSchema.parse(effectiveRaDraft);
+    await printReservation(draftReservationPaper(primary, secondary, tier, paymentScheme, plans.data?.find(p => p.id === planId), checked));
+  };
+  const downloadRaDraft = async () => {
+    const checked = applicationRaDraftSchema.parse(effectiveRaDraft);
+    downloadFile(await reservationPdf(draftReservationPaper(primary, secondary, tier, paymentScheme, plans.data?.find(p => p.id === planId), checked)));
+  };
   const payload = () => ({
+    raDraft: effectiveRaDraft,
     // Unchosen selectors stay absent: never send "" as a UUID.
     customerId: customerId || undefined,
     planId: planId || undefined,
@@ -1378,19 +1407,26 @@ export function CustomerApplicationEditorPage() {
         </div>
       ) : null}
       <DetailFieldGrid className={styles.planGrid}>
-        <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
-        <DetailField label="Holder limit">{selectedPlan.cardholderLimit} max</DetailField>
-        <DetailField label="Yearly points">
-          {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
-        </DetailField>
-        <DetailField label="Validity">
-          {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
-        </DetailField>
-        <DetailField label="Total value">
+        <DetailField label="Total loyalty value">
           {formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}
         </DetailField>
+        <DetailField label="Holders">{selectedPlan.cardholderLimit} maximum</DetailField>
       </DetailFieldGrid>
-      <p className={styles.hint}>Frozen at submit. Later edits change nothing.</p>
+      <details className={styles.planDetails}>
+        <summary>View plan details</summary>
+        <DetailFieldGrid className={styles.planGrid}>
+          <DetailField label="Discount">{selectedPlan.discountPercent}% off</DetailField>
+          <DetailField label="Yearly points">
+            {formatCountOrDash(selectedPlan.yearlyPoints)} × {selectedPlan.annualPointsTranches}
+          </DetailField>
+          <DetailField label="Validity">
+            {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
+          </DetailField>
+        </DetailFieldGrid>
+      </details>
+      <p className={styles.hint}>
+        Plan details are frozen when the application is submitted, not when you select a card.
+      </p>
     </DetailCard>
   ) : null;
   const relatedCustomer = linkedCustomer.data ?? null;
@@ -1456,10 +1492,11 @@ export function CustomerApplicationEditorPage() {
   // visible: disabled with an inline list of what to fix, never silent.
   const saveAction = (
     <Button
+      className={isNew ? `${v4.btn} ${v4.primary}` : undefined}
       onClick={() => {
         if (!isNew || activeStep === 6) saveAndSubmit.mutate();
       }}
-      disabled={!editable || saveAndSubmit.isPending || blockers.length > 0}
+      disabled={!editable || saveAndSubmit.isPending || blockers.length > 0 || !applicationRaDraftSchema.safeParse(effectiveRaDraft).success}
       loading={saveAndSubmit.isPending}
       loadingLabel="Saving…"
     >
@@ -1468,6 +1505,16 @@ export function CustomerApplicationEditorPage() {
   );
   // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
   // the final authority, and Next can never refuse what Save allows.
+  const holderSectionIndex = HOLDER_SECTIONS.indexOf(
+    holderSection as (typeof HOLDER_SECTIONS)[number],
+  );
+  const nextHolderSection = HOLDER_SECTIONS[holderSectionIndex + 1];
+  const nextHolderSectionLabel =
+    nextHolderSection === 'work'
+      ? 'Additional'
+      : nextHolderSection
+        ? nextHolderSection.charAt(0).toUpperCase() + nextHolderSection.slice(1)
+        : '';
   const stepBlockers: (string | null)[] = [
     !planId ? 'Select a VIP plan.' : null,
     !serverCurrentDocument?.reviewedFields?.idType && !idFile
@@ -1475,12 +1522,13 @@ export function CustomerApplicationEditorPage() {
       : idFile && !idType
         ? 'Choose ID type first.'
         : null,
-    Object.values(invalidFields).some(Boolean)
-      ? 'Correct the highlighted fields.'
-      : !primaryComplete
-        ? 'Complete primary holder fields.'
+    holderSectionBlocker(primary, holderSection, holderSection === 'work') ??
+      (secondary ? holderSectionBlocker(secondary, holderSection, holderSection === 'work') : null),
+    !optionalPhonesValid
+      ? 'Correct the recommender contact or landline number.'
+      : isNew && !importRowId && networkTeamError
+        ? networkTeamError
         : null,
-    !optionalPhonesValid ? 'Correct the recommender contact or landline number.' : null,
     null,
     !consent ? 'Certification and consent must be ticked.' : null,
     null,
@@ -1492,7 +1540,11 @@ export function CustomerApplicationEditorPage() {
       label: 'Identity',
       done: Boolean(serverCurrentDocument?.reviewedFields?.idType || idFile),
     },
-    { id: 'step-holders', label: 'Holders', done: primaryComplete },
+    {
+      id: 'step-holders',
+      label: 'Holders',
+      done: primaryComplete && (!secondary || applicationHolderSchema.safeParse(secondary).success),
+    },
     {
       id: 'step-recommender',
       label: 'Network',
@@ -1520,8 +1572,8 @@ export function CustomerApplicationEditorPage() {
         target.setAttribute('tabindex', '-1');
         target.focus({ preventScroll: true });
       }
-      // Desktop owns its scroll inside the right pane; stacked screens use the page.
-      if (panel && window.getComputedStyle(panel).overflowY === 'auto') {
+      // Existing record layouts may own a scroll pane; V4 uses the page.
+      if (!isNew && panel && window.getComputedStyle(panel).overflowY === 'auto') {
         panel.scrollTo({
           top: target
             ? panel.scrollTop +
@@ -1537,11 +1589,23 @@ export function CustomerApplicationEditorPage() {
   };
   const goStep = (index: number, targetId?: string) => {
     if (index < 0 || index > steps.length - 1 || index > maxReached) return;
+    if (index === 2) {
+      setHolderSection(targetId?.split('-').at(-1) ?? 'personal');
+    }
     setActiveStep(index);
-    revealStep(targetId);
+    revealStep(
+      index === 2 && targetId?.endsWith('-identity')
+        ? targetId.replace(/-identity$/, '-personal')
+        : targetId,
+    );
   };
   const goNext = () => {
     if (stepBlockers[activeStep] || activeStep >= steps.length - 1) return;
+    if (activeStep === 2 && nextHolderSection) {
+      setHolderSection(nextHolderSection);
+      revealStep(`primary-${nextHolderSection}`);
+      return;
+    }
     const next = activeStep + 1;
     setMaxReached((reached) => Math.max(reached, next));
     setActiveStep(next);
@@ -1553,69 +1617,152 @@ export function CustomerApplicationEditorPage() {
   // the server refuses non-draft writes regardless.
   return (
     <HumanInputValidity.Provider value={reportValidity}>
-      <section className={styles.editorSection} data-split={isNew || undefined}>
-        <PageHeader
-          title={existing.data?.applicationNumber ?? 'New Customer Application'}
-          description="Manual entry or ID capture."
-          actions={
-            <>
-              <Button variant="secondary" onClick={() => navigate('/admin/customers/applications')}>
-                Back to applications
-              </Button>
-            </>
-          }
-        />
-        <div className={isNew ? styles.applicationWorkspace : styles.recordWorkspace}>
+      <section className={isNew ? `${v4.application} ${v4.wrap}` : styles.editorSection}>
+        {isNew ? (
+          <div className={v4.pageTop}>
+            <div>
+              <h1>New Customer Application</h1>
+              <p>Create and submit a customer application for staff review.</p>
+            </div>
+            <button
+              type="button"
+              className={v4.plainlink}
+              onClick={() => navigate('/admin/customers/applications')}
+            >
+              ← Back to applications
+            </button>
+          </div>
+        ) : (
+          <PageHeader
+            title={existing.data?.applicationNumber ?? 'New Customer Application'}
+            description={
+              isNew
+                ? 'Create and submit a customer application for staff review.'
+                : 'Manual entry or ID capture.'
+            }
+            actions={
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => navigate('/admin/customers/applications')}
+                >
+                  Back to applications
+                </Button>
+              </>
+            }
+          />
+        )}
+        <div className={isNew ? v4.workspace : styles.recordWorkspace}>
           {isNew ? (
-            <aside aria-label="Selected VIP card" className={styles.applicationPreview}>
-              {planPreview ?? (
-                <div className={styles.planPlaceholder}>
-                  <Icon name="wallet" size={48} />
-                  <h2>Your VIP card</h2>
-                  <p className={styles.hint}>
-                    Select a VIP plan on the right to preview your card and its benefits.
-                  </p>
+            <aside aria-label="Selected VIP card" className={v4.vip}>
+              <h2 className={v4.vipTitle}>VIP card</h2>
+              <p className={v4.subtle}>
+                Choose a plan. The selection stays here throughout your application.
+              </p>
+              {plans.isPending ? (
+                <p role="status">Loading VIP plans…</p>
+              ) : plans.isError ? (
+                <ErrorState
+                  title="VIP plans could not be loaded"
+                  onRetry={() => void plans.refetch()}
+                />
+              ) : (
+                <ApplicationChoiceCards
+                  required
+                  segmented
+                  label="VIP plan *"
+                  value={planId}
+                  options={(plans.data ?? [])
+                    .filter((plan) => ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code))
+                    .sort(
+                      (a, b) =>
+                        ['BRONZE', 'SILVER', 'GOLD'].indexOf(a.code) -
+                        ['BRONZE', 'SILVER', 'GOLD'].indexOf(b.code),
+                    )
+                    .map((plan) => ({
+                      value: plan.id,
+                      label: plan.code[0] + plan.code.slice(1).toLowerCase(),
+                    }))}
+                  onChange={(next) => {
+                    const plan = plans.data?.find((p) => p.id === next);
+                    setPlanId(next);
+                    setTier((plan?.code ?? 'BRONZE') as typeof tier);
+                    if (plan?.code !== 'GOLD') setSecondary(null);
+                  }}
+                />
+              )}
+              {!plans.isPending &&
+              !plans.isError &&
+              !plans.data?.some((plan) => ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code)) ? (
+                <Alert variant="warning">
+                  No VIP plans are available. Contact an administrator.
+                </Alert>
+              ) : null}
+              {selectedPlan ? (
+                <>
+                  <div className={v4.vipcard}>
+                    <img {...tierArtwork(selectedPlan.code)} />
+                  </div>
+                  <div className={v4.planmeta}>
+                    <strong>
+                      {selectedPlan.code[0] + selectedPlan.code.slice(1).toLowerCase()} VIP
+                    </strong>
+                    <span className={v4.tag}>{selectedPlan.code}</span>
+                  </div>
+                  <div className={v4.statline}>
+                    <span>Total loyalty value</span>
+                    <b>{formatMoneyOrDash(selectedPlan.totalLoyaltyValue)}</b>
+                  </div>
+                  <div className={v4.statline}>
+                    <span>Holders</span>
+                    <b>{selectedPlan.cardholderLimit} maximum</b>
+                  </div>
+                  <details className={v4.planDisclosure}>
+                    <summary className={v4.textlink}>View plan details</summary>
+                    <div className={v4.statline}>
+                      <span>Discount</span>
+                      <b>{selectedPlan.discountPercent}% off</b>
+                    </div>
+                    <div className={v4.statline}>
+                      <span>Yearly points</span>
+                      <b>
+                        {formatCountOrDash(selectedPlan.yearlyPoints)} ×{' '}
+                        {selectedPlan.annualPointsTranches}
+                      </b>
+                    </div>
+                    <div className={v4.statline}>
+                      <span>Validity</span>
+                      <b>
+                        {selectedPlan.baseValidityYears}+{selectedPlan.validityExtensionYears} yrs
+                      </b>
+                    </div>
+                  </details>
+                  <div className={v4.viphint}>
+                    Plan details are frozen when the application is submitted, not when you select a
+                    card.
+                  </div>
+                </>
+              ) : (
+                <div className={v4.viphint}>
+                  Choose a plan above to preview your card and its benefits.
                 </div>
               )}
             </aside>
           ) : null}
           <div
             ref={formScrollRef}
-            className={isNew ? styles.applicationControls : styles.recordControls}
+            className={isNew ? v4.right : styles.recordControls}
             role={isNew ? 'region' : undefined}
             aria-label={isNew ? 'Application form' : undefined}
             tabIndex={isNew ? 0 : undefined}
           >
             {isNew ? (
-              <nav aria-label="Application steps" className={styles.stepper}>
-                <ol className={styles.stepperList}>
-                  {steps.map((step, index) => {
-                    const current = index === activeStep;
-                    const reachable = index <= maxReached;
-                    return (
-                      <li
-                        key={step.id}
-                        className={styles.stepperItem}
-                        data-done={step.done}
-                        data-current={current}
-                      >
-                        <button
-                          type="button"
-                          className={styles.stepperLink}
-                          disabled={!reachable}
-                          aria-current={current ? 'step' : undefined}
-                          onClick={() => goStep(index)}
-                        >
-                          <span className={styles.stepperIndex} aria-hidden="true">
-                            {step.done ? '✓' : index + 1}
-                          </span>
-                          <span className={styles.stepperLabel}>{step.label}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </nav>
+              <ApplicationProgress
+                steps={steps}
+                activeStep={activeStep}
+                maxReached={maxReached}
+                onNavigate={goStep}
+              />
             ) : (
               <nav aria-label="Application steps" className={styles.stepper}>
                 <ol className={styles.stepperList}>
@@ -1716,6 +1863,7 @@ export function CustomerApplicationEditorPage() {
               </section>
             ) : null}
             {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
+            {!isNew && existing.data ? <ApplicationRaReview onPrint={printRaDraft} onDownload={downloadRaDraft} value={effectiveRaDraft} onChange={changeRaDraft} defaults={raDefaults} disabled={!editable} /> : null}
 
             {proposal.data && !isEditRoute ? (
               <section aria-label="Purchase terms offer" className={styles.panel}>
@@ -1784,474 +1932,767 @@ export function CustomerApplicationEditorPage() {
                 ) : null}
               </section>
             ) : null}
-            {showForm ? (
-              <fieldset disabled={!editable} className={styles.formRoot}>
-                {!isNew ? planPreview : null}
-                {(!isNew || activeStep === 0) && (
-                  <section
-                    id="step-application"
-                    className={styles.panel}
-                    aria-labelledby="application-panel-heading"
+            <div
+              className={isNew ? v4.panel : styles.recordWorkspace}
+              role={isNew ? 'group' : undefined}
+              aria-label={isNew ? 'Current application step' : undefined}
+            >
+              {isNew ? (
+                <div className={v4.panelHead}>
+                  <span className={v4.eyebrow}>
+                    {String(activeStep + 1).padStart(2, '0')} / 07 · {steps[activeStep]?.label}
+                  </span>
+                  <h2>
+                    {
+                      [
+                        'VIP plan & payment',
+                        'Identity verification',
+                        'Cardholders',
+                        'Network & recommender',
+                        'Acquisition channel',
+                        'Certification',
+                        'Review application',
+                      ][activeStep]
+                    }
+                  </h2>
+                  <p>
+                    {
+                      [
+                        'Choose the payment arrangement for the selected VIP card.',
+                        'Capture the government ID evidence before moving on.',
+                        'Enter the holder records, organized into smaller sections.',
+                        'Identify the referrer and VIP recommender using AA numbers.',
+                        'Record how this customer reached AFhomes.',
+                        'Confirm the declarations required before submission.',
+                        'Review the complete application before submitting for approval.',
+                      ][activeStep]
+                    }
+                  </p>
+                </div>
+              ) : null}
+              <div className={isNew ? v4.panelBody : undefined}>
+                {showForm ? (
+                  <fieldset
+                    disabled={!editable}
+                    className={isNew ? v4.formFields : styles.formRoot}
                   >
-                    <h2 id="application-panel-heading" className={styles.panelTitle}>
-                      Application
-                    </h2>
-                    <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
-                    {importRowId ? (
-                      <>
-                        <label className={styles.filterLabel}>
-                          Purchase reference
-                          <input
-                            value={importPurchaseReference}
-                            maxLength={200}
-                            onChange={(e) => setImportPurchaseReference(e.target.value)}
-                            readOnly={Boolean(importIntake.data?.purchaseReference)}
-                          />
-                          <span>
-                            Use the actual purchase reference. Reuse the same reference for this
-                            purchase; Customer ID (RA No.) identifies the person.
-                          </span>
-                        </label>
-                        <DateField
-                          id="import-acknowledgement-date"
-                          name="acknowledgedAt"
-                          label="Actual acknowledgement date"
-                          value={meta.acknowledgedAt}
-                          max={today()}
-                          onChange={(value) =>
-                            setMeta((current) => ({ ...current, acknowledgedAt: value }))
-                          }
-                          hint="Enter the date the customer actually acknowledged the application."
-                        />
-                      </>
-                    ) : null}
-                    <div className={styles.editorGrid}>
-                      {!isNew || importRowId ? (
-                        <div className={styles.pickerWrap}>
-                          <label className={styles.filterLabel}>
-                            Customer
-                            <Select
-                              aria-label="Customer"
-                              value={customerId}
-                              disabled={saveAndSubmit.isPending}
-                              loading={customerOptions.isPending}
-                              onChange={(e) => pickCustomer(e.target.value)}
-                              options={[
-                                { value: '', label: 'New Register' },
-                                ...(customerOptions.data?.data.map((c) => ({
-                                  value: c.id,
-                                  label: c.fullName,
-                                })) ?? []),
-                              ]}
+                    {!isNew ? planPreview : null}
+                    {(!isNew || activeStep === 0) && (
+                      <section
+                        id="step-application"
+                        className={isNew ? v4.stepContent : styles.panel}
+                        aria-labelledby="application-panel-heading"
+                      >
+                        <h2
+                          id="application-panel-heading"
+                          className={isNew ? v4.sr : styles.panelTitle}
+                        >
+                          {isNew ? 'VIP plan & payment' : 'Application'}
+                        </h2>
+                        {!isNew ? (
+                          <p className={styles.hint}>Applicant, plan, and payment scheme.</p>
+                        ) : null}
+                        {importRowId ? (
+                          <>
+                            <label className={styles.filterLabel}>
+                              Purchase reference
+                              <input
+                                value={importPurchaseReference}
+                                maxLength={200}
+                                onChange={(e) => setImportPurchaseReference(e.target.value)}
+                                readOnly={Boolean(importIntake.data?.purchaseReference)}
+                              />
+                              <span>
+                                Use the actual purchase reference. Reuse the same reference for this
+                                purchase; Customer ID (RA No.) identifies the person.
+                              </span>
+                            </label>
+                            <DateField
+                              id="import-acknowledgement-date"
+                              name="acknowledgedAt"
+                              label="Actual acknowledgement date"
+                              value={meta.acknowledgedAt}
+                              max={today()}
+                              onChange={(value) =>
+                                setMeta((current) => ({ ...current, acknowledgedAt: value }))
+                              }
+                              hint="Enter the date the customer actually acknowledged the application."
                             />
-                          </label>
-                          {customerId && linkedCustomer.isPending ? (
-                            <p role="status" className={styles.pickedLine}>
-                              Loading customer…
-                            </p>
+                          </>
+                        ) : null}
+                        <div className={styles.editorGrid}>
+                          {!isNew || importRowId ? (
+                            <div className={styles.pickerWrap}>
+                              <label className={styles.filterLabel}>
+                                Customer
+                                <Select
+                                  aria-label="Customer"
+                                  value={customerId}
+                                  disabled={saveAndSubmit.isPending}
+                                  loading={customerOptions.isPending}
+                                  onChange={(e) => pickCustomer(e.target.value)}
+                                  options={[
+                                    { value: '', label: 'New Register' },
+                                    ...(customerOptions.data?.data.map((c) => ({
+                                      value: c.id,
+                                      label: c.fullName,
+                                    })) ?? []),
+                                  ]}
+                                />
+                              </label>
+                              {customerId && linkedCustomer.isPending ? (
+                                <p role="status" className={styles.pickedLine}>
+                                  Loading customer…
+                                </p>
+                              ) : null}
+                              {customerId && linkedCustomer.isError ? (
+                                <Alert variant="danger">
+                                  Customer details could not be loaded.{' '}
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() => void linkedCustomer.refetch()}
+                                  >
+                                    Retry customer details
+                                  </Button>
+                                </Alert>
+                              ) : null}
+                              {!id && customerId && mayLoadImport ? (
+                                <Button
+                                  variant="secondary"
+                                  loading={importPrefill.isPending}
+                                  onClick={() => importPrefill.mutate(customerId)}
+                                >
+                                  Load imported customer details
+                                </Button>
+                              ) : null}
+                            </div>
                           ) : null}
-                          {customerId && linkedCustomer.isError ? (
-                            <Alert variant="danger">
-                              Customer details could not be loaded.{' '}
-                              <Button
-                                variant="secondary"
-                                onClick={() => void linkedCustomer.refetch()}
-                              >
-                                Retry customer details
-                              </Button>
-                            </Alert>
-                          ) : null}
-                          {!id && customerId && mayLoadImport ? (
-                            <Button
-                              variant="secondary"
-                              loading={importPrefill.isPending}
-                              onClick={() => importPrefill.mutate(customerId)}
-                            >
-                              Load imported customer details
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className={styles.newCustomerNotice} style={{ gridColumn: '1 / -1' }}>
-                          <Icon name="user-plus" size={22} />
-                          <div>
-                            <strong>New customer application</strong>
-                            <p className={styles.hint}>
-                              A new customer record will be created from the information you enter.
-                            </p>
+                          <div
+                            className={isNew ? v4.stepContent : styles.applicationChoices}
+                            style={{ gridColumn: '1 / -1' }}
+                          >
+                            {/* For a new application, plan choice lives in the left
+                            preview pane instead (persistent selection + preview
+                            together, nothing duplicated on this side). Editing
+                            an existing record has no left pane, so it keeps the
+                            chooser here. */}
+                            {!isNew ? (
+                              plans.isPending ? (
+                                <p role="status">Loading VIP plans?</p>
+                              ) : plans.isError ? (
+                                <ErrorState
+                                  title="VIP plans could not be loaded"
+                                  onRetry={() => void plans.refetch()}
+                                />
+                              ) : (
+                                <ApplicationChoiceCards
+                                  required
+                                  label="VIP plan *"
+                                  value={planId}
+                                  options={(plans.data ?? [])
+                                    .filter((plan) =>
+                                      ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code),
+                                    )
+                                    .map((plan) => ({
+                                      value: plan.id,
+                                      label: plan.name,
+                                      icon: 'wallet' as const,
+                                      description: plan.code,
+                                    }))}
+                                  onChange={(next) => {
+                                    const plan = plans.data?.find((p) => p.id === next);
+                                    setPlanId(next);
+                                    setTier((plan?.code ?? 'BRONZE') as typeof tier);
+                                    if (plan?.code !== 'GOLD') setSecondary(null);
+                                  }}
+                                />
+                              )
+                            ) : null}
+                            {!isNew &&
+                            !plans.isPending &&
+                            !plans.isError &&
+                            !plans.data?.some((plan) =>
+                              ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code),
+                            ) ? (
+                              <Alert variant="warning">
+                                No VIP plans are available. Contact an administrator.
+                              </Alert>
+                            ) : null}
+                            <ApplicationChoiceCards
+                              required
+                              twoColumn={isNew}
+                              label={
+                                isNew ? 'Choose how the customer will pay' : 'Payment scheme *'
+                              }
+                              value={paymentScheme}
+                              options={(
+                                [
+                                  'spot_cash',
+                                  'move_a',
+                                  'installment_4_month',
+                                  'move_b1_40_12',
+                                  'move_b2_25_12',
+                                ] as const
+                              ).map((value) => ({
+                                value,
+                                label: isNew
+                                  ? {
+                                      spot_cash: 'Spot Cash',
+                                      move_a: 'Move A',
+                                      installment_4_month: '4-Month Installment',
+                                      move_b1_40_12: 'Move B1',
+                                      move_b2_25_12: 'Move B2',
+                                    }[value]
+                                  : paymentSchemeLabel(value),
+                                ariaLabel: paymentSchemeLabel(value),
+                                description: isNew
+                                  ? {
+                                      spot_cash: 'Single-payment arrangement',
+                                      move_a: 'Pay over 4 months',
+                                      installment_4_month: 'Standard installment schedule',
+                                      move_b1_40_12: '40% down payment + 12 months',
+                                      move_b2_25_12: '25% down payment + 12 months',
+                                    }[value]
+                                  : undefined,
+                                icon: 'dollar-sign' as const,
+                                glyph: isNew ? '\u20b1' : undefined,
+                              }))}
+                              onChange={(next) => setPaymentScheme(next as typeof paymentScheme)}
+                            />
+                            {isNew ? (
+                              <div className={v4.infobar}>
+                                The selected VIP plan stays on the left. The payment scheme is
+                                recorded with the application and verified again during approval and
+                                purchase terms review.
+                              </div>
+                            ) : null}
                           </div>
                         </div>
-                      )}
-                      <div className={styles.applicationChoices} style={{ gridColumn: '1 / -1' }}>
-                        {plans.isPending ? (
-                          <p role="status">Loading VIP plans?</p>
-                        ) : plans.isError ? (
-                          <ErrorState
-                            title="VIP plans could not be loaded"
-                            onRetry={() => void plans.refetch()}
-                          />
-                        ) : (
-                          <ApplicationChoiceCards
-                            required
-                            label="VIP plan *"
-                            value={planId}
-                            options={(plans.data ?? [])
-                              .filter((plan) => ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code))
-                              .map((plan) => ({
-                                value: plan.id,
-                                label: plan.name,
-                                icon: 'wallet' as const,
-                                description: plan.code,
-                              }))}
-                            onChange={(next) => {
-                              const plan = plans.data?.find((p) => p.id === next);
-                              setPlanId(next);
-                              setTier((plan?.code ?? 'BRONZE') as typeof tier);
-                              if (plan?.code !== 'GOLD') setSecondary(null);
-                            }}
-                          />
-                        )}
-                        {!plans.isPending &&
-                        !plans.isError &&
-                        !plans.data?.some((plan) =>
-                          ['BRONZE', 'SILVER', 'GOLD'].includes(plan.code),
-                        ) ? (
-                          <Alert variant="warning">
-                            No VIP plans are available. Contact an administrator.
-                          </Alert>
+                      </section>
+                    )}
+                    {(!isNew || activeStep === 1) && (
+                      <section
+                        id="step-identity"
+                        className={isNew ? v4.stepContent : styles.panel}
+                        aria-labelledby="identity-panel-heading"
+                      >
+                        <h2
+                          id="identity-panel-heading"
+                          className={isNew ? v4.sr : styles.panelTitle}
+                        >
+                          {isNew ? 'Identity verification' : 'Identity'}
+                        </h2>
+                        {!isNew ? (
+                          <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
                         ) : null}
-                        <ApplicationChoiceCards
-                          required
-                          label="Payment scheme *"
-                          value={paymentScheme}
-                          options={(
-                            [
-                              'spot_cash',
-                              'move_a',
-                              'installment_4_month',
-                              'move_b1_40_12',
-                              'move_b2_25_12',
-                            ] as const
-                          ).map((value) => ({
-                            value,
-                            label: paymentSchemeLabel(value),
-                            icon: 'dollar-sign' as const,
-                          }))}
-                          onChange={(next) => setPaymentScheme(next as typeof paymentScheme)}
-                        />
-                      </div>
-                    </div>
-                  </section>
-                )}
-                {(!isNew || activeStep === 1) && (
-                  <section
-                    id="step-identity"
-                    className={styles.panel}
-                    aria-labelledby="identity-panel-heading"
-                  >
-                    <h2 id="identity-panel-heading" className={styles.panelTitle}>
-                      Identity
-                    </h2>
-                    <p className={styles.hint}>Upload the ID, take a photo, pick its type.</p>
-                    <fieldset className={styles.subGroup}>
-                      <legend className={styles.subGroupTitle}>Valid ID</legend>
-                      <p>
-                        <StatusChip
-                          label={validId ? 'Valid ID: Uploaded ✓' : 'Valid ID: Required / Missing'}
-                          tone={validId ? 'success' : 'warning'}
-                        />
-                      </p>
-                      {serverCurrentDocument ? (
-                        <>
-                          <p>Current ID: {serverCurrentDocument.originalFilename}</p>
-                          <p>
-                            ID type:{' '}
-                            {serverCurrentDocument.reviewedFields?.idType
-                              ? (GOVERNMENT_ID_TYPE_LABELS[
-                                  serverCurrentDocument.reviewedFields.idType as GovernmentIdType
-                                ] ?? serverCurrentDocument.reviewedFields.idType)
-                              : 'Missing: choose the type and upload again'}
-                          </p>
-                        </>
-                      ) : null}
-                      {idFile ? (
-                        <div role="status" className={styles.idReady}>
-                          <p className={styles.hint}>Ready to upload on save.</p>
-                          {idPreviewUrl ? (
-                            <button
-                              type="button"
-                              className={styles.thumbnailButton}
-                              onClick={() => setPreviewOpen(true)}
-                              aria-label="Open full ID preview"
-                            >
+                        <fieldset className={isNew ? v4.stepContent : styles.subGroup}>
+                          <legend className={isNew ? v4.sr : styles.subGroupTitle}>Valid ID</legend>
+                          {isNew ? (
+                            <>
+                              <ApplicationChoiceCards
+                                label="ID Type *"
+                                legend="Select a valid government ID"
+                                threeColumn
+                                required
+                                disabled={saveAndSubmit.isPending}
+                                value={idType}
+                                onChange={(next) => setIdType(next)}
+                                options={governmentIdTypeSchema.options.map((value) => ({
+                                  value,
+                                  label: GOVERNMENT_ID_TYPE_LABELS[value],
+                                  icon: GOVERNMENT_ID_TYPE_ICONS[value],
+                                  glyph: ['\u25a3', '\u25b1', '\u25a4', '\u25a3', '\u25fb'][
+                                    governmentIdTypeSchema.options.indexOf(value)
+                                  ],
+                                }))}
+                              />
+                              <hr className={v4.sepline} />
+                            </>
+                          ) : null}
+                          <div
+                            className={
+                              isNew ? `${v4.grid2} ${v4.identityLayout}` : styles.recordWorkspace
+                            }
+                          >
+                            <div className={isNew ? v4.field : styles.recordWorkspace}>
+                              {!isNew ? (
+                                <ApplicationChoiceCards
+                                  label="ID Type *"
+                                  required
+                                  compact
+                                  disabled={saveAndSubmit.isPending}
+                                  value={idType}
+                                  onChange={(next) => setIdType(next)}
+                                  options={governmentIdTypeSchema.options.map((value) => ({
+                                    value,
+                                    label: GOVERNMENT_ID_TYPE_LABELS[value],
+                                  }))}
+                                />
+                              ) : null}
+                              <TextField
+                                id="application-government-id-number"
+                                name="governmentIdNumber"
+                                label="Government ID number"
+                                optional
+                                value={idNumber}
+                                onChange={(value) => setIdNumber(filterGovernmentIdInput(value))}
+                                maxLength={40}
+                                disabled={saveAndSubmit.isPending}
+                              />
+                            </div>
+                            <div className={isNew ? v4.uploadCard : styles.recordWorkspace}>
+                              {isNew && !idFile && !serverCurrentDocument ? (
+                                <div className={`${v4.uploadPreview} ${v4.uploadEmpty}`}>
+                                  <span aria-hidden="true">▧</span>
+                                  <strong>Government ID</strong>
+                                  <small>Preview appears here</small>
+                                </div>
+                              ) : null}
+                              <p className={isNew ? v4.sr : undefined}>
+                                <StatusChip
+                                  label={
+                                    validId
+                                      ? 'Valid ID: Uploaded ✓'
+                                      : 'Valid ID: Required / Missing'
+                                  }
+                                  tone={validId ? 'success' : 'warning'}
+                                />
+                              </p>
+                              {serverCurrentDocument ? (
+                                <>
+                                  <p>Current ID: {serverCurrentDocument.originalFilename}</p>
+                                  <p>
+                                    ID type:{' '}
+                                    {serverCurrentDocument.reviewedFields?.idType
+                                      ? (GOVERNMENT_ID_TYPE_LABELS[
+                                          serverCurrentDocument.reviewedFields
+                                            .idType as GovernmentIdType
+                                        ] ?? serverCurrentDocument.reviewedFields.idType)
+                                      : 'Missing: choose the type and upload again'}
+                                  </p>
+                                </>
+                              ) : null}
+                              {idFile ? (
+                                <div role="status" className={styles.idReady}>
+                                  <p className={isNew ? v4.sr : styles.hint}>
+                                    Ready to upload on save.
+                                  </p>
+                                  {idPreviewUrl ? (
+                                    <button
+                                      type="button"
+                                      className={isNew ? v4.uploadPreview : styles.thumbnailButton}
+                                      onClick={() => setPreviewOpen(true)}
+                                      aria-label="Open full ID preview"
+                                    >
+                                      <img
+                                        src={idPreviewUrl}
+                                        alt="ID preview thumbnail"
+                                        className={isNew ? v4.evidenceImage : styles.thumbnailLarge}
+                                      />
+                                      <span className={isNew ? v4.sr : styles.thumbnailZoom}>
+                                        {idFile.name} · {formatFileSize(idFile.size)} · Click to
+                                        enlarge
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <p className={styles.hint}>
+                                      {idFile.name} · {formatFileSize(idFile.size)}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : null}
+                              <div className={isNew ? v4.uploadActions : undefined}>
+                                <IdCapturePicker
+                                  uploadLabel={isNew ? 'Choose photo / PDF' : undefined}
+                                  cancelLabel={isNew ? 'Remove' : undefined}
+                                  onFile={setIdFile}
+                                  disabled={saveAndSubmit.isPending}
+                                  resetVersion={pickerVersion}
+                                  showCancel={Boolean(idFile)}
+                                  onCancel={() => {
+                                    setIdFile(null);
+                                    setPickerVersion((version) => version + 1);
+                                  }}
+                                />
+                              </div>
+                              {isNew ? (
+                                <small className={v4.uploadHint}>
+                                  {idFile
+                                    ? `${idFile.name} · Ready to upload on save.`
+                                    : 'JPG, PNG or PDF. Evidence is uploaded when you save.'}
+                                </small>
+                              ) : null}
+                            </div>
+                          </div>
+                          <Dialog
+                            open={previewOpen && Boolean(idPreviewUrl)}
+                            onClose={() => setPreviewOpen(false)}
+                            title="ID preview"
+                          >
+                            {idPreviewUrl ? (
                               <img
                                 src={idPreviewUrl}
-                                alt="ID preview thumbnail"
-                                className={styles.thumbnailLarge}
+                                alt="Full ID preview"
+                                className={styles.previewImage}
                               />
-                              <span className={styles.thumbnailZoom}>
-                                {idFile.name} · {formatFileSize(idFile.size)} · Click to enlarge
-                              </span>
-                            </button>
-                          ) : (
-                            <p className={styles.hint}>
-                              {idFile.name} · {formatFileSize(idFile.size)}
+                            ) : null}
+                          </Dialog>
+                          {currentDocument.isError ? (
+                            <p role="status">
+                              Current ID could not be loaded. Retry before saving.
                             </p>
-                          )}
-                        </div>
-                      ) : null}
-                      <label className={styles.filterLabel}>
-                        ID Type *
-                        <Select
-                          aria-label="ID Type"
-                          value={idType}
-                          disabled={saveAndSubmit.isPending}
-                          onChange={(event) => setIdType(event.target.value)}
-                          options={[
-                            { value: '', label: 'Select ID type' },
-                            ...governmentIdTypeSchema.options.map((value) => ({
-                              value,
-                              label: GOVERNMENT_ID_TYPE_LABELS[value],
-                            })),
-                          ]}
+                          ) : null}
+                          {isNew ? (
+                            <div className={v4.infobar}>
+                              Selected evidence is previewed locally and uploaded when the
+                              application is saved. A preview does not verify the document.
+                            </div>
+                          ) : null}
+                        </fieldset>
+                      </section>
+                    )}
+                    {(!isNew || activeStep === 2) && (
+                      <div id="step-holders" className={isNew ? v4.stepContent : undefined}>
+                        {/* The frame's own panelHead already shows "Cardholders" and its
+                          subtitle for a new application; the edit-mode record never had
+                          a page-level heading here either (HolderFields' own legend
+                          names each holder) - so neither mode repeats it. */}
+                        <HolderFields
+                          key="primary"
+                          title="Primary holder"
+                          value={primary}
+                          onChange={setPrimary}
+                          sectioned
+                          tabbed={isNew}
+                          initialSection={holderSection}
+                          section={isNew ? holderSection : undefined}
+                          onSectionChange={isNew ? setHolderSection : undefined}
                         />
-                      </label>
-                      <TextField
-                        id="application-government-id-number"
-                        name="governmentIdNumber"
-                        label="Government ID number"
-                        optional
-                        value={idNumber}
-                        onChange={(value) => setIdNumber(filterGovernmentIdInput(value))}
-                        maxLength={40}
-                        disabled={saveAndSubmit.isPending}
-                      />
-                      <IdCapturePicker
-                        onFile={setIdFile}
-                        disabled={saveAndSubmit.isPending}
-                        resetVersion={pickerVersion}
-                        showCancel={Boolean(idFile)}
-                        onCancel={() => {
-                          setIdFile(null);
-                          setPickerVersion((version) => version + 1);
-                        }}
-                      />
-                      <Dialog
-                        open={previewOpen && Boolean(idPreviewUrl)}
-                        onClose={() => setPreviewOpen(false)}
-                        title="ID preview"
-                      >
-                        {idPreviewUrl ? (
-                          <img
-                            src={idPreviewUrl}
-                            alt="Full ID preview"
-                            className={styles.previewImage}
+                        {isNew ? <div className={v4.sepline} /> : null}
+                        <div className={isNew ? v4.inlineRow : undefined}>
+                          {isNew ? (
+                            <div>
+                              <strong className={v4.raTitle}>RA number (customer ID)</strong>
+                              <p className={v4.helper}>
+                                Normally assigned by the server. Manual entry requires an existing
+                                company-issued RA number.
+                              </p>
+                            </div>
+                          ) : null}
+                          <ApplicationChoiceCards
+                            appearance={isNew ? 'inline' : 'tiles'}
+                            label="RA Number (Customer ID) mode"
+                            value={raNumberMode}
+                            options={[
+                              {
+                                value: 'automatic',
+                                label: 'Automatic',
+                                description: isNew ? undefined : 'Assigned by the server.',
+                              },
+                              {
+                                value: 'manual',
+                                label: 'Manual',
+                                description: isNew
+                                  ? undefined
+                                  : 'Enter an existing company-issued RA number.',
+                              },
+                            ]}
+                            onChange={(next) => {
+                              setRaNumberMode(next as typeof raNumberMode);
+                              if (next === 'automatic')
+                                setPrimary((current) => ({ ...current, raNumber: '' }));
+                            }}
+                          />
+                        </div>
+                        {raNumberMode === 'manual' ? (
+                          <div style={{ marginTop: 8 }}>
+                            <TextField
+                              id="app-primary-ra"
+                              name="primaryRaNumber"
+                              label="RA Number (Customer ID)"
+                              value={primary.raNumber ?? ''}
+                              onChange={(value) =>
+                                setPrimary((current) => ({ ...current, raNumber: value }))
+                              }
+                            />
+                          </div>
+                        ) : null}
+                        {isNew ? <div className={v4.sepline} /> : null}
+                        <label className={isNew ? v4.choiceToggle : styles.checkRow}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(secondary)}
+                            disabled={tier !== 'GOLD'}
+                            onChange={(e) => {
+                              setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null);
+                              if (isNew && e.target.checked) setHolderSection('personal');
+                            }}
+                          />{' '}
+                          Add optional Gold secondary cardholder
+                        </label>
+                        {isNew ? (
+                          <div className={v4.infobar}>
+                            Every section belongs to the holder record. The application validates
+                            the primary holder and any selected secondary holder before continuing.
+                          </div>
+                        ) : null}
+                        {secondary ? (
+                          <HolderFields
+                            key="secondary"
+                            tabbed={isNew}
+                            initialSection={holderSection}
+                            section={isNew ? holderSection : undefined}
+                            onSectionChange={isNew ? setHolderSection : undefined}
+                            sectioned
+                            title="Secondary holder (gold optional)"
+                            value={secondary}
+                            onChange={setSecondary}
                           />
                         ) : null}
-                      </Dialog>
-                      {currentDocument.isError ? (
-                        <p role="status">Current ID could not be loaded. Retry before saving.</p>
-                      ) : null}
-                    </fieldset>
-                  </section>
-                )}
-                {(!isNew || activeStep === 2) && (
-                  <div id="step-holders">
-                    <HolderFields
-                      title="Primary holder"
-                      value={primary}
-                      onChange={setPrimary}
-                      sectioned
-                    />
-                    <ApplicationChoiceCards
-                      label="RA Number (Customer ID) mode"
-                      value={raNumberMode}
-                      options={[
-                        {
-                          value: 'automatic',
-                          label: 'Automatic',
-                          description: 'Assigned by the server.',
-                        },
-                        {
-                          value: 'manual',
-                          label: 'Manual',
-                          description: 'Enter an existing company-issued RA number.',
-                        },
-                      ]}
-                      onChange={(next) => {
-                        setRaNumberMode(next as typeof raNumberMode);
-                        if (next === 'automatic')
-                          setPrimary((current) => ({ ...current, raNumber: '' }));
-                      }}
-                    />
-                    {raNumberMode === 'manual' ? (
-                      <div style={{ marginTop: 8 }}>
-                        <TextField
-                          id="app-primary-ra"
-                          name="primaryRaNumber"
-                          label="RA Number (Customer ID)"
-                          value={primary.raNumber ?? ''}
-                          onChange={(value) =>
-                            setPrimary((current) => ({ ...current, raNumber: value }))
-                          }
-                        />
                       </div>
-                    ) : null}
-                    <label className={styles.checkRow}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(secondary)}
-                        disabled={tier !== 'GOLD'}
-                        onChange={(e) =>
-                          setSecondary(e.target.checked ? emptyHolder('SECONDARY') : null)
-                        }
-                      />{' '}
-                      Add optional Gold secondary cardholder
-                    </label>
-                    {secondary ? (
-                      <HolderFields
-                        sectioned
-                        title="Secondary holder (gold optional)"
-                        value={secondary}
-                        onChange={setSecondary}
-                      />
-                    ) : null}
-                  </div>
-                )}
-                {(!isNew || activeStep === 3) && (
-                  <fieldset id="step-recommender" className={styles.panel}>
-                    <legend className={styles.panelTitle}>
-                      Application and network information
-                    </legend>
-                    <p className={styles.hint}>
-                      Select the referring member. Their existing organization relationship
-                      determines the Direct Head.
-                    </p>
-                    <div className={styles.editorGrid}>
-                      <RecommenderFields
-                        networkSelection={
-                          isNew && !importRowId
-                            ? { kind: networkKind, onKindChange: setNetworkKind }
-                            : undefined
-                        }
-                        meta={meta}
-                        chainNames={chainNames}
-                        onChange={(key, value) =>
-                          setMeta((current) => ({ ...current, [key]: value }))
-                        }
-                        onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
-                      />
-                    </div>
-                  </fieldset>
-                )}
-                {(!isNew || activeStep === 4) && (
-                  <fieldset id="step-channel" className={styles.panel}>
-                    <legend className={styles.panelTitle}>Acquisition channel</legend>
-                    {[
-                      'CMP',
-                      'DRP',
-                      'GDP Corporate',
-                      'Walk-In',
-                      'GDP Public Servant',
-                      'Referral',
-                      'FB Ads',
-                    ].map((channel) => (
-                      <label key={channel} className={styles.checkRow}>
-                        <input
-                          type="checkbox"
-                          checked={channels.includes(channel)}
-                          onChange={(e) =>
-                            setChannels(
-                              e.target.checked
-                                ? [...channels, channel]
-                                : channels.filter((v) => v !== channel),
-                            )
-                          }
-                        />
-                        {channel}
-                      </label>
-                    ))}
-                  </fieldset>
-                )}
-                {(!isNew || activeStep === 5) && (
-                  <fieldset id="step-cert" className={styles.panel}>
-                    <legend className={styles.panelTitle}>Certification</legend>
-                    <label className={styles.checkRow}>
-                      <input
-                        type="checkbox"
-                        checked={consent}
-                        onChange={(e) => setConsent(e.target.checked)}
-                      />{' '}
-                      I certify the information and consent to verification and processing under RA
-                      10173.
-                    </label>
-                    {submissionSuccess ? (
-                      <p className={styles.hint} style={{ color: 'var(--color-success)' }}>
-                        ✓ Valid government ID with specimen signatures received — verified on
-                        submission.
-                      </p>
-                    ) : (
-                      <label className={styles.checkRow}>
-                        <input
-                          type="checkbox"
-                          checked={validId}
-                          onChange={(e) => setValidId(e.target.checked)}
-                        />{' '}
-                        Valid government ID with specimen signatures received
-                      </label>
                     )}
+                    {(!isNew || activeStep === 3) && (
+                      <fieldset
+                        id="step-recommender"
+                        className={isNew ? v4.stepContent : styles.panel}
+                      >
+                        <legend className={isNew ? v4.sr : styles.panelTitle}>
+                          {isNew ? 'Network & recommender' : 'Application and network information'}
+                        </legend>
+                        {!isNew ? (
+                          <p className={styles.hint}>
+                            Select the SVD, SSM, SM and Referrer from the existing organization
+                            chain, and the VIP recommender separately.
+                          </p>
+                        ) : null}
+                        <div className={isNew ? v4.networkFields : styles.editorGrid}>
+                          <RecommenderFields
+                            networkSelection={isNew && !importRowId}
+                            meta={meta}
+                            chainNames={chainNames}
+                            onChange={(key, value) =>
+                              setMeta((current) => ({ ...current, [key]: value }))
+                            }
+                            onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
+                            onNetworkError={setNetworkTeamError}
+                          />
+                        </div>
+                      </fieldset>
+                    )}
+                    {(!isNew || activeStep === 4) && (
+                      <fieldset id="step-channel" className={isNew ? v4.stepContent : styles.panel}>
+                        <legend className={isNew ? v4.sr : styles.panelTitle}>
+                          Acquisition channel
+                        </legend>
+                        <p className={v4.subtle}>
+                          Select any applicable acquisition channels. The original application
+                          allows multiple selections.
+                        </p>
+                        <div className={isNew ? v4.chipgrid : undefined}>
+                          {[
+                            'CMP',
+                            'DRP',
+                            'GDP Corporate',
+                            'Walk-In',
+                            'GDP Public Servant',
+                            'Referral',
+                            'FB Ads',
+                          ].map((channel) => (
+                            <label
+                              key={channel}
+                              className={
+                                isNew
+                                  ? `${v4.chip} ${channels.includes(channel) ? v4.sel : ''}`
+                                  : styles.checkRow
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                className={isNew ? v4.sr : undefined}
+                                checked={channels.includes(channel)}
+                                onChange={(e) =>
+                                  setChannels(
+                                    e.target.checked
+                                      ? [...channels, channel]
+                                      : channels.filter((v) => v !== channel),
+                                  )
+                                }
+                              />
+                              {channel}
+                              {isNew ? (
+                                <span className={v4.tick} aria-hidden="true">
+                                  {channels.includes(channel) ? '✓' : '+'}
+                                </span>
+                              ) : null}
+                            </label>
+                          ))}
+                        </div>
+                        {isNew ? (
+                          <div className={v4.infobar}>
+                            Optional in the current application workflow. Continue even if no
+                            channel is selected.
+                          </div>
+                        ) : null}
+                      </fieldset>
+                    )}
+                    {(!isNew || activeStep === 5) && (
+                      <fieldset id="step-cert" className={isNew ? v4.stepContent : styles.panel}>
+                        <legend className={isNew ? v4.sr : styles.panelTitle}>Certification</legend>
+                        {isNew ? (
+                          <div className={v4.minihead}>
+                            <h3>Confirm application details</h3>
+                          </div>
+                        ) : null}
+                        {isNew ? (
+                          <div className={`${v4.reviewbox} ${v4.certification}`}>
+                            <label className={v4.choiceToggle}>
+                              <input
+                                type="checkbox"
+                                checked={consent}
+                                onChange={(e) => setConsent(e.target.checked)}
+                              />{' '}
+                              I certify the information and consent to verification and processing
+                              under RA 10173.
+                            </label>
+                          </div>
+                        ) : (
+                          <label className={styles.checkRow}>
+                            <input
+                              type="checkbox"
+                              checked={consent}
+                              onChange={(e) => setConsent(e.target.checked)}
+                            />{' '}
+                            I certify the information and consent to verification and processing
+                            under RA 10173.
+                          </label>
+                        )}
+                        <div
+                          className={isNew ? `${v4.reviewbox} ${v4.certification}` : undefined}
+                          style={isNew ? { marginTop: 13 } : undefined}
+                        >
+                          {submissionSuccess ? (
+                            <p className={styles.hint} style={{ color: 'var(--color-success)' }}>
+                              ✓ Valid government ID with specimen signatures received — verified on
+                              submission.
+                            </p>
+                          ) : (
+                            <label className={isNew ? v4.choiceToggle : styles.checkRow}>
+                              <input
+                                type="checkbox"
+                                checked={validId}
+                                onChange={(e) => setValidId(e.target.checked)}
+                              />{' '}
+                              Valid government ID with specimen signatures received
+                            </label>
+                          )}
+                          {isNew ? (
+                            <p className={v4.helper} style={{ marginLeft: 25 }}>
+                              Evidence recorded in Identity:{' '}
+                              <b>
+                                {idFile?.name ||
+                                  serverCurrentDocument?.originalFilename ||
+                                  'No file selected'}
+                              </b>
+                            </p>
+                          ) : null}
+                        </div>
+                        {isNew ? (
+                          <div className={v4.infobar}>
+                            Certification is part of the application. Signed agreement upload and
+                            payment confirmation are not extra fields at this stage.
+                          </div>
+                        ) : null}
+                      </fieldset>
+                    )}
+                    {isNew && activeStep === 6 ? (
+                      <>
+                      <h2>Application form review</h2>
+                      <ApplicationReview
+                        separateRaReview
+                        raDraft={effectiveRaDraft}
+                        primary={primary}
+                        secondary={secondary}
+                        planName={plans.data?.find((plan) => plan.id === planId)?.name}
+                        plan={selectedPlan}
+                        tier={tier}
+                        paymentScheme={paymentScheme}
+                        idType={idType || serverCurrentDocument?.reviewedFields?.idType || ''}
+                        idNumber={idNumber}
+                        idFilename={idFile?.name || serverCurrentDocument?.originalFilename}
+                        nodes={network.data ?? []}
+                        meta={meta}
+                        channels={channels}
+                        consent={consent}
+                        validId={validId}
+                        referenceLayout
+                        onEdit={goStep}
+                      />
+                      <ApplicationRaReview onPrint={printRaDraft} onDownload={downloadRaDraft} value={effectiveRaDraft} onChange={changeRaDraft} defaults={raDefaults} />
+                      </>
+                    ) : null}
                   </fieldset>
-                )}
-                {isNew && activeStep === 6 ? (
-                  <ApplicationReview
-                    primary={primary}
-                    secondary={secondary}
-                    planName={plans.data?.find((plan) => plan.id === planId)?.name}
-                    tier={tier}
-                    paymentScheme={paymentScheme}
-                    idType={idType || serverCurrentDocument?.reviewedFields?.idType || ''}
-                    idNumber={idNumber}
-                    idFilename={idFile?.name || serverCurrentDocument?.originalFilename}
-                    kind={networkKind}
-                    nodes={network.data ?? []}
-                    meta={meta}
-                    channels={channels}
-                    consent={consent}
-                    onEdit={goStep}
-                  />
                 ) : null}
-              </fieldset>
-            ) : null}
-            {blockers.length > 0 ? (
-              <Alert variant="warning" title="Cannot save and submit yet:">
-                <ul>
-                  {blockers.map((blocker) => (
-                    <li key={blocker}>{blocker}</li>
-                  ))}
-                </ul>
-              </Alert>
-            ) : null}
-            {showForm ? (
-              <div className={styles.stickyFooter}>
-                <div className={styles.stickyFooterInner}>
-                  {isNew && activeStep > 0 ? (
-                    <Button variant="secondary" onClick={() => goStep(activeStep - 1)}>
-                      Back
-                    </Button>
-                  ) : null}
-                  {isNew && activeStep < steps.length - 1 ? (
-                    <Button
-                      onClick={goNext}
-                      disabled={stepBlockers[activeStep] !== null}
-                      title={stepBlockers[activeStep] ?? undefined}
-                    >
-                      Next
-                    </Button>
-                  ) : null}
-                  {!(isNew && activeStep < steps.length - 1) ? saveAction : null}
-                </div>
+                {blockers.length > 0 &&
+                (!isNew ||
+                  activeStep === 6 ||
+                  !optionalPhonesValid ||
+                  Boolean(networkTeamError)) ? (
+                  <Alert variant="warning" title="Cannot save and submit yet:">
+                    <ul>
+                      {blockers.map((blocker) => (
+                        <li key={blocker}>{blocker}</li>
+                      ))}
+                    </ul>
+                  </Alert>
+                ) : null}
               </div>
-            ) : null}
+              {showForm ? (
+                <div className={isNew ? v4.panelFoot : styles.stickyFooter}>
+                  <div className={isNew ? v4.footerContents : styles.stickyFooterInner}>
+                    {isNew ? (
+                      <p className={v4.footnote}>
+                        {stepBlockers[activeStep] ??
+                          (activeStep === 6
+                            ? 'Submission creates a submitted application, not an approved sale.'
+                            : activeStep === 2 && nextHolderSection
+                              ? `Next: ${nextHolderSectionLabel}`
+                              : `Next: ${steps[activeStep + 1]?.label}`)}
+                      </p>
+                    ) : null}
+                    <div className={isNew ? v4.buttons : undefined}>
+                      {isNew ? (
+                        <Button
+                          className={v4.btn}
+                          variant="secondary"
+                          disabled={activeStep === 0}
+                          onClick={() => {
+                            if (activeStep === 2 && holderSection !== 'personal') {
+                              const previous =
+                                HOLDER_SECTIONS[holderSectionIndex - 1] ?? 'personal';
+                              setHolderSection(previous);
+                              revealStep(`primary-${previous}`);
+                            } else goStep(activeStep - 1);
+                          }}
+                        >
+                          Back
+                        </Button>
+                      ) : null}
+                      {isNew && activeStep < steps.length - 1 ? (
+                        <Button
+                          className={`${v4.btn} ${v4.primary}`}
+                          onClick={goNext}
+                          disabled={stepBlockers[activeStep] !== null}
+                          title={stepBlockers[activeStep] ?? undefined}
+                        >
+                          Continue <span aria-hidden="true">→</span>
+                        </Button>
+                      ) : null}
+                      {!(isNew && activeStep < steps.length - 1) ? saveAction : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
             {hasRecordActions ? (
               <section aria-label="Record actions" className={styles.panel}>
                 <div className={styles.recordGroups}>

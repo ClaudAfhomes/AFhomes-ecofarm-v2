@@ -13,6 +13,9 @@ export interface AppShellProps {
   brand?: ReactNode;
   sidebarFooter?: ReactNode;
   topbarActions?: ReactNode;
+  /** Dense task workspace, with an initially collapsed desktop navigation rail. */
+  compactWorkspace?: boolean;
+  topbarContext?: ReactNode;
   /** Page content rendered inside `<main>`. */
   children: ReactNode;
   /**
@@ -49,6 +52,8 @@ export function AppShell({
   brand,
   sidebarFooter,
   topbarActions,
+  compactWorkspace = false,
+  topbarContext,
   children,
   bottomNav,
   menuLabel = 'Open menu',
@@ -59,8 +64,8 @@ export function AppShell({
   menuPosition = 'left',
 }: AppShellProps) {
   const { isOpen, open, close } = useDisclosure();
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isDesktop = useMediaQuery(compactWorkspace ? '(min-width: 741px)' : '(min-width: 1024px)');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(compactWorkspace);
 
   const toggleSidebar = useCallback(() => {
     if (isDesktop) {
@@ -82,22 +87,40 @@ export function AppShell({
     [close],
   );
 
+  // Desktop: selecting a module (any link - a plain item or a dropdown
+  // sub-item) collapses the sidebar to icon-only automatically, the same way
+  // picking an item closes the mobile drawer above. A category HEADER is a
+  // <button>, not a link, so expanding/collapsing a dropdown never collapses
+  // the rail.
+  const handleSidebarNavClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!isDesktop) return;
+      const target = e.target as HTMLElement;
+      if (target.closest('a')) setSidebarCollapsed(true);
+    },
+    [isDesktop],
+  );
+
   const sidebar = (
     <Sidebar
       brand={brand}
       items={navItems}
       footer={sidebarFooter}
       ariaLabel={navLabel}
+      onExpand={() => setSidebarCollapsed(false)}
       collapsed={isDesktop && sidebarCollapsed}
     />
   );
 
   return (
-    <div className={styles.shell}>
+    <div className={`${styles.shell} ${compactWorkspace ? styles.workspaceShell : ''}`}>
       <a className="skip-link" href={`#${mainId}`}>
         Skip to content
       </a>
-      <div className={`${styles.sidebarCol} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
+      <div
+        className={`${styles.sidebarCol} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}
+        onClick={handleSidebarNavClick}
+      >
         {sidebar}
       </div>
       <div className={styles.mainCol}>
@@ -106,6 +129,7 @@ export function AppShell({
           menuLabel={menuLabel}
           actions={topbarActions}
           leading={topbarLeading}
+          context={topbarContext}
           hideMenuOnMobile={hideMenuOnMobile}
           menuPosition={menuPosition}
         />

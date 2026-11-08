@@ -15,8 +15,18 @@ import {
 vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
 vi.mock('../address/services', () => ({
   getAddressProvinces: async () => [{ code: '0403400000', name: 'Laguna' }],
-  getAddressLocalities: async () => [{ code: '0403406000', name: 'Calauan', type: 'municipality', provinceCode: '0403400000', postalCode: '4012' }],
-  getAddressBarangays: async () => [{ code: '0403406003', name: 'Dayap', localityCode: '0403406000' }],
+  getAddressLocalities: async () => [
+    {
+      code: '0403406000',
+      name: 'Calauan',
+      type: 'municipality',
+      provinceCode: '0403400000',
+      postalCode: '4012',
+    },
+  ],
+  getAddressBarangays: async () => [
+    { code: '0403406003', name: 'Dayap', localityCode: '0403406000' },
+  ],
 }));
 const calls = vi.hoisted(() => ({
   application: vi.fn<(input: CreateCustomerApplicationRequest) => Promise<never>>(),
@@ -148,6 +158,8 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: async () => [],
   getGenealogyDownline: async () => [],
   getGenealogySummary: async () => null,
+  resolveAaNumber: async () => ({ member: null }),
+  getAccreditationNumbers: async () => ({}),
 }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
@@ -180,12 +192,12 @@ type QAUser = ReturnType<typeof userEvent.setup>;
  */
 async function goToHolders(user: QAUser) {
   await user.click(await screen.findByRole('radio', { name: 'Gold' }));
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.change(await screen.findByLabelText('ID Type'), { target: { value: 'passport' } });
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  await user.click(await screen.findByRole('radio', { name: 'Passport' }));
   fireEvent.change(screen.getByLabelText('Upload ID'), {
     target: { files: [new File(['x'], 'x.png', { type: 'image/png' })] },
   });
-  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
   await screen.findByLabelText('First name');
 }
 /** Fill the required primary fields so Holders Next unlocks. */
@@ -193,16 +205,22 @@ async function fillPrimaryHolders(user: QAUser) {
   fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Ana' } });
   fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
   fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+  await user.click(screen.getByRole('tab', { name: 'Contact' }));
   fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+  await user.click(screen.getByRole('tab', { name: 'Additional' }));
   fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
-  fireEvent.change(screen.getByLabelText('Permanent address line 1'), { target: { value: '77 Synthetic Street' } });
+  await user.click(screen.getByRole('tab', { name: 'Address' }));
+  fireEvent.change(screen.getByLabelText('Permanent address line 1'), {
+    target: { value: '77 Synthetic Street' },
+  });
   await user.click(screen.getByRole('combobox', { name: /^Province/ }));
   await user.click(await screen.findByRole('option', { name: 'Laguna' }));
   await user.click(screen.getByRole('combobox', { name: /City \/ municipality/ }));
   await user.click(await screen.findByRole('option', { name: /Calauan/ }));
   await user.click(screen.getByRole('combobox', { name: /^Barangay/ }));
   await user.click(await screen.findByRole('option', { name: 'Dayap' }));
+  await user.click(screen.getByRole('tab', { name: 'Additional' }));
 }
 /**
  * Uppercase-with-live-caret behaviour, exercised through the holder ADDRESS.
@@ -322,9 +340,7 @@ it('actual IST tier retains the existing canonical enum payload behavior', async
   await user.click(await screen.findByRole('button', { name: 'OK' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   // SweetAlert removes the dialog before its delayed focus restoration completes.
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Create' })).toHaveFocus(),
-  );
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toHaveFocus());
   // An application-origin payload carries no vipTier by design, so this asserts
   // the stronger, real property: a tier can only ever be a value the schema
   // accepts, and clearing it never emits an empty or invented tier.
@@ -352,6 +368,7 @@ const blockersText = () =>
 it('primary landline refuses letters and blocks save while the number is invalid', async () => {
   const { user } = mount(true);
   await goToHolders(user);
+  await user.click(screen.getByRole('tab', { name: 'Contact' }));
   const input = screen.getByLabelText<HTMLInputElement>('Landline');
   await user.type(input, '09ABC123456');
   // Letters are refused at the keystroke: a landline can never hold them. The
@@ -365,7 +382,7 @@ it('primary landline refuses letters and blocks save while the number is invalid
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid contact number.');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
   expect(calls.application).not.toHaveBeenCalled();
   await user.clear(input);
@@ -378,25 +395,26 @@ it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);
   await goToHolders(user);
   await user.click(screen.getByLabelText(/Add optional Gold secondary/));
-  const input = screen.getAllByLabelText<HTMLInputElement>('Landline')[1]!;
+  const secondary = screen.getByRole('group', { name: /Secondary holder/ });
+  await user.click(within(secondary).getByRole('tab', { name: 'Contact' }));
+  const input = within(secondary).getByLabelText<HTMLInputElement>('Landline');
   await user.type(input, 'PHONE123');
   // The letters never land; the surviving digits are too short to be a number.
   expect(input.value).toBe('123');
   expect(input).toHaveAttribute('aria-invalid', 'true');
   expect(blockersText()).toContain('Correct the recommender contact or landline number.');
-  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   expect(calls.application).not.toHaveBeenCalled();
 });
-it('recommender contact accepts only the offered dropdown values', async () => {
+it('exposes no free-form Recommender Contact field to tamper with (New Customer Application resolves it from the AA number)', async () => {
   const { user } = mount(true);
   await goToHolders(user);
   await fillPrimaryHolders(user);
-  await user.click(screen.getByRole('button', { name: 'Next' }));
-  const input = await screen.findByLabelText('Recommender Contact');
-  expect(input.tagName).toBe('SELECT');
-  expect(within(input).queryByRole('option', { name: /0917TEST/ })).not.toBeInTheDocument();
-  fireEvent.change(input, { target: { value: '0917TEST' } });
-  expect(input).toHaveValue('');
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  await screen.findByLabelText('OST VIP recommender AA number');
+  // There is nothing to type a tampered value into: the contact is filled by
+  // the server once the AA number resolves, never by the browser directly.
+  expect(screen.queryByLabelText('Recommender Contact')).not.toBeInTheDocument();
   expect(calls.application).not.toHaveBeenCalled();
 });
 
@@ -414,8 +432,8 @@ it.each(['Silver', 'Bronze', 'Gold again'])(
     if (reselected) {
       await user.click(screen.getByRole('radio', { name: 'Gold' }));
     }
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByLabelText(/Add optional Gold secondary/);
     expect(screen.getByLabelText(/Add optional Gold secondary/)).not.toBeChecked();
     if (reselected) {

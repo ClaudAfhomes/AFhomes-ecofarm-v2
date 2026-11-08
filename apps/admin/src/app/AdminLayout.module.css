@@ -4,6 +4,10 @@
   min-width: 0;
   max-width: 100%;
 }
+.workspaceCrumbs { font-size: 12px; color: #819088; display: flex; gap: 12px; align-items: center; }
+.workspaceCrumbs strong { color: #335a48; }
+.workspaceLogo { display: block; width: 36px; height: 36px; object-fit: contain; }
+@media (max-width: 740px) { .workspaceCrumbs { font-size:10px; gap:7px; } }
 
 /* Grid items default to min-width:auto (their min-content), so one wide
    descendant — a nowrap figure, a date control, a table floor — would prop

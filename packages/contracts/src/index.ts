@@ -505,8 +505,14 @@ export {
   genealogyStatusSchema,
   genealogyNodeSchema,
   genealogySummarySchema,
+  genealogyResolveResultSchema,
+  accreditationNumberMapSchema,
 } from './schemas/genealogy.js';
-export type { GenealogyNode, GenealogySummary } from './schemas/genealogy.js';
+export type {
+  GenealogyNode,
+  GenealogySummary,
+  GenealogyResolvedMember,
+} from './schemas/genealogy.js';
 
 /* ---- Sales-network Members: hierarchy sellers with a linked profile ---- */
 export {
@@ -806,3 +812,5 @@ export * from './schemas/imported-sales.js';
 
 export * from './schemas/cms-content.js';
 export * from './schemas/media.js';
+
+export { applicationRaDraftSchema, type ApplicationRaDraft } from './schemas/official-forms.js';

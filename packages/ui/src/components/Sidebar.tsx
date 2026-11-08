@@ -41,10 +41,18 @@ export interface SidebarProps {
   footer?: ReactNode;
   ariaLabel?: string;
   collapsed?: boolean;
+  onExpand?: () => void;
 }
 
 /** Primary navigation rail (desktop persistent, reused inside the mobile drawer). */
-export function Sidebar({ brand, items, footer, ariaLabel = 'Primary', collapsed }: SidebarProps) {
+export function Sidebar({
+  brand,
+  items,
+  footer,
+  ariaLabel = 'Primary',
+  collapsed,
+  onExpand,
+}: SidebarProps) {
   const location = useLocation();
   const isItemActive = (item: SidebarItem) =>
     item.dropdown?.some(
@@ -76,7 +84,11 @@ export function Sidebar({ brand, items, footer, ariaLabel = 'Primary', collapsed
                   collapsed={collapsed}
                   open={isOpen}
                   onToggle={() => {
-                    if (collapsed) return;
+                    if (collapsed) {
+                      setOpenCategory(item.to);
+                      onExpand?.();
+                      return;
+                    }
                     setOpenCategory((prev) => (prev === item.to ? null : item.to));
                   }}
                 />
@@ -155,8 +167,6 @@ function CategoryItem({
         onClick={onToggle}
         aria-expanded={collapsed ? undefined : open}
         title={collapsed ? item.label : undefined}
-        aria-disabled={collapsed || undefined}
-        tabIndex={collapsed ? -1 : undefined}
       >
         {item.icon ? (
           <span className={styles.icon} aria-hidden="true">

@@ -6,7 +6,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 150. Public table inventory: 60. Private table inventory: 30.
+-- Migration count: 152. Public table inventory: 60. Private table inventory: 30.
 -- Confirmed scoped live apply 2026-10-24: shared production ikaevepedpqygdlipsei has 127 history entries.
 -- Its 60 public and 30 private application table names match this inventory.
 -- Applied exactly 20261215000002 and 20261223000001 through 20261223000004; history increased 120 -> 125.
@@ -220,6 +220,8 @@
 --   20261225000001_afhomes_public_verification_settings.sql
 --   20261226000001_afhomes_supabase_review_reason_reconciliation.sql
 --   20261227000001_afhomes_develop_catalog_reconciliation.sql
+--   20261228000001_afhomes_application_holder_prefix.sql
+--   20261229000001_afhomes_application_ra_draft.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
 --   public.audit_events
 --   public.card_categories

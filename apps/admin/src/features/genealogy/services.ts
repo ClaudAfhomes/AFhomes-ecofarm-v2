@@ -1,10 +1,13 @@
 import {
   genealogyNodeSchema,
   genealogySummarySchema,
+  genealogyResolveResultSchema,
+  accreditationNumberMapSchema,
   teamSalesAnalyticsSchema,
   teamSalesOverviewSchema,
   type AnalyticsPeriod,
   type GenealogyNode,
+  type GenealogyResolvedMember,
 } from '@afhomes/contracts';
 import { protectedRequest as request, protectedRequestList as requestList } from '../../lib/api/client';
 import { z } from 'zod';
@@ -34,5 +37,17 @@ export const getTeamSalesOverview = (period: AnalyticsPeriod, from?: string, to?
 export const getOstMemberContacts = (staffIds: string[]) =>
   request(`/genealogy/ost-contacts?staffIds=${encodeURIComponent(staffIds.join(','))}`, ostContactsSchema);
 
+/** AA number -> accredited seller, scoped to the caller's own genealogy view. */
+export const resolveAaNumber = (aaNumber: string) =>
+  request(`/genealogy/resolve?aaNumber=${encodeURIComponent(aaNumber)}`, genealogyResolveResultSchema);
+
+/** Batch staffId -> AA number, for read-only upline display. */
+export const getAccreditationNumbers = (staffIds: string[]) =>
+  request(
+    `/genealogy/aa-numbers?staffIds=${encodeURIComponent(staffIds.join(','))}`,
+    accreditationNumberMapSchema,
+  );
+
 export { type GenealogyNode };
+export { type GenealogyResolvedMember as ResolvedAaMember };
 export { teamSalesKeys } from '../business/queryKeys';

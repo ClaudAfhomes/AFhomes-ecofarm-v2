@@ -1,0 +1,2049 @@
+/* Copied from the approved AFhomes_Customer_Application_V4.html stylesheet.
+ * Selectors are scoped to this application; class names use CSS-module camelCase.
+ * The prototype print rule is omitted: real downloads use the existing isolated renderer. */
+
+.application {
+  --forest: #0a3126;
+  --green: #12533b;
+  --green2: #14734f;
+  --mint: #eaf5ef;
+  --ink: #152a27;
+  --text: #263a37;
+  --muted: #75847f;
+  --line: #e4e9e6;
+  --surface: #fff;
+  --back: #f9faf9;
+  --gold: #c38e25;
+  --red: #ab423d;
+  --redbg: #fff4f2;
+  --shadow: 0 7px 24px rgba(25, 47, 37, 0.04);
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Arial,
+    sans-serif;
+}
+.application,
+.application * {
+  box-sizing: border-box;
+}
+.application {
+  margin: 0;
+  background: var(--back);
+  color: var(--ink);
+  font-size: 14px;
+}
+.application button,
+.application input,
+.application select,
+.application textarea {
+  font: inherit;
+}
+.application button {
+  cursor: pointer;
+}
+.application button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+.application a {
+  color: inherit;
+  text-decoration: none;
+}
+.application .app {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.application .sidebar {
+  background: var(--forest);
+  color: #f4fcf7;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.application .brand {
+  height: 70px;
+  padding: 16px 21px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #25483b;
+}
+.application .mark {
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f6c35a, #e9607c, #69c9b3);
+  font-weight: 900;
+  color: white;
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+}
+.application .brand strong {
+  font-size: 17px;
+  display: block;
+  letter-spacing: -0.35px;
+}
+.application .brand small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  color: #d6e5dc;
+}
+.application .menu {
+  padding: 18px 12px;
+  display: grid;
+  gap: 3px;
+}
+.application .menu .caption {
+  font-size: 10px;
+  color: #86aa99;
+  letter-spacing: 1px;
+  margin: 14px 12px 3px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.application .menu div.item {
+  padding: 12px 13px;
+  color: #c7ddd2;
+  border-radius: 9px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.application .menu .item.selected {
+  background: #24533f;
+  color: white;
+  font-weight: 650;
+}
+.application .sidebarBottom {
+  margin-top: auto;
+  border-top: 1px solid #345d4a;
+  padding: 19px 25px;
+  color: #cfe1d6;
+}
+.application .mainArea {
+  min-width: 0;
+}
+.application .top {
+  height: 70px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  padding: 0 37px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.application .crumb {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  font-size: 12px;
+  color: #86958e;
+}
+.application .crumb b {
+  color: #52695e;
+  font-weight: 650;
+}
+.application .user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.application .userIco {
+  background: #e3eee7;
+  border-radius: 50%;
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #175b3d;
+}
+.application .userName {
+  font-weight: 650;
+  font-size: 12px;
+}
+.application .userName small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+.application.wrap {
+  max-width: 1430px;
+  margin: 0 auto;
+  padding: 32px 36px 50px;
+}
+.application .pageTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.application .pageTop h1 {
+  margin: 0;
+  font-size: 29px;
+  letter-spacing: -0.95px;
+  font-weight: 750;
+}
+.application .pageTop p {
+  color: var(--muted);
+  margin: 7px 0 0;
+  font-size: 13px;
+}
+.application .plainlink {
+  background: white;
+  border: 1px solid #dbe3dd;
+  color: #3f564a;
+  border-radius: 9px;
+  padding: 11px 15px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.application .workspace {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  gap: 19px;
+  align-items: start;
+}
+.application .vip {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px;
+  position: sticky;
+  top: 90px;
+  box-shadow: var(--shadow);
+}
+.application .vip h2 {
+  font-size: 15px;
+  letter-spacing: -0.25px;
+  margin: 0 0 7px;
+}
+.application .subtle {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.application .tiers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 14px 0 16px;
+}
+.application .tier {
+  border: 1px solid #dfe6e0;
+  border-radius: 9px;
+  padding: 10px 4px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  color: #43564a;
+}
+.application .tier.sel {
+  border: 1.5px solid #1b8156;
+  background: #eaf6ee;
+  color: #115b3e;
+}
+.application .vipcard {
+  width: 100%;
+  aspect-ratio: 1.62;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  box-shadow: 0 5px 14px #233f2c17;
+}
+.application .vipcard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.application .vipcard.silver {
+  background: linear-gradient(130deg, #535c62, #e1e5e5 31%, #7d8789 53%, #f3f5f5 67%, #6b7679);
+  color: #fff;
+}
+.application .vipcard.bronze {
+  background: linear-gradient(120deg, #6d3d19, #f0c486 36%, #995929 65%, #e9bd79);
+  color: #fff;
+}
+.application .cardtext {
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-shadow: 0 2px 3px #1b1b1b70;
+}
+.application .cardtext strong {
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: 1px;
+}
+.application .cardtext small {
+  letter-spacing: 2px;
+  font-size: 8px;
+}
+.application .cardtext em {
+  font-style: normal;
+  font-weight: 850;
+  font-size: 18px;
+  align-self: flex-end;
+}
+.application .planmeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 15px 0 6px;
+}
+.application .planmeta strong {
+  font-size: 16px;
+}
+.application .planmeta .tag {
+  font-size: 10px;
+  border-radius: 30px;
+  border: 1px solid #e3bf65;
+  color: #a87616;
+  padding: 4px 8px;
+  font-weight: 750;
+}
+.application .statline {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  font-size: 12px;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #eff1ef;
+}
+.application .statline:last-child {
+  border: 0;
+}
+.application .statline span {
+  color: var(--muted);
+}
+.application .statline b {
+  font-weight: 650;
+}
+.application .textlink {
+  background: transparent;
+  border: 0;
+  color: #17714e;
+  font-weight: 700;
+  padding: 10px 0 0;
+  font-size: 12px;
+}
+.application .detailHidden {
+  display: none;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.application .detailHidden.show {
+  display: block;
+}
+.application .viphint {
+  margin-top: 15px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f4f8f5;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #657b6f;
+}
+.application .right {
+  min-width: 0;
+}
+.application .progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 3px 17px;
+  gap: 10px;
+}
+.application .currentProgress {
+  font-size: 12px;
+  font-weight: 650;
+  color: #315f49;
+}
+.application .miniProgress {
+  display: flex;
+  gap: 5px;
+  flex: 1;
+  max-width: 480px;
+}
+.application .bar {
+  height: 5px;
+  flex: 1;
+  border-radius: 8px;
+  background: #e4ebe6;
+  border: 0;
+  padding: 0;
+}
+.application .bar.past {
+  background: #75b393;
+}
+.application .bar.now {
+  background: #176b49;
+}
+.application .stepnav {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #819088;
+  font-size: 12px;
+  padding: 6px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.application .stepmenu {
+  display: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px;
+  margin-bottom: 13px;
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+.application .stepmenu button {
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 3px;
+  color: #71867a;
+  font-size: 11px;
+}
+.application .stepmenu button.sel {
+  border-color: #83b69a;
+  background: #ecf6ef;
+  color: #0b5a3b;
+  font-weight: 700;
+}
+.application .stepmenu .n {
+  display: block;
+  font-size: 13px;
+  font-weight: 750;
+  margin-bottom: 3px;
+}
+.application .stepmenu.collapsed {
+  display: none;
+}
+.application .panel {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.application .panelHead {
+  padding: 26px 30px 0;
+}
+.application .eyebrow {
+  font-weight: 750;
+  color: #24704c;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.application .panel h2 {
+  font-size: 24px;
+  margin: 7px 0 6px;
+  letter-spacing: -0.6px;
+  font-weight: 750;
+}
+.application .panelHead p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.application .panelBody {
+  padding: 25px 30px 26px;
+  min-height: 310px;
+}
+.application .panelFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #fff;
+  border-top: 1px solid #eff1ef;
+  padding: 17px 30px;
+}
+.application .footnote {
+  font-size: 11px;
+  color: #819087;
+  line-height: 1.5;
+}
+.application .buttons {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.application .btn {
+  border: 1px solid #d9e2db;
+  background: #fff;
+  color: #2b4435;
+  padding: 10px 18px;
+  border-radius: 9px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.application .btn.primary {
+  background: #14583e;
+  border-color: #14583e;
+  color: #fff;
+}
+.application .btn.small {
+  padding: 8px 11px;
+}
+.application .btn:hover:not(:disabled) {
+  filter: brightness(0.98);
+}
+.application .grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px 16px;
+}
+.application .grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+}
+.application .field {
+  display: block;
+  min-width: 0;
+}
+.application .field .label {
+  display: block;
+  font-size: 12px;
+  font-weight: 680;
+  margin-bottom: 7px;
+  color: #304039;
+}
+.application .field .req {
+  color: #ba513c;
+}
+.application .field input,
+.application .field select,
+.application .field textarea {
+  width: 100%;
+  height: 42px;
+  background: #fff;
+  border: 1px solid #d9e1da;
+  border-radius: 9px;
+  padding: 10px 12px;
+  outline: none;
+  color: #20342b;
+  transition: border-color 0.15s;
+}
+.application .field textarea {
+  height: 72px;
+  resize: vertical;
+}
+.application .field input:focus,
+.application .field select:focus,
+.application .field textarea:focus {
+  border-color: #188655;
+  box-shadow: 0 0 0 3px #dcefe4;
+}
+.application .field input[readonly] {
+  background: #f4f7f4;
+  color: #67796d;
+}
+.application .helper {
+  font-size: 11px;
+  color: #83938a;
+  margin: 5px 0 0;
+  line-height: 1.45;
+}
+.application .secTitle {
+  font-size: 13px;
+  font-weight: 750;
+  margin: 0 0 15px;
+}
+.application .sepline {
+  height: 1px;
+  background: #edf0ed;
+  margin: 20px 0;
+}
+.application .tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.application .tiles.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.application .tile {
+  min-height: 61px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  border: 1px solid #dae2da;
+  border-radius: 11px;
+  padding: 13px 15px;
+  background: #fff;
+  color: #283d33;
+}
+.application .tile .tileicon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: #f2f5f2;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+}
+.application .tile strong {
+  display: block;
+  font-size: 12.5px;
+}
+.application .tile small {
+  display: block;
+  color: #8b998f;
+  margin-top: 3px;
+  font-size: 11px;
+}
+.application .tile.sel {
+  border: 1.5px solid #1b8058;
+  background: #eef8f1;
+}
+.application .check {
+  margin-left: auto;
+  color: #187c54;
+  font-weight: 800;
+}
+.application .radioRow {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.application .seg {
+  min-width: 91px;
+  padding: 11px 16px;
+  border: 1px solid #dee4df;
+  background: #fff;
+  border-radius: 9px;
+  color: #34493c;
+  font-weight: 650;
+}
+.application .seg.sel {
+  background: #eef7f0;
+  border-color: #248b5c;
+  color: #165e3d;
+}
+.application .sections {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #e9ede9;
+  margin: 0 -30px 22px;
+  padding: 0 30px;
+  overflow: auto;
+}
+.application .sectiontab {
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 13px 14px;
+  color: #7a8b82;
+  font-size: 12px;
+  font-weight: 670;
+}
+.application .sectiontab.sel {
+  color: #156b47;
+  border-bottom-color: #1c7d52;
+}
+.application .inlineRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.application .hintpill {
+  border-radius: 40px;
+  background: #eef6f0;
+  padding: 5px 10px;
+  color: #226644;
+  font-size: 10px;
+  font-weight: 750;
+}
+.application .choiceRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.application .choiceRow .field {
+  flex: 1;
+}
+.application .infobar {
+  padding: 11px 14px;
+  background: #f4f8f5;
+  border-radius: 10px;
+  color: #65766b;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 15px;
+}
+.application .warn {
+  border: 1px solid #e8c4bd;
+  background: var(--redbg);
+  color: #9c3830;
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 16px 0 0;
+}
+.application .success {
+  border: 1px solid #cce6d3;
+  background: #eff8f0;
+  color: #146b40;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 12px;
+}
+.application .filebox {
+  border: 1px dashed #bdcbc0;
+  background: #fafcf9;
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.application .filebox strong {
+  font-size: 12px;
+}
+.application .filebox small {
+  display: block;
+  color: #809082;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.application .filebox input {
+  max-width: 210px;
+  font-size: 11px;
+}
+.application .minihead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 15px;
+}
+.application .minihead h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.application .tiny {
+  color: #85958a;
+  font-size: 11px;
+}
+.application .choiceToggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.application .choiceToggle input {
+  accent-color: #176b49;
+  width: 16px;
+  height: 16px;
+}
+.application .staffgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+.application .resolved {
+  border: 1px solid #c5e2cf;
+  background: #f1faf4;
+  border-radius: 12px;
+  padding: 15px;
+  margin: 13px 0 5px;
+}
+.application .resolved .topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.application .resolved strong {
+  font-size: 13px;
+}
+.application .resolved .quiet {
+  font-size: 11px;
+  color: #678572;
+  line-height: 1.6;
+}
+.application .chain {
+  display: flex;
+  gap: 7px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.application .chain div {
+  border: 1px solid #cfe5d6;
+  border-radius: 9px;
+  padding: 10px 13px;
+  background: #fff;
+  min-width: 105px;
+}
+.application .chain small {
+  display: block;
+  color: #758b7c;
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+.application .chain b {
+  font-size: 12px;
+}
+.application .chipgrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.application .chip {
+  border: 1px solid #dfe6e0;
+  border-radius: 10px;
+  padding: 15px 12px;
+  background: #fff;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+  color: #3f5246;
+}
+.application .chip.sel {
+  border-color: #2b9160;
+  background: #eaf5ee;
+  color: #165f40;
+}
+.application .chip .tick {
+  float: right;
+}
+.application .reviewgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+.application .reviewbox {
+  border: 1px solid #e2e9e3;
+  border-radius: 12px;
+  padding: 15px;
+  min-width: 0;
+}
+.application .reviewbox .rtop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.application .reviewbox .rtop strong {
+  font-size: 13px;
+}
+.application .reviewbox .rtop button {
+  background: none;
+  border: 0;
+  color: #146d47;
+  font-weight: 700;
+  font-size: 11px;
+}
+.application .reviewbox dl {
+  margin: 0;
+}
+.application .reviewbox dt {
+  font-size: 10px;
+  color: #839487;
+  margin-top: 8px;
+}
+.application .reviewbox dd {
+  font-size: 12px;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.application .statusflow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+}
+.application .flowbox {
+  text-align: center;
+  border: 1px solid #e3eae4;
+  border-radius: 10px;
+  padding: 13px 4px;
+  background: #fff;
+  color: #7d8e83;
+  font-size: 11px;
+}
+.application .flowbox.done {
+  background: #e8f6ed;
+  color: #186b44;
+  border-color: #b8dfc8;
+  font-weight: 800;
+}
+.application .finalmsg {
+  padding: 24px;
+  text-align: center;
+}
+.application .bigcheck {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #e3f5e9;
+  color: #1a874e;
+  font-size: 35px;
+  display: grid;
+  place-items: center;
+  margin: 5px auto 17px;
+}
+.application .finalmsg h2 {
+  margin: 0 0 9px;
+}
+.application .notice {
+  margin-top: 18px;
+  padding: 13px 15px;
+  border: 1px solid #eadfbf;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #8b6f35;
+  font-size: 12px;
+}
+.application .sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.application .demoBanner {
+  background: #f3f7f2;
+  border: 1px solid #deeadf;
+  color: #697e70;
+  padding: 10px 15px;
+  border-radius: 10px;
+  font-size: 11px;
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.application .demoBanner button {
+  background: transparent;
+  border: 0;
+  color: #1b714b;
+  font-size: 11px;
+  font-weight: 750;
+}
+.application .statusNote {
+  color: #63796b;
+  font-size: 11px;
+  margin-top: 10px;
+}
+.application .hidden {
+  display: none !important;
+}
+@media (max-width: 1250px) {
+  .application.wrap {
+    padding: 27px 24px;
+  }
+  .application .workspace {
+    grid-template-columns: 245px minmax(0, 1fr);
+  }
+  .application .panelHead {
+    padding: 23px 24px 0;
+  }
+  .application .panelBody {
+    padding: 22px 24px;
+  }
+  .application .panelFoot {
+    padding: 16px 24px;
+  }
+  .application .sections {
+    margin: 0 -24px 22px;
+    padding: 0 24px;
+  }
+  .application .top {
+    padding: 0 24px;
+  }
+}
+@media (max-width: 1000px) {
+  .application .app {
+    grid-template-columns: 69px 1fr;
+  }
+  .application .sidebar .brand strong,
+  .application .sidebar .brand small,
+  .application .menu .item span,
+  .application .sidebarBottom {
+    display: none;
+  }
+  .application .brand {
+    padding: 14px 17px;
+  }
+  .application .menu .item {
+    justify-content: center;
+  }
+  .application .menu .caption {
+    display: none;
+  }
+  .application.wrap {
+    padding: 22px;
+  }
+  .application .workspace {
+    grid-template-columns: 205px 1fr;
+    gap: 13px;
+  }
+  .application .vip {
+    padding: 14px;
+  }
+  .application .panelBody {
+    padding: 20px;
+  }
+  .application .panelHead {
+    padding: 20px 20px 0;
+  }
+  .application .panelFoot {
+    padding: 14px 20px;
+  }
+  .application .sections {
+    margin: 0 -20px 20px;
+    padding: 0 20px;
+  }
+  .application .panel h2 {
+    font-size: 21px;
+  }
+  .application .tiles.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 740px) {
+  .application .app {
+    display: block;
+  }
+  .application .sidebar {
+    display: none;
+  }
+  .application .top {
+    height: 56px;
+    padding: 0 18px;
+  }
+  .application.wrap {
+    padding: 18px 15px 70px;
+  }
+  .application .pageTop {
+    margin-bottom: 17px;
+  }
+  .application .pageTop h1 {
+    font-size: 23px;
+  }
+  .application .pageTop .plainlink {
+    display: none;
+  }
+  .application .workspace {
+    display: block;
+  }
+  .application .vip {
+    position: relative;
+    top: auto;
+    margin-bottom: 14px;
+  }
+  .application .vip h2,
+  .application .vip .subtle {
+    display: none;
+  }
+  .application .tiers {
+    margin: 0 0 11px;
+  }
+  .application .vipcard {
+    height: 96px;
+    aspect-ratio: auto;
+    max-width: 190px;
+    float: left;
+    margin-right: 12px;
+  }
+  .application .planmeta {
+    margin: 0 0 6px;
+  }
+  .application .statline {
+    padding: 5px 0;
+  }
+  .application .vip .viphint,
+  .application .vip .textlink,
+  .application .vip .detailHidden {
+    display: none;
+  }
+  .application .progress {
+    padding: 6px 0 14px;
+  }
+  .application .miniProgress {
+    gap: 4px;
+  }
+  .application .stepnav {
+    font-size: 11px;
+  }
+  .application .panelHead {
+    padding: 20px 18px 0;
+  }
+  .application .panelBody {
+    padding: 20px 18px;
+  }
+  .application .panelFoot {
+    padding: 13px 18px;
+  }
+  .application .grid2,
+  .application .grid3,
+  .application .staffgrid,
+  .application .reviewgrid {
+    grid-template-columns: 1fr;
+  }
+  .application .tiles.three,
+  .application .chipgrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .application .sections {
+    margin: 0 -18px 20px;
+    padding: 0 18px;
+  }
+  .application .stepmenu {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .application .panelFoot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .application .buttons {
+    justify-content: space-between;
+  }
+  .application .btn {
+    flex: 1;
+  }
+  .application .filebox {
+    display: block;
+  }
+  .application .filebox input {
+    margin-top: 15px;
+  }
+  .application .statusflow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .application,
+  .application * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+/* Approved iteration: collapsible icon-only navigation */
+.application .app {
+  transition: grid-template-columns 0.18s ease;
+}
+.application .sidebar .menu .item {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  background: transparent;
+  cursor: pointer;
+}
+.application .sidebar .menu button.item {
+  padding: 12px 13px;
+  color: #c7ddd2;
+  border-radius: 9px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-weight: 500;
+}
+.application .sidebar .menu .item.selected {
+  background: #24533f;
+  color: #fff;
+  font-weight: 650;
+}
+.application .sidebar .menu .item:hover {
+  background: #1c4937;
+  color: #fff;
+}
+.application .sidebar .menu .item:focus-visible,
+.application .navToggle:focus-visible {
+  outline: 2px solid #9fe7c0;
+  outline-offset: 2px;
+}
+.application .navico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  min-width: 19px;
+  font-size: 19px;
+}
+.application .sidebarBottom {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #345d4a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.application .topLeading {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.application .navToggle {
+  background: #f2f7f2;
+  border: 1px solid #d6e7da;
+  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  color: var(--forest);
+  font-size: 20px;
+  cursor: pointer;
+}
+.application .app.navCollapsed {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+.application .navCollapsed .brand {
+  padding: 16px;
+  justify-content: center;
+}
+.application .navCollapsed .brandWords,
+.application .navCollapsed .navlabel,
+.application .navCollapsed .caption {
+  display: none;
+}
+.application .navCollapsed .menu {
+  padding: 18px 7px;
+}
+.application .navCollapsed .menu .item {
+  padding: 12px 0;
+  justify-content: center;
+}
+.application .navCollapsed .navico {
+  width: 24px;
+  min-width: 24px;
+}
+.application .navCollapsed .sidebarBottom {
+  justify-content: center;
+  padding: 18px 5px;
+}
+.application .toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #113d2c;
+  color: white;
+  border-radius: 11px;
+  padding: 12px 17px;
+  z-index: 100;
+  font-size: 12px;
+  box-shadow: 0 8px 28px #223e332c;
+}
+/* ID evidence stays inside a fixed preview rectangle */
+.application .identityLayout {
+  align-items: start;
+}
+.application .uploadCard {
+  min-width: 0;
+  border: 1px solid #dce7df;
+  padding: 12px;
+  border-radius: 13px;
+  background: #fbfdfb;
+}
+.application .uploadPreview {
+  height: 164px;
+  max-height: 164px;
+  width: 100%;
+  border: 1px dashed #bed2c4;
+  border-radius: 9px;
+  background: #f5f8f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+.application .uploadPreview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+.application .uploadEmpty,
+.application .fileicon {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 7px;
+  color: #80938a;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px;
+  max-width: 100%;
+}
+.application .uploadEmpty span,
+.application .fileicon {
+  font-size: 27px;
+}
+.application .uploadEmpty strong,
+.application .fileicon strong {
+  color: #335345;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.application .uploadEmpty small,
+.application .fileicon small {
+  font-size: 11px;
+  color: #81938a;
+}
+.application .uploadActions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 11px;
+}
+.application .uploadActions .btn {
+  font-size: 11px;
+  padding: 10px 11px;
+}
+.application .uploadHint {
+  display: block;
+  color: #778d81;
+  font-size: 11px;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.application .civilChoices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.application .civilChoices .seg {
+  padding: 11px 6px;
+  text-align: center;
+}
+.application .reviewTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 17px;
+}
+.application .reviewActions {
+  display: flex;
+  gap: 8px;
+}
+.application .reviewActions .btn {
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Paper application preview modal */
+.application .previewModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 28, 20, 0.76);
+  z-index: 300;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+.application .previewDialog {
+  width: min(1020px, 100%);
+  height: min(95vh, 1200px);
+  background: #fff;
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.application .previewToolbar {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 19px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.application .previewToolbar small {
+  display: block;
+  font-size: 11px;
+  color: #75847f;
+  margin-top: 5px;
+}
+.application .previewTools {
+  display: flex;
+  gap: 8px;
+}
+.application .previewTools .btn {
+  font-size: 12px;
+  padding: 9px 13px;
+}
+.application .previewScroll {
+  overflow: auto;
+  background: #e4e9e4;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+}
+.application .previewScroll img {
+  width: min(100%, 720px);
+  height: auto;
+  align-self: flex-start;
+  box-shadow: 0 8px 30px #23432c3d;
+  background: white;
+}
+.application #printArea {
+  display: none;
+}
+@media (max-width: 1000px) {
+  .application .app.navCollapsed {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+}
+@media (max-width: 740px) {
+  .application .app.navCollapsed {
+    display: block;
+  }
+  .application .sidebar {
+    display: none;
+  }
+  .application .sidebar.mobileShow {
+    position: fixed;
+    display: flex;
+    z-index: 90;
+    width: 68px;
+    top: 0;
+    left: 0;
+    height: 100vh;
+  }
+  .application .topLeading {
+    gap: 8px;
+  }
+  .application .crumb {
+    font-size: 10px;
+  }
+  .application .civilChoices {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .application .identityLayout {
+    grid-template-columns: 1fr;
+  }
+  .application .previewModal {
+    padding: 8px;
+  }
+  .application .previewToolbar {
+    flex-wrap: wrap;
+  }
+  .application .previewTools {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .application .previewScroll {
+    padding: 10px;
+  }
+}
+/* v4: one recommender contact result and one shared team hierarchy */
+.application .networkInputGrid {
+  align-items: start;
+  gap: 22px;
+}
+.application .networkBrief {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #84958d;
+}
+.application .networkInlineOk,
+.application .networkInlineError {
+  font-size: 12px;
+  font-weight: 650;
+  margin: 11px 0 0;
+}
+.application .networkInlineOk {
+  color: #16734b;
+}
+.application .networkInlineError {
+  color: #ae4d44;
+}
+.application .networkContact {
+  border: 1px solid #d8e8de;
+  background: #f6fbf7;
+  border-radius: 11px;
+  padding: 14px;
+  margin-top: 12px;
+}
+.application .networkContactPending {
+  background: #fff8f7;
+  border-color: #ecd5d0;
+}
+.application .networkContactTitle {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.application .networkContactTitle strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #205a3c;
+}
+.application .networkContactBadge {
+  font-size: 10px;
+  color: #28734e;
+  background: #e8f5eb;
+  border-radius: 40px;
+  padding: 5px 9px;
+  font-weight: 650;
+}
+.application .networkContactPending .networkContactBadge {
+  background: #f8e7e3;
+  color: #a54842;
+}
+.application .networkContactDetails {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.application .networkContactDetails span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.application .networkContactDetails small {
+  color: #7a8d80;
+  font-size: 10px;
+}
+.application .networkContactDetails b {
+  color: #264237;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.application .sharedTeam {
+  border: 1px solid #dce8df;
+  background: #f9fcfa;
+  padding: 16px 18px;
+  border-radius: 13px;
+  margin-top: 18px;
+}
+.application .sharedTeamHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.application .sharedTeamHead h3 {
+  font-size: 14px;
+  margin: 0 0 4px;
+}
+.application .sharedTeamHead p {
+  margin: 0;
+  color: #83938b;
+  font-size: 11px;
+}
+.application .sharedTeamChain {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.application .sharedTeamChain > div {
+  background: #fff;
+  border: 1px solid #e0eae3;
+  border-radius: 9px;
+  padding: 11px 12px;
+  min-width: 0;
+}
+.application .sharedTeamChain small {
+  font-size: 10px;
+  color: #758779;
+  display: block;
+  margin-bottom: 4px;
+}
+.application .sharedTeamChain strong {
+  color: #163e2a;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.application .networkBottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: end;
+}
+.application .networkBottom .helper {
+  margin: 0 0 3px;
+  line-height: 1.65;
+}
+@media (max-width: 740px) {
+  .application .networkBottom {
+    grid-template-columns: 1fr;
+  }
+  .application .sharedTeamChain {
+    grid-template-columns: 1fr;
+  }
+  .application .networkContactDetails {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* Integration hooks the React implementation needs that the copied prototype
+ * stylesheet has no literal equivalent for (it builds these via innerHTML,
+ * not nested elements) - kept minimal, deliberately not another approximate
+ * stylesheet: each one reuses the reference's own declarations. */
+
+/* The VIP card aside's own heading - same rule as the prototype's `.vip h2`. */
+.application .vipTitle {
+  font-size: 15px;
+  letter-spacing: -0.25px;
+  margin: 0 0 7px;
+}
+
+/* Collapsible plan benefits: a native <details> replaces the prototype's
+ * JS-toggled div, so this is `.detail-hidden`'s spacing on the <details>
+ * itself; `.textlink` (already applied to the <summary>) supplies the look. */
+.application .planDisclosure {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.application .planDisclosure > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.application .planDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.application .planDisclosure > summary::after {
+  content: ' \25BE';
+}
+.application .planDisclosure[open] > summary::after {
+  content: ' \25B4';
+}
+.application .planDisclosure[open] > summary {
+  margin-bottom: 8px;
+}
+
+/* The disabling fieldset around the active step's content. The prototype has
+ * no such wrapper (one `.panel-body` swaps its own innerHTML); this is a
+ * fieldset reset only, so the step's own markup supplies all visible layout. */
+.application .formFields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+/* One step's own content area inside `.panelBody`. Same reset: the
+ * prototype's `stepFn()` renders its tiles/grids directly inside
+ * `.panel-body`, so this wrapper must be invisible to that layout too. */
+.application .stepContent {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+/* The footnote + buttons row inside `.panelFoot`. The reference has no extra
+ * wrapper here either - `.panel-foot` is already the flex row - so this stays
+ * transparent to it rather than nesting a second one. */
+.application .footerContents {
+  display: contents;
+}
+
+/* React form semantics retain validation and accessible radio groups. */
+.application .choiceGroup {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.application .choiceGroup .tiles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.application .choiceGroup .tiles.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.application .choiceGroup .tile {
+  min-height: 61px;
+  display: flex;
+  gap: 11px;
+  padding: 13px 15px;
+  border-radius: 11px;
+  box-shadow: none;
+}
+.application .choiceGroup .tile > span:first-of-type {
+  gap: 11px;
+}
+.application .choiceGroup .tile strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: normal;
+}
+.application .choiceGroup .tile small {
+  font-size: 11px;
+  line-height: normal;
+}
+.application .choiceGroup .tileicon {
+  flex-shrink: 0;
+}
+.application .choiceGroup .tier {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  padding: 10px 4px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+.application .choiceGroup .tier strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: normal;
+}
+.application .tier .check,
+.application .seg .check {
+  display: none;
+}
+.application .choiceGroup:has(.radioRow) {
+  width: auto;
+}
+.application .choiceGroup:has(.radioRow) .secTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.application .holderBlock .choiceGroup:has(.radioRow) .secTitle {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  font-size: 12px;
+  font-weight: 680;
+  margin-bottom: 7px;
+}
+.application .choiceGroup .seg {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  gap: 0;
+  box-shadow: none;
+  text-align: center;
+}
+.application .choiceGroup .seg strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: normal;
+}
+.application .choiceGroup .seg:has(input[value='']) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.application .fullWidth {
+  grid-column: 1/-1;
+}
+.application .holderBlock {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.application .holderSections {
+  display: block;
+}
+.application .holderSection {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.application .holderSection[hidden] {
+  display: none;
+}
+.application .field {
+  gap: 0;
+  font-size: 12px;
+  font-weight: 400;
+}
+.application .field > span:first-child,
+.application .field > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 680;
+  margin-bottom: 7px;
+  color: #304039;
+}
+.application .field small {
+  font-size: 11px;
+  color: #83938a;
+  font-weight: 400;
+}
+.application .formFields > .stepContent > p:has(+ fieldset) {
+  margin: 0;
+}
+.application .sepline {
+  border: 0;
+}
+.application .vipcard img {
+  width: 127%;
+  max-width: none;
+  height: 127%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.application .vip {
+  display: flow-root;
+}
+.application .planDisclosure {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.application .planDisclosure[open] > summary {
+  margin-bottom: 8px;
+}
+.application .planDisclosure[open] > .statline:first-of-type {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 16px;
+}
+.application .footnote {
+  margin: 0;
+}
+.application .btn {
+  min-height: 0;
+  line-height: normal;
+  box-shadow: none;
+}
+.application .chip {
+  position: relative;
+  cursor: pointer;
+}
+.application .chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.application .chip:has(input:focus-visible) {
+  outline: 2px solid #188655;
+  outline-offset: 2px;
+}
+.application .certification {
+  align-items: flex-start;
+  background: #fafcf9;
+  margin-top: 13px;
+}
+.application .uploadCard {
+  display: block;
+}
+.application .uploadActions button {
+  min-height: 0;
+  padding: 10px 11px;
+  border: 1px solid #d9e2db;
+  border-radius: 9px;
+  background: #fff;
+  color: #2b4435;
+  font-size: 11px;
+  font-weight: 700;
+}
+.application .uploadPreview {
+  padding: 0;
+}
+.application .raTitle {
+  font-size: 12px;
+}
+.application .stepmenu {
+  list-style: none;
+  margin-top: 0;
+}
+.application .stepmenu li > button {
+  width: 100%;
+}
+.application .bar {
+  position: relative;
+}
+.application .bar::before {
+  content: '';
+  position: absolute;
+  inset: -8px 0;
+}
+.application :focus-visible {
+  outline: 2px solid #188655;
+  outline-offset: 3px;
+}
+@media (max-width: 1000px) {
+  .application .choiceGroup .tiles.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 740px) {
+  .application .choiceGroup .tiles.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .application .vip .planDisclosure {
+    display: none;
+  }
+  .application .buttons {
+    width: 100%;
+  }
+  .application .choiceGroup .civilChoices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .application .choiceGroup .seg {
+    min-width: 0;
+  }
+}
+
+.application .reviewTitle {
+  font-size: 13px;
+  margin: 0;
+}
+.application .rtop button {
+  min-height: 0;
+  padding: 0;
+  line-height: normal;
+}
+.application .reviewActions {
+  flex-wrap: wrap;
+}
+.application .reviewTools > p {
+  flex: 1;
+  min-width: 180px;
+}
+
+.application {
+  line-height: normal;
+}
+.application.wrap {
+  width: 100%;
+}
+.application .choiceGroup,
+.application .formFields,
+.application .stepContent {
+  display: block;
+  gap: 0;
+}
+.application .choiceGroup legend {
+  padding: 0;
+}
+.application .choiceGroup .tile {
+  font-weight: 400;
+}
+.application .choiceGroup .tile small {
+  font-weight: 400;
+}
+.application .choiceGroup .tiers {
+  margin: 14px 0 16px;
+}
+.application .holderBlock {
+  display: block;
+}
+
+.application .choiceGroup .civilChoices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.application .choiceGroup .radioRow {
+  display: flex;
+  gap: 9px;
+}
+.application .choiceGroup .civilChoices .seg {
+  padding: 11px 6px;
+}
+.application .choiceGroup .seg strong {
+  font-size: 14px;
+}
+.application .fullWidth .secTitle {
+  font-size: 12px;
+  font-weight: 680;
+  margin-bottom: 7px;
+}
+.application .field {
+  font-size: 14px;
+}
+.application .vip > .subtle {
+  margin-bottom: 0;
+}
+.application .prefixSpace {
+  min-height: 1px;
+}
+.application .panel h2 {
+  line-height: normal;
+}
+.application .field:has(input:required) > span:first-child::after {
+  content: ' *';
+  color: #ba513c;
+}
+@media (max-width: 740px) {
+  .application .choiceGroup .civilChoices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .application .prefixSpace {
+    display: none;
+  }
+}
+
+.application .choiceGroup .tile > span:first-of-type > span:last-child {
+  display: block;
+}
+.application .choiceGroup .tile > span:first-of-type > span:last-child small {
+  margin-top: 3px;
+}
+@media (max-width: 740px) {
+  .application .choiceGroup .tiers {
+    margin: 0 0 11px;
+  }
+}
+
+.application .holderSection .grid2 > p[role="status"] { grid-column:1/-1; font-size:11px; color:#83938a; margin:0; }
+.application .holderSection [data-testid$="-combobox"] > span:first-child { font-size:12px; font-weight:680; color:#304039; }

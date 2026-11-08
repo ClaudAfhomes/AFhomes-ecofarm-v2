@@ -255,7 +255,7 @@ describe('applicationHolderSchema geographic fields', () => {
     );
   });
 
-  it('accepts only the fixed pick-list values for suffix, sex, citizenship and civil status', () => {
+  it('accepts only the fixed pick-list values for sex and civil status', () => {
     const parsed = applicationHolderSchema.parse({
       ...holderBase,
       suffix: 'Jr.',
@@ -281,11 +281,18 @@ describe('applicationHolderSchema geographic fields', () => {
     expect(blank.sex).toBeUndefined();
     // Anything off the list is refused.
     expect(
-      applicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success,
-    ).toBe(false);
-    expect(
       applicationHolderSchema.safeParse({ ...holderBase, civilStatus: 'Single-ish' }).success,
     ).toBe(false);
+  });
+
+  it('takes suffix as free text, not a pick-list', () => {
+    // `customer_application_holders.suffix` is a plain `text` column with no
+    // database-level enum, and the read side already accepts any string here
+    // (`storedApplicationHolderSchema`) - the write side matches it, same as
+    // citizenship below: a real applicant's suffix is not limited to the five
+    // historical examples (Jr./Sr./II/III/IV).
+    expect(applicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success).toBe(true);
+    expect(applicationHolderSchema.parse({ ...holderBase, suffix: 'V' }).suffix).toBe('V');
   });
 
   it('refuses a sex and a civil status outside the recordable pick-lists', () => {

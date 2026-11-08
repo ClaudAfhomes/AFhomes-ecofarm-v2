@@ -31,6 +31,7 @@ import { addressProvider } from '../_lib/address-source.js';
 import { loadImportRecoveryContext } from '../_lib/customer-import-continuation.js';
 import { verifyAddressHierarchy } from '../_lib/address-provider.js';
 import { resolvePostalCode } from '../_lib/postal-reference.js';
+import { verifyReferrerRecommenderTeam } from '../_lib/team-match.js';
 import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
@@ -77,12 +78,40 @@ const sendFile = (res: VercelResponse, filename: string, mime: string, bytes: Ui
 const rpcId = (data: unknown) => String(Array.isArray(data) ? data[0] : data);
 
 /**
+ * Authoritative Network-step gate, shared by every write path that accepts
+ * `referrerStaffId` / `recommenderAaNumber`: a no-op when either is absent,
+ * otherwise the server re-resolves the recommender and re-derives both
+ * uplines itself (see `_lib/team-match.ts`) rather than trusting whatever the
+ * client already concluded. Returns false (and has already written the
+ * refusal) when the write must stop here.
+ */
+async function assertSameTeam(
+  db: Db,
+  res: VercelResponse,
+  referrerStaffId: string | undefined,
+  recommenderAaNumber: string | undefined,
+): Promise<boolean> {
+  const check = await verifyReferrerRecommenderTeam(db, referrerStaffId, recommenderAaNumber);
+  if (check.ok) return true;
+  fail(
+    res,
+    'VALIDATION_ERROR',
+    check.reason === 'RECOMMENDER_NOT_FOUND'
+      ? 'VIP recommender AA number was not found or is not an active, authorized OST.'
+      : 'Referrer and VIP recommender must belong to the same sales team.',
+    400,
+  );
+  return false;
+}
+
+/**
  * Normalize the optional holder/header text the schemas validate but leave
  * untransformed (required fields are already normalized by the schemas).
  * Spreads preserve key presence exactly: null/undefined/blank pass through.
  */
 type OptionalTextHolder = {
   middleName?: string;
+  prefix?: string;
   suffix?: string;
   postalCode?: string;
   occupationBusinessName?: string;
@@ -266,11 +295,31 @@ async function resolveHolderLocations(
   return { ok: true, primary: resolvedPrimary.holder, secondary: resolvedSecondary.holder };
 }
 
+async function prefixStorageReady(
+  db: Db,
+  res: VercelResponse,
+  primary: { prefix?: string },
+  secondary?: { prefix?: string } | null,
+): Promise<boolean> {
+  if (!primary.prefix && !secondary?.prefix) return true;
+  // Reject before any write when the target has not received prefix persistence.
+  const { error } = await db.from('customer_application_holders').select('prefix').limit(0);
+  if (!error) return true;
+  fail(
+    res,
+    'PREFIX_STORAGE_UNAVAILABLE',
+    'Prefix cannot be saved until the approved prefix database migration is applied. Your application has not been saved.',
+    503,
+  );
+  return false;
+}
+
 const shapeApplicationHolder = (row: Record<string, unknown>) => ({
   holderType: row.holder_type,
   lastName: row.last_name,
   firstName: row.first_name,
   middleName: row.middle_name ?? undefined,
+  prefix: row.prefix ?? undefined,
   suffix: row.suffix ?? undefined,
   birthDate: row.birth_date,
   sex: row.sex ?? undefined,
@@ -322,6 +371,7 @@ async function getApplication(db: Db, id: string) {
   const secondary = rows.find((value) => value.holder_type === 'SECONDARY');
   return {
     id: row.id,
+    raDraft: row.ra_draft ?? undefined,
     applicationNumber: row.application_number,
     // Which frozen terms record this application points at. Null is the honest
     // "review required" state the UI keys off.
@@ -697,16 +747,11 @@ async function listRows(
         const rid = String(row.id);
         const vTotal = verifiedTotal.get(rid) ?? '0.00';
         const total = String(row.total_price_snapshot ?? '0.00');
-        row.payment_status = verified.has(rid)
-          ? 'paid'
-          : anyPayment.has(rid)
-            ? 'pending'
-            : null;
+        row.payment_status = verified.has(rid) ? 'paid' : anyPayment.has(rid) ? 'pending' : null;
         row.verified_total = vTotal;
         let fullyPaid = false;
         try {
-          fullyPaid =
-            compareMoney(total, '0.00') > 0 && compareMoney(vTotal, total) >= 0;
+          fullyPaid = compareMoney(total, '0.00') > 0 && compareMoney(vTotal, total) >= 0;
         } catch {
           fullyPaid = false;
         }
@@ -1168,8 +1213,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           secondary,
           requestId,
           registerNewCustomer: _mode,
+          recommenderAaNumber,
           ...header
         } = newRegistration.data;
+        if (!(await prefixStorageReady(db, res, primary, secondary))) return;
+      if (header.raDraft) {
+        const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
+        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
+      }
+        if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
         const locations = await resolveHolderLocations(primary, secondary);
         if ('status' in locations)
           return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
@@ -1201,7 +1253,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .safeParse(jsonBody(req));
       if (!parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
-      const { primary, secondary, requestId, importContext, ...header } = parsed.data;
+      const { primary, secondary, requestId, importContext, recommenderAaNumber, ...header } =
+        parsed.data;
+      if (!(await prefixStorageReady(db, res, primary, secondary))) return;
+      if (header.raDraft) {
+        const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
+        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
+      }
+      if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
       const locations = await resolveHolderLocations(primary, secondary);
       if ('status' in locations)
         return fail(res, 'VALIDATION_ERROR', locations.message, locations.status);
@@ -1279,7 +1338,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 'VALIDATION_ERROR', 'Invalid customer application', 400);
       const before = await getApplication(db, appPatch[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
-      const { primary, secondary, requestId: _requestId, ...header } = parsed.data;
+      const {
+        primary,
+        secondary,
+        requestId: _requestId,
+        recommenderAaNumber,
+        ...header
+      } = parsed.data;
+      if (!(await prefixStorageReady(db, res, primary, secondary))) return;
+      if (header.raDraft) {
+        const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
+        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
+      }
+      if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
       const { error } = await db.rpc('save_customer_application', {
         p_application_id: appPatch[1],
         p_actor_id: auth.userId,
@@ -1834,8 +1905,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const agreement = await getAgreement(db, agreementExport[1]!);
       if (!agreement) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       const first = agreement.schedule[0] as
-        | { particular?: string; amount?: string; paymentDate?: string }
-        | undefined;
+        { particular?: string; amount?: string; paymentDate?: string } | undefined;
       const primary = (agreement.primary ?? {}) as Record<string, string>;
       const secondary = (agreement.secondary ?? null) as Record<string, string> | null;
       const fields: Record<string, string> = {

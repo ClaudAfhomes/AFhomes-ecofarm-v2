@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Sidebar } from './Sidebar';
 import styles from './Sidebar.module.css';
@@ -53,4 +53,30 @@ describe('Sidebar dropdown', () => {
     const wrapper = document.querySelector(`.${styles.subListWrap}`);
     expect(wrapper?.className).not.toContain(styles.subListWrapOpen);
   });
+});
+
+it('keeps collapsed module icons keyboard accessible and requests expansion', async () => {
+  const onExpand = vi.fn();
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <Sidebar
+        collapsed
+        onExpand={onExpand}
+        items={[
+          {
+            to: '/ops',
+            label: 'Operations',
+            icon: 'user',
+            dropdown: [{ to: '/admin/sales', label: 'Sales' }],
+          },
+        ]}
+      />
+    </MemoryRouter>,
+  );
+  const icon = screen.getByRole('button', { name: 'Operations' });
+  expect(icon).not.toHaveAttribute('aria-disabled', 'true');
+  expect(icon).not.toHaveAttribute('tabindex', '-1');
+  await user.click(icon);
+  expect(onExpand).toHaveBeenCalledOnce();
 });

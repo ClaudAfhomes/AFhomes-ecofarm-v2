@@ -82,6 +82,8 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: async () => [],
   getGenealogyDownline: async () => [],
   getGenealogySummary: async () => null,
+  resolveAaNumber: async () => ({ member: null }),
+  getAccreditationNumbers: async () => ({}),
 }));
 vi.mock('../../lib/download', () => ({ downloadFile: vi.fn() }));
 

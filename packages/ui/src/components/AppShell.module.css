@@ -3,6 +3,24 @@
   min-height: 100vh;
   background-color: var(--color-bg-canvas);
 }
+.workspaceShell {
+  background: #f9faf9;
+  --color-brand-deep: #0a3126;
+}
+.workspaceShell .main { padding: 0; max-width: none; }
+.workspaceShell > .mainCol > header { min-height: 70px; padding: 0 36px; background: #fff; }
+@media (min-width: 741px) {
+  .workspaceShell .sidebarCol { display: flex; }
+  .workspaceShell .sidebarCollapsed { width: 68px; }
+}
+@media (max-width: 1000px) {
+  .workspaceShell .main { padding: 0; }
+  .workspaceShell > .mainCol > header { padding-inline: 22px; }
+}
+@media (max-width: 740px) {
+  .workspaceShell .main { padding: 0; }
+  .workspaceShell > .mainCol > header { min-height: 56px; padding-inline: 18px; }
+}
 
 .sidebarCol {
   display: none;
@@ -60,3 +78,24 @@
     padding: var(--space-5) var(--space-6);
   }
 }
+
+.workspaceShell > .mainCol > header {
+  position:static;
+  color:#152a27;
+  --color-text-primary:#152a27;
+  --color-text-secondary:#75847f;
+  --color-text-muted:#75847f;
+  --color-brand-primary:#12533b;
+  --color-border-default:#e4e9e6;
+}
+.workspaceShell header button[aria-label="Open navigation"] { width:36px; height:36px; background:#f2f7f2; border:1px solid #d6e7da; border-radius:9px; color:#0a3126; }
+
+@media(min-width:741px) { .workspaceShell .sidebarCol { width:216px; } .workspaceShell .sidebarCollapsed { width:68px; } }
+.workspaceShell header > div:first-child { gap:18px; }
+.workspaceShell header button[aria-label="Open navigation"] { min-width:36px; min-height:36px; padding:0; }
+.workspaceShell header button[aria-label="Account menu"] { gap:10px; }
+.workspaceShell header button[aria-label="Account menu"] > span:first-child { display:flex; width:33px; height:33px; background:#e3eee7; border:0; color:#175b3d; font-size:12px; }
+.workspaceShell header button[aria-label="Account menu"] > span:nth-child(2) { display:flex; }
+.workspaceShell header button[aria-label="Account menu"] > span:nth-child(2) > span:first-child { font-size:12px; font-weight:650; }
+.workspaceShell header button[aria-label="Account menu"] > span:nth-child(2) > span:last-child { font-size:10px; font-weight:400; margin-top:2px; }
+@media(max-width:740px) { .workspaceShell header > div:first-child { gap:8px; } .workspaceShell header button[aria-label="Account menu"] { padding:0; } }

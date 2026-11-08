@@ -26,6 +26,7 @@ import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { downloadFile } from '../../lib/download';
+import { reservationPdf, savedReservationPaper } from './reservation-print';
 import { formatCount, formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
 import {
@@ -1160,14 +1161,15 @@ export function ReservationAgreementEditorPage() {
               <Button
                 variant="ghost"
                 onClick={() =>
-                  void exportReservationAgreement(id, 'pdf')
+                  void getReservationAgreement(id)
+                    .then((agreement) => reservationPdf(savedReservationPaper(agreement)))
                     .then(saveFile)
                     .catch((e: unknown) =>
                       setMessage(e instanceof Error ? e.message : 'Export failed.'),
                     )
                 }
               >
-                Export PDF
+                Download RA PDF
               </Button>
             </>
           ) : null}

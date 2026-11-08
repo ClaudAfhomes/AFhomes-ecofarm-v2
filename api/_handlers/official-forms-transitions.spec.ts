@@ -69,6 +69,7 @@ function install(
   options: {
     rpcs?: { fn: string; result: unknown }[];
     rpcErrors?: Record<string, { code?: string; message: string }>;
+    errors?: Record<string, { code?: string; message: string }>;
   } = {},
 ) {
   holder.db = new FakeSupabase({
@@ -88,6 +89,7 @@ function install(
     rpcs: options.rpcs ?? [],
     links: [{ child: 'identity_documents', parent: 'customers', fk: 'customer_id' }],
     rpcErrors: options.rpcErrors,
+    errors: options.errors,
   });
   return holder.db as FakeSupabase;
 }
@@ -1134,4 +1136,83 @@ describe('reservations filtered by their originating application', () => {
     const rows = (result.body as { data: { id: string }[] }).data;
     expect(rows.map((row) => row.id)).toEqual(['bbbbbbbb-0000-4000-8000-00000000d101']);
   });
+});
+
+it('refuses a prefixed registration before any write when prefix persistence is unavailable', async () => {
+  const db = install(
+    {},
+    {
+      errors: { customer_application_holders: { code: '42703', message: 'prefix column absent' } },
+    },
+  );
+  const result = await call(forms, {
+    path: 'customer-applications',
+    method: 'POST',
+    body: {
+      registerNewCustomer: true,
+      requestId: REQUEST_ID,
+      planId: PLAN_ID,
+      tier: 'GOLD',
+      paymentScheme: 'spot_cash',
+      primary: {
+        holderType: 'PRIMARY',
+        prefix: 'Dr.',
+        firstName: 'Mara',
+        lastName: 'Santos',
+        birthDate: '1990-01-01',
+        permanentAddressLine1: '123 Garden Street',
+        province: 'Laguna',
+        cityMunicipality: 'Calamba',
+        mobile: '09171234567',
+        email: 'mara@example.test',
+        printedName: 'Mara Santos',
+      },
+      consentAcknowledged: true,
+      acknowledgedAt: '2026-11-07',
+      validIdReceived: false,
+      reservationPaymentProofReceived: false,
+    },
+  });
+  expect(result.status).toBe(503);
+  expect(result.body).toMatchObject({ error: { code: 'PREFIX_STORAGE_UNAVAILABLE' } });
+  expect(
+    db.calls.filter((call) => ['rpc', 'insert', 'update', 'delete'].includes(call.op)),
+  ).toHaveLength(0);
+});
+it('returns persisted holder Prefix without changing their first name', async () => {
+  install({
+    customer_applications: [draftApplication],
+    customer_application_holders: [
+      {
+        application_id: APP_ID,
+        holder_type: 'PRIMARY',
+        prefix: 'Dr.',
+        first_name: 'Mara',
+        last_name: 'Santos',
+        birth_date: '1990-01-01',
+        permanent_address_line_1: '123 Garden Street',
+        city_municipality: 'Calamba',
+        province: 'Laguna',
+        mobile: '09171234567',
+        email: 'mara@example.test',
+        printed_name: 'Mara Santos',
+      },
+    ],
+  });
+  const result = await call(forms, { path: `customer-applications/${APP_ID}` });
+  expect(result.status).toBe(200);
+  expect(result.body).toMatchObject({ primary: { prefix: 'Dr.', firstName: 'Mara' } });
+});
+
+it('refuses an RA draft before writes if its storage migration is missing', async () => {
+ const db = install({}, { errors: { customer_applications: { code: '42703', message: 'ra_draft column absent' } } });
+ const result = await call(forms, { path: 'customer-applications', method: 'POST', body: {
+  registerNewCustomer: true, requestId: REQUEST_ID, planId: PLAN_ID, tier: 'GOLD', paymentScheme: 'spot_cash',
+  raDraft: { reservationDate: '2026-11-08', totalPrice: '100000.00' },
+  primary: { holderType: 'PRIMARY', firstName: 'Mara', lastName: 'Santos', birthDate: '1990-01-01', permanentAddressLine1: '123 Garden Street', cityMunicipality: 'Calamba', province: 'Laguna', mobile: '09171234567', email: 'mara@example.test', printedName: 'Mara Santos' },
+  acquisitionChannels: [], primarySignatureStatus: 'pending', consentAcknowledged: true, acknowledgedAt: '2026-11-08', validIdReceived: false, reservationPaymentProofReceived: false,
+ } });
+ expect(result.status).toBe(503);
+ expect(result.body).toMatchObject({ error: { code: 'RA_DRAFT_STORAGE_UNAVAILABLE' } });
+ expect(db.calls.filter(c => ['rpc','insert','update','delete'].includes(c.op))).toHaveLength(0);
 });

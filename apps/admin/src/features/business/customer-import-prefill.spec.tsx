@@ -41,6 +41,8 @@ vi.mock('./import-workflow-services', () => ({ getImportRowIntake: vi.fn() }));
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(async () => []),
   getOstMemberContacts: vi.fn(async () => ({})),
+  resolveAaNumber: vi.fn(async () => ({ member: null })),
+  getAccreditationNumbers: vi.fn(async () => ({})),
 }));
 const plan = { id: '00000000-0000-4000-8000-000000000010', name: 'Gold', code: 'GOLD' };
 beforeEach(() => {

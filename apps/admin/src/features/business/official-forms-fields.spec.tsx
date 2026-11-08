@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { HolderFields, RecommenderFields, emptyHolder } from './official-forms-fields';
-import { getGenealogy, getOstMemberContacts } from '../genealogy/services';
+import { getGenealogy, getOstMemberContacts, resolveAaNumber, getAccreditationNumbers } from '../genealogy/services';
 
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(),
@@ -14,6 +14,8 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyDownline: vi.fn(async () => []),
   getGenealogySummary: vi.fn(),
   getOstMemberContacts: vi.fn(async () => ({})),
+  resolveAaNumber: vi.fn(),
+  getAccreditationNumbers: vi.fn(async () => ({})),
 }));
 
 /**
@@ -26,12 +28,12 @@ vi.mock('../genealogy/services', () => ({
  * is worse than one that never offers it.
  */
 
-function Holder({ initial }: { initial?: Partial<ApplicationHolder> }) {
+function Holder({ initial, tabbed = false }: { initial?: Partial<ApplicationHolder>; tabbed?: boolean }) {
   const [value, setValue] = useState<ApplicationHolder>({
     ...emptyHolder('PRIMARY'),
     ...initial,
   });
-  return <HolderFields title="3. Primary holder" value={value} onChange={setValue} />;
+  return <HolderFields title="3. Primary holder" value={value} onChange={setValue} sectioned={tabbed} tabbed={tabbed} />;
 }
 
 const render = (initial?: Partial<ApplicationHolder>) =>
@@ -46,13 +48,11 @@ const optionLabels = (label: string): string[] =>
 const yearsAgo = (years: number): string => `${new Date().getFullYear() - years}-01-01`;
 
 describe('holder pick-lists', () => {
-  it('offers no suffix as "None", not "Not specified"', () => {
+  it('keeps suffix as optional free text, including values outside the workbook vocabulary', () => {
     render();
-    // "No suffix" is a statement about the person; "not specified" is a
-    // statement about the form, and only the first one is true here.
-    expect(optionLabels('Suffix')[0]).toBe('None');
-    expect(optionLabels('Suffix')).not.toContain('Not specified');
-    expect(optionLabels('Suffix').slice(1)).toEqual(['Jr.', 'Sr.', 'II', 'III', 'IV']);
+    expect(screen.getByRole('textbox', { name: 'Suffix' })).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Suffix'), { target: { value: 'V' } });
+    expect(screen.getByLabelText('Suffix')).toHaveValue('V');
   });
 
   it('keeps the other pick-lists on their shared "Not specified" empty choice', () => {
@@ -91,6 +91,21 @@ describe('holder pick-lists', () => {
 });
 
 describe('holder typed fields', () => {
+  it('preserves entries while switching V4 detail tabs and supports keyboard navigation', () => {
+    renderWithProviders(<Holder tabbed />);
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Maria' } });
+    expect(screen.getByLabelText('Email')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: 'Contact' }));
+    expect(screen.getByLabelText('Email')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'maria@example.test' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Personal' }));
+    expect(screen.getByLabelText('First name')).toHaveValue('Maria');
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Personal' }), { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Address' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: 'Address' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Contact' }));
+    expect(screen.getByLabelText('Email')).toHaveValue('maria@example.test');
+  });
   it('takes citizenship as typed text, not a closed dropdown', () => {
     render();
     const citizenship = screen.getByLabelText('Citizenship');
@@ -232,7 +247,13 @@ const OST_A = '00000000-0000-4000-8000-0000000000a1';
 const OST_B = '00000000-0000-4000-8000-0000000000b2';
 const SM_A = '00000000-0000-4000-8000-0000000000c3';
 
-function Recommender({ initial }: { initial?: Partial<Parameters<typeof RecommenderFields>[0]['meta']> }) {
+function Recommender({
+  initial,
+  networkSelection,
+}: {
+  initial?: Partial<Parameters<typeof RecommenderFields>[0]['meta']>;
+  networkSelection?: Parameters<typeof RecommenderFields>[0]['networkSelection'];
+}) {
   const [meta, setMeta] = useState({
     svdStaffId: '',
     ssmStaffId: '',
@@ -242,12 +263,16 @@ function Recommender({ initial }: { initial?: Partial<Parameters<typeof Recommen
     recommenderContact: '',
     recommenderEmail: '',
     acknowledgedAt: '2026-10-19',
+    referrerAaNumber: '',
+    recommenderAaNumber: '',
+    recommenderStaffId: '',
     ...initial,
   });
   return (
     <RecommenderFields
       meta={meta}
       chainNames={{}}
+      networkSelection={networkSelection}
       onChange={(key, value) => setMeta((current) => ({ ...current, [key]: value }))}
       onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
     />
@@ -256,6 +281,8 @@ function Recommender({ initial }: { initial?: Partial<Parameters<typeof Recommen
 
 const renderRecommender = (initial?: Parameters<typeof Recommender>[0]['initial']) =>
   renderWithProviders(<Recommender initial={initial} />);
+
+const renderNewRecommender = () => renderWithProviders(<Recommender networkSelection />);
 
 const optionsOf = (label: string): string[] =>
   within(screen.getByLabelText(label))
@@ -472,5 +499,154 @@ describe('recommender typed fields', () => {
       expect(within(emailSelect).getByRole('option', { name: /ana@example\.com/ })).toBeInTheDocument();
     });
     expect(within(screen.getByLabelText('Recommender Email')).queryByRole('option', { name: /Ana@Example/ })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * New Customer Application only (`networkSelection` set): the VIP recommender
+ * is an AA-number input, not a name dropdown. Nothing here is picked by hand -
+ * proving that means proving the typed number actually drives the resolved
+ * name, the role guard, the mutual-exclusion guard, and the read-only upline.
+ */
+describe('VIP recommender AA-number resolution (New Customer Application)', () => {
+  it('suggests only active visible OST AAO numbers in the input', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node(OST_A, 'ANA SANTOS', 'ost'), node(SM_A, 'BEN CRUZ', 'sales_manager'),
+    ]);
+    vi.mocked(getAccreditationNumbers).mockResolvedValue({ [OST_A]: 'AAO26100001', [SM_A]: 'AAI26050002' });
+    const { container } = renderNewRecommender();
+    await waitFor(() => expect(container.querySelector('datalist option[value="AAO26100001"]')).not.toBeNull());
+    expect(container.querySelector('datalist option[value="AAI26050002"]')).toBeNull();
+    expect(screen.getByLabelText('OST Referrer AA number')).toHaveAttribute('list');
+  });
+
+  it('resolves a typed AA number to the recommender and shows their SM/SSM/SVD upline with AA numbers', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node(OST_A, 'ANA SANTOS', 'ost', { uplineStaffId: SM_A }),
+      node(SM_A, 'BEN CRUZ', 'sales_manager'),
+    ]);
+    vi.mocked(resolveAaNumber).mockResolvedValue({
+      member: {
+        staffId: OST_A,
+        fullName: 'ANA SANTOS',
+        role: 'ost',
+        aaNumber: 'AAO26100001',
+        kind: 'OST',
+        status: 'accredited',
+      },
+    });
+    vi.mocked(getAccreditationNumbers).mockResolvedValue({ [SM_A]: 'AAI26050002' });
+    renderNewRecommender();
+    fireEvent.change(screen.getByLabelText('OST VIP recommender AA number'), {
+      target: { value: 'AAO26100001' },
+    });
+    expect(await screen.findByText(/ANA SANTOS/)).toBeVisible();
+    expect(await screen.findByText('BEN CRUZ')).toBeVisible();
+    expect(await screen.findByText(/AAI26050002/)).toBeVisible();
+  });
+
+  it('refuses a resolved member who is not an accredited OST member', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node(SM_A, 'BEN CRUZ', 'sales_manager')]);
+    vi.mocked(resolveAaNumber).mockResolvedValue({
+      member: {
+        staffId: SM_A,
+        fullName: 'BEN CRUZ',
+        role: 'sales_manager',
+        aaNumber: 'AAI26050002',
+        kind: 'IST',
+        status: 'accredited',
+      },
+    });
+    renderNewRecommender();
+    fireEvent.change(screen.getByLabelText('OST VIP recommender AA number'), {
+      target: { value: 'AAI26050002' },
+    });
+    expect(await screen.findByText(/must be an accredited OST member/)).toBeVisible();
+  });
+
+  it('refuses a recommender who is also the selected referrer', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node(OST_A, 'ANA SANTOS', 'ost')]);
+    vi.mocked(resolveAaNumber).mockResolvedValue({
+      member: {
+        staffId: OST_A,
+        fullName: 'ANA SANTOS',
+        role: 'ost',
+        aaNumber: 'AAO26100001',
+        kind: 'OST',
+        status: 'accredited',
+      },
+    });
+    renderWithProviders(
+      <Recommender initial={{ referrerStaffId: OST_A }} networkSelection />,
+    );
+    fireEvent.change(screen.getByLabelText('OST VIP recommender AA number'), {
+      target: { value: 'AAO26100001' },
+    });
+    expect(
+      await screen.findByText('Referrer and VIP recommender must be different members.'),
+    ).toBeVisible();
+  });
+
+  it('resolves the referrer compactly - a verified/invalid status only, never a name or contact', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([node(OST_A, 'ANA SANTOS', 'ost')]);
+    vi.mocked(resolveAaNumber).mockResolvedValue({
+      member: {
+        staffId: OST_A,
+        fullName: 'ANA SANTOS',
+        role: 'ost',
+        aaNumber: 'AAO26100001',
+        kind: 'OST',
+        status: 'accredited',
+      },
+    });
+    renderNewRecommender();
+    fireEvent.change(screen.getByLabelText('OST Referrer AA number'), {
+      target: { value: 'AAO26100001' },
+    });
+    expect(await screen.findByText('✓ Verified')).toBeVisible();
+    expect(screen.queryByText(/ANA SANTOS/)).not.toBeInTheDocument();
+  });
+
+  it('rejects a referrer and recommender who do not share a sales team', async () => {
+    vi.mocked(getGenealogy).mockResolvedValue([
+      node(OST_A, 'ANA SANTOS', 'ost', { uplineStaffId: SM_A }),
+      node(SM_A, 'BEN CRUZ', 'sales_manager'),
+      node(OST_B, 'CARLA REYES', 'ost', { uplineStaffId: 'sm-b' }),
+      node('sm-b', 'DAN TORRES', 'sales_manager'),
+    ]);
+    vi.mocked(resolveAaNumber).mockImplementation(async (aaNumber) =>
+      aaNumber === 'AAO26100001'
+        ? {
+            member: {
+              staffId: OST_A,
+              fullName: 'ANA SANTOS',
+              role: 'ost',
+              aaNumber,
+              kind: 'OST',
+              status: 'accredited',
+            },
+          }
+        : {
+            member: {
+              staffId: OST_B,
+              fullName: 'CARLA REYES',
+              role: 'ost',
+              aaNumber,
+              kind: 'OST',
+              status: 'accredited',
+            },
+          },
+    );
+    renderNewRecommender();
+    fireEvent.change(screen.getByLabelText('OST Referrer AA number'), {
+      target: { value: 'AAO26100001' },
+    });
+    await screen.findByText('✓ Verified');
+    fireEvent.change(screen.getByLabelText('OST VIP recommender AA number'), {
+      target: { value: 'AAO26100002' },
+    });
+    expect(
+      await screen.findByText(/referrer and VIP recommender belong to different teams/),
+    ).toBeVisible();
   });
 });

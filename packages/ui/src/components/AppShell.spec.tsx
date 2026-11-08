@@ -22,6 +22,21 @@ function renderShell() {
 }
 
 describe('AppShell', () => {
+  it('opens a compact workspace with the navigation rail collapsed and context in the topbar', () => {
+    mockMatchMedia(true);
+    render(
+      <MemoryRouter>
+        <AppShell compactWorkspace navItems={NAV} topbarContext={<span>New application</span>}>
+          <h1>Application</h1>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('link', { name: 'Registrations' })).toHaveAttribute(
+      'title',
+      'Registrations',
+    );
+    expect(within(screen.getByRole('banner')).getByText('New application')).toBeInTheDocument();
+  });
   it('renders semantic landmarks (aside, header, main)', () => {
     mockMatchMedia(true);
     renderShell();
@@ -90,5 +105,41 @@ describe('AppShell', () => {
     await user.click(category);
     await user.click(within(dialog).getByRole('link', { name: 'Sales' }));
     expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument();
+  });
+
+  it('auto-collapses the sidebar to icon-only on desktop after a module link is clicked', async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    renderShell();
+    const link = screen.getByRole('link', { name: 'Registrations' });
+    // Collapsed state surfaces as a `title` tooltip on each item (see
+    // `Sidebar`); uncollapsed links carry none.
+    expect(link).not.toHaveAttribute('title');
+    await user.click(link);
+    expect(link).toHaveAttribute('title', 'Registrations');
+  });
+
+  it('does not collapse the sidebar when only expanding a dropdown category', async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    const NAV_WITH_DROPDOWN = [
+      { to: '/admin', label: 'Dashboard', end: true },
+      {
+        to: '/admin/ops',
+        label: 'Operations',
+        dropdown: [{ to: '/admin/sales', label: 'Sales' }],
+      },
+    ];
+    render(
+      <MemoryRouter>
+        <AppShell brand="AFHomes" navItems={NAV_WITH_DROPDOWN}>
+          <h1>Queue</h1>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    const category = screen.getByRole('button', { name: 'Operations' });
+    await user.click(category);
+    const sub = screen.getByRole('link', { name: 'Sales' });
+    expect(sub).not.toHaveAttribute('title');
   });
 });

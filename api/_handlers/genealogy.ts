@@ -4,9 +4,39 @@ import { readSearchRows } from '../_lib/list-search.js';
 /** PHASE 7 authorized VD -> SSM -> SM -> OST genealogy reads. */
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { canAccessMemberDetail } from '../_lib/genealogy-visibility.js';
+import { storedAccreditationNumbers } from '../_lib/accreditation-numbers.js';
 import { deny, fail, list, method, subPath, type Db } from '../_lib/handler-kit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { serviceClient } from '../_lib/rest.js';
+import { aaNumberSchema } from '@afhomes/contracts';
+
+/**
+ * Raw `search_sale_team_accreditation` row, read defensively like
+ * `sale-team.ts` does: the RPC returns `staffId` so the service role can use
+ * it, which the public search handler strips before responding. This path is
+ * staff-authorized (same `network.genealogy` gate as the rest of this file),
+ * so keeping `staffId` here is deliberate, not an oversight.
+ */
+function readAccreditationRow(data: unknown): {
+  staffId: string;
+  fullName: string;
+  aaNumber: string;
+  kind: 'IST' | 'OST';
+  status: string;
+} | null {
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  if (!row || typeof row !== 'object') return null;
+  const { staffId, fullName, aaNumber, kind, status } = row as Record<string, unknown>;
+  if (
+    typeof staffId !== 'string' ||
+    typeof fullName !== 'string' ||
+    typeof aaNumber !== 'string' ||
+    (kind !== 'IST' && kind !== 'OST') ||
+    typeof status !== 'string'
+  )
+    return null;
+  return { staffId, fullName, aaNumber, kind, status };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (method(req) !== 'GET') return fail(res, 'NOT_FOUND', 'Genealogy endpoint not found', 404);
@@ -101,6 +131,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { nodes, visible, ancestors, descendants } = projectGenealogy({ staff, assign, roles, rels, ost }, auth);
     const path = subPath(req);
     if (path === '') return list(res, nodes);
+    // AA-number resolution for the New Customer Application's recommender/
+    // referrer inputs. The full upline chain is NOT computed here: the client
+    // already holds the same `nodes` list via `GET /genealogy` and walks it
+    // with the existing pure `resolveApplicationNetwork` - this endpoint only
+    // ever answers "which staff member holds this AA number", scoped to what
+    // this caller may already see (an out-of-scope or unknown number are
+    // intentionally the same answer: `member: null`, never a 403).
+    if (path === 'resolve' && method(req) === 'GET') {
+      const parsedAaNumber = aaNumberSchema.safeParse(req.query.aaNumber);
+      if (!parsedAaNumber.success)
+        return fail(res, 'VALIDATION_ERROR', 'Provide a valid AA number', 400);
+      const { data, error } = await db.rpc('search_sale_team_accreditation', {
+        p_aa_number: parsedAaNumber.data,
+      });
+      if (error) throw error;
+      const row = readAccreditationRow(data);
+      const node = row ? nodes.find((n) => n.staffId === row.staffId) : undefined;
+      if (!row || !node) return res.status(200).json({ member: null });
+      return res.status(200).json({
+        member: {
+          staffId: row.staffId,
+          fullName: row.fullName,
+          role: node.role,
+          aaNumber: row.aaNumber,
+          kind: row.kind,
+          status: row.status,
+        },
+      });
+    }
+    // Batch staffId -> AA number for read-only upline display (SM/SSM/SVD).
+    // Same scope as `ost-contacts` above: it answers for whatever ids the
+    // caller already holds from an authorized `/genealogy` read, it does not
+    // re-check each id against `visible`.
+    if (path === 'aa-numbers' && method(req) === 'GET') {
+      const staffIdsParam = req.query.staffIds as string | undefined;
+      if (!staffIdsParam) return fail(res, 'VALIDATION_ERROR', 'staffIds parameter required', 400);
+      const staffIds = staffIdsParam.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!staffIds.length) return res.status(200).json({});
+      const numbers = await storedAccreditationNumbers(db, staffIds);
+      return res.status(200).json(Object.fromEntries(numbers));
+    }
     const match = path.match(/^([0-9a-f-]+)(?:\/(upline|downline|summary))?$/);
     if (!match) return fail(res, 'NOT_FOUND', 'Genealogy endpoint not found', 404);
     const id = match[1]!;

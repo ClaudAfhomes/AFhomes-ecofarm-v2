@@ -16,7 +16,6 @@ it('reviews every information section, distinguishes optional omissions and retu
       idType="passport"
       idNumber="P1234567"
       idFilename="passport.png"
-      kind="OST"
       nodes={[]}
       meta={{
         svdStaffId: '',
@@ -27,6 +26,9 @@ it('reviews every information section, distinguishes optional omissions and retu
         recommenderContact: '',
         recommenderEmail: '',
         acknowledgedAt: '2026-11-06',
+        referrerAaNumber: '',
+        recommenderAaNumber: '',
+        recommenderStaffId: '',
       }}
       channels={[]}
       consent

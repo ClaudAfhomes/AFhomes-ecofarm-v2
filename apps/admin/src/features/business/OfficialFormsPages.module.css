@@ -621,15 +621,27 @@
 
 .applicationWorkspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
   align-items: start;
-  gap: var(--space-5);
+  gap: 19px;
   min-width: 0;
 }
 
 .applicationPreview,
 .applicationControls {
   min-width: 0;
+}
+
+/* The left pane now holds the plan picker AND its live preview together
+   (one persistent unit), so its direct children need their own rhythm. */
+.applicationPreview {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-raised);
 }
 
 .applicationControls {
@@ -660,68 +672,76 @@
   margin: 0;
 }
 
-@media (min-width: 1100px) and (min-height: 700px) {
-  .editorSection[data-split='true'] {
-    padding-bottom: var(--space-4);
-  }
+@media (min-width: 741px) and (min-height: 600px) {
+  .editorSection[data-split='true'] { padding-bottom: 0; }
+  .applicationWorkspace { height: calc(100dvh - 190px); min-height: 0; }
+  .applicationPreview { max-height: 100%; overflow-y: auto; }
+  .applicationControls { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding-inline-end: 2px; }
+}
+@media (max-width: 1250px) { .applicationWorkspace { grid-template-columns: 245px minmax(0, 1fr); } }
+@media (max-width: 1000px) { .applicationWorkspace { grid-template-columns: 205px minmax(0, 1fr); gap: 13px; } }
+@media (max-width: 740px) { .applicationWorkspace { grid-template-columns: minmax(0, 1fr); } }
 
-  .applicationWorkspace {
-    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-    height: calc(100dvh - 15rem);
-    min-height: 0;
-    overflow: hidden;
-  }
+/* Keep the selected card visible while the application scrolls beside it. */
+.applicationPreview .planBenefits {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+}
+.applicationPreview .planArt { padding: 0; background: transparent; }
+.applicationPreview .planArtImage { width: 100%; max-height: 190px; }
+.applicationPreview .planTitle { font-size: 1rem; }
+.applicationPreview .planBenefitsHead { align-items: center; margin-bottom: 12px; }
+.applicationPreview .planGrid { grid-template-columns: 1fr; gap: 12px; }
+.planDetails { margin-top: 12px; }
+.planDetails summary { color: var(--color-brand-primary); cursor: pointer; font-size: 0.8rem; padding: 8px 0; }
+.planDetails[open] summary { margin-bottom: 8px; }
+.planDetails summary { list-style: none; font-weight: 650; }
+.planDetails summary::-webkit-details-marker { display: none; }
+.planDetails summary::after { content: ' ▾'; }
+.planDetails[open] summary::after { content: ' ▴'; }
+.applicationPreview .hint { font-size: 0.75rem; margin-top: 12px; }
 
-  .applicationPreview,
-  .applicationControls {
-    height: 100%;
-    min-height: 0;
-  }
-
-  .applicationControls {
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-    scrollbar-gutter: stable;
-    padding-inline-end: var(--space-2);
-  }
-
-  .applicationPreview .planBenefits {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    height: 100%;
-    min-height: 0;
-    margin: 0;
-    padding: var(--space-4);
-  }
-
-  .applicationPreview .planBenefitsHead,
-  .applicationPreview .hint {
-    margin-bottom: 0;
-  }
-
-  .applicationPreview .planArt {
-    flex: 1;
-    min-height: 0;
-    margin-bottom: 0;
-  }
-
-  .applicationPreview .planArtImage {
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    object-fit: contain;
-  }
-
-  .applicationPreview .planGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-3);
-  }
-
-  .applicationPreview .planPlaceholder {
-    height: 100%;
-    min-height: 0;
-  }
+/* V4 application surface; record, reservation and Finance screens keep their own styles. */
+.editorSection[data-split='true'] {
+  max-width: 1430px;
+  --color-bg-surface: #fff;
+  --color-bg-surface-raised: #fff;
+  --color-text-primary: #152a27;
+  --color-text-secondary: #75847f;
+  --color-border-default: #e4e9e6;
+  --application-choice-height: 60px;
+  --application-choice-padding: 14px;
+}
+.applicationPreview .planBenefits { display: flex; flex-direction: column; gap: 0; }
+.applicationPreview .planArt { order: 1; }
+.applicationPreview .planBenefitsHead { order: 2; }
+.applicationPreview .planGrid { order: 3; }
+.applicationPreview .planDetails { order: 4; }
+.applicationPreview .hint { order: 5; }
+.editorSection[data-split='true'] .panel {
+  padding: 26px 30px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 7px 24px rgba(25, 47, 37, 0.04);
+}
+.editorSection[data-split='true'] .panelTitle { font-size: 1.4rem; border: 0; letter-spacing: -0.4px; }
+.editorSection[data-split='true'] .stickyFooter { background: #fff; }
+.holderTabs { display: flex; gap: 6px; overflow-x: auto; border-bottom: 1px solid #e9ede9; margin-bottom: 22px; }
+.holderTabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 13px 14px; color: #7a8b82; font: inherit; font-size: 0.8rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.holderTabs button[aria-selected='true'] { color: #156b47; border-bottom-color: #1c7d52; }
+.holderTabs button:focus-visible { outline: 2px solid var(--color-state-focus); outline-offset: -3px; }
+.holderSection[hidden] { display: none; }
+.holderTabs + .holderSections { gap: 16px; }
+.holderTabs + .holderSections .holderSection { border: 0; padding-top: 0; }
+.holderTabs + .holderSections .holderSection h3 { display: none; }
+.editorSection[data-split='true'] [id='step-holders'] > fieldset.panel { border: 0; box-shadow: none; padding: 12px 0; }
+.editorSection[data-split='true'] [id='step-holders'] > fieldset.panel > legend { font-size: 0.95rem; }
+.holderSwitch { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+@media (max-width: 740px) {
+  .editorSection[data-split='true'] .panel { padding: 20px 18px; }
 }
 
 /* Numbered editor panels, same card pattern as the redemption and
@@ -909,18 +929,22 @@
   overflow-wrap: anywhere;
 }
 
-/* ID preview thumbnail: opens the fullscreen modal. Shrink-wraps its content
-   so the control measures the image, not a fixed box. */
+/* ID preview thumbnail: opens the fullscreen modal. A fixed-height box (the
+   evidence area never grows or shrinks with the photo's own dimensions), the
+   image fitted inside with `object-fit: contain` so a portrait or landscape
+   capture is never cropped or distorted - only ever letterboxed. */
 .thumbnailButton {
-  display: inline-block;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
   max-width: 100%;
   padding: 0;
-  border: 1px solid var(--color-border-default);
+  border: 1px dashed var(--color-border-default);
   border-radius: var(--radius-control);
-  background: none;
+  background: var(--color-bg-subtle, #f5f8f5);
   cursor: zoom-in;
-  line-height: 0;
-  vertical-align: top;
+  overflow: hidden;
 }
 
 .thumbnailButton:focus-visible {
@@ -936,15 +960,14 @@
   border-radius: var(--radius-control);
 }
 
-/* Large ID thumbnail: shown at the image's OWN size.
-   The button wraps it, so its width and height are whatever the uploaded file
-   measures - no fixed box, no max-height crop, no `cover` trimming. `100%` is a
-   layout guard for an oversized photo only; it never upscales or distorts. */
+/* Large ID thumbnail: fixed evidence area, the image fitted inside with
+   `object-fit: contain` - the container's own dimensions never change with
+   the uploaded photo's size or orientation, and nothing is ever cropped. */
 .thumbnailLarge {
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  border-radius: var(--radius-control);
+  width: 100%;
+  height: 164px;
+  object-fit: contain;
+  display: block;
 }
 
 /* Filename, size and zoom hint under the image. `min-width: 0` lets a long
@@ -2155,3 +2178,136 @@ button.stepperLink:disabled {
   display: grid;
   gap: var(--space-6, 24px);
 }
+.aaNumberField {
+  display: grid;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+.aaNumberField .hint[data-tone='success'] {
+  color: var(--color-success);
+}
+.aaNumberField .hint[data-tone='danger'] {
+  color: var(--color-danger);
+}
+.uplineList {
+  display: grid;
+  gap: var(--space-2, 8px);
+  margin: 0;
+}
+.uplineRow {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: var(--space-3, 12px);
+  align-items: baseline;
+}
+.uplineRow dt {
+  font-weight: 600;
+  color: var(--color-text-muted, #626d67);
+}
+.uplineRow dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.resolvedContact {
+  border: 1px solid var(--color-success-border, #c5e2cf);
+  background: var(--color-success-soft, #f1faf4);
+  border-radius: var(--radius-md, 12px);
+  padding: var(--space-4, 15px);
+  margin-top: var(--space-3, 12px);
+}
+.resolvedContactTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.resolvedContactDetails {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.resolvedContactDetails span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.resolvedContactDetails small {
+  color: var(--color-text-muted, #7a8d80);
+  font-size: 10px;
+}
+.resolvedContactDetails b {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+/* V4 composition: one step panel with an attached footer, alongside the card. */
+.editorSection[data-split='true'] {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  font-size: 14px;
+  gap: 24px;
+  --application-choice-columns: repeat(3, minmax(0, 1fr));
+  --application-choice-title-size: 12px;
+  --application-choice-description-size: 11px;
+  --application-choice-selected-bg: #eef8f1;
+}
+.editorSection[data-split='true'] > header { margin: 0; padding: 0; border: 0; }
+.editorSection[data-split='true'] > header h1 { font-size: 28px; line-height: 1.25; letter-spacing: -0.5px; }
+.editorSection[data-split='true'] > header p { font-size: 13px; margin-top: 7px; }
+.editorSection[data-split='true'] > header button { font-size: 12px; min-height: 36px; }
+.applicationControls { gap: 13px; }
+.applicationPreview { padding: 18px; border-radius: 16px; gap: 0; box-shadow: 0 7px 24px rgba(25,47,37,.04); }
+.planPickerTitle { font-size: 15px; margin: 0 0 7px; }
+.planPickerHelper { color: #75847f; font-size: 12px; line-height: 1.55; margin: 0 0 14px; }
+.applicationPreview > fieldset { margin-bottom: 16px; }
+.applicationPreview .planArt { margin: 0 0 15px; }
+.applicationPreview .planBenefitsHead { margin: 0 0 6px; }
+.applicationPreview .planGrid { gap: 0; }
+.applicationPreview .planGrid > div { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eff1ef; }
+.applicationPreview .planGrid dt, .applicationPreview .planGrid dd { font-size: 12px; }
+.applicationPreview .planGrid dd { font-weight: 650; }
+.applicationPreview .hint { margin: 15px 0 0; padding: 9px 11px; border-radius: 8px; background: #f4f8f5; font-size: 11px; line-height: 1.45; }
+.applicationPreview .planPlaceholder { min-height: 130px; padding: 16px; font-size: 12px; }
+.applicationFormFrame { min-width: 0; border: 1px solid #e4e9e6; border-radius: 16px; background: #fff; box-shadow: 0 7px 24px rgba(25,47,37,.04); overflow: clip; }
+.applicationFormFrame .formRoot { padding: 26px 30px; display: block; }
+.stageEyebrow { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700; color: #38644d; margin: 0 0 12px; }
+.editorSection[data-split='true'] .applicationFormFrame .panel { border: 0; box-shadow: none; border-radius: 0; padding: 0; }
+.editorSection[data-split='true'] .applicationFormFrame .panelTitle { font-size: 24px; font-weight: 750; line-height: 1.25; margin-bottom: 6px; }
+.applicationFormFrame .hint { font-size: 13px; line-height: 1.55; margin-bottom: 22px; }
+.applicationFormFrame .applicationChoices { gap: 0; }
+.applicationFormFrame .stickyFooter { margin: 0; padding: 17px 30px; border: 0; border-top: 1px solid #eff1ef; border-radius: 0; box-shadow: none; backdrop-filter: none; }
+.footerHint { flex: 1; margin: 0; font-size: 11px; line-height: 1.5; color: #7c8c81; }
+.applicationFormFrame .stickyFooter button { min-height: 40px; padding: 10px 17px; font-size: 12px; border-radius: 9px; }
+.applicationFormFrame .stickyFooter > div { max-width: none; flex-wrap: nowrap; }
+@media (max-width: 1250px) { .editorSection[data-split='true'] { --application-choice-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .applicationFormFrame .formRoot { padding: 20px; } .applicationFormFrame .stickyFooter { padding: 14px 20px; } }
+@media (max-width: 740px) {
+  .editorSection[data-split='true'] > header h1 { font-size: 23px; }
+  .applicationFormFrame .formRoot { padding: 20px 18px; }
+  .applicationFormFrame .stickyFooter { padding: 13px 18px; }
+  .applicationFormFrame .stickyFooter > div { flex-wrap: wrap; }
+  .footerHint { flex-basis: 100%; }
+}
+
+/* The source artwork includes transparent export margins around the card. */
+.applicationPreview .planArt { position: relative; aspect-ratio: 1.58; overflow: hidden; flex: 0 0 auto; }
+.applicationPreview .planArtImage { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: 127%; height: 127%; max-width: none; max-height: none; object-fit: contain; }
+.applicationPreview { max-height: none; overflow: visible; }
+.identityWorkspace { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.05fr); gap: 24px; align-items: start; }
+.identityEvidence { min-width: 0; border: 1px solid #dce7df; background: #fbfdfb; padding: 12px; border-radius: 13px; display: flex; flex-direction: column; gap: 10px; }
+.identityEvidence > p { font-size: 11px; margin: 0; }
+.identityEvidence .hint { margin: 0; font-size: 11px; }
+.identityEmpty { min-height: 164px; border: 1px dashed #bed2c4; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; color: #80938a; font-size: 12px; background: #f5f8f5; }
+.identityEmpty > span { font-size: 30px; }
+.identityEmpty strong { color: #335345; font-size: 12px; }
+.identityFields { display: grid; gap: 16px; min-width: 0; --application-choice-columns: repeat(2, minmax(0,1fr)); --application-choice-height: 44px; --application-choice-padding: 10px; }
+.identityEvidence .thumbnailLarge { height: 164px; }
+.applicationFormFrame .editorGrid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 15px 16px; }
+.applicationFormFrame .filterLabel > span:first-child { font-size: 12px; font-weight: 650; color: #304039; }
+.applicationFormFrame input:not([type='radio']):not([type='checkbox']):not([type='file']),
+.applicationFormFrame select { min-height: 42px; padding: 10px 12px; border-radius: 9px; font-size: 13px; }
+.identityWorkspace + [role='dialog'] { grid-column: 1 / -1; }
+@media (max-width: 740px) { .identityWorkspace, .applicationFormFrame .editorGrid { grid-template-columns: minmax(0,1fr); } }

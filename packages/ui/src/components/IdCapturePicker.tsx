@@ -19,6 +19,7 @@ export function IdCapturePicker({
   resetVersion = 0,
   onCancel,
   cancelLabel = 'Cancel selection',
+  uploadLabel = 'Upload an ID',
   showCancel = false,
 }: {
   onFile: (file: File | null) => void;
@@ -27,12 +28,24 @@ export function IdCapturePicker({
   /** Clears the pending selection. Shown beside Take photo when set. */
   onCancel?: () => void;
   cancelLabel?: string;
+  uploadLabel?: string;
   showCancel?: boolean;
 }) {
   const upload = useRef<HTMLInputElement>(null);
   const camera = useRef<HTMLInputElement>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const view = useCameraCapture();
+  const {
+    status,
+    message,
+    supported,
+    start,
+    cancel,
+    capture,
+    videoRef,
+    preview,
+    setPreview,
+    retake,
+  } = useCameraCapture();
 
   /**
    * Turns the confirmed frame into a `File` and hands it to the one `onFile`.
@@ -42,7 +55,7 @@ export function IdCapturePicker({
    * `atob` is the browser's own decoder; a data URL needs no library.
    */
   function confirmPreview(): void {
-    const dataUrl = view.preview;
+    const dataUrl = preview;
     if (!dataUrl) return;
     const binary = atob(dataUrl.split(',')[1] ?? '');
     const bytes = new Uint8Array(binary.length);
@@ -52,7 +65,7 @@ export function IdCapturePicker({
   }
 
   function closeSheet(): void {
-    view.cancel();
+    cancel();
     setSheetOpen(false);
   }
 
@@ -80,7 +93,7 @@ export function IdCapturePicker({
         onChange={(e) => onFile(e.target.files?.[0] ?? null)}
       />
       <Button type="button" disabled={disabled} onClick={() => upload.current?.click()}>
-        Upload an ID
+        {uploadLabel}
       </Button>
       <Button
         type="button"
@@ -89,12 +102,12 @@ export function IdCapturePicker({
         onClick={() => {
           // With no camera API there is nothing to preview or confirm, so the
           // native input is used directly instead of opening an empty sheet.
-          if (!view.supported) {
+          if (!supported) {
             camera.current?.click();
             return;
           }
           setSheetOpen(true);
-          view.start();
+          start();
         }}
       >
         Take a photo
@@ -112,27 +125,27 @@ export function IdCapturePicker({
         closeLabel="Close camera"
       >
         <video
-          ref={view.videoRef}
+          ref={videoRef}
           muted
           playsInline
           aria-label="Camera preview"
           style={{ width: '100%', maxHeight: '60vh', objectFit: 'cover' }}
         />
-        {view.message ? <p role="status">{view.message}</p> : null}
-        {view.preview ? (
+        {message ? <p role="status">{message}</p> : null}
+        {preview ? (
           <img
-            src={view.preview}
+            src={preview}
             alt="Captured ID photo awaiting confirmation"
             style={{ width: '100%', maxHeight: '60vh', objectFit: 'contain' }}
           />
         ) : null}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {view.preview ? (
+          {preview ? (
             <>
               <Button type="button" onClick={confirmPreview}>
                 Use this photo
               </Button>
-              <Button type="button" variant="secondary" onClick={view.retake}>
+              <Button type="button" variant="secondary" onClick={retake}>
                 Retake
               </Button>
               <Button type="button" variant="secondary" onClick={closeSheet}>
@@ -143,8 +156,8 @@ export function IdCapturePicker({
             <>
               <Button
                 type="button"
-                disabled={view.status !== 'live'}
-                onClick={() => view.setPreview(view.capture())}
+                disabled={status !== 'live'}
+                onClick={() => setPreview(capture())}
               >
                 Capture
               </Button>

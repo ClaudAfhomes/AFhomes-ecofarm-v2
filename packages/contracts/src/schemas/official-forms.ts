@@ -19,6 +19,7 @@ import {
   paymentSchemeSchema,
   reservationAgreementStatusSchema,
 } from './lifecycle.js';
+import { aaNumberSchema } from './sale-team.js';
 
 export const vipTierSchema = z.enum(['BRONZE', 'SILVER', 'GOLD']);
 export const holderTypeSchema = z.enum(['PRIMARY', 'SECONDARY']);
@@ -123,12 +124,20 @@ const optionalUuid = z.preprocess(blankToUndefined, z.string().uuid().optional()
 
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
+  prefix: z.preprocess(blankToUndefinedOption, z.string().trim().max(20).optional()),
   lastName: holderName,
   firstName: holderName,
   middleName: optionalHolderName,
+  /**
+   * Free text, not a pick-list: `customer_application_holders.suffix` is a
+   * plain `text` column with no database-level enum, and the read side
+   * (`storedApplicationHolderSchema`) already accepts any string here, so
+   * this only widens the write side to match what is already stored and
+   * already rendered - not a new capability, not a migration.
+   */
   suffix: z.preprocess(
     (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
-    z.preprocess(blankToUndefinedOption, suffixOptionSchema.optional()),
+    z.preprocess(blankToUndefinedOption, z.string().trim().max(20).optional()),
   ),
   birthDate: holderBirthDateSchema,
   sex: z.preprocess(blankToUndefinedOption, sexOptionSchema.optional()),
@@ -202,7 +211,11 @@ const optionalCompanyText = z.preprocess(
  */
 const optionalCompanyMoney = z.preprocess(
   (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
-  z.string().trim().regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/).optional(),
+  z
+    .string()
+    .trim()
+    .regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/)
+    .optional(),
 );
 
 /** Write-only government ID number; blank is "not supplied", never a clear. */
@@ -211,7 +224,30 @@ const optionalGovernmentIdNumber = z.preprocess(
   z.string().trim().min(4).max(40).optional(),
 );
 
+export const applicationRaDraftSchema = z.object({
+  reservationDate: z.iso.date().optional(),
+  agreementDate: z.iso.date().optional(),
+  reservationNumber: z.string().trim().max(100).optional(),
+  revisionNumber: z.string().trim().max(50).optional(),
+  reservationPaymentDate: z.iso.date().optional(),
+  downPaymentDate: z.iso.date().optional(),
+  paymentMethod: z.string().trim().max(100).optional(),
+  paymentReference: z.string().trim().max(160).optional(),
+  reportedPaymentReceived: exactDecimalStringSchema.optional(),
+  totalPrice: exactDecimalStringSchema.optional(),
+  reservationFee: exactDecimalStringSchema.optional(),
+  downPayment: exactDecimalStringSchema.optional(),
+  balance: exactDecimalStringSchema.optional(),
+  monthlyAmortization: exactDecimalStringSchema.optional(),
+  installmentMonths: z.number().int().min(0).max(600).optional(),
+  monthlyAmortizationStart: z.iso.date().optional(),
+  monthlyAmortizationEnd: z.iso.date().optional(),
+  paymentDueDay: z.number().int().min(1).max(31).optional(),
+});
+export type ApplicationRaDraft = z.infer<typeof applicationRaDraftSchema>;
+
 const customerApplicationInputSchema = z.object({
+  raDraft: applicationRaDraftSchema.optional(),
   /** Required by POST creation; existing-record PATCH does not require a token. */
   requestId: z.string().uuid().optional(),
   customerId: requiredUuid,
@@ -269,6 +305,15 @@ const customerApplicationInputSchema = z.object({
   svdName: z.string().trim().max(160).optional(),
   ssmName: z.string().trim().max(160).optional(),
   vipRecommenderName: z.string().trim().max(160).optional(),
+  /**
+   * TRANSIENT - never stored. The server re-resolves this AA number and
+   * confirms it shares a sales team with `referrerStaffId` before the write
+   * proceeds (see `sameSalesTeam` in `api/_lib/team-match.ts`); the handler
+   * strips it from `header` before it ever reaches `p_header`. Without this
+   * the server would have no independent way to re-check what the client
+   * already resolved client-side, and would have to trust it.
+   */
+  recommenderAaNumber: z.preprocess(blankToUndefinedOption, aaNumberSchema.optional()),
   recommenderContact: optionalContactNumberSchema,
   recommenderEmail: z.preprocess(
     (value) => (typeof value === 'string' && !value.trim() ? undefined : value),
@@ -448,33 +493,32 @@ export const reservationHolderSchema = z.object({
   tinNumber: z.string().trim().max(40).optional(),
 });
 
-export const createReservationAgreementSchema = z
-  .object({
-    requestId: z.string().uuid().optional(),
-    /**
-     * Required for the LEGACY sale-origin form, absent for an application-origin
-     * reservation. `purchaseReservationCreateSchema` is the application-origin
-     * contract and carries no sale id at all, so the two shapes cannot be
-     * confused for one another.
-     */
-    saleId: optionalUuid,
-    customerApplicationId: optionalUuid,
-    /**
-     * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
-     * for economics: the sale's plan tier is authoritative, and a conflict is
-     * rejected. Present so previews and saves can validate Gold-only holders.
-     */
-    vipTier: vipTierSchema.optional(),
-    reservationDate: dateSchema,
-    agreementDate: dateSchema,
-    revisionNumber: z.string().trim().max(40).optional(),
-    monthlyAmortizationStart: dateSchema.optional(),
-    monthlyAmortizationEnd: dateSchema.optional(),
-    paymentDueDay: z.number().int().min(1).max(31).optional(),
-    primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
-    secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
-    scheduleNotes: z.array(agreementPaymentInputSchema).max(24).default([]),
-  });
+export const createReservationAgreementSchema = z.object({
+  requestId: z.string().uuid().optional(),
+  /**
+   * Required for the LEGACY sale-origin form, absent for an application-origin
+   * reservation. `purchaseReservationCreateSchema` is the application-origin
+   * contract and carries no sale id at all, so the two shapes cannot be
+   * confused for one another.
+   */
+  saleId: optionalUuid,
+  customerApplicationId: optionalUuid,
+  /**
+   * Imported tier context (IST XLSX `vip_tier`). The server never trusts it
+   * for economics: the sale's plan tier is authoritative, and a conflict is
+   * rejected. Present so previews and saves can validate Gold-only holders.
+   */
+  vipTier: vipTierSchema.optional(),
+  reservationDate: dateSchema,
+  agreementDate: dateSchema,
+  revisionNumber: z.string().trim().max(40).optional(),
+  monthlyAmortizationStart: dateSchema.optional(),
+  monthlyAmortizationEnd: dateSchema.optional(),
+  paymentDueDay: z.number().int().min(1).max(31).optional(),
+  primary: reservationHolderSchema.extend({ holderType: z.literal('PRIMARY') }),
+  secondary: reservationHolderSchema.extend({ holderType: z.literal('SECONDARY') }).optional(),
+  scheduleNotes: z.array(agreementPaymentInputSchema).max(24).default([]),
+});
 
 export const reservationAgreementSchema = z.object({
   id: z.string().uuid(),

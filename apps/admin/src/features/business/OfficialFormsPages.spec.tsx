@@ -15,6 +15,7 @@ import {
   CustomerApplicationEditorPage,
   CustomerApplicationsPage,
   ReservationAgreementsPage,
+  ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
 import {
   createCustomerApplication,
@@ -27,7 +28,18 @@ import {
   getReservationAgreementsPage,
   registerCustomerApplication,
   submitCustomerApplication,
+  getReservationAgreement,
+  getSales,
+  getCustomerApplications,
+  submitReservationAgreement,
 } from './services';
+import { reservationPdf } from './reservation-print';
+import { downloadFile } from '../../lib/download';
+vi.mock('./reservation-print', async (original) => ({
+  ...(await original<typeof import('./reservation-print')>()),
+  reservationPdf: vi.fn(),
+}));
+vi.mock('../../lib/download', () => ({ downloadFile: vi.fn() }));
 import {
   getCurrentDocument,
   completeDocumentUpload,
@@ -94,6 +106,8 @@ vi.mock('../genealogy/services', () => ({
   getGenealogyUpline: vi.fn(async () => []),
   getGenealogyDownline: vi.fn(async () => []),
   getGenealogySummary: vi.fn(),
+  resolveAaNumber: vi.fn(async () => ({ member: null })),
+  getAccreditationNumbers: vi.fn(async () => ({})),
 }));
 
 // Geographic reference data comes from the server-held provider. ONE small
@@ -213,6 +227,60 @@ const agreement = {
   submittedAt: '2026-09-28T00:00:00.000Z',
   createdAt: '2026-09-28T00:00:00.000Z',
 };
+
+it('downloads a freshly authorized saved RA without submitting or changing the reservation', async () => {
+  const record = {
+    ...agreement,
+    origin: 'sale',
+    saleId: undefined,
+    planId: '00000000-0000-4000-8000-000000000010',
+    reservationDate: '2026-11-07',
+    agreementDate: '2026-11-07',
+    status: 'draft',
+    reservationFee: '10000.00',
+    downPayment: '20000.00',
+    totalPaymentReceived: '5000.00',
+    balance: '307000.00',
+    monthlyAmortization: null,
+    installmentMonths: null,
+    discountPercent: 20,
+    validityYears: 12,
+    yearlyPoints: 20000,
+    annualPointsTranches: 10,
+    holderLimit: 1,
+    inclusions: {},
+    schedule: [],
+    primary: {
+      holderType: 'PRIMARY',
+      name: 'ANA SANTOS',
+      address: '1 MAIN STREET',
+      contactNumber: '+639171234567',
+      email: 'ana@example.test',
+    },
+    updatedAt: '2026-11-07T00:00:00Z',
+    submittedAt: null,
+    executedAt: null,
+  };
+  vi.mocked(getReservationAgreement).mockResolvedValue(record as never);
+  vi.mocked(getCardProducts).mockResolvedValue([]);
+  vi.mocked(getSales).mockResolvedValue([]);
+  vi.mocked(getCustomerApplications).mockResolvedValue([]);
+  const envelope = { filename: 'RES-000001.pdf', mime: 'application/pdf', content: 'JVBERi0=' };
+  vi.mocked(reservationPdf).mockResolvedValue(envelope);
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/sales/reservations/:id" element={<ReservationAgreementEditorPage />} />
+    </Routes>,
+    { route: '/admin/sales/reservations/00000000-0000-4000-8000-000000000003' },
+  );
+  const button = await screen.findByRole('button', { name: 'Download RA PDF' });
+  expect(getReservationAgreement).toHaveBeenCalledTimes(1);
+  fireEvent.click(button);
+  await waitFor(() => expect(downloadFile).toHaveBeenCalledWith(envelope));
+  expect(getReservationAgreement).toHaveBeenCalledTimes(2);
+  expect(reservationPdf).toHaveBeenCalledWith(expect.objectContaining({ agreement: record }));
+  expect(submitReservationAgreement).not.toHaveBeenCalled();
+});
 
 describe('CustomerApplicationsPage list states', () => {
   const pageOf = (rows: unknown[], total: number) => ({ data: rows, total }) as never;
@@ -508,6 +576,7 @@ describe('application private ID intake', () => {
     });
   const PLAN_ID = '00000000-0000-4000-8000-000000000010';
   const QA_PLAN = {
+    cashPrice: '100000.00', installmentPrice: '130000.00', reservationFee: '10000.00', standardInstallmentMonths: 4,
     id: PLAN_ID,
     code: 'GOLD',
     name: 'Gold',
@@ -609,17 +678,69 @@ describe('application private ID intake', () => {
 
     // The editor is a wizard: pick a plan on step 1 so Next reaches Identity.
     fireEvent.click(screen.getByRole('radio', { name: 'Gold' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByLabelText('ID Type');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('group', { name: 'ID Type *' });
   };
   const chooseIdTypeAndFile = (name = 'qa.png', type = 'image/png') => {
-    fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Passport' }));
     fireEvent.change(screen.getByLabelText('Upload ID'), {
       target: { files: [new File(['synthetic'], name, { type })] },
     });
   };
 
-  it('keeps the selected card separate from the application controls across steps', async () => {
+  it('advances completed Personal information to Address without requiring hidden sections', async () => {
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const prefix = await screen.findByLabelText('Prefix');
+    fireEvent.change(prefix, { target: { value: 'Dr.' } });
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Mara' } });
+    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+    fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+    expect(
+      prefix.compareDocumentPosition(screen.getByLabelText('First name')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('tab', { name: 'Address' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Permanent address line 1')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByLabelText('Prefix')).toHaveValue('Dr.');
+    expect(screen.getByLabelText('First name')).toHaveValue('Mara');
+    expect(registerCustomerApplication).not.toHaveBeenCalled();
+  });
+
+  it('shows an optional Gold secondary holder below the primary without hiding either record', async () => {
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'Mara' } });
+    fireEvent.click(screen.getByLabelText('Add optional Gold secondary cardholder'));
+    const primary = screen.getByRole('group', { name: 'Primary holder' });
+    const secondary = screen.getByRole('group', { name: 'Secondary holder (gold optional)' });
+    expect(primary).toBeVisible();
+    expect(secondary).toBeVisible();
+    expect(
+      primary.compareDocumentPosition(secondary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(primary).getByLabelText('First name')).toHaveValue('Mara');
+    expect(within(secondary).getByLabelText('Prefix')).toHaveValue('');
+    expect(screen.getAllByLabelText('First name')).toHaveLength(2);
+    fireEvent.click(within(secondary).getByRole('tab', { name: 'Contact' }));
+    expect(within(primary).getByRole('tab', { name: 'Contact' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(within(secondary).getByRole('tab', { name: 'Contact' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(registerCustomerApplication).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plan choice and its persistent preview together on the left, separate from the controls', async () => {
     vi.mocked(getCardProducts).mockResolvedValueOnce([
       QA_PLAN,
       { ...QA_PLAN, id: '00000000-0000-4000-8000-000000000011', code: 'SILVER', name: 'Silver' },
@@ -627,42 +748,50 @@ describe('application private ID intake', () => {
     await setup(null, { pickCustomer: false });
     const preview = screen.getByRole('complementary', { name: 'Selected VIP card' });
     const controls = screen.getByRole('region', { name: 'Application form' });
-    expect(within(preview).getByText('Gold')).toBeVisible();
-    expect(within(preview).queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
-    expect(within(controls).getByLabelText('ID Type')).toBeVisible();
-    expect(within(controls).getByRole('button', { name: 'Next' })).toBeVisible();
+    // Both the choice (tile) and its live preview (card heading) live in the
+    // left pane; the right pane never repeats the VIP plan choice.
+    expect(within(preview).getByRole('radio', { name: 'Gold' })).toBeChecked();
+    expect(within(preview).getByText('Gold VIP', { selector: 'div > strong' })).toBeVisible();
+    expect(within(controls).queryByRole('radio', { name: 'Gold' })).not.toBeInTheDocument();
+    expect(within(controls).queryByRole('radio', { name: 'Silver' })).not.toBeInTheDocument();
+    expect(within(preview).queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    expect(within(controls).getByRole('group', { name: 'ID Type *' })).toBeVisible();
+    expect(within(controls).getByRole('button', { name: 'Continue' })).toBeVisible();
+    const stepFrame = within(controls).getByRole('group', { name: 'Current application step' });
+    expect(within(stepFrame).getByRole('button', { name: 'Continue' })).toBeVisible();
+    expect(within(stepFrame).getByRole('group', { name: 'ID Type *' })).toBeVisible();
+    expect(screen.queryByText('Cannot save and submit yet:')).not.toBeInTheDocument();
     expect(controls).toHaveAttribute('tabindex', '0');
-    fireEvent.click(within(controls).getByRole('button', { name: /Application$/ }));
-    expect(within(preview).getByText('Gold')).toBeVisible();
-    expect(within(controls).getByRole('radio', { name: 'Gold' })).toBeChecked();
-    fireEvent.click(within(controls).getByRole('radio', { name: 'Silver' }));
-    expect(within(preview).getByText('Silver')).toBeVisible();
-    expect(within(preview).queryByText('Gold')).not.toBeInTheDocument();
+    // Navigating controls back to the Application step never touches or
+    // duplicates the persistent left-pane preview.
+    fireEvent.click(within(controls).getByRole('button', { name: /All steps/ }));
+    fireEvent.click(within(controls).getByRole('button', { name: 'Application' }));
+    expect(within(preview).getByText('Gold VIP', { selector: 'div > strong' })).toBeVisible();
+    fireEvent.click(within(preview).getByRole('radio', { name: 'Silver' }));
+    expect(within(preview).getByText('Silver VIP', { selector: 'div > strong' })).toBeVisible();
+    expect(
+      within(preview).queryByText('Gold VIP', { selector: 'div > strong' }),
+    ).not.toBeInTheDocument();
+    const benefits = within(preview).getByText('View plan details').closest('details')!;
+    expect(benefits).not.toHaveAttribute('open');
+    fireEvent.click(within(preview).getByText('View plan details'));
+    expect(benefits).toHaveAttribute('open');
+    expect(within(preview).getByText('Discount')).toBeVisible();
   });
 
-  it('resets only the right form pane when advancing in the desktop split layout', async () => {
+  it('resets page scrolling when advancing without scrolling the sticky VIP pane', async () => {
     await setup(null, { pickCustomer: false });
     const controls = screen.getByRole('region', { name: 'Application form' });
     const paneScroll = vi.fn();
     controls.scrollTo = paneScroll;
-    const originalStyle = window.getComputedStyle.bind(window);
-    const styleSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
-      const style = originalStyle(element, pseudo);
-      return element === controls
-        ? new Proxy(style, {
-            get: (target, key) => (key === 'overflowY' ? 'auto' : Reflect.get(target, key)),
-          })
-        : style;
-    });
     const windowScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
     try {
       chooseIdTypeAndFile();
-      fireEvent.click(within(controls).getByRole('button', { name: 'Next' }));
+      fireEvent.click(within(controls).getByRole('button', { name: 'Continue' }));
       await screen.findByLabelText('First name');
-      await waitFor(() => expect(paneScroll).toHaveBeenCalledWith({ top: 0, left: 0 }));
-      expect(windowScroll).not.toHaveBeenCalled();
+      await waitFor(() => expect(windowScroll).toHaveBeenCalledWith({ top: 0, left: 0 }));
+      expect(paneScroll).not.toHaveBeenCalled();
     } finally {
-      styleSpy.mockRestore();
       windowScroll.mockRestore();
     }
   });
@@ -672,7 +801,7 @@ describe('application private ID intake', () => {
     expect(screen.queryByRole('button', { name: 'Detect fields' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Upload selected ID' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Selected ID:/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Upload an ID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose photo / PDF' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
   });
 
@@ -683,14 +812,17 @@ describe('application private ID intake', () => {
     await screen.findByRole('radio', { name: 'Gold' });
     expect(screen.queryByLabelText('Customer')).not.toBeInTheDocument();
     expect(getCustomersPage).not.toHaveBeenCalled();
-    expect(screen.getByText('New customer application')).toBeVisible();
+    expect(
+      screen.getByText('Create and submit a customer application for staff review.'),
+    ).toBeVisible();
   });
 
   it('labels the ID types with the shared vocabulary, not slug-derived text', async () => {
     await setup(null);
-    const labels = [...(screen.getByLabelText('ID Type') as HTMLSelectElement).options].map(
-      (option) => option.textContent,
-    );
+    const group = screen.getByRole('group', { name: 'ID Type *' });
+    const labels = within(group)
+      .getAllByRole('radio')
+      .map((radio) => radio.getAttribute('aria-label'));
     // Same map the member and OST ID-type dropdowns use. Deriving a label from
     // the slug produced "Philippine Id", "Drivers License" and "Tax Id".
     expect(labels).toContain('Philippine ID');
@@ -730,7 +862,7 @@ describe('application private ID intake', () => {
       await setup(document('completed'));
       // setup() already pressed Next once, landing on Identity.
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
-      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
       await waitFor(() => expect(calls.length).toBeGreaterThan(1));
       // Every change asks for the top, and every one of them carries an
       // explicit target: a bare `scrollTo()` would be an unassertable no-op.
@@ -766,7 +898,7 @@ describe('application private ID intake', () => {
     expect(pickerClick).not.toHaveBeenCalled();
     const captured = new File(['cam'], 'capture.jpg', { type: 'image/jpeg' });
     fireEvent.change(camera, { target: { files: [captured] } });
-    fireEvent.change(screen.getByLabelText('ID Type'), { target: { value: 'passport' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Passport' }));
     await screen.findByAltText('ID preview thumbnail');
     expect(requestUploadGrant).not.toHaveBeenCalled();
   });
@@ -776,7 +908,7 @@ describe('application private ID intake', () => {
     await screen.findByText(/Current ID: qa\.png/);
     chooseIdTypeAndFile('replacement.png');
     await screen.findByAltText('ID preview thumbnail');
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel selection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(screen.queryByAltText('ID preview thumbnail')).not.toBeInTheDocument();
     expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
     expect(requestUploadGrant).not.toHaveBeenCalled();
@@ -788,6 +920,7 @@ describe('application private ID intake', () => {
     // step done on its own: a fresh form shows the step number, not a check.
     await setup();
     const nav = screen.getByRole('navigation', { name: 'Application steps' });
+    fireEvent.click(within(nav).getByRole('button', { name: /All steps/ }));
     const item = within(nav).getByText('Network').closest('li')!;
     expect(item).toHaveAttribute('data-done', 'false');
     expect(within(item).getByText('4')).toBeInTheDocument();
@@ -896,10 +1029,11 @@ describe('application private ID intake', () => {
 
     // Identity is satisfied by the picked file; forward to Holders and fill
     // every field the register contract requires.
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'Ana' } });
     fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
     fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Address' }));
     fireEvent.change(screen.getByLabelText('Permanent address line 1'), {
       target: { value: '1 QA Street' },
     });
@@ -908,25 +1042,30 @@ describe('application private ID intake', () => {
     await chooseAddress(screen.getByRole('combobox', { name: /^Province/ }), 'Laguna');
     await chooseAddress(screen.getByRole('combobox', { name: /City \/ municipality/ }), /Calauan/);
     await chooseAddress(screen.getByRole('combobox', { name: /Barangay/ }), 'Dayap');
+    fireEvent.click(screen.getByRole('tab', { name: 'Contact' }));
     fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Additional' }));
     fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Recommender
-    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Channel
-    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Certify
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Recommender
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Channel
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Certify
     fireEvent.click(
       screen.getByRole('checkbox', { name: /I certify the information and consent/ }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Next' })); // Review
-    await screen.findByRole('heading', { name: 'Review your application' });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Contact information' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Review
+    await screen.findByRole('heading', { name: 'Review application' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Primary holder' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Contact' }));
     expect(await screen.findByLabelText('Email')).toHaveValue('ana@example.com');
+    expect(screen.getByLabelText('Email')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /All steps/ }));
     fireEvent.click(
       within(screen.getByRole('navigation', { name: 'Application steps' })).getByRole('button', {
-        name: /Review/,
+        name: 'Review',
       }),
     );
-    await screen.findByRole('heading', { name: 'Review your application' });
+    await screen.findByRole('heading', { name: 'Review application' });
     expect(screen.getByText('ana@example.com')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
 
