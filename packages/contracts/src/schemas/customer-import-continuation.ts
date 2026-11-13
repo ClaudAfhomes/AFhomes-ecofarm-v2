@@ -51,9 +51,20 @@ export const customerImportContinuationSchema = importReviewTokensSchema.extend(
   applicationId: uuid.nullable(),
   reservationId: uuid.nullable(),
   saleId: uuid.nullable(),
-  stage: z.enum(['application', 'reservation', 'finance', 'activation', 'active', 'inactive', 'complete', 'review']),
+  stage: z.enum([
+    'application',
+    'reservation',
+    'finance',
+    'activation',
+    'active',
+    'inactive',
+    'complete',
+    'review',
+  ]),
   missingRequirements: z.array(z.string()),
-  conflicts: z.array(z.object({ field: z.string(), message: z.string() })),
+  conflicts: z.array(
+    z.object({ field: z.string(), message: z.string(), code: z.string().optional() }),
+  ),
   nextAction: z
     .object({ label: z.string(), path: z.string().regex(/^\/admin\/[a-zA-Z0-9/?=&_%.-]+$/) })
     .nullable(),

@@ -17,6 +17,7 @@ import {
   ReservationAgreementsPage,
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
+import { getGenealogy } from '../genealogy/services';
 import {
   createCustomerApplication,
   getCardProducts,
@@ -100,6 +101,7 @@ vi.mock('../documents/services', async (original) => ({
 // The referral chain reads the Organization live. Tests pin the cascade with
 // their own nodes where needed; by default the list is empty so the four
 // dropdowns render with `Not specified` only and no request ever leaves.
+const SELLER_SM_ID = '00000000-0000-4000-8000-0000000000c1';
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(async () => []),
   getGenealogyNode: vi.fn(),
@@ -972,6 +974,18 @@ describe('application private ID intake', () => {
     // Regression: the create contract was parsed before the register branch,
     // so New Register - which carries no customerId by design - was refused
     // with "Select a customer for this application." and never registered.
+    vi.mocked(getGenealogy).mockResolvedValue([
+      {
+        staffId: SELLER_SM_ID,
+        fullName: 'Active Manager',
+        role: 'sales_manager',
+        status: 'active',
+        ostStatus: null,
+        uplineStaffId: null,
+        directDownlineCount: 0,
+        totalDescendantCount: 0,
+      },
+    ] as never);
     vi.mocked(registerCustomerApplication).mockResolvedValue({
       id: '00000000-0000-4000-8000-0000000000aa',
       customerId: '00000000-0000-4000-8000-0000000000bb',
@@ -1048,6 +1062,10 @@ describe('application private ID intake', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Additional' }));
     fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Recommender
+    // A super admin is not the seller: the Sales Manager is named in the Network step.
+    fireEvent.change(await screen.findByLabelText('Seller of record'), {
+      target: { value: SELLER_SM_ID },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Channel
     fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Certify
     fireEvent.click(
@@ -1067,6 +1085,8 @@ describe('application private ID intake', () => {
     );
     await screen.findByRole('heading', { name: 'Review application' });
     expect(screen.getByText('ana@example.com')).toBeVisible();
+    // The picker no longer lives on the review step.
+    expect(screen.queryByLabelText('Seller of record')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
 
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
@@ -1081,6 +1101,9 @@ describe('application private ID intake', () => {
     expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
 
     await waitFor(() => expect(vi.mocked(submitCustomerApplication)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(submitCustomerApplication).mock.calls[0]![1]).toMatchObject({
+      sellerCandidateId: SELLER_SM_ID,
+    });
     // Regression: the current-document refresh used to fire with this render's
     // stale (empty) customerId, which the server refuses with "A valid
     // subject is required" - the new customer's own id must be used instead.

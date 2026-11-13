@@ -225,6 +225,8 @@ describe('newly numbered entities flow through handlers', () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]!.paymentNumber).toBe('AF-PAY-Q8M4V');
     expect(body.data[0]!.reference).toBe('GCASH-9382910293');
+    // The admin client parses this list strictly; a missing paymentPurpose broke the Verify dialog.
+    expect(() => paymentSchema.array().parse(body.data)).not.toThrow();
   });
 
   it('payment and commission contracts accept the new numbers and legacy nulls', () => {
@@ -245,6 +247,7 @@ describe('newly numbered entities flow through handlers', () => {
         verifiedBy: null,
         recordedAt: new Date().toISOString(),
         verifiedAt: null,
+        paymentPurpose: null,
       }),
     ).not.toThrow();
     expect(() =>

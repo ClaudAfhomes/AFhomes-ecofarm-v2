@@ -704,14 +704,14 @@ describe('Phase 2 role matrix', () => {
     expect([...allowed]).toEqual(['read catalogue', 'read customers', 'create a sale']);
   });
 
-  it('an OST sells and manages customers, nothing more', async () => {
+  it('an OST manages customers but cannot create sales', async () => {
     install();
     const allowed = new Set<string>();
     for (const entry of MATRIX) {
       const status = await call(entry.family, { ...entry.options, token: TOKEN2.ost });
       if (status !== 403) allowed.add(entry.label);
     }
-    expect([...allowed]).toEqual(['read catalogue', 'read customers', 'create a sale']);
+    expect([...allowed]).toEqual(['read catalogue', 'read customers']);
   });
 
   it('a Vice Director holds no selling or finance permission in this phase', async () => {
@@ -741,24 +741,46 @@ describe('Phase 2 role matrix', () => {
     ]);
   });
 
-  it('an Admin may do every Phase 2 action', async () => {
+  it('an Admin manages customers, may create sales for an SM, records payments, activates, reads queues and commissions', async () => {
     install();
+    const allowed = new Set<string>();
     for (const entry of MATRIX) {
-      expect(
-        await call(entry.family, { ...entry.options, token: TOKEN.admin }),
-        entry.label,
-      ).not.toBe(403);
+      const status = await call(entry.family, { ...entry.options, token: TOKEN.admin });
+      if (status !== 403) allowed.add(entry.label);
     }
+    expect([...allowed]).toEqual([
+      'read catalogue',
+      'read customers',
+      'create a sale',
+      'record a payment',
+      'activate a sale',
+      'read the finance queue',
+      'read the activation queue',
+      'read commissions',
+      'read uplines',
+      'assign an upline',
+    ]);
   });
 
-  it('a Super Admin may do every Phase 2 action', async () => {
+  it('a Super Admin manages customers, may create sales for an SM, records payments, activates, reads queues and commissions', async () => {
     install();
+    const allowed = new Set<string>();
     for (const entry of MATRIX) {
-      expect(
-        await call(entry.family, { ...entry.options, token: TOKEN.superAdmin }),
-        entry.label,
-      ).not.toBe(403);
+      const status = await call(entry.family, { ...entry.options, token: TOKEN.superAdmin });
+      if (status !== 403) allowed.add(entry.label);
     }
+    expect([...allowed]).toEqual([
+      'read catalogue',
+      'read customers',
+      'create a sale',
+      'record a payment',
+      'activate a sale',
+      'read the finance queue',
+      'read the activation queue',
+      'read commissions',
+      'read uplines',
+      'assign an upline',
+    ]);
   });
 
   it('an HR account with no Phase 2 permission is refused everywhere', async () => {

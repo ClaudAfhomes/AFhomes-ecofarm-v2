@@ -1,7 +1,10 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useSearchParams } from 'react-router';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { useSession } from '../../lib/session';
 import {
+  Alert,
   Button,
   Dialog,
   EmptyState,
@@ -24,26 +27,24 @@ import {
 import { formatDateTime } from '../../lib/format';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import {
+  activationBadge,
+  paymentProgress,
+  paymentProgressBadge,
+  saleStatusBadge,
+} from './format';
 import { activateSale, getActivationQueue } from './services';
 import { businessKeys, sharedScopes } from './queryKeys';
 import { TierBadge } from './TierBadge';
 import styles from './BusinessActivationQueuePage.module.css';
 
 /**
- * Tier from a card plan name, using the same uppercase-substring rule the
- * dashboard uses to read tiers off published names. Unrecognized plans pass
- * through to TierBadge's neutral treatment with the name intact.
- */
-function tierFromProductName(productName: string): string {
-  const upper = productName.toUpperCase();
-  if (upper.includes('GOLD')) return 'GOLD';
-  if (upper.includes('SILVER')) return 'SILVER';
-  if (upper.includes('BRONZE')) return 'BRONZE';
-  return productName;
-}
-
-/**
  * Activation queue.
+ *
+ * Lists sales in Payment Verified or Awaiting Activation. Sale status,
+ * payment progress and activation eligibility are shown separately; the
+ * eligibility and its reason come from the server (`activationBlocker`),
+ * never re-derived here.
  *
  * A membership becomes active only through the server's activation transition,
  * which re-checks that VERIFIED payments reach the snapshotted price inside the
@@ -59,6 +60,12 @@ const PAGE_SIZE = 10;
 
 export function BusinessActivationQueuePage() {
   const client = useQueryClient();
+  const { user } = useSession();
+  // UX only: the server authorizes activation. Mirrors the Payment Queue's gate.
+  const canActivate =
+    user?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'finance.card_activation' && permission.canUpdate,
+    ) ?? false;
   const [search, setSearch] = useState('');
   const settled = useDebouncedValue(search.trim());
   const [eligibility, setEligibility] = useState<'all' | 'eligible' | 'not'>('all');
@@ -74,14 +81,18 @@ export function BusinessActivationQueuePage() {
   });
   const [page, setPage] = useState(0);
   const [activating, setActivating] = useState<FinanceQueueItem | null>(null);
+  const [urlParams] = useSearchParams();
+  const deepLinkedSale = urlParams.get('sale');
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
   const [result, setResult] = useState<ActivationResult | null>(null);
 
-  const rows = useMemo(() => queue.data ?? [], [queue.data]);
+  const rows = useMemo(() => queue.data?.items ?? [], [queue.data]);
+  const queueTotal = queue.data?.total ?? rows.length;
   // Headline counts from the loaded rows.
   const summary = useMemo(() => {
     const eligible = rows.filter((item) => item.activatable).length;
-    return { total: rows.length, eligible, notEligible: rows.length - eligible };
-  }, [rows]);
+    return { total: queueTotal, loaded: rows.length, eligible, notEligible: rows.length - eligible };
+  }, [rows, queueTotal]);
   // Client-side search and eligibility filter over the loaded queue rows.
   const visible = useMemo(() => {
     const term = settled.toLowerCase();
@@ -113,8 +124,18 @@ export function BusinessActivationQueuePage() {
   const safePage = Math.min(page, pageCount - 1);
   const paged = visible.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
+  // `?sale=<id>` (from "Activate now") opens that sale's activation dialog once.
+  // Activation itself stays a manual confirm inside the dialog.
+  if (!deepLinkOpened && deepLinkedSale && canActivate) {
+    const target = rows.find((item) => item.saleId === deepLinkedSale && item.activatable);
+    if (target) {
+      setDeepLinkOpened(true);
+      setActivating(target);
+      setResult(null);
+    }
+  }
   const openActivate = (item: FinanceQueueItem) => {
-    if (!item.activatable) return;
+    if (!item.activatable || !canActivate) return;
     setActivating(item);
     setResult(null);
   };
@@ -170,7 +191,10 @@ export function BusinessActivationQueuePage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title="Activation Queue" description="Fully paid sales awaiting activation" />
+      <PageHeader
+        title="Activation Queue"
+        description="Sales with verified payments awaiting membership activation. Only fully paid sales can be activated."
+      />
 
       {queue.isError ? (
         <ErrorState error={queue.error} onRetry={queue.refetch} />
@@ -188,7 +212,7 @@ export function BusinessActivationQueuePage() {
             </li>
             <li>
               <StatusChip
-                label={`Short: ${formatCountOrDash(summary.notEligible)}`}
+                label={`Not eligible: ${formatCountOrDash(summary.notEligible)}`}
                 tone="warning"
                 icon="clock"
               />
@@ -201,6 +225,12 @@ export function BusinessActivationQueuePage() {
               />
             </li>
           </ul>
+          {summary.total > summary.loaded ? (
+            <Alert variant="warning" title="Queue capped">
+              Showing {formatCountOrDash(summary.loaded)} of {formatCountOrDash(summary.total)}{' '}
+              records. Narrow the search to reach the rest.
+            </Alert>
+          ) : null}
 
           <FilterBar
             filtersToggleLabel="Expand Filters"
@@ -256,7 +286,7 @@ export function BusinessActivationQueuePage() {
               description={
                 settled || eligibility !== 'all'
                   ? 'Try a different search term or eligibility filter.'
-                  : 'No application is fully paid yet. Check back after payments are verified.'
+                  : 'No sale is in Payment Verified or Awaiting Activation. Check back after payments are verified.'
               }
             />
           ) : (
@@ -273,58 +303,70 @@ export function BusinessActivationQueuePage() {
                     <th>Customer</th>
                     <th>Plan</th>
                     <th>Verified / Total</th>
-                    <th>Ready</th>
+                    <th>Status</th>
+                    <th>Payment</th>
+                    <th>Activation</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {paged.map((item) => (
-                    <tr
-                      key={item.saleId}
-                      tabIndex={0}
-                      role="link"
-                      aria-label={`Activate membership for ${item.saleNumber}`}
-                      onClick={() => openActivate(item)}
-                      onKeyDown={(event) => onRowKeyDown(event, item)}
-                      className={styles.clickable}
-                    >
-                      <td data-label="Sale">
-                        <span className={styles.recordRef}>
-                          <span className={styles.recordRefDot} aria-hidden="true" />
-                          {item.saleNumber}
-                        </span>
-                      </td>
-                      <td data-label="Customer">{item.customerName}</td>
-                      <td data-label="Plan">
-                        <TierBadge tier={tierFromProductName(item.productName)} />
-                      </td>
-                      <td data-label="Verified / Total" className={styles.numeric}>
-                        {formatMoneyOrDash(item.verifiedTotal)} / {formatMoneyOrDash(item.cashPrice)}
-                      </td>
-                      <td data-label="Ready">
-                        <StatusChip
-                          label={item.activatable ? 'Eligible' : 'Not eligible'}
-                          tone={item.activatable ? 'success' : 'warning'}
-                        />
-                      </td>
-                      <td
-                        data-label="Actions"
-                        data-row-actions
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-                        }}
+                  {paged.map((item) => {
+                    const status = saleStatusBadge(item.status);
+                    const progress = paymentProgressBadge(
+                      paymentProgress(item.verifiedTotal, item.cashPrice),
+                    );
+                    const activation = activationBadge(item.activationBlocker);
+                    return (
+                      <tr
+                        key={item.saleId}
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Activate membership for ${item.saleNumber}`}
+                        onClick={() => openActivate(item)}
+                        onKeyDown={(event) => onRowKeyDown(event, item)}
+                        className={styles.clickable}
                       >
-                        <Button
-                          size="sm"
-                          disabled={!item.activatable}
-                          onClick={() => openActivate(item)}
+                        <td data-label="Sale">
+                          <span className={styles.recordRef}>
+                            <span className={styles.recordRefDot} aria-hidden="true" />
+                            {item.saleNumber}
+                          </span>
+                        </td>
+                        <td data-label="Customer">{item.customerName}</td>
+                        <td data-label="Plan">
+                          <TierBadge tier={item.tier} />
+                        </td>
+                        <td data-label="Verified / Total" className={styles.numeric}>
+                          {formatMoneyOrDash(item.verifiedTotal)} / {formatMoneyOrDash(item.cashPrice)}
+                        </td>
+                        <td data-label="Status">
+                          <StatusChip label={status.label} tone={status.tone} />
+                        </td>
+                        <td data-label="Payment">
+                          <StatusChip label={progress.label} tone={progress.tone} />
+                        </td>
+                        <td data-label="Activation">
+                          <StatusChip label={activation.label} tone={activation.tone} />
+                        </td>
+                        <td
+                          data-label="Actions"
+                          data-row-actions
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+                          }}
                         >
-                          Activate
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                          <Button
+                            size="sm"
+                            disabled={!item.activatable || !canActivate}
+                            onClick={() => openActivate(item)}
+                          >
+                            Activate
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -431,6 +473,12 @@ function ActivateDialog({
           }}
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+            <div>
+              <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Status</dt>
+              <dd style={{ margin: '4px 0 0' }}>
+                <StatusChip {...saleStatusBadge(item.status)} />
+              </dd>
+            </div>
             <div>
               <dt style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', fontWeight: 600 }}>Scheme</dt>
               <dd style={{ margin: '4px 0 0', fontWeight: 600 }}>{paymentSchemeLabel(item.paymentScheme)}</dd>

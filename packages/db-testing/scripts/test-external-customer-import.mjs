@@ -7,6 +7,10 @@ import { checkStayDateAllowances } from './lib/stay-date-allowance-checks.mjs';
 import { externalImportSummary } from '../../../api/_lib/external-customer-import.ts';
 import { buildImportedCustomerFacts } from '../../../api/_lib/customer-import-continuation.ts';
 import { makePurchaseFixtures } from '../../../supabase/reservation-purchase-integration.ts';
+import {
+  acceptedSignedDocument,
+  paymentReceipt,
+} from '../../../supabase/purchase-evidence-fixtures.ts';
 import { customerImportContinuationSchema } from '../../../packages/contracts/src/schemas/customer-import-continuation.ts';
 
 // Owns only a fresh loopback database. Never loads repository environment files.
@@ -55,6 +59,11 @@ try {
     );
   }
   let activeHistory;
+  let goldVipFields;
+  let committedSample;
+  const manilaToday = (
+    await db.query("select to_char((now() at time zone 'Asia/Manila')::date,'YYYY-MM-DD') d")
+  ).rows[0].d;
   for (const [tier, total] of [
     ['BRONZE', '60000.00'],
     ['SILVER', '240000.00'],
@@ -111,6 +120,13 @@ try {
         recommender_name: 'External Test recommender',
         recommender_staff_id: staff.recommender,
       };
+      // The existing-history case reuses a normal application whose RA the
+      // purchase submission created (repair 20261231000001), so that RA's
+      // reservation date is the submission date; the import reuses it only when
+      // its contract date matches, so this one row is dated today (Manila).
+      if (tier === 'GOLD' && status === 'Partially Paid') fields.contract_date = manilaToday;
+      if (tier === 'GOLD' && status === 'Active VIP') goldVipFields = fields;
+      if (tier === 'BRONZE' && status === 'Fully Paid') committedSample = { row, stage };
       const historical = ['active','inactive'].includes(stage);
       if (historical) Object.assign(fields, { existing_card_activation_date: '2026-01-01', existing_card_valid_until: status === 'Expired' ? '2026-09-01' : '2030-01-01', existing_stay_points_total: '10000' });
       if (tier === 'GOLD' && status === 'Active VIP') Object.assign(fields, { purchase_reference: '26101400003G1C01S', existing_vip_control_number: '26101400003G1C01S' });
@@ -203,11 +219,15 @@ try {
             normalized.customerFacts.primary,
           ])
         ).rows[0].id;
+        // Purchase workflow (repair 20261231000001): a super-admin originator names
+        // an ACTIVE Sales Manager as seller of record (an OST never is); the RA is
+        // created at submission; approval needs an ACCEPTED signed application and
+        // execution an ACCEPTED signed RA, each reviewed by someone else.
         const offer = (
           await db.query('select public.purchase_terms_proposal($1,$2,$3) result', [
             appId,
             staff.actor,
-            staff.referrer,
+            staff.sm,
           ])
         ).rows[0].result;
         await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,$5)', [
@@ -215,33 +235,31 @@ try {
           staff.actor,
           appId,
           offer.expectedProposalHash,
-          staff.referrer,
+          staff.sm,
         ]);
-        // Fixture represents historical approval before automatic reservations existed.
-        await db.query("update public.customer_applications set status='approved',approved_at=now() where id=$1", [appId]);
-        const termsId = (
+        await acceptedSignedDocument(db, {
+          kind: 'signed_customer_application',
+          entityId: appId,
+          uploader: staff.actor,
+          reviewer: staff.vd,
+        });
+        await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
+          randomUUID(),
+          staff.actor,
+          appId,
+        ]);
+        existingReservation = (
           await db.query(
-            'select purchase_terms_id id from public.customer_applications where id=$1',
+            "select id from public.reservation_agreements where customer_application_id=$1 and status<>'cancelled'",
             [appId],
           )
         ).rows[0].id;
-        existingReservation = (
-          await db.query('select public.reserve_application_purchase_once($1,$2,$3,$4,$5) id', [
-            randomUUID(),
-            staff.actor,
-            appId,
-            termsId,
-            {
-              reservationDate: fields.contract_date,
-              agreementDate: fields.contract_date,
-              primarySignatureStatus: 'received',
-            },
-          ])
-        ).rows[0].id;
-        await db.query(
-          "select public.transition_purchase_reservation_once($1,$2,$3,'submit','{}')",
-          [randomUUID(), staff.actor, existingReservation],
-        );
+        await acceptedSignedDocument(db, {
+          kind: 'signed_reservation_agreement',
+          entityId: existingReservation,
+          uploader: staff.actor,
+          reviewer: staff.vd,
+        });
         await db.query(
           "select public.transition_purchase_reservation_once($1,$2,$3,'execute','{}')",
           [randomUUID(), staff.actor, existingReservation],
@@ -578,11 +596,24 @@ try {
       );
       if (tier === 'BRONZE' && status === 'Partially Paid') {
         const reservation = first.importContinuation.reservationId;
+        // Finance records against a REAL receipt object and an explicit purpose
+        // (repair 20261231000001 section 12); the type is derived from the purpose.
+        const receipt = `reservation/${reservation}/${randomUUID()}.pdf`;
+        await db.query('insert into storage.objects (bucket_id, name) values ($1, $2)', [
+          'afhomes-payment-receipts',
+          receipt,
+        ]);
         const payment = (
           await db.query('select public.record_reservation_payment_once($1,$2,$3,$4) id', [
             randomUUID(),
             reservation,
-            { amount: '30000.00', paymentType: 'full', method: 'cash', reference: randomUUID() },
+            {
+              amount: '30000.00',
+              paymentPurpose: 'contractual_full',
+              method: 'cash',
+              reference: randomUUID(),
+              receiptStoragePath: receipt,
+            },
             staff.actor,
           ])
         ).rows[0].id;
@@ -647,6 +678,187 @@ try {
       );
     }
   }
+
+  // Row-level import rules (product owner, 11 Nov 2026; repair 20261231000001
+  // sections 25-26). Each row is built exactly like the matrix rows above.
+  const externalReason = 'Company history externally verified by local synthetic tester.';
+  const newJob = async () => {
+    const job = randomUUID();
+    await db.query(
+      "insert into public.customer_import_jobs(id,source_type,source_name,status,total_rows,valid_rows,created_by,validated_at) values($1,'excel','synthetic-external.xlsx','ready',1,1,$2,now())",
+      [job, staff.actor],
+    );
+    return job;
+  };
+  let rowNumber = 2;
+  const importRow = async (job, fields) => {
+    const row = randomUUID();
+    const normalized = {
+      customerStatus: 'prospect',
+      requireMember: false,
+      payment: null,
+      customerFacts: buildImportedCustomerFacts(fields),
+      paymentClaims: [],
+      externalVerified: true,
+      externalReason,
+      externalSummary: externalImportSummary(fields, []),
+    };
+    await db.query(
+      "insert into public.customer_import_rows(id,import_job_id,row_number,raw_data,normalized_data,validation_status,action) values($1,$2,$3,$4,$5,'valid','CREATE')",
+      [row, job, rowNumber++, fields, normalized],
+    );
+    return row;
+  };
+  const previewOf = async (row) =>
+    (
+      await db.query('select public.prepare_customer_import_batch(array[$1::uuid],$2) result', [
+        row,
+        staff.actor,
+      ])
+    ).rows[0].result[0];
+  const commitRow = (row) =>
+    db.query('select public.commit_external_customer_import_row($1,$2,$3) result', [
+      row,
+      staff.actor,
+      externalReason,
+    ]);
+  const freshPerson = (base) => {
+    const key = randomUUID();
+    return { ...base, customer_key: key, email: `${key}@example.invalid`, purchase_reference: `EXTERNAL-${key}` };
+  };
+
+  // D. The SM is the only seller: a referrer with no active Sales Manager upline
+  // (an OST directly under the SSM, no SM named) is a row-level error.
+  {
+    const job = await newJob();
+    const orphan = await importRow(job, {
+      ...freshPerson(goldVipFields),
+      existing_vip_control_number: '',
+      purchase_reference: `EXTERNAL-${randomUUID()}`,
+      stated_status: 'Pending',
+      sm_name: '',
+      sm_staff_id: '',
+      referrer_name: 'External Test recommender',
+      referrer_staff_id: staff.recommender,
+      existing_card_activation_date: '',
+      existing_card_valid_until: '',
+      existing_stay_points_total: '',
+    });
+    const preview = await previewOf(orphan);
+    assert.ok(
+      (preview.conflicts ?? []).some((c) => c.code === 'IMPORT_SELLER_SM_REQUIRED'),
+      `an import with no resolvable SM is flagged in the preview: ${JSON.stringify(preview)}`,
+    );
+    await assert.rejects(commitRow(orphan), /IMPORT_SELLER_SM_REQUIRED/);
+    console.log('PASS an import whose referrer has no active SM upline is a row-level error');
+  }
+
+  // E. A supplied VIP Card number already in the system registry is flagged and
+  // never committed; the same new number twice in ONE file flags both rows.
+  {
+    const job = await newJob();
+    const duplicate = await importRow(job, freshPerson(goldVipFields));
+    const preview = await previewOf(duplicate);
+    assert.ok(
+      (preview.conflicts ?? []).some(
+        (c) =>
+          c.code === 'IMPORT_DUPLICATE_VIP_CARD_NUMBER' &&
+          c.message === 'VIP Card number already exists in the system',
+      ),
+      `a VIP Card number already in the registry is flagged: ${JSON.stringify(preview)}`,
+    );
+    await assert.rejects(commitRow(duplicate), /IMPORT_DUPLICATE_VIP_CARD_NUMBER/);
+    assert.equal(
+      (
+        await db.query('select count(*)::int n from private.vip_card_number_issuances where vip_card_number=$1', [
+          goldVipFields.existing_vip_control_number,
+        ])
+      ).rows[0].n,
+      1,
+    );
+    const sameFile = await newJob();
+    const fresh = '26101400088G1C01S';
+    const first = await importRow(sameFile, {
+      ...freshPerson(goldVipFields),
+      existing_vip_control_number: fresh,
+    });
+    const second = await importRow(sameFile, {
+      ...freshPerson(goldVipFields),
+      existing_vip_control_number: fresh,
+    });
+    for (const row of [first, second]) {
+      const p = await previewOf(row);
+      assert.ok(
+        (p.conflicts ?? []).some(
+          (c) =>
+            c.code === 'IMPORT_DUPLICATE_VIP_CARD_NUMBER' &&
+            c.message === 'VIP Card number appears more than once in this file',
+        ),
+        `both rows carrying one VIP Card number are flagged: ${JSON.stringify(p)}`,
+      );
+    }
+    console.log('PASS duplicate VIP Card numbers (system registry or same file) are row-level errors');
+    // One customer's own rows may repeat their number (repair section 28).
+    const sameCustomerJob = await newJob();
+    const person = freshPerson(goldVipFields);
+    const own = '26101400077G1C01S';
+    for (let i = 0; i < 2; i++) {
+      const ownRow = await importRow(sameCustomerJob, { ...person, existing_vip_control_number: own });
+      const p = await previewOf(ownRow);
+      assert.ok(
+        !(p.conflicts ?? []).some((c) => c.message === 'VIP Card number appears more than once in this file'),
+        `rows of the SAME customer repeating its number are not flagged: ${JSON.stringify(p)}`,
+      );
+    }
+    console.log('PASS one customer repeating its own VIP Card number is not a duplicate');
+    // Rows with neither email nor customer key never compare equal (section 35).
+    const keylessJob = await newJob();
+    const keyless = '26101400066G1C01S';
+    const keylessRows = [];
+    for (let i = 0; i < 2; i++) {
+      // The TS fact builder requires an email, so the key-less SOURCE row is made
+      // by blanking the raw identity keys the SQL duplicate check compares.
+      const id = await importRow(keylessJob, {
+        ...freshPerson(goldVipFields),
+        existing_vip_control_number: keyless,
+      });
+      await db.query(
+        "update public.customer_import_rows set raw_data=raw_data||'{\"email\":\"\",\"customer_key\":\"\"}'::jsonb where id=$1",
+        [id],
+      );
+      keylessRows.push(id);
+    }
+    for (const row of keylessRows) {
+      const p = await previewOf(row);
+      assert.ok(
+        (p.conflicts ?? []).some((c) => c.message === 'VIP Card number appears more than once in this file'),
+        `two key-less rows carrying one VIP Card number are both flagged: ${JSON.stringify(p)}`,
+      );
+    }
+    console.log('PASS key-less rows sharing a VIP Card number are flagged');
+  }
+
+  // A row committed earlier never flips to review when its seller can no longer
+  // be resolved (repair section 28): the seller rule applies only before import.
+  {
+    const paused = (
+      await db.query(
+        'update public.referral_relationships set is_active=false where subject_staff_id=$1 and is_active returning id',
+        [staff.referrer],
+      )
+    ).rows.map((r) => r.id);
+    try {
+      const again = (await commitRow(committedSample.row)).rows[0].result;
+      assert.equal(again.importContinuation.stage, committedSample.stage, JSON.stringify(again.importContinuation));
+      assert.ok(
+        !(again.importContinuation.conflicts ?? []).some((c) => c.code === 'IMPORT_SELLER_SM_REQUIRED'),
+        'an already-imported row is not re-judged by the seller rule',
+      );
+    } finally {
+      await db.query('update public.referral_relationships set is_active=true where id=any($1::uuid[])', [paused]);
+    }
+    console.log('PASS an already-imported row keeps its stage when its seller can no longer be resolved');
+  }
   assert.equal(
     (
       await db.query(
@@ -673,22 +885,49 @@ try {
   );
   const normalFixtures = await makePurchaseFixtures(db, {
     actor: staff.actor,
-    automaticReservation: true,
+    reviewer: staff.vd,
+    seller: staff.sm,
     createdCustomers: [],
     createdApplications: [],
   });
   const normalApp = await normalFixtures.mkApproved('approved');
   const normal = (await db.query('select id as "reservationId",total_price_snapshot as total,reservation_fee_snapshot as fee from public.reservation_agreements where customer_application_id=$1',[normalApp.id])).rows[0];
-  assert(normal.reservationId,'Normal approval must automatically create a reservation');
-  const feePayment=(await db.query("select id from public.payments where reservation_id=$1 and status='recorded'",[normal.reservationId])).rows[0];
-  assert(feePayment,'Normal approval records the reservation fee for Finance verification');
+  assert(normal.reservationId,'The purchase submission creates the reservation');
+  // Changed with the rule (repair 20261231000001 header: "Finance records/verifies
+  // each payment against a real receipt object"): approval no longer records the
+  // reservation fee itself. The RA is executed (accepted signed RA), then Finance
+  // records the fee with its purpose and a real receipt, and verifies it. This used
+  // to assert 'Normal approval records the reservation fee for Finance verification'.
+  await normalFixtures.acceptSignedRa(normal.reservationId);
+  await normalFixtures.transition('execute', staff.actor, normal.reservationId);
+  const feePayment = {
+    id: (
+      await db.query('select public.record_reservation_payment_once($1,$2,$3,$4) id', [
+        randomUUID(),
+        normal.reservationId,
+        {
+          amount: normal.fee,
+          paymentPurpose: 'reservation_fee',
+          method: 'cash',
+          receiptStoragePath: await paymentReceipt(db),
+        },
+        staff.actor,
+      ])
+    ).rows[0].id,
+  };
   await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)",[randomUUID(),feePayment.id,staff.actor]);
 
   const normalPayment = (
     await db.query('select public.record_reservation_payment_once($1,$2,$3,$4) id', [
       randomUUID(),
       normal.reservationId,
-      { amount: subtractMoney(normal.total,normal.fee), paymentType: 'full', method: 'cash' },
+      {
+        amount: subtractMoney(normal.total, normal.fee),
+        paymentType: 'full',
+        paymentPurpose: 'contractual_full',
+        method: 'cash',
+        receiptStoragePath: await paymentReceipt(db),
+      },
       staff.actor,
     ])
   ).rows[0].id;

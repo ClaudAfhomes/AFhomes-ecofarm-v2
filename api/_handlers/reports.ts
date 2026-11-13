@@ -566,9 +566,8 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
     );
     return {
       paymentDate: row.recorded_at,
-      // A pre-sale row has no sale number yet, so it reports the reservation it
-      // belongs to instead of a null the reader cannot follow.
-      saleNumber: sale?.sale_number ?? reservation?.reservation_number ?? null,
+      saleNumber: sale?.sale_number ?? null,
+      reservationNumber: reservation?.reservation_number ?? null,
       customer: customer ? displayName(customer) : null,
       amount: row.amount ?? '0.00',
       type: row.payment_type ?? null,
@@ -595,6 +594,7 @@ async function buildPayments(ctx: Ctx): Promise<ReportData> {
     columns: [
       { key: 'paymentDate', label: 'Payment date', type: 'date' },
       { key: 'saleNumber', label: 'Sale number', type: 'text' },
+      { key: 'reservationNumber', label: 'Official Reservation Agreement Number', type: 'text' },
       { key: 'customer', label: 'Customer', type: 'text' },
       { key: 'amount', label: 'Amount', type: 'money' },
       { key: 'type', label: 'Type', type: 'text' },

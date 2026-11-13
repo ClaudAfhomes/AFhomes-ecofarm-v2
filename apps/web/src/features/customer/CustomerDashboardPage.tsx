@@ -138,6 +138,7 @@ export function CustomerDashboardPage() {
         {membership.data && (
           <FieldList>
             <Field label="Membership number" value={membership.data.membershipNumber} />
+            <Field label="VIP Card ID" value={membership.data.vipCardNumber ?? 'Not issued'} />
             <Field
               label="Product"
               value={membership.data.productName ?? 'AFhomes VIP Privilege Card'}

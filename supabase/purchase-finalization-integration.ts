@@ -81,7 +81,9 @@ export async function runPurchaseFinalizationChecks(world: World) {
         await world.record(reservationId, amount, {
           reference: `PAY-${index + 1}`,
           method: 'bank',
+          // The ledger type is derived from the purpose (repair 20261231000001 s.12).
           paymentType: index === 0 ? 'down_payment' : 'installment',
+          paymentPurpose: index === 0 ? 'contractual_down_payment' : 'contractual_installment',
         }),
       );
     }
@@ -154,6 +156,7 @@ const saleRowsFor = (customerId: string) =>
     reference: 'FULL-RECORDED',
     method: 'cash',
     paymentType: 'full',
+    paymentPurpose: 'contractual_full',
   });
   await fails(
     'a fully RECORDED but unverified reservation cannot finalize',
@@ -186,16 +189,19 @@ const saleRowsFor = (customerId: string) =>
     )
   ).rows[0]!.id;
   await world.verify(decided);
-  // Verified total now equals the frozen total, and a NEW row is still pending.
-  await world.record(undecided.reservationId, '500.00', {
-    reference: 'LATE-ARRIVAL',
-    method: 'cash',
-    paymentType: 'installment',
-  });
+  // Verified total now equals the frozen total, so any further recording is
+  // refused before it can overpay. Changed with the rule (repair 20261231000001
+  // section 12): a fully verified purchase refuses new money outright with
+  // PURCHASE_FULLY_PAID (checked before the verified + pending cap); it used to
+  // expect OVERPAYMENT_NOT_ALLOWED.
   await fails(
-    'verified total >= frozen total does NOT excuse an undecided payment',
-    /RESERVATION_UNDECIDED_PAYMENTS/,
-    () => finalize(undecided.reservationId),
+    'recording a payment that would exceed the frozen total is rejected',
+    /PURCHASE_FULLY_PAID/,
+    () => world.record(undecided.reservationId, '500.00', {
+      reference: 'LATE-ARRIVAL',
+      method: 'cash',
+      paymentType: 'installment',
+    }),
   );
   check('the undecided reservation still has no sale', (await saleRowsFor(undecided.customerId)).length === 0);
 
@@ -417,19 +423,41 @@ const saleRowsFor = (customerId: string) =>
   }
 
   /* ---------------------------------------------------------------- */
-  /* 5. Overpayment still permits the sale                             */
+  /* 5. Overpayment is refused at recording, never retained            */
   /* ---------------------------------------------------------------- */
+  // Changed with the rule (repair 20261231000001 header: "overpayment refused
+  // at recording (verified + pending) and at verification"). This used to
+  // record and verify total + 2,500.00 and assert the overpayment was RETAINED.
   const over = await world.executed();
-  await pay(over.reservationId, [over.total, '2500.00']);
+  await world.record(over.reservationId, over.total, {
+    reference: 'OVER-1',
+    method: 'bank',
+    paymentType: 'down_payment',
+    paymentPurpose: 'contractual_down_payment',
+  });
+  await fails(
+    'a pending recording on top of the full total is refused as overpayment',
+    /OVERPAYMENT_NOT_ALLOWED/,
+    () =>
+      world.record(over.reservationId, '2500.00', { reference: 'OVER-2', method: 'bank' }),
+  );
+  await world.verify(
+    (
+      await db.query<{ id: string }>(
+        `select id from public.payments where reservation_id=$1 and status='recorded'`,
+        [over.reservationId],
+      )
+    ).rows[0]!.id,
+  );
   const overSale = (await finalize(over.reservationId)).rows[0]!.id;
-  check('an overpayment still permits finalization', Boolean(overSale));
+  check('the exactly-paid purchase finalizes', Boolean(overSale));
   check(
-    'the overpayment is RETAINED, not discarded',
+    'no overpaid money exists: verified equals the frozen total',
     (await db.query<{ overpaid: string }>(
       `select private.money(coalesce(sum(amount::numeric),0) - $1::numeric) as overpaid
          from public.payments where reservation_id=$2 and status='verified'`,
       [over.total, over.reservationId],
-    )).rows[0]!.overpaid === '2500.00',
+    )).rows[0]!.overpaid === '0.00',
   );
 
   /* ---------------------------------------------------------------- */
@@ -663,6 +691,10 @@ const saleRowsFor = (customerId: string) =>
       `delete from public.card_sale_hierarchy_snapshots where sale_id = any($1::uuid[])`,
       [saleIds],
     );
+    // Signed RA documents RESTRICT their agreement (owner-only cleanup escape is set).
+    await db.query(`delete from public.purchase_signed_documents where reservation_id = any($1::uuid[])`, [
+      reservationIds,
+    ]);
     await db.query(`delete from public.reservation_agreement_schedule where agreement_id = any($1::uuid[])`, [
       reservationIds,
     ]);

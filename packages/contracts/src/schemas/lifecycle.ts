@@ -309,6 +309,82 @@ export const SALE_AWAITING_FULL_PAYMENT: readonly SaleStatus[] = [
 /** States from which activation is allowed. Full payment is re-checked in the RPC. */
 export const SALE_ACTIVATABLE: readonly SaleStatus[] = ['payment_verified', 'activation_pending'];
 
+/* ------------------------------------------------------------------ */
+/* Activation readiness                                                */
+/* ------------------------------------------------------------------ */
+
+/** Why a sale cannot be activated right now. `null` means it can. */
+export const activationBlockerSchema = z.enum([
+  'already_active',
+  'cancelled',
+  'outstanding_balance',
+  'not_ready',
+]);
+export type ActivationBlocker = z.infer<typeof activationBlockerSchema>;
+
+/**
+ * The single activation-readiness rule: a sale is activatable exactly when it
+ * sits in `SALE_ACTIVATABLE` AND its verified total covers the frozen price
+ * (`fullyPaid`). Returns the reason when it is not; the activation RPC still
+ * re-checks full payment inside its transaction.
+ */
+export function activationBlocker(
+  status: SaleStatus,
+  fullyPaid: boolean,
+): ActivationBlocker | null {
+  if (status === 'active') return 'already_active';
+  if (status === 'cancelled') return 'cancelled';
+  if (!fullyPaid) return 'outstanding_balance';
+  if (!SALE_ACTIVATABLE.includes(status)) return 'not_ready';
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Display labels (codes travel; labels are display only)              */
+/* ------------------------------------------------------------------ */
+// Each map is exhaustive over its enum, so adding a lifecycle state fails
+// typecheck until it has a label.
+
+export const SALE_STATUS_LABELS: Record<SaleStatus, string> = {
+  draft: 'Draft',
+  submitted: 'Submitted',
+  payment_pending: 'Awaiting Payment',
+  payment_in_progress: 'Payment In Progress',
+  payment_verified: 'Payment Verified',
+  activation_pending: 'Awaiting Activation',
+  active: 'Active',
+  cancelled: 'Cancelled',
+  overdue: 'Overdue',
+};
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  recorded: 'Recorded',
+  verified: 'Verified',
+  rejected: 'Rejected',
+  voided: 'Voided',
+};
+
+export const RESERVATION_AGREEMENT_STATUS_LABELS: Record<ReservationAgreementStatus, string> = {
+  draft: 'Draft',
+  submitted: 'Submitted',
+  executed: 'Executed',
+  cancelled: 'Cancelled',
+};
+
+export const MEMBERSHIP_STATUS_LABELS: Record<MembershipStatus, string> = {
+  active: 'Active',
+  expired: 'Expired',
+  suspended: 'Suspended',
+  cancelled: 'Cancelled',
+};
+
+export const ACTIVATION_BLOCKER_LABELS: Record<ActivationBlocker, string> = {
+  already_active: 'Already Activated',
+  cancelled: 'Cancelled',
+  outstanding_balance: 'Outstanding Balance',
+  not_ready: 'Sale Not Ready',
+};
+
 /** True when the hierarchy level may legitimately sit under `upline`. */
 export function hierarchyAllowsUpline(subject: HierarchyRole, upline: HierarchyRole): boolean {
   const s = HIERARCHY_ORDER.indexOf(subject);

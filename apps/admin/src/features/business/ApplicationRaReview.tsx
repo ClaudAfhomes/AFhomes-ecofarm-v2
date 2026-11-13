@@ -7,7 +7,7 @@ import {
   applicationRaDraftSchema,
 } from '@afhomes/contracts';
 import { subtractMoney, multiplyMoney, divideMoneyExact } from '@afhomes/shared';
-import { Field } from './official-forms-fields';
+import { Field, today } from './official-forms-fields';
 import v4 from './CustomerApplicationV4.module.css';
 
 export function suggestedRaTerms(
@@ -40,6 +40,9 @@ export function suggestedRaTerms(
     /* Leave inexact schedules for manual document review. */
   }
   return {
+    // Dates default to today; the operator edits them to the real document dates.
+    reservationDate: today(),
+    agreementDate: today(),
     totalPrice,
     reservationFee,
     downPayment,
@@ -52,7 +55,6 @@ export function suggestedRaTerms(
 const fields: [keyof ApplicationRaDraft, string, string?][] = [
   ['reservationDate', 'Reservation date', 'date'],
   ['agreementDate', 'Agreement date', 'date'],
-  ['reservationNumber', 'Reservation number (proposed)'],
   ['revisionNumber', 'Revision number'],
   ['reservationPaymentDate', 'Reservation fee date of payment', 'date'],
   ['downPaymentDate', 'Down payment date of payment', 'date'],
@@ -117,6 +119,8 @@ export function ApplicationRaReview({
           Choose a configured plan to suggest payment terms, or enter proposed terms below.
         </p>
       ) : null}
+      <Field label="Official Reservation Agreement Number" value="Pending authorized reservation issuance" readOnly onChange={() => {}} />
+      {value.reservationNumber ? <p>Legacy proposed reference: {value.reservationNumber}. This is not an issued RA number.</p> : null}
       <div className={v4.grid2}>
         {fields.map(([key, label, type]) => (
           <Field

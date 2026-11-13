@@ -1,6 +1,6 @@
 /**
  * Task D database proof: an approved application with exact frozen terms creates
- * an AF-RES with NO card sale, freezes the commercial source immutably, refuses
+ * an official RA with NO card sale, freezes the commercial source immutably, refuses
  * every ineligible state, and keeps the legacy sale-origin path intact.
  *
  * Task E/F live in `reservation-finance-integration.ts`.
@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import type { PaymentScheme } from '../packages/contracts/src/schemas/lifecycle.js';
+import { acceptedSignedDocument, registerSignedDocument } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -23,14 +24,23 @@ export async function makePurchaseFixtures(
   db: Client,
   options: {
     actor: string;
+    /** Reviews the signed documents; defaults to `actor` (self-review allowed). */
+    reviewer?: string;
+    /**
+     * Seller-of-record candidate. An SM actor is its own seller (leave unset); any
+     * other originator must name an ACTIVE Sales Manager (repair section 4).
+     */
+    seller?: string;
     tier?: 'BRONZE' | 'SILVER' | 'GOLD';
     scheme?: PaymentScheme;
-    automaticReservation?: boolean;
     createdCustomers: string[];
     createdApplications: string[];
   },
 ) {
+  // Self-review is allowed (product owner, 11 Nov 2026); a separate reviewer is optional.
   const { actor, createdCustomers, createdApplications } = options;
+  const reviewer = options.reviewer ?? actor;
+  const seller = options.seller ?? null;
   const plan = (
     await db.query<PlanRow>('select id, code, cash_price from public.card_plans where code=$1', [
       options.tier ?? 'BRONZE',
@@ -56,8 +66,19 @@ export async function makePurchaseFixtures(
     return id;
   };
 
-  /** A draft application with frozen terms, optionally moved to `status`. */
-  const mkApproved = async (status: 'draft' | 'submitted' | 'approved' = 'approved') => {
+  /**
+   * An application at a workflow stage, through the real RPCs only:
+   *  - `draft`: saved, nothing frozen;
+   *  - `submitted`: the LEGACY submit (no frozen terms, no RA) - an old application;
+   *  - `purchase_submitted`: the purchase submit froze terms AND created the
+   *    linked official RA atomically, in draft (repair 20261231000001 section 8);
+   *  - `approved`: additionally an ACCEPTED signed Customer Application (uploaded
+   *    by the actor, reviewed by `reviewer` - the actor itself by default), then approval, which moves
+   *    the RA to `submitted` (awaiting the signed RA).
+   */
+  const mkApproved = async (
+    status: 'draft' | 'submitted' | 'purchase_submitted' | 'approved' = 'approved',
+  ) => {
     const customerId = await mkCustomer();
     const { rows } = await db.query<{ id: string }>(
       'select public.save_customer_application(null::uuid,$1::uuid,$2::jsonb,$3::jsonb,null::jsonb) as id',
@@ -96,25 +117,27 @@ export async function makePurchaseFixtures(
     if (status === 'submitted') {
       await db.query('select public.submit_customer_application($1::uuid,$2::uuid)', [id, actor]);
     }
-    if (status === 'approved') {
-      const offer = await fetchProposalHash(db, id, actor);
+    const submitRequest = randomUUID();
+    let submitHash: string | null = null;
+    if (status === 'purchase_submitted' || status === 'approved') {
+      submitHash = await fetchProposalHash(db, id, actor, seller);
       await db.query(
         `select public.submit_purchase_application_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::uuid)`,
-        [randomUUID(), actor, id, offer, null],
+        [submitRequest, actor, id, submitHash, seller],
       );
-      // Isolate manual reservation RPCs; normal approval now creates and executes
-      // a reservation automatically (proven in runPurchaseTermsChecks).
-      if (options.automaticReservation) {
-        await db.query(
-          "select public.decide_purchase_application_once($1,$2,$3,'approved')",
-          [randomUUID(), actor, id],
-        );
-      } else {
-        await db.query(
-          "update public.customer_applications set status='approved', approved_at=now() where id=$1",
-          [id],
-        );
-      }
+    }
+    if (status === 'approved') {
+      await acceptedSignedDocument(db, {
+        kind: 'signed_customer_application',
+        entityId: id,
+        uploader: actor,
+        reviewer,
+      });
+      await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
+        randomUUID(),
+        actor,
+        id,
+      ]);
     }
     const terms = (
       await db.query<{ id: string; version: number }>(
@@ -122,7 +145,22 @@ export async function makePurchaseFixtures(
         [id],
       )
     ).rows;
-    return { id, customerId, termsId: terms[0]?.id ?? null, termsVersion: terms[0]?.version ?? 0 };
+    const reservation = (
+      await db.query<{ id: string }>(
+        `select id from public.reservation_agreements
+          where customer_application_id=$1 and status<>'cancelled'`,
+        [id],
+      )
+    ).rows;
+    return {
+      id,
+      customerId,
+      submitRequest,
+      submitHash,
+      termsId: terms[0]?.id ?? null,
+      termsVersion: terms[0]?.version ?? 0,
+      reservationId: reservation[0]?.id ?? null,
+    };
   };
 
   const reserveInput = (extra: Record<string, unknown> = {}) =>
@@ -161,10 +199,24 @@ export async function makePurchaseFixtures(
       )
     ).rows[0]!;
 
-  /** Approved application -> exact terms -> a DRAFT reservation, no sale. */
+  /** An ACCEPTED signed RA for a `submitted` reservation (uploaded by the actor, reviewed by `reviewer`). */
+  const acceptSignedRa = (reservationId: string) =>
+    acceptedSignedDocument(db, {
+      kind: 'signed_reservation_agreement',
+      entityId: reservationId,
+      uploader: actor,
+      reviewer,
+    });
+
+  /**
+   * Approved application -> the RA created at submission, reopened to DRAFT, no
+   * sale. Approval moves the RA to `submitted`; `reopen` is the real transition
+   * back to an editable draft.
+   */
   const reserved = async () => {
     const app = await mkApproved('approved');
-    const id = await reserve(app.id, app.termsId);
+    const id = app.reservationId!;
+    await transition('reopen', actor, id);
     const { total, fee } = await termsOf(id);
     return {
       applicationId: app.id,
@@ -176,11 +228,11 @@ export async function makePurchaseFixtures(
     };
   };
 
-  /** Approved application -> exact terms -> EXECUTED reservation, no sale. */
+  /** Approved application -> its RA -> accepted signed RA -> EXECUTED, no sale. */
   const executed = async () => {
     const app = await mkApproved('approved');
-    const id = await reserve(app.id, app.termsId);
-    await transition('submit', actor, id);
+    const id = app.reservationId!;
+    await acceptSignedRa(id);
     await transition('execute', actor, id);
     const { total, fee } = await termsOf(id);
     return {
@@ -193,7 +245,17 @@ export async function makePurchaseFixtures(
     };
   };
 
-  return { plan, mkCustomer, mkApproved, reserve, reserveInput, transition, reserved, executed };
+  return {
+    plan,
+    mkCustomer,
+    mkApproved,
+    reserve,
+    reserveInput,
+    transition,
+    acceptSignedRa,
+    reserved,
+    executed,
+  };
 }
 
 /**
@@ -203,10 +265,15 @@ export async function makePurchaseFixtures(
  * function-name column, so it is unwrapped here once rather than at each call
  * site. PostgREST hands the API handler the object itself.
  */
-async function fetchProposalHash(db: Client, applicationId: string, actor: string) {
+async function fetchProposalHash(
+  db: Client,
+  applicationId: string,
+  actor: string,
+  seller: string | null = null,
+) {
   const { rows } = await db.query<Record<string, { expectedProposalHash: string }>>(
     'select public.purchase_terms_proposal($1::uuid,$2::uuid,$3::uuid)',
-    [applicationId, actor, null],
+    [applicationId, actor, seller],
   );
   const value = rows[0]!.purchase_terms_proposal ?? (rows[0] as never);
   return value.expectedProposalHash;
@@ -230,8 +297,13 @@ export async function runReservationPurchaseChecks({
   const actor = staff['sm']!;
   const superAdmin = staff['super-admin']!;
   const finance = staff['finance']!;
-  const { plan, mkCustomer, mkApproved, reserve, reserveInput, transition } =
-    await makePurchaseFixtures(db, { actor, createdCustomers, createdApplications });
+  const { plan, mkCustomer, mkApproved, reserve, reserveInput, transition, acceptSignedRa } =
+    await makePurchaseFixtures(db, {
+      actor,
+      reviewer: superAdmin,
+      createdCustomers,
+      createdApplications,
+    });
 
   const fails = async (label: string, expected: RegExp, work: () => Promise<unknown>) => {
     try {
@@ -244,14 +316,16 @@ export async function runReservationPurchaseChecks({
   };
 
   /* ---------------------------------------------------------------- */
-  /* The headline case: approved application, no card sale            */
+  /* The headline case: submission creates the RA, no card sale       */
   /* ---------------------------------------------------------------- */
-  const approved = await mkApproved('approved');
+  // Rule (repair 20261231000001 header, 10 Nov 2026): the RA is created
+  // atomically AT SUBMISSION, not by a separate reservation call after approval.
+  // The checks below therefore read the RA the purchase submit created.
   const reservationsBefore = (
     await db.query<{ n: number }>('select count(*)::int as n from public.reservation_agreements')
   ).rows[0]!.n;
-  const request = randomUUID();
-  const reservationId = await reserve(approved.id, approved.termsId, request);
+  const approved = await mkApproved('purchase_submitted');
+  const reservationId = approved.reservationId!;
 
   const row = (
     await db.query<Record<string, string | number | null>>(
@@ -259,10 +333,10 @@ export async function runReservationPurchaseChecks({
       [reservationId],
     )
   ).rows[0]!;
-  check('an approved application creates an AF-RES', Boolean(reservationId));
+  check('a purchase submission creates an official RA atomically', Boolean(reservationId));
   check(
-    'the reservation allocates an AF-RES business number',
-    /^AF-RES-[A-HJ-NP-Z2-9]{5}$/.test(String(row.reservation_number)),
+    'the reservation allocates an official RA business number',
+    /^[0-9]{4}-[0-9]{4}$/.test(String(row.reservation_number)),
     String(row.reservation_number),
   );
   check('no card sale is created and none is required', row.sale_id === null);
@@ -360,8 +434,25 @@ export async function runReservationPurchaseChecks({
       )
     ).rows[0]!.n === 1,
   );
-  const replay = await reserve(approved.id, approved.termsId, request);
-  check('the same request id replays the original AF-RES', replay === reservationId);
+  // The RA is created inside the submission, so the replay that must not create a
+  // second one is a replay of the SUBMISSION request.
+  const replay = (
+    await db.query<{ id: string }>(
+      `select public.submit_purchase_application_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::uuid) as id`,
+      [approved.submitRequest, actor, approved.id, approved.submitHash, null],
+    )
+  ).rows[0]!.id;
+  check(
+    'the same submission request id replays the original result',
+    replay === approved.id &&
+      (
+        await db.query<{ id: string }>(
+          `select id from public.reservation_agreements
+            where customer_application_id=$1 and status<>'cancelled'`,
+          [approved.id],
+        )
+      ).rows[0]?.id === reservationId,
+  );
   check(
     'a replay created no second row',
     (
@@ -384,14 +475,22 @@ export async function runReservationPurchaseChecks({
   );
 
   /* Eligibility */
-  for (const status of ['draft', 'submitted'] as const) {
-    const ineligible = await mkApproved(status);
-    await fails(
-      `an application in ${status} cannot create a reservation`,
-      /APPLICATION_NOT_APPROVED/,
-      () => reserve(ineligible.id, ineligible.termsId),
-    );
-  }
+  const draftOnly = await mkApproved('draft');
+  await fails(
+    'an application in draft cannot create a reservation',
+    /APPLICATION_NOT_APPROVED/,
+    () => reserve(draftOnly.id, draftOnly.termsId),
+  );
+  // Changed with the rule (repair 20261231000001 header: "RA created atomically
+  // at submission"): a submitted application is now eligible for its RA, so a
+  // LEGACY-submitted one (no frozen terms) is refused for the missing terms, not
+  // for its status. It used to expect APPLICATION_NOT_APPROVED.
+  const legacySubmitted = await mkApproved('submitted');
+  await fails(
+    'a legacy-submitted application without frozen terms cannot create a reservation',
+    /PURCHASE_TERMS_REVIEW_REQUIRED/,
+    () => reserve(legacySubmitted.id, legacySubmitted.termsId),
+  );
   // An OLD approved application: submitted through the legacy path and then
   // approved while the system already required terms. It has no terms pointer at
   // all, which is exactly the state the explicit review flow exists for.
@@ -428,15 +527,19 @@ export async function runReservationPurchaseChecks({
       [randomUUID(), staff['inactive']!, approved.id, approved.termsId, reserveInput()],
     ),
   );
+  // Changed with the rule (RA at submission): `approved` and `otherTerms` each
+  // hold exactly the one RA their submission created, so the expected total over
+  // these applications is 2, not 1. The draft, legacy-submitted and no-terms
+  // applications must still hold none.
   check(
     'no refused attempt created a reservation',
     (
       await db.query<{ n: number }>(
         `select count(*)::int as n from public.reservation_agreements
           where customer_application_id = any($1::uuid[])`,
-        [[approved.id, noTerms.id, otherTerms.id, ...createdApplications]],
+        [[approved.id, noTerms.id, otherTerms.id, draftOnly.id, legacySubmitted.id]],
       )
-    ).rows[0]!.n === 1,
+    ).rows[0]!.n === 2,
   );
 
   /* Source immutability */
@@ -490,6 +593,63 @@ export async function runReservationPurchaseChecks({
       )
     ).rows[0]!.status;
 
+  // Approval needs an ACCEPTED signed Customer Application in private storage,
+  // reviewed by someone other than the uploader (repair 20261231000001 section 9).
+  const approve = () =>
+    db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
+      randomUUID(),
+      actor,
+      approved.id,
+    ]);
+  await fails(
+    'approval without a signed Customer Application is refused',
+    /SIGNED_APPLICATION_DOCUMENT_REQUIRED/,
+    approve,
+  );
+  const pendingDoc = await registerSignedDocument(db, {
+    kind: 'signed_customer_application',
+    entityId: approved.id,
+    uploader: actor,
+  });
+  await fails(
+    'an uploaded but unreviewed signed application does not count',
+    /SIGNED_APPLICATION_DOCUMENT_REQUIRED/,
+    approve,
+  );
+  // Changed with the rule (product owner, 11 Nov 2026: self-review is allowed for
+  // everyone): the uploader (an SM) reviews their own document. This used to
+  // assert SIGNED_DOCUMENT_SELF_REVIEW.
+  await db.query(`select public.review_purchase_signed_document_once($1,$2,'accepted',null)`, [
+    actor,
+    pendingDoc.id,
+  ]);
+  check(
+    'the uploader may accept their own signed document',
+    (
+      await db.query<{ status: string; reviewed_by: string }>(
+        'select status, reviewed_by from public.purchase_signed_documents where id=$1',
+        [pendingDoc.id],
+      )
+    ).rows.some((d) => d.status === 'accepted' && d.reviewed_by === actor),
+  );
+  await fails(
+    'a reviewed signed document cannot be reviewed again',
+    /SIGNED_DOCUMENT_ALREADY_REVIEWED/,
+    () =>
+      db.query(`select public.review_purchase_signed_document_once($1,$2,'rejected','Second opinion.')`, [
+        superAdmin,
+        pendingDoc.id,
+      ]),
+  );
+  await approve();
+  check(
+    'approval with an accepted signed application moves the submission RA to submitted',
+    (await statusNow()) === 'submitted',
+  );
+  // Back to draft through the real transition, so the draft lifecycle is proven.
+  await move('reopen');
+  check('submitted -> draft (reopen)', (await statusNow()) === 'draft');
+
   await fails('execute is refused from draft', /INVALID_AGREEMENT_TRANSITION/, () =>
     move('execute'),
   );
@@ -508,6 +668,11 @@ export async function runReservationPurchaseChecks({
       ])
     ).rows[0]!.revision_number === 'R9',
   );
+  // Execution needs an ACCEPTED signed RA (repair 20261231000001 section 10).
+  await fails('execution without an accepted signed RA is refused', /SIGNED_RA_DOCUMENT_REQUIRED/, () =>
+    move('execute'),
+  );
+  await acceptSignedRa(reservationId);
   await move('execute');
   check('submitted -> executed', (await statusNow()) === 'executed');
   for (const action of ['reopen', 'cancel', 'execute', 'submit']) {
@@ -535,9 +700,9 @@ export async function runReservationPurchaseChecks({
   );
 
   /* A cancelled (never executed) agreement frees the application for a new one. */
+  // The RA comes from the submission and approval already moved it to submitted.
   const cancelApp = await mkApproved('approved');
-  const cancelReservation = await reserve(cancelApp.id, cancelApp.termsId);
-  await transition('submit', actor, cancelReservation);
+  const cancelReservation = cancelApp.reservationId!;
   await transition('save', actor, cancelReservation, { revisionNumber: 'R1' });
   check(
     'saving a submitted agreement retains its status and revision',
@@ -632,7 +797,10 @@ export async function runReservationPurchaseChecks({
   );
 
   /* A super admin may reserve on behalf of another seller; the creator is recorded. */
+  // The submission already created this application's RA, so the reviewer's
+  // reservation is the replacement after that RA is cancelled (one live RA rule).
   const reviewerApp = await mkApproved('approved');
+  await transition('cancel', actor, reviewerApp.reservationId!);
   const reviewerReservation = (
     await db.query<{ id: string }>(
       'select public.reserve_application_purchase_once($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::jsonb) as id',
@@ -656,5 +824,138 @@ export async function runReservationPurchaseChecks({
         [reviewerReservation],
       )
     ).rows[0]!.seller_staff_id === termsRow.seller_staff_id,
+  );
+
+  /* An Admin may submit an SM's draft (repair 20261231000001 section 30). */
+  const admin = staff['admin']!;
+  const smDraft = await mkApproved('draft');
+  const adminHash = await fetchProposalHash(db, smDraft.id, admin, actor);
+  await db.query(
+    `select public.submit_purchase_application_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::uuid)`,
+    [randomUUID(), admin, smDraft.id, adminHash, actor],
+  );
+  const adminRa = (
+    await db.query<{ created_by: string; seller_staff_id: string }>(
+      `select created_by, seller_staff_id from public.reservation_agreements
+        where customer_application_id=$1 and status<>'cancelled'`,
+      [smDraft.id],
+    )
+  ).rows;
+  check(
+    "an Admin submitting an SM's draft creates the RA, with the SM as seller of record",
+    adminRa.length === 1 && adminRa[0]!.created_by === admin && adminRa[0]!.seller_staff_id === actor,
+    JSON.stringify(adminRa),
+  );
+  await fails(
+    "a DIRECT reservation on someone else's application still needs sales.card_sales update",
+    /MUTATION_FORBIDDEN/,
+    () =>
+      db.query(
+        'select public.reserve_application_purchase_once($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::jsonb)',
+        [randomUUID(), admin, smDraft.id, null, reserveInput()],
+      ),
+  );
+
+  /* Only the creator or an oversight role may price or submit a DRAFT (section 32). */
+  const guarded = await mkApproved('draft');
+  for (const [who, label] of [
+    [staff['sm-alt']!, 'another SM'],
+    [staff['ssm']!, 'the SSM above the creator'],
+    [staff['vice-director']!, 'the VD above the creator'],
+  ] as const) {
+    await fails(`${label} cannot obtain a proposal on an SM's draft`, /MUTATION_FORBIDDEN/, () =>
+      fetchProposalHash(db, guarded.id, who),
+    );
+    await fails(`${label} cannot submit an SM's draft`, /MUTATION_FORBIDDEN/, () =>
+      db.query(
+        `select public.submit_purchase_application_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::uuid)`,
+        [randomUUID(), who, guarded.id, 'a'.repeat(64), null],
+      ),
+    );
+  }
+  check(
+    'the refused submissions left the draft untouched',
+    (
+      await db.query<{ status: string }>('select status from public.customer_applications where id=$1', [
+        guarded.id,
+      ])
+    ).rows[0]!.status === 'draft',
+  );
+
+  /* A frozen seller that is no longer an active SM is re-resolved, within its
+     team or by an oversight role only (sections 29 and 33). */
+  const mkSm = async (label: string) => {
+    const id = randomUUID();
+    const email = `${run}-${label}-${id}@example.invalid`;
+    await db.query('insert into auth.users (id,email) values ($1,$2)', [id, email]);
+    await db.query(
+      `insert into public.staff_users (id,email,full_name,status) values ($1,$2,$3,'active')`,
+      [id, email, `Synthetic ${label}`],
+    );
+    await db.query(
+      `insert into public.staff_role_assignments (staff_id,role_id)
+       select $1,id from public.roles where slug='sales_manager'`,
+      [id],
+    );
+    return id;
+  };
+  const legacySeller = await mkSm('legacy-seller');
+  const legacyFixtures = await makePurchaseFixtures(db, {
+    actor: legacySeller,
+    createdCustomers,
+    createdApplications,
+  });
+  const legacyApp = await legacyFixtures.mkApproved('approved');
+  const legacyApp2 = await legacyFixtures.mkApproved('approved');
+  for (const app of [legacyApp, legacyApp2])
+    await legacyFixtures.transition('cancel', legacySeller, app.reservationId!);
+  // The frozen seller stops being an SM (a legacy reassignment; becoming an OST
+  // needs the separate OST workflow, so an SSM role stands in for "not an SM").
+  await db.query(
+    `update public.staff_role_assignments set role_id=(select id from public.roles where slug='senior_sales_manager')
+      where staff_id=$1`,
+    [legacySeller],
+  );
+  const teamSm = await mkSm('team-sm');
+  await db.query(
+    `insert into public.referral_relationships
+       (subject_staff_id,upline_staff_id,hierarchy_role,is_authoritative,is_active,assigned_by)
+     values ($1,$2,'sales_manager',true,true,$3)`,
+    [teamSm, legacySeller, superAdmin],
+  );
+  const termsOfApp = async (id: string) =>
+    (
+      await db.query<{ id: string; seller_staff_id: string }>(
+        'select id, seller_staff_id from public.customer_application_purchase_terms where application_id=$1 order by version',
+        [id],
+      )
+    ).rows;
+  const review = async (who: string, appId: string, candidate: string | null) => {
+    const hash = await fetchProposalHash(db, appId, who, candidate);
+    return (
+      await db.query<{ id: string }>(
+        `select public.review_application_purchase_terms_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::uuid) as id`,
+        [randomUUID(), who, appId, hash, 'The frozen seller is no longer an active SM.', candidate],
+      )
+    ).rows[0]!.id;
+  };
+  await fails(
+    'a rival SM cannot take over an application whose frozen seller is no longer an SM',
+    /SELLER_OF_RECORD_FROZEN/,
+    () => review(actor, legacyApp.id, null),
+  );
+  const teamTerms = await review(teamSm, legacyApp.id, null);
+  const teamRows = await termsOfApp(legacyApp.id);
+  check(
+    "an SM in the old seller's team re-resolves it: the reviewed terms name that active SM",
+    teamRows.at(-1)?.id === teamTerms && teamRows.at(-1)?.seller_staff_id === teamSm,
+    JSON.stringify(teamRows),
+  );
+  check('  and the original frozen terms row is untouched', teamRows[0]?.seller_staff_id === legacySeller);
+  const adminTerms = await review(admin, legacyApp2.id, actor);
+  check(
+    'an Admin may re-resolve it to any active SM',
+    (await termsOfApp(legacyApp2.id)).at(-1)?.id === adminTerms &&
+      (await termsOfApp(legacyApp2.id)).at(-1)?.seller_staff_id === actor,
   );
 }

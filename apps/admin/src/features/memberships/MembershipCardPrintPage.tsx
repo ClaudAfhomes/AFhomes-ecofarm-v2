@@ -142,7 +142,8 @@ export function MembershipCardPrintPage() {
           <StatusChip label={humanizeCode(data.status)} />
         </div>
         <p className={styles.memberName}>{data.memberName}</p>
-        <p className={styles.membershipNumber}>{data.membershipNumber}</p>
+        <p className={styles.membershipNumber}>VIP Card ID: {data.vipCardNumber ?? 'Not issued'}</p>
+        <p>Membership Code: {data.membershipNumber}</p>
         <div className={styles.cardBody}>
           {hasCodes ? (
             <>

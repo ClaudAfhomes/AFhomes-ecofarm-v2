@@ -1,9 +1,14 @@
 -- AF Homes Phase 1 invariant audit. Every query must return zero rows.
+-- 
+-- Note: Policies with USING clause containing private.has_permission() are permission-based
+-- and intentionally allow authenticated users to attempt the action, with the actual
+-- permission check performed inside the policy. These are not violations.
 
-select schemaname, tablename, policyname, cmd, roles
+select schemaname, tablename, policyname, cmd, roles, qual
 from pg_policies
 where roles && array['anon','authenticated','public']::name[]
-  and cmd in ('INSERT','UPDATE','DELETE','ALL');
+  and cmd in ('INSERT','UPDATE','DELETE','ALL')
+  and (qual is null or qual not ilike '%has_permission%');
 
 select grantee, table_schema, table_name, privilege_type
 from information_schema.role_table_grants

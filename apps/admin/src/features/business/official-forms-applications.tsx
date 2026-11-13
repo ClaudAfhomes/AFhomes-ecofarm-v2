@@ -118,6 +118,25 @@ import {
   RecommenderFields,
   formatFileSize,
 } from './official-forms-fields';
+import { sellerOfRecordBlocker } from './SellerOfRecordPicker';
+import { applicationNextStep } from './next-step';
+import {
+  SignedDocumentPanel,
+  signedDocumentBlocker,
+  useSignedDocument,
+} from './SignedDocumentPanel';
+
+/** The wizard step a submit blocker belongs to, so the reason can say where to fix it. */
+function submitBlockerStep(blocker: string): string {
+  if (/landline/i.test(blocker)) return 'Holders or Network step';
+  if (/seller|Sales Manager|referrer|recommender|team|network|import/i.test(blocker))
+    return 'Network step';
+  if (/plan/i.test(blocker)) return 'Application step';
+  if (/\bID\b|identity|file/i.test(blocker)) return 'Identity step';
+  if (/holder|highlighted|customer/i.test(blocker)) return 'Holders step';
+  if (/consent|certif/i.test(blocker)) return 'Certify step';
+  return 'Review step';
+}
 
 export function CustomerApplicationsPage() {
   const navigate = useNavigate();
@@ -335,6 +354,7 @@ export function CustomerApplicationsPage() {
                     <th>Tier</th>
                     <th>Seller</th>
                     <th>Status</th>
+                    <th>Next step</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,6 +385,19 @@ export function CustomerApplicationsPage() {
                           label={app.status}
                           tone={APPLICATION_STATUS_TONES[app.status] ?? 'neutral'}
                         />
+                      </td>
+                      <td data-label="Next step" onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const step = applicationNextStep(app);
+                          const target = step.to;
+                          return target ? (
+                            <Button size="sm" onClick={() => navigate(target)}>
+                              {step.label}
+                            </Button>
+                          ) : (
+                            <span>{step.label}</span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -552,6 +585,7 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
           </li>
         ))}
       </ol>
+      <p>Official Reservation Agreement Number: <strong>{reservation?.reservationNumber ?? 'Pending authorized issuance'}</strong></p>
       <div className={styles.workflowNextCard}>
         <div className={styles.workflowNextHead}>
           <span className={styles.workflowNextEyebrow}>Next step</span>
@@ -580,6 +614,12 @@ function shortInstant(value: string | null | undefined): string | null {
 export function CustomerApplicationEditorPage() {
   const formScrollRef = useRef<HTMLDivElement>(null);
   const { user: applicationUser } = useSession();
+  // Non-SM creators must name the active SM seller of record; an SM sends nothing.
+  const [sellerCandidateId, setSellerCandidateId] = useState('');
+  const routeId = useParams().id;
+  const signedApplication = useSignedDocument('applications', routeId);
+  const sellerBlocker = sellerOfRecordBlocker(applicationUser, sellerCandidateId);
+  const sellerParam = sellerCandidateId || undefined;
   const mayLoadImport =
     applicationUser?.roleSlug === 'super_admin' ||
     (applicationUser?.afHomesPermissions.some(
@@ -606,8 +646,8 @@ export function CustomerApplicationEditorPage() {
   // proposal below is what the operator sees AND what the submit/review calls
   // echo back as `expectedProposalHash`.
   const proposal = useQuery({
-    queryKey: reservationKeys.purchaseTermsProposal(id),
-    queryFn: () => getPurchaseTermsProposal(id!),
+    queryKey: [...reservationKeys.purchaseTermsProposal(id), sellerParam ?? null],
+    queryFn: () => getPurchaseTermsProposal(id!, sellerParam),
     enabled: Boolean(id),
     retry: false,
   });
@@ -1024,6 +1064,7 @@ export function CustomerApplicationEditorPage() {
     if (!meta.acknowledgedAt) blockers.push('Enter the actual acknowledgement date.');
   }
   if (!planId) blockers.push('Select a VIP plan.');
+  if (sellerBlocker) blockers.push(sellerBlocker);
   if (!consent) blockers.push('Certification and consent must be ticked.');
   // A picked file uploads on Save, so it satisfies the gate.
   if (!serverCurrentDocument?.reviewedFields?.idType && !idFile)
@@ -1140,13 +1181,15 @@ export function CustomerApplicationEditorPage() {
           if (alreadyRegistered) {
             const latest = await getCustomerApplication(created.id);
             if (latest.status === 'submitted') {
-              const offer = await getPurchaseTermsProposal(created.id);
+              const offer = await getPurchaseTermsProposal(created.id, sellerParam);
               return submitCustomerApplication(created.id, {
                 requestId: applicationRequest.forPayload({
                   applicationId: created.id,
                   expectedProposalHash: offer.expectedProposalHash,
+                  sellerCandidateId: sellerParam,
                 }),
                 expectedProposalHash: offer.expectedProposalHash,
+                ...(sellerParam ? { sellerCandidateId: sellerParam } : {}),
               });
             }
             await updateCustomerApplication(
@@ -1193,13 +1236,15 @@ export function CustomerApplicationEditorPage() {
             if (latest.status === 'submitted') {
               // A lost Submit response must retry the transition, not edit a
               // submitted record.
-              const offer = await getPurchaseTermsProposal(id);
+              const offer = await getPurchaseTermsProposal(id, sellerParam);
               return submitCustomerApplication(id, {
                 requestId: applicationRequest.forPayload({
                   applicationId: id,
                   expectedProposalHash: offer.expectedProposalHash,
+                  sellerCandidateId: sellerParam,
                 }),
                 expectedProposalHash: offer.expectedProposalHash,
+                ...(sellerParam ? { sellerCandidateId: sellerParam } : {}),
               });
             }
             // Upload the picked ID on Save before updating the draft.
@@ -1246,13 +1291,15 @@ export function CustomerApplicationEditorPage() {
 
         // The hash is fetched fresh so it is always the offer the server holds
         // at this instant. A stale offer is refused server-side.
-        const offer = await getPurchaseTermsProposal(appId);
+        const offer = await getPurchaseTermsProposal(appId, sellerParam);
         return submitCustomerApplication(appId, {
           requestId: applicationRequest.forPayload({
             applicationId: appId,
             expectedProposalHash: offer.expectedProposalHash,
+            sellerCandidateId: sellerParam,
           }),
           expectedProposalHash: offer.expectedProposalHash,
+          ...(sellerParam ? { sellerCandidateId: sellerParam } : {}),
         });
       }),
     onSuccess: (app) => {
@@ -1490,7 +1537,19 @@ export function CustomerApplicationEditorPage() {
   // The ONE primary action lives in the header and the sticky footer alike, so
   // a long form never buries it. One element, rendered twice. Blocking stays
   // visible: disabled with an inline list of what to fix, never silent.
+  // A disabled Submit always says why, in plain words, and names the step to fix.
+  const raDraftValid = applicationRaDraftSchema.safeParse(effectiveRaDraft).success;
+  const submitReason = !editable
+    ? `This application is already ${existing.data?.status ?? 'submitted'} and can no longer be submitted.`
+    : blockers.length > 0
+      ? `Cannot submit yet (${submitBlockerStep(blockers[0]!)}): ${blockers[0]}${
+          blockers.length > 1 ? ` (${blockers.length - 1} more to fix)` : ''
+        }`
+      : !raDraftValid
+        ? 'Cannot submit yet (Review step): complete the reservation agreement details.'
+        : null;
   const saveAction = (
+    <>
     <Button
       className={isNew ? `${v4.btn} ${v4.primary}` : undefined}
       onClick={() => {
@@ -1502,6 +1561,12 @@ export function CustomerApplicationEditorPage() {
     >
       {isNew ? 'Submit application' : 'Submit'}
     </Button>
+    {submitReason ? (
+      <span role="note" className={styles.hint}>
+        {submitReason}
+      </span>
+    ) : null}
+    </>
   );
   // Per-step Next gates. Each mirrors a save blocker, never more: Save stays
   // the final authority, and Next can never refuse what Save allows.
@@ -2004,7 +2069,7 @@ export function CustomerApplicationEditorPage() {
                               />
                               <span>
                                 Use the actual purchase reference. Reuse the same reference for this
-                                purchase; Customer ID (RA No.) identifies the person.
+                                purchase; Customer ID identifies the person.
                               </span>
                             </label>
                             <DateField
@@ -2372,16 +2437,16 @@ export function CustomerApplicationEditorPage() {
                         <div className={isNew ? v4.inlineRow : undefined}>
                           {isNew ? (
                             <div>
-                              <strong className={v4.raTitle}>RA number (customer ID)</strong>
+                              <strong className={v4.raTitle}>Customer ID</strong>
                               <p className={v4.helper}>
                                 Normally assigned by the server. Manual entry requires an existing
-                                company-issued RA number.
+                                company-issued Customer ID.
                               </p>
                             </div>
                           ) : null}
                           <ApplicationChoiceCards
                             appearance={isNew ? 'inline' : 'tiles'}
-                            label="RA Number (Customer ID) mode"
+                            label="Customer ID mode"
                             value={raNumberMode}
                             options={[
                               {
@@ -2394,7 +2459,7 @@ export function CustomerApplicationEditorPage() {
                                 label: 'Manual',
                                 description: isNew
                                   ? undefined
-                                  : 'Enter an existing company-issued RA number.',
+                                  : 'Enter an existing company-issued Customer ID.',
                               },
                             ]}
                             onChange={(next) => {
@@ -2409,7 +2474,7 @@ export function CustomerApplicationEditorPage() {
                             <TextField
                               id="app-primary-ra"
                               name="primaryRaNumber"
-                              label="RA Number (Customer ID)"
+                              label="Customer ID"
                               value={primary.raNumber ?? ''}
                               onChange={(value) =>
                                 setPrimary((current) => ({ ...current, raNumber: value }))
@@ -2475,6 +2540,11 @@ export function CustomerApplicationEditorPage() {
                             }
                             onChain={(next) => setMeta((current) => ({ ...current, ...next }))}
                             onNetworkError={setNetworkTeamError}
+                            seller={{
+                              account: applicationUser,
+                              value: sellerCandidateId,
+                              onChange: setSellerCandidateId,
+                            }}
                           />
                         </div>
                       </fieldset>
@@ -2687,6 +2757,12 @@ export function CustomerApplicationEditorPage() {
                           Continue <span aria-hidden="true">→</span>
                         </Button>
                       ) : null}
+                      {isNew && activeStep < steps.length - 1 && stepBlockers[activeStep] ? (
+                        <span role="note" className={styles.hint}>
+                          Cannot continue ({submitBlockerStep(stepBlockers[activeStep]!)}):{' '}
+                          {stepBlockers[activeStep]}
+                        </span>
+                      ) : null}
                       {!(isNew && activeStep < steps.length - 1) ? saveAction : null}
                     </div>
                   </div>
@@ -2695,10 +2771,26 @@ export function CustomerApplicationEditorPage() {
             </div>
             {hasRecordActions ? (
               <section aria-label="Record actions" className={styles.panel}>
+                {existing.data?.status === 'submitted' ? (
+                  <SignedDocumentPanel
+                    controller={signedApplication}
+                    disabled={decide.isPending || review.isPending}
+                  />
+                ) : null}
                 <div className={styles.recordGroups}>
                   <div className={styles.actions}>
                     <Button
                       onClick={async () => {
+                        try {
+                          // Accept the signed document first (upload + register when a
+                          // new file was picked); each step is idempotent on retry.
+                          await signedApplication.ensureAccepted();
+                        } catch (error) {
+                          setMessage(
+                            error instanceof Error ? error.message : 'The signed document step failed.',
+                          );
+                          return;
+                        }
                         try {
                           await decide.mutateAsync('approved');
                           const reservations = await getReservationAgreements({
@@ -2724,15 +2816,19 @@ export function CustomerApplicationEditorPage() {
                       disabled={
                         decide.isPending ||
                         review.isPending ||
-                        existing.data?.status !== 'submitted'
+                        existing.data?.status !== 'submitted' ||
+                        signedDocumentBlocker(signedApplication) !== null
                       }
                       loading={
                         (decide.isPending && decidingDecision === 'approved') || review.isPending
                       }
                       loadingLabel="Approving…"
                     >
-                      Approve
+                      Review and approve
                     </Button>
+                    {existing.data?.status === 'submitted' && signedDocumentBlocker(signedApplication) ? (
+                      <span role="note">{signedDocumentBlocker(signedApplication)}</span>
+                    ) : null}
                     <Button
                       variant="danger"
                       onClick={() => decide.mutate('rejected')}

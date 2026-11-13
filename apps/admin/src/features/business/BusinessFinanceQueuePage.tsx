@@ -1,13 +1,23 @@
 import styles from './BusinessFinanceQueuePage.module.css';
 import { ImportPaymentClaimsPanel } from './ImportPaymentClaimsPanel';
+import { FinanceSummaryCards } from './FinanceSummaryCards';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useSingleFlight } from '../../lib/useSingleFlight';
 import { useMutationRequest } from '../../lib/useMutationRequest';
 import { useSession } from '../../lib/session';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { paymentSchemeLabel, recordPaymentSchema } from '@afhomes/contracts';
+import {
+  PAYMENT_RECEIPT_CONTENT_TYPES,
+  PAYMENT_RECEIPT_MAX_BYTES,
+  REJECTION_REASON_MIN_LENGTH,
+  paymentReceiptUploadRequestSchema,
+  paymentSchemeLabel,
+  recordPaymentSchema,
+} from '@afhomes/contracts';
+import { putUploadBytes } from '../documents/services';
 import {
   Table,
   TableHead,
@@ -37,23 +47,35 @@ import type { OverflowMenuItem } from '@afhomes/ui';
 import type {
   FinanceCollectionQueueItem,
   FinanceQueueItem,
-  PaymentType,
   PurchaseDocumentKind,
   ReservationFinanceSummary,
 } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
+import { normalizeProfileName } from '../../lib/normalize';
 import { downloadFile } from '../../lib/download';
 import {
   SPOT_CASH_LABEL,
-  SALE_STATUS_LABEL,
-  SALE_STATUS_TONE,
+  activationBadge,
   formatMoney,
-  humanizeCode,
+  paymentProgress,
+  paymentProgressBadge,
+  paymentStatusBadge,
+  reservationAgreementStatusBadge,
+  saleStatusBadge,
+  type PaymentProgress,
+  type StatusBadge,
 } from './format';
 import { TierBadge } from './TierBadge';
 import { businessKeys, sharedScopes } from './queryKeys';
-import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { compareMoney, formatCountOrDash, formatMoneyOrDash, subtractMoney } from '@afhomes/shared';
+import {
+  PAYMENT_PURPOSE_LABEL,
+  PURPOSE_PAYMENT_TYPE,
+  type PaymentPurpose,
+  availablePurposes,
+  nextPaymentStep,
+} from './payment-purposes';
 import {
   exportPurchaseDocument,
   finalizeReservationPurchase,
@@ -61,12 +83,22 @@ import {
   getReservationPayments,
   getReservationFinance,
   recordReservationPayment,
+  requestReservationPaymentReceiptUpload,
+  requestSalePaymentReceiptUpload,
   verifyReservationPayment,
   getSalePayments,
   getSaleSummary,
   recordPayment,
+  saveDuplicateReview,
   verifyPayment,
 } from './services';
+import {
+  DuplicateHoldPanel,
+  PaymentLedgerList,
+  isDuplicateHold,
+  paymentDetailLine,
+  todayIso,
+} from './PaymentFinanceParts';
 
 /**
  * Finance payment queue.
@@ -100,59 +132,36 @@ function formatMoneyInput(raw: string): string {
   return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
 }
 
-/** Client-side status filter over the loaded queue rows (no API change). */
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All statuses' },
-  { value: 'awaiting', label: 'Awaiting payment' },
-  { value: 'paid', label: 'Fully paid' },
-] as const;
+/**
+ * Client-side payment-progress filter over the loaded queue rows. It filters
+ * on exactly the milestone the Payment column shows, never on lifecycle.
+ */
+const PROGRESS_OPTIONS = [
+  { value: 'all', label: 'All payment progress' },
+  { value: 'none', label: 'No Verified Payments' },
+  { value: 'partial', label: 'Partially Paid' },
+  { value: 'full', label: 'Fully Paid' },
+] as const satisfies readonly { value: 'all' | PaymentProgress; label: string }[];
 
-type StatusFilter = (typeof STATUS_OPTIONS)[number]['value'];
+type ProgressFilter = (typeof PROGRESS_OPTIONS)[number]['value'];
+
+/** Frozen contract amount the verified total is measured against. */
+const frozenTotal = (item: FinanceCollectionQueueItem): string =>
+  item.origin === 'sale' ? item.cashPrice : item.totalPrice;
+
+/** Payment progress from verified settlement vs the frozen amount. */
+const itemProgress = (item: FinanceCollectionQueueItem): PaymentProgress =>
+  paymentProgress(item.verifiedTotal, frozenTotal(item));
 
 /**
- * Badge vocabulary for a queue status code: a capitalized human label plus
- * the settlement tone. Unknown codes fall back to a humanized Capitalized
- * label on neutral — a new server status never renders as snake_case.
+ * Lifecycle badge for a queue row: the sale's own status, or the reservation
+ * agreement's status for an application-origin row. Never mixed with money.
  */
-function statusBadgeProps(status: string): {
-  label: string;
-  tone: 'success' | 'warning' | 'danger' | 'neutral';
-} {
-  return {
-    label: SALE_STATUS_LABEL[status] ?? humanizeCode(status),
-    tone: SALE_STATUS_TONE[status] ?? 'neutral',
-  };
-}
+const lifecycleBadge = (item: FinanceCollectionQueueItem): StatusBadge =>
+  item.origin === 'sale'
+    ? saleStatusBadge(item.status)
+    : reservationAgreementStatusBadge(item.status);
 
-/**
- * Payment-derived status for a finance-queue row. Mirrors the reservations
- * list so both surfaces agree on the words. Cancelled stays a lifecycle
- * fact (the row is still in the queue only while collectible).
- */
-function financePaymentStatus(item: FinanceCollectionQueueItem): {
-  label: string;
-  tone: 'success' | 'warning' | 'danger' | 'neutral';
-} {
-  if (item.status === 'cancelled')
-    return { label: 'Cancelled', tone: 'danger' };
-  if (item.fullyPaid) return { label: 'Fully Paid', tone: 'success' };
-  const verified = item.verifiedTotal ?? '0.00';
-  if (verified !== '0.00' && verified !== '0') return { label: 'Partial', tone: 'warning' };
-  return { label: 'Pending', tone: 'warning' };
-}
-
-/**
- * Tier from a card plan name, using the same uppercase-substring rule the
- * dashboard uses to read tiers off published names. Unrecognized plans pass
- * through to TierBadge's neutral treatment with the name intact.
- */
-function tierFromProductName(productName: string): string {
-  const upper = productName.toUpperCase();
-  if (upper.includes('GOLD')) return 'GOLD';
-  if (upper.includes('SILVER')) return 'SILVER';
-  if (upper.includes('BRONZE')) return 'BRONZE';
-  return productName;
-}
 /**
  * Loading placeholder: hero chips, summary badges and table rows shaped like
  * the loaded queue, so nothing pops in and reflows once the data lands. The
@@ -229,8 +238,8 @@ function ReservationActions({
   canHandlePayments: boolean;
   /** Opens the read-only reservation details in the parent. */
   onViewDetails: () => void;
-  /** Opens the record-payment dialog in the parent. */
-  onRecord: () => void;
+  /** Opens the record-payment dialog in the parent, pre-loaded with the next purpose. */
+  onRecord: (purpose?: PaymentPurpose) => void;
   /** Opens the payment ledger (Verify) in the parent. */
   onVerify: () => void;
   onDone: () => Promise<void>;
@@ -262,6 +271,7 @@ function ReservationActions({
       setBusy(false);
     }
   };
+  const step = nextPaymentStep({ ...item, origin: 'reservation' });
   const menuItems: OverflowMenuItem[] = [
     {
       label: 'View details',
@@ -275,10 +285,10 @@ function ReservationActions({
       onClick: () => void print('reservation'),
     },
     {
-      label: 'Record payment',
+      label: 'Record & verify payment',
       icon: 'dollar-sign',
       disabled: !canHandlePayments || busy,
-      onClick: onRecord,
+      onClick: () => onRecord(),
     },
     {
       label: 'Verify',
@@ -297,7 +307,18 @@ function ReservationActions({
   }
   return (
     <>
-      <span data-row-menu onClick={(event) => event.stopPropagation()}>
+      <span
+        data-row-menu
+        onClick={(event) => event.stopPropagation()}
+        style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}
+      >
+        <Button
+          size="sm"
+          disabled={!canHandlePayments || busy}
+          onClick={() => (step.key === 'finalize' ? void finalize() : onRecord(step.purpose))}
+        >
+          {step.label}
+        </Button>
         <OverflowMenu label={`Actions for ${item.reservationNumber}`} items={menuItems} />
       </span>
       {error ? <p role="alert">{error}</p> : null}
@@ -307,13 +328,16 @@ function ReservationActions({
 
 export function BusinessFinanceQueuePage() {
   const { user } = useSession();
+  const navigate = useNavigate();
   const canHandlePayments =
     user?.afHomesPermissions.some(
       (permission) =>
         permission.moduleKey === 'finance.payment_verification' && permission.canUpdate,
     ) ?? false;
   const client = useQueryClient();
-  const [search, setSearch] = useState('');
+  // A deep link from another list (`?search=RES-...`) lands on the right row.
+  const [urlParams] = useSearchParams();
+  const [search, setSearch] = useState(() => urlParams.get('search') ?? '');
   const settled = useDebouncedValue(search.trim());
   const query = useQuery({
     queryKey: businessKeys.financeQueue(settled),
@@ -333,11 +357,12 @@ export function BusinessFinanceQueuePage() {
     origin: 'sale' | 'reservation';
     customerName?: string;
     recordLabel?: string;
+    purpose?: PaymentPurpose;
   } | null>(null);
   const [reviewing, setReviewing] = useState<{ id: string; origin: 'sale' | 'reservation' } | null>(
     null,
   );
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [progressFilter, setProgressFilter] = useState<ProgressFilter>('all');
   const currentDetail = detail
     ? ((rows.find((item) =>
         detail.origin === 'sale'
@@ -364,20 +389,19 @@ export function BusinessFinanceQueuePage() {
   // ever printed twice on this screen). `total` is the server's full count,
   // which can exceed the capped page — the toolbar says so when it does.
   const summary = useMemo(() => {
-    const paid = rows.filter((item) => item.fullyPaid).length;
+    const progress = { none: 0, partial: 0, full: 0 };
+    for (const item of rows) progress[itemProgress(item)] += 1;
+    const overdue = rows.filter(
+      (item) => item.origin === 'sale' && item.status === 'overdue',
+    ).length;
     const total = query.data?.total ?? rows.length;
-    return { total, loaded: rows.length, paid, awaiting: rows.length - paid };
+    return { total, loaded: rows.length, overdue, ...progress };
   }, [rows, query.data?.total]);
-  // Client-side status filter over the loaded rows; the search itself stays
-  // server-side via the debounced term.
+  // Client-side payment-progress filter over the loaded rows; the search
+  // itself stays server-side via the debounced term.
   const visible = useMemo(
-    () =>
-      rows.filter((item) => {
-        if (statusFilter === 'awaiting') return !item.fullyPaid;
-        if (statusFilter === 'paid') return item.fullyPaid;
-        return true;
-      }),
-    [rows, statusFilter],
+    () => rows.filter((item) => progressFilter === 'all' || itemProgress(item) === progressFilter),
+    [rows, progressFilter],
   );
   const truncated = summary.total > summary.loaded;
 
@@ -431,14 +455,16 @@ export function BusinessFinanceQueuePage() {
         <div className={styles.heroMeta}>
           <span className={styles.heroChip}>
             <Icon name="clock" size={14} aria-hidden="true" />
-            {formatCountOrDash(summary.awaiting)} awaiting
+            {formatCountOrDash(summary.none + summary.partial)} not fully paid
           </span>
           <span className={styles.heroChip}>
             <Icon name="check" size={14} aria-hidden="true" />
-            {formatCountOrDash(summary.paid)} fully paid
+            {formatCountOrDash(summary.full)} fully paid
           </span>
         </div>
       </div>
+
+      <FinanceSummaryCards />
 
       {query.isError ? (
         <ErrorState error={query.error} onRetry={query.refetch} />
@@ -447,17 +473,21 @@ export function BusinessFinanceQueuePage() {
           <ul className={styles.badges} aria-label="Queue summary">
             <li>
               <StatusChip
-                label={`Awaiting payment: ${formatCountOrDash(summary.awaiting)}`}
-                tone="warning"
-                icon="clock"
+                label={`No Verified Payments: ${formatCountOrDash(summary.none)}`}
+                tone="neutral"
               />
             </li>
             <li>
               <StatusChip
-                label={`Fully paid: ${formatCountOrDash(summary.paid)}`}
-                tone="success"
-                icon="check"
+                label={`Partially Paid: ${formatCountOrDash(summary.partial)}`}
+                tone="warning"
               />
+            </li>
+            <li>
+              <StatusChip label={`Fully Paid: ${formatCountOrDash(summary.full)}`} tone="success" />
+            </li>
+            <li>
+              <StatusChip label={`Overdue: ${formatCountOrDash(summary.overdue)}`} tone="danger" />
             </li>
             <li>
               <StatusChip
@@ -479,12 +509,12 @@ export function BusinessFinanceQueuePage() {
             }
             filters={
               <label className={styles.filterLabel}>
-                Status
+                Payment progress
                 <Select
-                  aria-label="Filter by status"
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                  options={[...STATUS_OPTIONS]}
+                  aria-label="Filter by payment progress"
+                  value={progressFilter}
+                  onChange={(event) => setProgressFilter(event.target.value as ProgressFilter)}
+                  options={[...PROGRESS_OPTIONS]}
                 />
               </label>
             }
@@ -500,7 +530,7 @@ export function BusinessFinanceQueuePage() {
           {visible.length === 0 ? (
             <EmptyState
               title={
-                settled || statusFilter !== 'all' ? 'No matching records.' : 'Nothing to handle'
+                settled || progressFilter !== 'all' ? 'No matching records.' : 'Nothing to handle'
               }
               description="No sale is awaiting payment."
             />
@@ -519,6 +549,7 @@ export function BusinessFinanceQueuePage() {
                     <TableHeaderCell>Plan</TableHeaderCell>
                     <TableHeaderCell align="right">Balance</TableHeaderCell>
                     <TableHeaderCell>Status</TableHeaderCell>
+                    <TableHeaderCell>Payment</TableHeaderCell>
                     <TableHeaderCell>Actions</TableHeaderCell>
                   </TableRow>
                 </TableHead>
@@ -526,7 +557,8 @@ export function BusinessFinanceQueuePage() {
                   {visible.map((item) => {
                     const recordNumber =
                       item.origin === 'sale' ? item.saleNumber : item.reservationNumber;
-                    const status = financePaymentStatus(item);
+                    const status = lifecycleBadge(item);
+                    const progress = paymentProgressBadge(itemProgress(item));
                     return (
                       <TableRow
                         key={item.origin === 'sale' ? item.saleId : item.reservationId}
@@ -551,7 +583,7 @@ export function BusinessFinanceQueuePage() {
                           <span className={styles.cellTitle}>{item.customerName}</span>
                         </TableCell>
                         <TableCell label="Plan">
-                          <TierBadge tier={tierFromProductName(item.productName)} />
+                          <TierBadge tier={item.tier} />
                         </TableCell>
                         <TableCell label="Balance" className={styles.numeric}>
                           <span className={styles.balanceFigure}>
@@ -561,10 +593,7 @@ export function BusinessFinanceQueuePage() {
                             <span
                               className={styles.progressBar}
                               style={{
-                                width: `${progressPercent(
-                                  item.verifiedTotal,
-                                  item.origin === 'sale' ? item.cashPrice : item.totalPrice,
-                                )}%`,
+                                width: `${progressPercent(item.verifiedTotal, frozenTotal(item))}%`,
                               }}
                             />
                           </span>
@@ -572,18 +601,22 @@ export function BusinessFinanceQueuePage() {
                         <TableCell label="Status">
                           <StatusChip label={status.label} tone={status.tone} />
                         </TableCell>
+                        <TableCell label="Payment">
+                          <StatusChip label={progress.label} tone={progress.tone} />
+                        </TableCell>
                         <TableCell label="Actions">
                           {item.origin === 'reservation' ? (
                             <ReservationActions
                               item={item}
                               canHandlePayments={canHandlePayments}
                               onViewDetails={() => setDetail(item)}
-                              onRecord={() =>
+                              onRecord={(purpose) =>
                                 setRecording({
                                   id: item.reservationId,
                                   origin: 'reservation',
                                   customerName: item.customerName,
                                   recordLabel: item.reservationNumber,
+                                  purpose,
                                 })
                               }
                               onVerify={() =>
@@ -592,7 +625,35 @@ export function BusinessFinanceQueuePage() {
                               onDone={refresh}
                             />
                           ) : (
-                            <span data-row-menu onClick={(event) => event.stopPropagation()}>
+                            <span
+                              data-row-menu
+                              onClick={(event) => event.stopPropagation()}
+                              style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}
+                            >
+                              {(() => {
+                                const step = nextPaymentStep(item);
+                                if (step.key === 'none')
+                                  return <span className={styles.formNote}>{step.label}</span>;
+                                return (
+                                  <Button
+                                    size="sm"
+                                    disabled={!canHandlePayments}
+                                    onClick={() =>
+                                      step.key === 'activate'
+                                        ? navigate('/admin/finance/activation')
+                                        : setRecording({
+                                            id: item.saleId,
+                                            origin: 'sale',
+                                            customerName: item.customerName,
+                                            recordLabel: item.saleNumber,
+                                            purpose: step.purpose,
+                                          })
+                                    }
+                                  >
+                                    {step.label}
+                                  </Button>
+                                );
+                              })()}
                               <OverflowMenu
                                 label={`Actions for ${recordNumber}`}
                                 items={[
@@ -602,7 +663,7 @@ export function BusinessFinanceQueuePage() {
                                     onClick: () => setDetail(item),
                                   },
                                   {
-                                    label: 'Record payment',
+                                    label: 'Record & verify payment',
                                     icon: 'dollar-sign',
                                     disabled: !canHandlePayments,
                                     onClick: () =>
@@ -662,6 +723,7 @@ export function BusinessFinanceQueuePage() {
         <RecordPaymentDialog
           saleId={recording.id}
           origin={recording.origin}
+          initialPurpose={recording.purpose}
           customerName={recording.customerName}
           recordLabel={recording.recordLabel}
           onDone={async () => {
@@ -749,16 +811,38 @@ function RecordDialogSkeleton() {
   );
 }
 
+/** Raised when the payment IS recorded but the verification step failed. */
+class VerifyStageError extends Error {
+  constructor(
+    message: string,
+    /** The server held verification for a duplicate bank reference / OR number. */
+    readonly hold = false,
+  ) {
+    super(message);
+  }
+}
+
+type RecordStep = 1 | 2 | 3;
+
+/**
+ * Finance's single "record and verify" flow: details -> proof -> review, then
+ * ONE action records the payment and immediately verifies it. If verification
+ * fails the payment stays Recorded in the queue and "Retry verification"
+ * re-verifies the SAME payment (no second record).
+ */
 export function RecordPaymentDialog({
   saleId,
   origin = 'sale',
   customerName,
   recordLabel,
+  initialPurpose,
   onDone,
   onClose,
 }: {
   saleId: string;
   origin?: 'sale' | 'reservation';
+  /** The next step the row asked for; used when still valid for the purchase. */
+  initialPurpose?: PaymentPurpose;
   /** Shown in the confirmation so staff confirm the right customer. */
   customerName?: string;
   /** The sale or reservation number this payment belongs to. */
@@ -766,20 +850,100 @@ export function RecordPaymentDialog({
   onDone: () => Promise<void>;
   onClose: () => void;
 }) {
-  const [amount, setAmount] = useState('');
-  const [amountDirty, setAmountDirty] = useState(false);
-  const [type, setType] = useState<PaymentType>('installment');
+  const navigate = useNavigate();
+  const { user: sessionUser } = useSession();
+  // UX only: the server authorizes activation.
+  const canActivate =
+    sessionUser?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'finance.card_activation' && permission.canUpdate,
+    ) ?? false;
+  const [step, setStep] = useState<RecordStep>(1);
+  const [purposeChoice, setPurposeChoice] = useState<PaymentPurpose | ''>(initialPurpose ?? '');
+  const [amountEdit, setAmountEdit] = useState<string | null>(null);
+  // Purpose and amount as recorded: later ledger changes never move them.
+  const [frozen, setFrozen] = useState<{ purpose: PaymentPurpose | ''; amount: string } | null>(
+    null,
+  );
+  const [orNumber, setOrNumber] = useState('');
+  const [paidOn, setPaidOn] = useState(todayIso);
+  const [paidByName, setPaidByName] = useState('');
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
-  const [confirming, setConfirming] = useState(false);
   const runPayment = useSingleFlight<
     Awaited<ReturnType<typeof recordPayment>> | Awaited<ReturnType<typeof recordReservationPayment>>
   >();
   const paymentRequest = useMutationRequest();
-  const paymentInput = { amount, paymentType: type, method, ...(reference ? { reference } : {}) };
-  const amountValid = recordPaymentSchema.shape.amount.safeParse(amount).success;
-  const paymentValid = recordPaymentSchema.safeParse(paymentInput).success;
+  const verifyRequest = useMutationRequest();
+  // The payment this action recorded: a verify retry reuses it, never records again.
+  const [recordedId, setRecordedId] = useState<string | null>(null);
+  const [hold, setHold] = useState(false);
+  const [verifyFailure, setVerifyFailure] = useState('');
 
+  // Receipt: uploaded to the private bucket as soon as it is picked; the
+  // returned storage path is what the record call carries. A replacement
+  // clears the path first, so Next stays disabled until the new upload lands.
+  const [receiptPath, setReceiptPath] = useState('');
+  const [receiptName, setReceiptName] = useState('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptState, setReceiptState] = useState<'idle' | 'uploading' | 'error'>('idle');
+  const [receiptError, setReceiptError] = useState('');
+  const receiptAttempt = useRef(0);
+  const previewRef = useRef('');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const dropPreview = () => {
+    if (previewRef.current) URL.revokeObjectURL?.(previewRef.current);
+    previewRef.current = '';
+    setPreviewUrl('');
+  };
+  useEffect(
+    () => () => {
+      if (previewRef.current) URL.revokeObjectURL?.(previewRef.current);
+    },
+    [],
+  );
+  const pickReceipt = async (file: File | undefined) => {
+    if (!file) return;
+    const attempt = ++receiptAttempt.current;
+    setReceiptPath('');
+    setReceiptFile(null);
+    dropPreview();
+    setReceiptName(file.name);
+    const request = paymentReceiptUploadRequestSchema.safeParse({
+      contentType: file.type,
+      byteSize: file.size,
+    });
+    if (!request.success) {
+      setReceiptState('error');
+      setReceiptError(
+        !(PAYMENT_RECEIPT_CONTENT_TYPES as readonly string[]).includes(file.type)
+          ? 'Receipt must be a JPEG, PNG or PDF file.'
+          : `Receipt must be larger than 0 bytes and at most ${Math.floor(PAYMENT_RECEIPT_MAX_BYTES / 1048576)} MB.`,
+      );
+      return;
+    }
+    setReceiptState('uploading');
+    setReceiptError('');
+    try {
+      const grant = await (origin === 'reservation'
+        ? requestReservationPaymentReceiptUpload(saleId, request.data)
+        : requestSalePaymentReceiptUpload(saleId, request.data));
+      await putUploadBytes(grant.uploadUrl, file);
+      if (attempt !== receiptAttempt.current) return;
+      setReceiptPath(grant.receiptStoragePath);
+      setReceiptFile(file);
+      if (typeof URL.createObjectURL === 'function') {
+        previewRef.current = URL.createObjectURL(file);
+        setPreviewUrl(previewRef.current);
+      }
+      setReceiptState('idle');
+    } catch (error) {
+      if (attempt !== receiptAttempt.current) return;
+      setReceiptState('error');
+      setReceiptError(
+        error instanceof Error ? error.message : 'The receipt could not be uploaded. Try again.',
+      );
+    }
+  };
   const summary = useQuery({
     queryKey: businessKeys.summaryFor(origin, saleId),
     queryFn: async () => {
@@ -788,95 +952,196 @@ export function RecordPaymentDialog({
       return { ...finance, cashPrice: finance.totalPrice };
     },
   });
+  const ledger = useQuery({
+    queryKey: businessKeys.paymentsFor(origin, saleId),
+    queryFn: async () =>
+      origin === 'reservation'
+        ? await getReservationPayments(saleId)
+        : await getSalePayments(saleId),
+  });
+  const options = useMemo(
+    () =>
+      summary.data && ledger.data
+        ? availablePurposes(
+            {
+              total: summary.data.cashPrice,
+              reservationFee: summary.data.reservationFee,
+              requiredInitial: summary.data.requiredInitial,
+              monthlyAmount: summary.data.monthlyAmount ?? null,
+              installmentMonths: summary.data.installmentMonths ?? null,
+            },
+            ledger.data,
+          )
+        : [],
+    [summary.data, ledger.data],
+  );
+  // Default to the next purpose due; a purpose that stops being valid falls back to it.
+  const purpose: PaymentPurpose | '' =
+    frozen?.purpose ??
+    (options.find((option) => option.purpose === purposeChoice) ?? options[0])?.purpose ??
+    '';
+  const chosen = options.find((option) => option.purpose === purpose);
+  const amount = frozen?.amount ?? amountEdit ?? chosen?.amount ?? '';
+  const amountDirty = amountEdit !== null;
+  const choosePurpose = (next: PaymentPurpose) => {
+    setPurposeChoice(next);
+    setAmountEdit(null);
+  };
+
+  const amountValid = recordPaymentSchema.shape.amount.safeParse(amount).success;
+  const amountWithinLimit =
+    Boolean(chosen) &&
+    amountValid &&
+    (chosen!.locked
+      ? compareMoney(amount, chosen!.amount) === 0
+      : compareMoney(amount, chosen!.max) <= 0);
+  const paidOnValid = paidOn === '' || paidOn <= todayIso();
+  const detailsValid = Boolean(frozen) || (Boolean(chosen) && amountWithinLimit && paidOnValid);
+  const paymentInput = {
+    amount,
+    ...(purpose ? { paymentType: PURPOSE_PAYMENT_TYPE[purpose], paymentPurpose: purpose } : {}),
+    method,
+    ...(reference ? { reference } : {}),
+    ...(orNumber.trim() ? { orNumber: orNumber.trim() } : {}),
+    ...(paidOn ? { paidOn } : {}),
+    ...(paidByName.trim() ? { paidByName: normalizeProfileName(paidByName.trim()) } : {}),
+    ...(receiptPath ? { receiptStoragePath: receiptPath } : {}),
+  };
+  const paymentValid = recordPaymentSchema.safeParse(paymentInput).success;
+
+  const verifiedBefore = summary.data?.verifiedTotal ?? '0.00';
+  const balanceBefore = summary.data?.remainingBalance ?? '0.00';
+  const balanceAfter =
+    amountValid && compareMoney(balanceBefore, amount) > 0
+      ? subtractMoney(balanceBefore, amount)
+      : '0.00';
 
   const save = useBusinessMutation({
-    mutationFn: async (input: typeof paymentInput) => {
-      const confirmed = await notifyConfirm({
-        title: 'Record this payment?',
-        message:
-          'Recorded only. Server recalculates balance.',
-        detail: [
-          customerName ? `Customer: ${customerName}` : null,
-          recordLabel
-            ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`
-            : null,
-          `Amount: ${formatMoneyOrDash(input.amount)}`,
-          `Type: ${input.paymentType.replace(/_/g, ' ')}`,
-          `Method: ${input.method}`,
-          `Reference: ${input.reference ?? '—'}`,
-        ]
-          .filter((line): line is string => line !== null)
-          .join('\n'),
-        confirmButtonText: 'Record Payment',
-      });
-      if (!confirmed) return null;
-      setConfirming(true);
-      const result = await runPayment(() => {
-        const parsed = recordPaymentSchema.parse(input);
-        const body = {
-          ...parsed,
-          requestId: paymentRequest.forPayload({ origin, saleId, ...parsed }),
-        };
-        return origin === 'reservation'
-          ? recordReservationPayment(saleId, body)
-          : recordPayment(saleId, body);
-      });
-      return { input, result };
+    mutationFn: async (input: { note?: string }) => {
+      setVerifyFailure('');
+      let paymentId = recordedId;
+      if (!paymentId) {
+        const parsed = recordPaymentSchema.parse(paymentInput);
+        const before = new Set((await ledger.refetch()).data?.map((payment) => payment.id) ?? []);
+        const result = await runPayment(() => {
+          const body = {
+            ...parsed,
+            requestId: paymentRequest.forPayload({ origin, saleId, ...parsed }),
+          };
+          return origin === 'reservation'
+            ? recordReservationPayment(saleId, body as never)
+            : recordPayment(saleId, body);
+        });
+        let recorded: string | undefined;
+        if (isReservationFinanceSummary(result)) {
+          // The reservation endpoint answers with the finance summary: the
+          // payment just recorded is the newest 'recorded' row that was not
+          // in the ledger before (same purpose and amount).
+          recorded = [...result.payments]
+            .filter(
+              (row) =>
+                row.status === 'recorded' &&
+                !before.has(row.id) &&
+                row.paymentPurpose === parsed.paymentPurpose &&
+                compareMoney(row.amount, parsed.amount) === 0,
+            )
+            .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0]?.id;
+        } else {
+          recorded = result.id;
+        }
+        if (!recorded)
+          throw new VerifyStageError(
+            'The payment was recorded but could not be identified for verification. Open Verify to finish.',
+          );
+        paymentId = recorded;
+        setRecordedId(recorded);
+        setFrozen({ purpose, amount });
+      }
+      let fullyPaid: boolean;
+      try {
+        if (input.note) await saveDuplicateReview(paymentId, input.note);
+        if (origin === 'reservation') {
+          const outcome = await verifyReservationPayment(saleId, paymentId, {
+            requestId: verifyRequest.forPayload({ paymentId, decision: 'verified' }),
+            decision: 'verified',
+          });
+          fullyPaid = outcome.fullyPaid;
+        } else {
+          const outcome = await verifyPayment(paymentId, { decision: 'verified' });
+          fullyPaid = outcome.fullyPaid;
+        }
+      } catch (error) {
+        // Recorded but unverified: keep it visible in the queue as Recorded.
+        await onDone().catch(() => undefined);
+        throw new VerifyStageError(
+          error instanceof Error ? error.message : 'The verification did not complete.',
+          isDuplicateHold(error) || Boolean(input.note),
+        );
+      }
+      return { paymentId, fullyPaid };
     },
     // The alert reports the SERVER's stored row, never the browser's optimism.
-    // An HTTP 201 alone proves nothing: the sale endpoint returns only the new
-    // id, and the reservation endpoint returns the recomputed summary.
-    onSuccess: async (recorded) => {
-      if (!recorded) return;
-      setConfirming(false);
+    onSuccess: async ({ paymentId, fullyPaid }) => {
       await onDone();
       paymentRequest.complete();
-      // Close the modal once the payment is recorded so the success alert is
-      // the only thing left on screen.
+      verifyRequest.complete();
       onClose();
-      // Captured in a const so the narrowing survives into the filter callback.
-      const outcome = recorded.result;
-      // The re-read reports the SERVER's row. If it fails the payment is still
-      // recorded, so the confirmation must never be swallowed by it: the alert
-      // falls back to the submitted figures and says the status is unconfirmed.
       let stored:
         | {
             amount: string;
             reference: string | null;
-            // `paymentNumber` is nullish on the payment contract.
+            orNumber?: string | null;
             paymentNumber?: string | null;
-            id: string;
             status: string;
           }
         | undefined;
       try {
-        const rows = isReservationFinanceSummary(outcome)
-          ? outcome.payments
-          : (await getSalePayments(saleId)).filter((row) => row.id === outcome.id);
-        stored = [...rows].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
+        stored = (await ledger.refetch()).data?.find((row) => row.id === paymentId);
       } catch {
-        // Left undefined on purpose: the payment IS recorded, so the alert falls
-        // back to the submitted figures rather than being swallowed.
+        // The payment IS recorded and verified; the alert falls back to the form.
       }
-      notifySuccess({
-        title: 'Payment Recorded Successfully',
-        message: 'The payment has been recorded and the payment queue has been updated.',
-        detail: [
-          `Amount: ${formatMoneyOrDash(stored?.amount ?? recorded.input.amount)}`,
-          `Reference: ${stored?.reference ?? recorded.input.reference ?? '—'}`,
+      const detail = [
+          `Amount: ${formatMoneyOrDash(stored?.amount ?? amount)}`,
+          purpose ? `Purpose: ${PAYMENT_PURPOSE_LABEL[purpose]}` : null,
+          `Reference: ${stored?.reference ?? (reference || '—')}`,
+          stored?.orNumber ? `OR number: ${stored.orNumber}` : null,
           `Payment ID: ${stored?.paymentNumber ?? '—'}`,
           customerName ? `Customer: ${customerName}` : null,
           recordLabel
             ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`
             : null,
-          `Current payment status: ${stored?.status ?? 'recorded (confirmation unavailable)'}`,
+          `Current payment status: ${stored?.status ?? 'verified'}`,
         ]
-          .filter((line): line is string => line !== null)
-          .join('\n'),
+        .filter((line): line is string => line !== null)
+        .join('\n');
+      // The final payment made the purchase fully paid: offer the (still manual)
+      // activation. A sale activates directly; a reservation is finalized first.
+      if (fullyPaid && origin === 'sale' && canActivate) {
+        const activateNow = await notifyConfirm({
+          title: 'Payment Recorded and Verified',
+          message: `${detail}\n\nThis purchase is now fully paid. Activate the membership now?`,
+          confirmButtonText: 'Activate now',
+        });
+        if (activateNow) navigate(`/admin/finance/activation?sale=${encodeURIComponent(saleId)}`);
+        return;
+      }
+      notifySuccess({
+        title: 'Payment Recorded and Verified',
+        message: 'The payment has been recorded and verified, and the payment queue is updated.',
+        detail,
       });
     },
     onError: (error) => {
-      setConfirming(false);
+      if (error instanceof VerifyStageError) {
+        setVerifyFailure(error.message);
+        setHold(error.hold);
+        if (error.hold) return;
+        notifyError({
+          title: 'Recorded, not verified',
+          message: `The payment was recorded but not verified: ${error.message} It stays in the queue as Recorded; use "Retry verification".`,
+        });
+        return;
+      }
       // `message` is the server's own domain envelope, already free of SQL,
       // stack traces and RPC internals.
       notifyError({
@@ -885,30 +1150,48 @@ export function RecordPaymentDialog({
       });
     },
   });
+  const recordedUnverified = Boolean(verifyFailure) || (save.isError && Boolean(recordedId));
+
+  const stepLabel = ['Details', 'Proof', 'Review'];
+  const footer = (
+    <div className={styles.dialogFooter}>
+      {step === 1 ? (
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+      ) : (
+        <Button
+          variant="secondary"
+          disabled={save.isPending || recordedUnverified}
+          onClick={() => setStep((step - 1) as RecordStep)}
+        >
+          Back
+        </Button>
+      )}
+      <span className={styles.dialogFooterSpacer} aria-hidden="true" />
+      {step === 3 ? (
+        <Button
+          disabled={!paymentValid || !detailsValid || save.isSuccess || hold}
+          loading={save.isPending}
+          loadingLabel={recordedId ? 'Verifying…' : 'Recording and verifying…'}
+          onClick={() => save.mutate({})}
+        >
+          {recordedUnverified ? 'Retry verification' : 'Verify and record'}
+        </Button>
+      ) : (
+        <Button
+          disabled={step === 1 ? !detailsValid : !receiptPath}
+          onClick={() => setStep((step + 1) as RecordStep)}
+        >
+          Next
+        </Button>
+      )}
+    </div>
+  );
 
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="Record a payment"
-      footer={
-        <div className={styles.dialogFooter}>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <span className={styles.dialogFooterSpacer} aria-hidden="true" />
-          <Button
-            disabled={!paymentValid || save.isSuccess || confirming}
-            loading={save.isPending}
-            loadingLabel="Recording…"
-            onClick={() => save.mutate(paymentInput)}
-          >
-            {confirming ? 'Recording…' : 'Record'}
-          </Button>
-        </div>
-      }
-    >
-      {summary.isPending ? (
+    <Dialog open onClose={onClose} title="Record & verify payment" footer={footer}>
+      {summary.isPending || ledger.isPending ? (
         <RecordDialogSkeleton />
       ) : (
         <>
@@ -925,114 +1208,298 @@ export function RecordPaymentDialog({
               </div>
             </div>
           ) : null}
+          <p className={styles.formNote} aria-label="Progress">
+            Step {step} of 3 · {stepLabel[step - 1]}
+          </p>
           <div className={styles.formGrid}>
-            <p className={styles.formNote}>
-              <strong>Recorded only.</strong> Server recalculates balance.
-            </p>
-            {summary.data ? (
-              <section className={styles.detailSection} aria-label="Sale figures">
-                <h2 className={styles.detailTitle}>Sale figures</h2>
-                <dl className={styles.facts}>
-                  <div>
-                    <dt>Scheme</dt>
-                    <dd>{paymentSchemeLabel(summary.data.paymentScheme)}</dd>
+            {step === 1 ? (
+              <>
+                <p className={styles.formNote}>
+                  <strong>Recorded and verified in one action.</strong> Server recalculates balance.
+                </p>
+                {summary.data ? (
+                  <section className={styles.detailSection} aria-label="Sale figures">
+                    <h2 className={styles.detailTitle}>Sale figures</h2>
+                    <dl className={styles.facts}>
+                      <div>
+                        <dt>Scheme</dt>
+                        <dd>{paymentSchemeLabel(summary.data.paymentScheme)}</dd>
+                      </div>
+                      <div>
+                        <dt>Frozen total</dt>
+                        <dd>{formatMoney(summary.data.cashPrice)}</dd>
+                      </div>
+                      <div>
+                        <dt>Reservation</dt>
+                        <dd>{formatMoney(summary.data.reservationFee)}</dd>
+                      </div>
+                      <div>
+                        <dt>Required initial</dt>
+                        <dd>{formatMoney(summary.data.requiredInitial)}</dd>
+                      </div>
+                      <div>
+                        <dt>Monthly target</dt>
+                        <dd>
+                          {summary.data.installmentMonths && summary.data.monthlyAmount
+                            ? `${formatMoney(summary.data.monthlyAmount)} × ${summary.data.installmentMonths}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Verified paid</dt>
+                        <dd>{formatMoney(summary.data.verifiedTotal)}</dd>
+                      </div>
+                      <div>
+                        <dt>Remaining balance</dt>
+                        <dd>{formatMoney(summary.data.remainingBalance)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                ) : null}
+                <section className={styles.detailSection} aria-label="Payment details">
+                  <h2 className={styles.detailTitle}>Payment details</h2>
+                  <div className={styles.formGrid}>
+                    {options.length === 0 ? (
+                      <p role="alert" className={styles.formAlert}>
+                        No payment can be recorded: the purchase is fully paid or every remaining
+                        amount is already awaiting verification.
+                      </p>
+                    ) : (
+                      <label className={styles.field}>
+                        Payment is for
+                        <Select
+                          aria-label="Payment is for"
+                          value={purpose}
+                          onChange={(e) => choosePurpose(e.target.value as PaymentPurpose)}
+                          options={options.map((option) => ({
+                            value: option.purpose,
+                            label: option.label,
+                          }))}
+                        />
+                      </label>
+                    )}
+                    <TextField
+                      id="record-payment-amount"
+                      name="amount"
+                      label="Amount"
+                      type="text"
+                      inputMode="decimal"
+                      value={formatMoneyInput(amount)}
+                      readOnly={chosen?.locked ?? false}
+                      hint={
+                        chosen?.locked
+                          ? 'Full payment must equal the exact remaining balance.'
+                          : chosen
+                            ? `Next amount due is pre-filled; at most ${formatMoney(chosen.max)}.`
+                            : undefined
+                      }
+                      onChange={(value) => {
+                        setAmountEdit(value.replace(/,/g, ''));
+                      }}
+                      error={
+                        amountDirty && !amountValid
+                          ? 'Enter a valid amount greater than zero without letters or scientific notation.'
+                          : amountDirty && chosen && !amountWithinLimit
+                            ? `Amount cannot exceed ${formatMoney(chosen.max)} for this payment.`
+                            : undefined
+                      }
+                    />
+                    <label className={styles.field}>
+                      Method
+                      <Select
+                        aria-label="Method"
+                        value={method}
+                        onChange={(e) => setMethod(e.target.value)}
+                        options={[
+                          { value: 'bank_transfer', label: 'Bank Transfer' },
+                          { value: 'cash', label: 'Cash' },
+                          { value: 'gcash', label: 'GCash' },
+                          { value: 'maya', label: 'Maya' },
+                          { value: 'check', label: 'Check' },
+                          { value: 'other', label: 'Other' },
+                        ]}
+                      />
+                    </label>
+                    <TextField
+                      id="record-payment-reference"
+                      name="reference"
+                      label="Payment reference"
+                      optional
+                      value={reference}
+                      onChange={setReference}
+                      hint="Enter the transaction or reference number."
+                    />
+                    <TextField
+                      id="record-payment-or"
+                      name="orNumber"
+                      label="OR number"
+                      optional
+                      maxLength={60}
+                      value={orNumber}
+                      onChange={setOrNumber}
+                    />
+                    <label className={styles.field}>
+                      Payment date
+                      <input
+                        type="date"
+                        name="paidOn"
+                        value={paidOn}
+                        max={todayIso()}
+                        aria-invalid={!paidOnValid}
+                        onChange={(event) => setPaidOn(event.target.value)}
+                      />
+                      {!paidOnValid ? (
+                        <span role="alert" className={styles.formAlert}>
+                          The payment date cannot be in the future.
+                        </span>
+                      ) : null}
+                    </label>
+                    <TextField
+                      id="record-payment-paid-by"
+                      name="paidByName"
+                      label="Paid by"
+                      optional
+                      maxLength={120}
+                      value={paidByName}
+                      onChange={setPaidByName}
+                    />
                   </div>
-                  <div>
-                    <dt>Frozen total</dt>
-                    <dd>{formatMoney(summary.data.cashPrice)}</dd>
-                  </div>
-                  <div>
-                    <dt>Reservation</dt>
-                    <dd>{formatMoney(summary.data.reservationFee)}</dd>
-                  </div>
-                  <div>
-                    <dt>Required initial</dt>
-                    <dd>{formatMoney(summary.data.requiredInitial)}</dd>
-                  </div>
-                  <div>
-                    <dt>Monthly target</dt>
-                    <dd>
-                      {summary.data.installmentMonths && summary.data.monthlyAmount
-                        ? `${formatMoney(summary.data.monthlyAmount)} × ${summary.data.installmentMonths}`
-                        : '—'}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Verified paid</dt>
-                    <dd>{formatMoney(summary.data.verifiedTotal)}</dd>
-                  </div>
-                  <div>
-                    <dt>Remaining balance</dt>
-                    <dd>{formatMoney(summary.data.remainingBalance)}</dd>
-                  </div>
-                </dl>
+                </section>
+              </>
+            ) : null}
+            {step === 2 ? (
+              <section className={styles.detailSection} aria-label="Payment proof">
+                <h2 className={styles.detailTitle}>Proof of payment</h2>
+                <div className={styles.field}>
+                  <label htmlFor="record-payment-receipt">
+                    Payment receipt (JPEG, PNG or PDF, max 10 MB)
+                  </label>
+                  <input
+                    id="record-payment-receipt"
+                    type="file"
+                    accept={PAYMENT_RECEIPT_CONTENT_TYPES.join(',')}
+                    required
+                    disabled={save.isPending}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      void pickReceipt(file);
+                    }}
+                  />
+                  {receiptState === 'uploading' ? (
+                    <p role="status">Uploading {receiptName}…</p>
+                  ) : receiptPath ? (
+                    <p role="status">Uploaded: {receiptName}. Choose another file to replace it.</p>
+                  ) : receiptState === 'error' ? (
+                    <p role="alert" className={styles.formAlert}>
+                      {receiptError}
+                    </p>
+                  ) : (
+                    <p className={styles.formNote}>A receipt is required to record a payment.</p>
+                  )}
+                </div>
               </section>
             ) : null}
-            <section className={styles.detailSection} aria-label="Payment details">
-              <h2 className={styles.detailTitle}>Payment details</h2>
-              <div className={styles.formGrid}>
-                <TextField
-                  id="record-payment-amount"
-                  name="amount"
-                  label="Amount"
-                  type="text"
-                  inputMode="decimal"
-                  value={formatMoneyInput(amount)}
-                  onChange={(value) => {
-                    setAmount(value.replace(/,/g, ''));
-                    setAmountDirty(true);
-                  }}
-                  error={
-                    amountDirty && !amountValid
-                      ? 'Enter a valid amount greater than zero without letters or scientific notation.'
-                      : undefined
-                  }
-                />
-                <label className={styles.field}>
-                  Type
-                  <Select
-                    aria-label="Type"
-                    value={type}
-                    onChange={(e) => setType(e.target.value as PaymentType)}
-                    options={[
-                      { value: 'down_payment', label: 'Down payment' },
-                      { value: 'installment', label: 'Installment' },
-                      { value: 'full', label: 'Full payment' },
-                    ]}
-                  />
-                </label>
-                <label className={styles.field}>
-                  Method
-                  <Select
-                    aria-label="Method"
-                    value={method}
-                    onChange={(e) => setMethod(e.target.value)}
-                    options={[
-                      { value: 'bank_transfer', label: 'Bank Transfer' },
-                      { value: 'cash', label: 'Cash' },
-                      { value: 'gcash', label: 'GCash' },
-                      { value: 'maya', label: 'Maya' },
-                      { value: 'check', label: 'Check' },
-                      { value: 'other', label: 'Other' },
-                    ]}
-                  />
-                </label>
-                <TextField
-                  id="record-payment-reference"
-                  name="reference"
-                  label="Payment reference"
-                  optional
-                  value={reference}
-                  onChange={setReference}
-                  hint="Enter the transaction or reference number."
-                />
-                {save.error ? (
+            {step === 3 ? (
+              <>
+                <section className={styles.detailSection} aria-label="Payment review">
+                  <h2 className={styles.detailTitle}>Review before verifying</h2>
+                  <dl className={styles.facts}>
+                    {customerName ? (
+                      <div>
+                        <dt>Customer</dt>
+                        <dd>{customerName}</dd>
+                      </div>
+                    ) : null}
+                    {recordLabel ? (
+                      <div>
+                        <dt>{origin === 'reservation' ? 'Reservation' : 'Sale'}</dt>
+                        <dd>{recordLabel}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt>Payment is for</dt>
+                      <dd>{purpose ? PAYMENT_PURPOSE_LABEL[purpose] : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Amount</dt>
+                      <dd>{formatMoneyOrDash(amount)}</dd>
+                    </div>
+                    <div>
+                      <dt>Method</dt>
+                      <dd>{method.replace(/_/g, ' ')}</dd>
+                    </div>
+                    <div>
+                      <dt>Reference</dt>
+                      <dd>{reference || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>OR number</dt>
+                      <dd>{orNumber.trim() || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Payment date</dt>
+                      <dd>{paidOn || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Paid by</dt>
+                      <dd>{paidByName.trim() ? normalizeProfileName(paidByName.trim()) : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Price</dt>
+                      <dd>{formatMoney(summary.data?.cashPrice ?? '0.00')}</dd>
+                    </div>
+                    <div>
+                      <dt>Verified so far</dt>
+                      <dd>{formatMoney(verifiedBefore)}</dd>
+                    </div>
+                    <div>
+                      <dt>Balance before</dt>
+                      <dd>{formatMoney(balanceBefore)}</dd>
+                    </div>
+                    <div>
+                      <dt>Balance after</dt>
+                      <dd>{formatMoney(balanceAfter)}</dd>
+                    </div>
+                  </dl>
+                </section>
+                <section className={styles.detailSection} aria-label="Proof preview">
+                  <h2 className={styles.detailTitle}>Uploaded proof</h2>
+                  <p className={styles.formNote}>{receiptName}</p>
+                  {previewUrl && receiptFile?.type === 'application/pdf' ? (
+                    <>
+                      <object data={previewUrl} type="application/pdf" aria-label="Proof PDF preview" width="100%" height="320" />
+                      <a href={previewUrl} target="_blank" rel="noreferrer">
+                        Open proof PDF
+                      </a>
+                    </>
+                  ) : previewUrl ? (
+                    <img
+                      src={previewUrl}
+                      alt="Payment proof preview"
+                      style={{ maxWidth: '100%', maxHeight: 320 }}
+                    />
+                  ) : null}
+                </section>
+                {verifyFailure ? (
+                  <p role="alert" className={styles.formAlert}>
+                    The payment was recorded but NOT verified. {verifyFailure} It remains in the
+                    queue as Recorded; retry verification below.
+                  </p>
+                ) : save.error ? (
                   <p role="alert" className={styles.formAlert}>
                     The payment was not recorded. {save.error.message}
                   </p>
                 ) : null}
-              </div>
-            </section>
+                {hold && recordedId ? (
+                  <DuplicateHoldPanel
+                    paymentId={recordedId}
+                    busy={save.isPending}
+                    onSave={(note) => save.mutate({ note })}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </div>
         </>
       )}
@@ -1056,6 +1523,8 @@ export function VerifyDialog({
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decidingDecision, setDecidingDecision] = useState<'verified' | 'rejected' | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // The payment the server held for a duplicate bank reference / OR number.
+  const [holdId, setHoldId] = useState<string | null>(null);
   const payments = useQuery({
     queryKey: businessKeys.paymentsFor(origin, saleId),
     queryFn: async () =>
@@ -1071,12 +1540,14 @@ export function VerifyDialog({
       paymentId: string;
       decision: 'verified' | 'rejected';
       reason?: string;
+      note?: string;
     }) => {
       setDecidingId(input.paymentId);
       setDecidingDecision(input.decision);
+      if (input.note) await saveDuplicateReview(input.paymentId, input.note);
       return origin === 'reservation'
         ? await verifyReservationPayment(saleId, input.paymentId, {
-            requestId: verificationRequest.forPayload(input),
+            requestId: verificationRequest.forPayload({ ...input, note: undefined }),
             decision: input.decision,
             ...(input.reason ? { reason: input.reason } : {}),
           })
@@ -1087,6 +1558,7 @@ export function VerifyDialog({
     },
     onSuccess: async (_result, input) => {
       verificationRequest.complete();
+      setHoldId(null);
       if (input?.decision === 'verified') {
         notifySuccess({
           title: 'Payment verified',
@@ -1102,9 +1574,11 @@ export function VerifyDialog({
       setRejectingId(null);
       setReason('');
     },
-    onError: () => {
+    onError: (error, input) => {
       setDecidingId(null);
       setDecidingDecision(null);
+      // Stays Recorded; the panel collects the reason and retries the SAME payment.
+      setHoldId(isDuplicateHold(error) ? input.paymentId : null);
     },
   });
 
@@ -1158,12 +1632,15 @@ export function VerifyDialog({
                   <li key={payment.id} className={styles.timelineItem}>
                     <div className={styles.timelineTop}>
                       <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
-                      <StatusChip label={humanizeCode(payment.status)} />
+                      <StatusChip {...paymentStatusBadge(payment.status)} />
                     </div>
                     <p className={styles.timelineMeta}>
                       {payment.paymentType.replaceAll('_', ' ')} · {payment.method}{' '}
                       {payment.reference ? `(${payment.reference})` : '(No reference)'}
                     </p>
+                    {paymentDetailLine(payment) ? (
+                      <p className={styles.timelineMeta}>{paymentDetailLine(payment)}</p>
+                    ) : null}
                     <div className={styles.timelineActions}>
                       <Button
                         onClick={() =>
@@ -1183,6 +1660,15 @@ export function VerifyDialog({
                         {isRejecting ? 'Cancel' : 'Reject'}
                       </Button>
                     </div>
+                    {holdId === payment.id ? (
+                      <DuplicateHoldPanel
+                        paymentId={payment.id}
+                        busy={decide.isPending}
+                        onSave={(note) =>
+                          decide.mutate({ paymentId: payment.id, decision: 'verified', note })
+                        }
+                      />
+                    ) : null}
                     {isRejecting ? (
                       <div className={styles.formGrid}>
                         <TextField
@@ -1194,7 +1680,9 @@ export function VerifyDialog({
                         />
                         <Button
                           variant="danger"
-                          disabled={decide.isPending || reason.trim().length < 3}
+                          disabled={
+                            decide.isPending || reason.trim().length < REJECTION_REASON_MIN_LENGTH
+                          }
                           loading={isDeciding && decidingDecision === 'rejected'}
                           loadingLabel="Rejecting…"
                           onClick={() =>
@@ -1215,7 +1703,7 @@ export function VerifyDialog({
             </ul>
           </>
         ) : null}
-        {decide.error ? (
+        {decide.error && !holdId ? (
           <p role="alert" className={styles.formAlert}>
             {decide.error.message}
           </p>
@@ -1242,7 +1730,8 @@ function ReservationDetails({
     queryFn: () => getReservationPayments(item.reservationId),
     refetchInterval: 15_000,
   });
-  const status = statusBadgeProps(item.status);
+  const status = reservationAgreementStatusBadge(item.status);
+  const progress = paymentProgressBadge(itemProgress(item));
   return (
     <Dialog
       open
@@ -1319,20 +1808,7 @@ function ReservationDetails({
         ) : payments.isError ? (
           <ErrorState error={payments.error} onRetry={payments.refetch} />
         ) : payments.data.length ? (
-          <ol className={styles.timeline}>
-            {payments.data.map((payment) => (
-              <li key={payment.id} className={styles.timelineItem}>
-                <div className={styles.timelineTop}>
-                  <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
-                  <StatusChip label={humanizeCode(payment.status)} />
-                </div>
-                <p className={styles.timelineMeta}>
-                  {payment.paymentType.replaceAll('_', ' ')} · {payment.method} ·{' '}
-                  {payment.reference ?? 'No reference'}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <PaymentLedgerList payments={payments.data} />
         ) : (
           <p className={styles.dialogHeroMeta}>No payments recorded.</p>
         )}
@@ -1341,8 +1817,16 @@ function ReservationDetails({
         <h2 className={styles.detailTitle}>Status</h2>
         <dl className={styles.facts}>
           <div>
-            <dt>Fully paid</dt>
-            <dd>{item.fullyPaid ? 'Yes' : 'No'}</dd>
+            <dt>Agreement</dt>
+            <dd>
+              <StatusChip label={status.label} tone={status.tone} />
+            </dd>
+          </div>
+          <div>
+            <dt>Payment progress</dt>
+            <dd>
+              <StatusChip label={progress.label} tone={progress.tone} />
+            </dd>
           </div>
           <div>
             <dt>Recorded payments</dt>
@@ -1372,7 +1856,9 @@ function PaymentDetails({
     queryFn: () => getSalePayments(item.saleId),
     refetchInterval: 15_000,
   });
-  const status = statusBadgeProps(item.status);
+  const status = saleStatusBadge(item.status);
+  const progress = paymentProgressBadge(paymentProgress(item.verifiedTotal, item.cashPrice));
+  const activation = activationBadge(item.activationBlocker);
   return (
     <Dialog
       open
@@ -1452,20 +1938,7 @@ function PaymentDetails({
         ) : payments.isError ? (
           <ErrorState error={payments.error} onRetry={payments.refetch} />
         ) : payments.data.length ? (
-          <ol className={styles.timeline}>
-            {payments.data.map((payment) => (
-              <li key={payment.id} className={styles.timelineItem}>
-                <div className={styles.timelineTop}>
-                  <span className={styles.timelineAmount}>{formatMoney(payment.amount)}</span>
-                  <StatusChip label={humanizeCode(payment.status)} />
-                </div>
-                <p className={styles.timelineMeta}>
-                  {payment.paymentType.replaceAll('_', ' ')} · {payment.method} ·{' '}
-                  {payment.reference ?? 'No reference'}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <PaymentLedgerList payments={payments.data} />
         ) : (
           <p className={styles.dialogHeroMeta}>No payments recorded.</p>
         )}
@@ -1478,18 +1951,28 @@ function PaymentDetails({
             <dd>{item.downPaymentSatisfied ? 'Yes' : 'No'}</dd>
           </div>
           <div>
-            <dt>Fully paid</dt>
-            <dd>{item.fullyPaid ? 'Yes' : 'No'}</dd>
+            <dt>Sale status</dt>
+            <dd>
+              <StatusChip label={status.label} tone={status.tone} />
+            </dd>
           </div>
           <div>
-            <dt>Activation eligible</dt>
-            <dd>{item.activatable ? 'Yes' : 'No'}</dd>
+            <dt>Payment progress</dt>
+            <dd>
+              <StatusChip label={progress.label} tone={progress.tone} />
+            </dd>
+          </div>
+          <div>
+            <dt>Activation</dt>
+            <dd>
+              <StatusChip label={activation.label} tone={activation.tone} />
+            </dd>
           </div>
         </dl>
       </section>
       <div className={styles.actionGroup}>
         <Button disabled={!canHandlePayments} onClick={() => onRecord(item)}>
-          Record payment
+          Record &amp; verify payment
         </Button>
         <Button disabled={!canHandlePayments} variant="secondary" onClick={onVerify}>
           Verify payment

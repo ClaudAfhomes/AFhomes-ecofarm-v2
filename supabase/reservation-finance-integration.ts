@@ -6,6 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { paymentReceipt } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -196,7 +197,7 @@ export async function runReservationFinanceChecks(world: World) {
       db.query('select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)', [
         randomUUID(),
         purchase.reservationId,
-        { amount: '1.00', method: 'cash', paymentType: 'installment' },
+        { amount: '1.00', method: 'cash', paymentType: 'installment', paymentPurpose: 'contractual_installment' },
         world.actor,
       ]),
   );
@@ -207,7 +208,7 @@ export async function runReservationFinanceChecks(world: World) {
       db.query('select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)', [
         randomUUID(),
         purchase.reservationId,
-        { amount: '1.00', method: 'cash', paymentType: 'installment' },
+        { amount: '1.00', method: 'cash', paymentType: 'installment', paymentPurpose: 'contractual_installment' },
         inactive,
       ]),
   );
@@ -218,18 +219,22 @@ export async function runReservationFinanceChecks(world: World) {
       db.query('select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)', [
         randomUUID(),
         purchase.reservationId,
-        { amount: '0.00', method: 'cash', paymentType: 'installment' },
+        { amount: '0.00', method: 'cash', paymentType: 'installment', paymentPurpose: 'contractual_installment' },
         finance,
       ]),
   );
+  // Changed with the rule (repair 20261231000001 section 12): the ledger
+  // payment_type is DERIVED from the purpose and never chosen separately, so an
+  // unknown or contradicting type is refused as a purpose mismatch. It used to
+  // expect INVALID_PAYMENT_TYPE.
   await fails(
     'an unknown payment type is refused',
-    /INVALID_PAYMENT_TYPE/,
+    /PAYMENT_TYPE_PURPOSE_MISMATCH/,
     () =>
       db.query('select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)', [
         randomUUID(),
         purchase.reservationId,
-        { amount: '1.00', method: 'cash', paymentType: 'cash_topup' },
+        { amount: '1.00', method: 'cash', paymentType: 'cash_topup', paymentPurpose: 'contractual_installment' },
         finance,
       ]),
   );
@@ -263,6 +268,8 @@ export async function runReservationFinanceChecks(world: World) {
     method: 'bank',
     paymentType: 'installment',
     reference: 'REF-A',
+    paymentPurpose: 'contractual_installment',
+    receiptStoragePath: await paymentReceipt(db),
   };
   const replay = (await recordRaw(recordRequest, firstInstallment, finance)).rows[0]!.id;
   const replayAgain = (await recordRaw(recordRequest, firstInstallment, finance)).rows[0]!.id;
@@ -275,10 +282,30 @@ export async function runReservationFinanceChecks(world: World) {
   await fails(
     'a duplicate reference on the same reservation is refused',
     /payments_reservation_reference_unique/,
+    async () =>
+      recordRaw(
+        randomUUID(),
+        {
+          amount: '1.00',
+          method: 'bank',
+          paymentType: 'installment',
+          reference: 'REF-A',
+          paymentPurpose: 'contractual_installment',
+          // A real receipt, so only the duplicate reference can refuse it.
+          receiptStoragePath: await paymentReceipt(db),
+        },
+        finance,
+      ),
+  );
+  // A receipt backs exactly one live payment (repair 20261231000001 section 24):
+  // a NEW request citing the replayed installment's receipt is refused cleanly.
+  await fails(
+    'a new recording citing an already-used receipt is refused',
+    /RECEIPT_ALREADY_USED/,
     () =>
       recordRaw(
         randomUUID(),
-        { amount: '1.00', method: 'bank', paymentType: 'installment', reference: 'REF-A' },
+        { ...firstInstallment, amount: '1.00', reference: 'REF-REUSE' },
         finance,
       ),
   );
@@ -501,6 +528,7 @@ check(
   // verifier that takes PAYMENT then RESERVATION. Under the old order these two
   // sessions deadlock and PostgreSQL answers 40P01; under the approved
   // parent-first order both simply queue behind each other and commit.
+  const concurrentReceipt = await paymentReceipt(db);
   const other = new Client({ connectionString: world.url });
   await other.connect();
   try {
@@ -509,7 +537,14 @@ check(
       [
         randomUUID(),
         fresh.reservationId,
-        { amount: '100.00', method: 'cash', paymentType: 'installment', reference: 'REF-C2' },
+        {
+          amount: '100.00',
+          method: 'cash',
+          paymentType: 'installment',
+          reference: 'REF-C2',
+          paymentPurpose: 'contractual_installment',
+          receiptStoragePath: concurrentReceipt,
+        },
         finance,
       ],
     );
@@ -546,10 +581,13 @@ check(
   );
 
   /* Legacy sale-origin payments still verify through the parent-first RPC. */
+  // Verification requires the receipt object to exist (no bypass), so the
+  // legacy row carries a real one.
   const legacy = await db.query<{ id: string }>(
-    `insert into public.payments(sale_id,customer_id,amount,payment_type,method,reference,status,recorded_by)
-     values ($1,$2,'100.00','installment','cash','LEG-1','recorded',$3) returning id`,
-    [await legacySaleFor(db, world), world.createdCustomers[0]!, finance],
+    `insert into public.payments(sale_id,customer_id,amount,payment_type,method,reference,status,recorded_by,
+       receipt_storage_path)
+     values ($1,$2,'100.00','installment','cash','LEG-1','recorded',$3,$4) returning id`,
+    [await legacySaleFor(db, world), world.createdCustomers[0]!, finance, await paymentReceipt(db)],
   );
   const legacyPayment = legacy.rows[0]!.id;
   const legacyResult = await verify(legacyPayment, 'verified');
@@ -580,6 +618,10 @@ check(
       [reservationIds],
     );
     await db.query(`delete from public.payments where reservation_id = any($1::uuid[])`, [
+      reservationIds,
+    ]);
+    // Signed RA documents RESTRICT their agreement (owner-only cleanup escape is set).
+    await db.query(`delete from public.purchase_signed_documents where reservation_id = any($1::uuid[])`, [
       reservationIds,
     ]);
     await db.query(`delete from public.reservation_agreement_schedule where agreement_id = any($1::uuid[])`, [

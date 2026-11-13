@@ -13,6 +13,7 @@ import {
   LINKS,
   PRODUCT,
   TOKEN,
+  TOKEN2,
   UNIQUE,
   phase2World,
   phase2WorldTokens,
@@ -193,7 +194,7 @@ const nextCustomer = () => CUSTOMERS[customerCursor++ % CUSTOMERS.length]!;
 async function createSale(productId: string, paymentScheme?: string) {
   const body: Record<string, string> = { customerId: nextCustomer(), productId };
   if (paymentScheme) body.paymentScheme = paymentScheme;
-  return call('sales', { method: 'POST', path: '', token: TOKEN.admin, body });
+  return call('sales', { method: 'POST', path: '', token: TOKEN2.salesManager, body });
 }
 
 describe('VIP sale creation freezes scheme economics', () => {

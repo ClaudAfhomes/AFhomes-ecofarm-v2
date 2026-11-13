@@ -477,6 +477,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (!entry) throw new Error('Import row persistence was incomplete');
             persistedIds.push(entry.id);
           }
+          // Legacy rows: the seller of record is always an active Sales Manager,
+          // resolved from the row's seller code / named SM. A row that would
+          // create a sale without one is flagged here (the SQL also persists the
+          // flag) so it shows in the review workbook; other rows proceed.
+          const sellerRowIds = batch
+            .filter((v) => {
+              // Only a row that would create a sale needs a seller (same test as the SQL).
+              const n = v.normalized as
+                | { externalVerified?: boolean; requireMember?: boolean; payment?: unknown }
+                | undefined;
+              return (
+                !v.errors.length &&
+                v.action === 'CREATE' &&
+                !!n &&
+                !n.externalVerified &&
+                (n.requireMember === true || (n.payment !== undefined && n.payment !== null))
+              );
+            })
+            .map(
+              (v) =>
+                ((saved ?? []) as { id: string; row_number: number }[]).find(
+                  (s) => s.row_number === v.rowNumber,
+                )!.id,
+            );
+          if (sellerRowIds.length) {
+            const sellers = await db.rpc('preview_import_sellers', {
+              p_row_ids: sellerRowIds,
+              p_actor_id: auth.userId,
+            });
+            if (sellers.error) throw sellers.error;
+            for (const result of (sellers.data ?? []) as Record<string, unknown>[]) {
+              if (!result.error) continue;
+              const item = ((saved ?? []) as { id: string; row_number: number }[]).find(
+                (s) => s.id === result.rowId,
+              );
+              const row = batch.find((v) => v.rowNumber === item?.row_number);
+              if (!row) continue;
+              row.errors.push({
+                field: 'seller_code',
+                message:
+                  "No active Sales Manager was found for this row. The seller of record must be an active SM from the seller's team.",
+              });
+              row.validation = 'error';
+              row.action = 'CONFLICT';
+              // The SQL check is read-only; persist the flag on the row we just created.
+              const flagged = await db
+                .from('customer_import_rows')
+                .update({
+                  validation_status: 'error',
+                  action: 'CONFLICT',
+                  validation_errors: row.errors,
+                })
+                .eq('id', result.rowId);
+              if (flagged.error) throw flagged.error;
+            }
+          }
           const candidateIds = batch
             .filter(
               (v) =>
@@ -843,6 +899,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         } catch (error) {
           const safeMessages: Record<string, string> = {
+            IMPORT_DUPLICATE_VIP_CARD_NUMBER: 'VIP Card number already exists in the system.',
+            IMPORT_SELLER_SM_REQUIRED:
+              'No active Sales Manager was found for this row. The seller of record must be an active SM from the referrer\x27s team.',
+            IMPORT_SELLER_TEAM_CONFLICT:
+              'The Sales Manager named on this row is not the SM of the referrer\x27s team.',
             EXTERNAL_IMPORT_EXISTING_APPLICATION_REVIEW_REQUIRED:
               'This purchase already has an application. Review the existing history before reconciling externally verified payments.',
             EXTERNAL_IMPORT_EXISTING_PAYMENT_REVIEW_REQUIRED:

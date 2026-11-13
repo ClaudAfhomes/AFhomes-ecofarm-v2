@@ -603,7 +603,7 @@ export function CustomerDetailPage() {
           </div>
         </div>
         <DetailFieldGrid className={styles.mastheadIds}>
-          <DetailField label="Customer ID (RA No.):">
+          <DetailField label="Customer ID:">
             <DetailMono>{record.raNumber || 'Not Recorded'}</DetailMono>
           </DetailField>
           <DetailField label="Internal system reference:">

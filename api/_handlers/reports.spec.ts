@@ -914,7 +914,7 @@ describe('Payments report with reservation-origin rows', () => {
   it('includes a pre-sale payment and reports the reservation it belongs to', async () => {
     seedReservationPayment();
     const report = reportResponseSchema.parse((await get('payments', TOKEN.superAdmin)).body);
-    const row = report.data.find((item) => item.saleNumber === 'AF-RES-ZZZZZ');
+    const row = report.data.find((item) => item.reservationNumber === 'AF-RES-ZZZZZ');
     expect(row).toBeDefined();
     expect(row).toMatchObject({ amount: '10000.00', status: 'verified', reference: 'RES-REF-1' });
     // The money is in the totals, not only in the row list.
@@ -927,7 +927,16 @@ describe('Payments report with reservation-origin rows', () => {
       (await get('payments', TOKEN.superAdmin, { search: 'AF-RES-ZZZZZ' })).body,
     );
     expect(report.data).toHaveLength(1);
-    expect(report.data[0]!.saleNumber).toBe('AF-RES-ZZZZZ');
+    expect(report.data[0]!.reservationNumber).toBe('AF-RES-ZZZZZ');
+  });
+
+  it('finds the official annual RA number in a pre-sale payment report', async () => {
+    seedReservationPayment();
+    const db=holder.db as FakeSupabase;
+    db.rows('reservation_agreements').find(r=>r.id===RESERVATION)!.reservation_number='2026-0001';
+    const report=reportResponseSchema.parse((await get('payments',TOKEN.superAdmin,{search:'2026-0001'})).body);
+    expect(report.data).toHaveLength(1);
+    expect(report.data[0]!.reservationNumber).toBe('2026-0001');
   });
 
   it('counts a finalization-linked row ONCE, not once per branch', async () => {
@@ -943,7 +952,7 @@ describe('Payments report with reservation-origin rows', () => {
   it('hides pre-sale rows from a scope-limited caller', async () => {
     seedReservationPayment();
     const report = reportResponseSchema.parse((await get('payments', TOKEN2.salesManager)).body);
-    expect(report.data.some((item) => item.saleNumber === 'AF-RES-ZZZZZ')).toBe(false);
+    expect(report.data.some((item) => item.reservationNumber === 'AF-RES-ZZZZZ')).toBe(false);
   });
 
   it('does not read pre-sale rows for a plan or seller filter', async () => {

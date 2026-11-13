@@ -1,4 +1,17 @@
 import { compareMoney, subtractMoney } from '@afhomes/shared';
+import {
+  ACTIVATION_BLOCKER_LABELS,
+  MEMBERSHIP_STATUS_LABELS,
+  PAYMENT_STATUS_LABELS,
+  RESERVATION_AGREEMENT_STATUS_LABELS,
+  SALE_STATUS_LABELS,
+  type ActivationBlocker,
+  type MembershipStatus,
+  type PaymentStatus,
+  type ReservationAgreementStatus,
+  type SaleStatus,
+} from '@afhomes/contracts';
+import type { StatusTone } from '@afhomes/ui';
 
 /** Presentation helpers for AFHomes business values. */
 
@@ -97,30 +110,112 @@ export const SPOT_CASH_TONE: Record<string, 'success' | 'warning' | 'danger' | '
   fully_paid: 'success',
 };
 
-/** A human label for a sale status. */
-export const SALE_STATUS_LABEL: Record<string, string> = {
-  draft: 'Draft',
-  submitted: 'Submitted',
-  payment_pending: 'Awaiting payment',
-  payment_in_progress: 'Payment in progress',
-  payment_verified: 'Fully paid',
-  activation_pending: 'Awaiting activation',
-  active: 'Active',
-  cancelled: 'Cancelled',
-  overdue: 'Overdue',
-};
+/* ------------------------------------------------------------------ */
+/* Lifecycle status badges                                             */
+/* ------------------------------------------------------------------ */
+// Labels come from the contracts lifecycle; only the semantic tone lives
+// here. Every map is keyed by the lifecycle enum type, so a new state fails
+// typecheck until it has a tone. Sale, payment, reservation, payment
+// progress and activation eligibility stay separate vocabularies.
 
-export const SALE_STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+export type StatusBadge = { label: string; tone: StatusTone };
+
+export const SALE_STATUS_TONE: Record<SaleStatus, StatusTone> = {
   draft: 'neutral',
   submitted: 'neutral',
   payment_pending: 'warning',
-  payment_in_progress: 'warning',
+  payment_in_progress: 'info',
   payment_verified: 'success',
   activation_pending: 'warning',
   active: 'success',
   cancelled: 'neutral',
   overdue: 'danger',
 };
+
+export const PAYMENT_STATUS_TONE: Record<PaymentStatus, StatusTone> = {
+  recorded: 'warning',
+  verified: 'success',
+  rejected: 'danger',
+  voided: 'neutral',
+};
+
+export const RESERVATION_AGREEMENT_STATUS_TONE: Record<ReservationAgreementStatus, StatusTone> = {
+  draft: 'neutral',
+  submitted: 'warning',
+  executed: 'success',
+  cancelled: 'neutral',
+};
+
+export const MEMBERSHIP_STATUS_TONE: Record<MembershipStatus, StatusTone> = {
+  active: 'success',
+  expired: 'neutral',
+  suspended: 'danger',
+  cancelled: 'neutral',
+};
+
+export const ACTIVATION_BLOCKER_TONE: Record<ActivationBlocker, StatusTone> = {
+  already_active: 'info',
+  cancelled: 'neutral',
+  outstanding_balance: 'warning',
+  not_ready: 'neutral',
+};
+
+export const saleStatusBadge = (status: SaleStatus): StatusBadge => ({
+  label: SALE_STATUS_LABELS[status],
+  tone: SALE_STATUS_TONE[status],
+});
+
+export const paymentStatusBadge = (status: PaymentStatus): StatusBadge => ({
+  label: PAYMENT_STATUS_LABELS[status],
+  tone: PAYMENT_STATUS_TONE[status],
+});
+
+export const reservationAgreementStatusBadge = (
+  status: ReservationAgreementStatus,
+): StatusBadge => ({
+  label: RESERVATION_AGREEMENT_STATUS_LABELS[status],
+  tone: RESERVATION_AGREEMENT_STATUS_TONE[status],
+});
+
+export const membershipStatusBadge = (status: MembershipStatus): StatusBadge => ({
+  label: MEMBERSHIP_STATUS_LABELS[status],
+  tone: MEMBERSHIP_STATUS_TONE[status],
+});
+
+/** Activation eligibility from the server's `activationBlocker` (null = eligible). */
+export const activationBadge = (blocker: ActivationBlocker | null): StatusBadge =>
+  blocker === null
+    ? { label: 'Eligible', tone: 'success' }
+    : { label: ACTIVATION_BLOCKER_LABELS[blocker], tone: ACTIVATION_BLOCKER_TONE[blocker] };
+
+/**
+ * Payment progress: a derived presentation milestone, never a stored state.
+ * Compares the verified total with the frozen contract amount in exact
+ * cents, using the same `>=` rule the server's `fullyPaid` uses.
+ */
+export type PaymentProgress = 'none' | 'partial' | 'full';
+
+export const PAYMENT_PROGRESS_LABEL: Record<PaymentProgress, string> = {
+  none: 'No Verified Payments',
+  partial: 'Partially Paid',
+  full: 'Fully Paid',
+};
+
+export const PAYMENT_PROGRESS_TONE: Record<PaymentProgress, StatusTone> = {
+  none: 'neutral',
+  partial: 'warning',
+  full: 'success',
+};
+
+export function paymentProgress(verifiedTotal: string, frozenTotal: string): PaymentProgress {
+  if (compareMoney(verifiedTotal, frozenTotal) >= 0) return 'full';
+  return compareMoney(verifiedTotal, '0.00') > 0 ? 'partial' : 'none';
+}
+
+export const paymentProgressBadge = (progress: PaymentProgress): StatusBadge => ({
+  label: PAYMENT_PROGRESS_LABEL[progress],
+  tone: PAYMENT_PROGRESS_TONE[progress],
+});
 
 /**
  * Humanize a snake_case code: bank_transfer -> Bank Transfer. The method is

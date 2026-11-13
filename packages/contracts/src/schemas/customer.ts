@@ -105,6 +105,7 @@ export type CustomerProfile = z.infer<typeof customerProfileSchema>;
 /* ================================================================== */
 
 export const customerMembershipSchema = z.object({
+  vipCardNumber: z.string().nullable().optional(),
   id: z.string().uuid(),
   membershipNumber: z.string(),
   productName: z.string().nullable(),

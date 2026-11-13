@@ -15,6 +15,7 @@ import {
   LINKS,
   PRODUCT,
   TOKEN,
+  TOKEN2,
   UNIQUE,
   UUID,
   phase2World,
@@ -80,7 +81,7 @@ describe('POST /sales ordering (BR-RATE-01: seller before number)', () => {
           productId: PRODUCT.gold,
           sellerStaffId: UUID.inactiveStaff,
         },
-        token: TOKEN.admin,
+        token: TOKEN2.salesManager,
       }) as never,
       res as never,
     );
@@ -92,7 +93,7 @@ describe('POST /sales ordering (BR-RATE-01: seller before number)', () => {
   it('issues exactly one sale number per created sale, after seller resolution', async () => {
     const { db, state } = await create(
       { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-      TOKEN.admin,
+      TOKEN2.salesManager,
     );
     expect(state.status).toBe(201);
     expect(numberCalls(db)).toHaveLength(1);
@@ -118,7 +119,7 @@ describe('POST /sales ordering (BR-RATE-01: seller before number)', () => {
           productId: PRODUCT.gold,
           paymentScheme: 'installment_4_month',
         },
-        token: TOKEN.admin,
+        token: TOKEN2.salesManager,
       }) as never,
       res as never,
     );
@@ -138,7 +139,7 @@ describe('POST /sales ordering (BR-RATE-01: seller before number)', () => {
         method: 'POST',
         familyPath: '',
         body: { customerId: CUSTOMER.prospect, productId: PRODUCT.retired },
-        token: TOKEN.admin,
+        token: TOKEN2.salesManager,
       }) as never,
       res as never,
     );

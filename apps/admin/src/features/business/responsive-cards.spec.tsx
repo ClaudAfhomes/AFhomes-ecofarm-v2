@@ -138,7 +138,7 @@ describe('directory tables carry mobile card labels', () => {
     } as never);
     renderWithProviders(<CustomerApplicationsPage />);
     const table = await screen.findByRole('table');
-    expectLabeledCards(table, ['Application', 'Applicant', 'Tier', 'Seller', 'Status']);
+    expectLabeledCards(table, ['Application', 'Applicant', 'Tier', 'Seller', 'Status', 'Next step']);
   });
 
   it('reservations: Reservation, Applicant, Tier, Payment scheme, Amount, Payment', async () => {
@@ -167,6 +167,7 @@ describe('directory tables carry mobile card labels', () => {
       'Payment scheme',
       'Amount',
       'Payment',
+      'Next step',
     ]);
   });
 

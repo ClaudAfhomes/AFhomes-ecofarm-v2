@@ -2,7 +2,13 @@ import type { AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
 import type { BreadcrumbItem, SidebarItem } from '@afhomes/ui';
 import { isFeaturePathEnabled } from '@afhomes/shared';
 
-export type NavLink = { to: string; label: string; module: AfHomesModuleKey };
+export type NavLink = {
+  to: string;
+  label: string;
+  module: AfHomesModuleKey;
+  /** Extra modules that also make this entry visible (any-of with `module`). */
+  alsoModules?: AfHomesModuleKey[];
+};
 export type AdminNavItem = {
   to: string;
   label: string;
@@ -62,6 +68,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         to: '/admin/finance/payments',
         label: 'Payment List',
         module: 'finance.payment_verification',
+      },
+      {
+        to: '/admin/finance/month-end',
+        label: 'Month-End Close',
+        module: 'finance.payroll',
+        alsoModules: ['finance.payroll_close'],
       },
       {
         to: '/admin/finance/activation',
@@ -193,7 +205,10 @@ export const canViewModule = (
   key: AfHomesModuleKey,
 ) => permissions?.some((permission) => permission.moduleKey === key && permission.canView) === true;
 
-const REPORT_MODULES: readonly AfHomesModuleKey[] = [
+const canViewNavLink = (permissions: readonly AfHomesPermission[] | undefined, link: NavLink) =>
+  [link.module, ...(link.alsoModules ?? [])].some((key) => canViewModule(permissions, key));
+
+const REPORT_MODULES:readonly AfHomesModuleKey[] = [
   'sales.card_sales',
   'sales.customers',
   'sales.card_plans',
@@ -220,7 +235,7 @@ export function navItemsForPermissions(
     const dropdown = item.dropdown?.filter((child) =>
       child.to === '/admin/reports'
         ? canViewReports(permissions)
-        : canViewModule(permissions, child.module),
+        : canViewNavLink(permissions, child),
     );
     const canViewParent =
       item.to === '/admin/reports'
@@ -281,6 +296,13 @@ export const EXTRA_GATED_ROUTES: readonly {
     pathPrefix: '/admin/customers/applications/import-export',
     module: 'governance.customer_import',
   },
+  // OST onboarding screens left the sidebar but kept their routes. Without an
+  // entry here they fell through to the Dashboard catch-all (`/admin` covers
+  // every console path) and opened for any `dashboard.view` session. Keys are
+  // the ones their removed nav entries carried.
+  { pathPrefix: '/admin/ost/applications', module: 'network.ost_registrations' },
+  { pathPrefix: '/admin/ost/members', module: 'network.ost_members' },
+  { pathPrefix: '/admin/ost/referral-code', module: 'network.referrals' },
 ];
 
 export function canAccessNavTarget(
@@ -297,7 +319,8 @@ export function canAccessNavTarget(
   if (extra) return canViewModule(permissions, extra.module);
   const sub = findNavSubItem(pathname);
   const item = findNavItem(pathname);
-  const key = sub?.sub.module ?? item?.module;
+  if (sub) return canViewNavLink(permissions, sub.sub);
+  const key = item?.module;
   return !key || canViewModule(permissions, key);
 }
 

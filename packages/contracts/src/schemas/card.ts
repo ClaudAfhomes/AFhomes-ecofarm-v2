@@ -20,6 +20,7 @@ import { z } from 'zod';
  * from the product catalogue.
  */
 export const membershipCardSchema = z.object({
+  vipCardNumber: z.string().nullable().optional(),
   membershipId: z.string().uuid(),
   membershipNumber: z.string(),
   memberName: z.string(),

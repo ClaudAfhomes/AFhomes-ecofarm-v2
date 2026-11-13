@@ -248,3 +248,9 @@ function stripTimestamp(text: string): string {
     .replace(/D:\d{4}[\d+\-']*/g, '')
     .replace(/\(Generated [^)]*\)/g, '(Generated ...)');
 }
+it.each(['2026-0001','AF-RES-ABCDE'])('prints official and historical RA %s under the correct identifier label',number=>{
+ const pdf=visible(evidence('reservation',{...common,reservationNumber:number}));
+ expect(pdf).toContain(number);
+ expect(pdf).toContain('Official Reservation Agreement Number');
+ expect(pdf).not.toContain('Reservation (AF-RES)');
+});

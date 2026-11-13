@@ -302,6 +302,16 @@ function install(
     rpcs: [
       ...(options.rpcs ?? []),
       {
+        // Default: every legacy row resolves a seller; a test overrides it via options.rpcs.
+        fn: 'preview_import_sellers',
+        result: (args: Record<string, unknown>) =>
+          (args.p_row_ids as string[]).map((rowId) => ({
+            rowId,
+            sellerStaffId: null,
+            error: null,
+          })),
+      },
+      {
         fn: 'prepare_customer_import_batch',
         result: (args: Record<string, unknown>) =>
           (args.p_row_ids as string[]).map((rowId) => {
@@ -779,6 +789,55 @@ describe('customer import/export handler', () => {
     expect((holder.db as FakeSupabase).tables['customers']).toHaveLength(0);
   });
 
+  it('flags a row with no resolvable Sales Manager seller and keeps the other rows valid', async () => {
+    install(
+      {},
+      {
+        rpcs: [
+          {
+            fn: 'preview_import_sellers',
+            result: (args: Record<string, unknown>) =>
+              (args.p_row_ids as string[]).map((rowId, index) => ({
+                rowId,
+                sellerStaffId: null,
+                error: index === 0 ? 'IMPORT_SELLER_SM_REQUIRED' : null,
+              })),
+          },
+        ],
+      },
+    );
+    const second = { ...pendingRow(), email: 'second-import-row@example.invalid' };
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: {
+        source: 'excel',
+        contentBase64: xlsxOf([pendingRow(), second]),
+        sourceName: 'members.xlsx',
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = res.body as {
+      job: { status: string; validRows: number; invalidRows: number };
+      rows: { action: string; errors: { field: string; message: string }[] }[];
+    };
+    expect(body.job.validRows).toBe(1);
+    expect(body.job.invalidRows).toBe(1);
+    expect(body.rows[0]!.action).toBe('CONFLICT');
+    expect(body.rows[0]!.errors).toEqual([
+      expect.objectContaining({
+        field: 'seller_code',
+        message: expect.stringMatching(/No active Sales Manager/),
+      }),
+    ]);
+    expect(body.rows[1]!.errors).toHaveLength(0);
+    // The flag is saved on the stored row, so the review workbook shows it.
+    const stored = (holder.db as FakeSupabase).rows('customer_import_rows');
+    expect(
+      stored.filter((r) => r.validation_status === 'error' && r.action === 'CONFLICT'),
+    ).toHaveLength(1);
+  });
+
   it('parses CSV with UTF-8 names and surfaces per-field errors', async () => {
     const csv = b64(
       Buffer.from(
@@ -1087,24 +1146,66 @@ it('loads every import row across server pages before completing a large job', a
   });
 });
 
-it('collects bad guided values into a downloadable review without creating business records', async()=>{
- const db=install();const parts=readWorkbookParts(customerWorkflowTemplate());
- let sheet=new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'));
- const input={first_name:'Elena',last_name:'Reyes',email:'bad-email',mobile:'09ABC',vip_tier:'Platinum',contract_date:'not-a-date',stated_payment_scheme:'Spot cash'};
- for(const [key,value] of Object.entries(input)){
-   const n=WORKFLOW_COLUMNS.Customers.findIndex(c=>c.key===key)+1;const col=(n:number):string=>n>26?col(Math.floor((n-1)/26))+String.fromCharCode(65+(n-1)%26):String.fromCharCode(64+n);
-   const ref=col(n)+'2';const regex=new RegExp('<c\\b[^>]*r="'+ref+'"[^>]*?(?:\\/>|>[\\s\\S]*?<\\/c>)');
-   sheet=sheet.replace(regex,'<c r="'+ref+'" t="inlineStr"><is><t>'+value+'</t></is></c>');
- }
- parts.set('xl/worksheets/sheet2.xml',new TextEncoder().encode(sheet));
- const sourceBytes=zipStored([...parts].map(([name,data])=>({name,data})),true);
- expect(parseCustomerWorkbookV2(sourceBytes,{collectErrors:true})!.rows[0]!.fields.last_name).toBe('Reyes');
- const res=await call({path:'parse',method:'POST',body:{source:'excel',contentBase64:b64(zipStored([...parts].map(([name,data])=>({name,data})),true))}});
- expect(res.status).toBe(201);
- const body=res.body as {job:{invalidRows:number};reviewFile:{content:string};rows:{errors:{field:string}[]}[]};
- expect(body.job.invalidRows).toBe(1);expect(body.reviewFile.content).toBeTruthy();
- expect(body.rows[0]!.errors.map(e=>e.field)).toEqual(expect.arrayContaining(['mobile','email','vip_tier','contract_date']));
- const review=readWorkbookParts(new Uint8Array(Buffer.from(body.reviewFile.content,'base64')));
- expect(new TextDecoder().decode(review.get('xl/worksheets/sheet2.xml'))).toContain('09ABC');
- expect(db.rows('customers')).toHaveLength(0);expect(db.rows('card_sales')).toHaveLength(0);
+it('collects bad guided values into a downloadable review without creating business records', async () => {
+  const db = install();
+  const parts = readWorkbookParts(customerWorkflowTemplate());
+  let sheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet2.xml'));
+  const input = {
+    first_name: 'Elena',
+    last_name: 'Reyes',
+    email: 'bad-email',
+    mobile: '09ABC',
+    vip_tier: 'Platinum',
+    contract_date: 'not-a-date',
+    stated_payment_scheme: 'Spot cash',
+  };
+  for (const [key, value] of Object.entries(input)) {
+    const n = WORKFLOW_COLUMNS.Customers.findIndex((c) => c.key === key) + 1;
+    const col = (n: number): string =>
+      n > 26
+        ? col(Math.floor((n - 1) / 26)) + String.fromCharCode(65 + ((n - 1) % 26))
+        : String.fromCharCode(64 + n);
+    const ref = col(n) + '2';
+    const regex = new RegExp('<c\\b[^>]*r="' + ref + '"[^>]*?(?:\\/>|>[\\s\\S]*?<\\/c>)');
+    sheet = sheet.replace(
+      regex,
+      '<c r="' + ref + '" t="inlineStr"><is><t>' + value + '</t></is></c>',
+    );
+  }
+  parts.set('xl/worksheets/sheet2.xml', new TextEncoder().encode(sheet));
+  const sourceBytes = zipStored(
+    [...parts].map(([name, data]) => ({ name, data })),
+    true,
+  );
+  expect(
+    parseCustomerWorkbookV2(sourceBytes, { collectErrors: true })!.rows[0]!.fields.last_name,
+  ).toBe('Reyes');
+  const res = await call({
+    path: 'parse',
+    method: 'POST',
+    body: {
+      source: 'excel',
+      contentBase64: b64(
+        zipStored(
+          [...parts].map(([name, data]) => ({ name, data })),
+          true,
+        ),
+      ),
+    },
+  });
+  expect(res.status).toBe(201);
+  const body = res.body as {
+    job: { invalidRows: number };
+    reviewFile: { content: string };
+    rows: { errors: { field: string }[] }[];
+  };
+  expect(body.job.invalidRows).toBe(1);
+  expect(body.reviewFile.content).toBeTruthy();
+  expect(body.rows[0]!.errors.map((e) => e.field)).toEqual(
+    expect.arrayContaining(['mobile', 'email', 'vip_tier', 'contract_date']),
+  );
+  const review = readWorkbookParts(new Uint8Array(Buffer.from(body.reviewFile.content, 'base64')));
+  expect(new TextDecoder().decode(review.get('xl/worksheets/sheet2.xml'))).toContain('09ABC');
+  expect(db.rows('customers')).toHaveLength(0);
+  expect(db.rows('card_sales')).toHaveLength(0);
 });

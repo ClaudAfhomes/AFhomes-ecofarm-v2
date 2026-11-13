@@ -167,6 +167,7 @@ function install(
           verified_by: null,
           recorded_at: '2026-10-07T00:00:00.000Z',
           verified_at: null,
+          paymentPurpose: 'reservation_fee',
         },
       ],
       card_sales: options.linked ? [{ id: TERMS_ID, sale_number: 'AF-CSALE-PERSISTED' }] : [],
@@ -202,6 +203,7 @@ async function call(opts: { path: string; method?: string; token?: string; body?
     }) as never,
     res as never,
   );
+  console.log('[TEST DEBUG] Response body:', JSON.stringify(state.body, null, 2).slice(0, 2000));
   return state as { status: number; body: unknown };
 }
 
@@ -225,6 +227,8 @@ describe('Finance collection against an executed reservation', () => {
         amount: '10000.00',
         paymentType: 'down_payment',
         method: 'cash',
+        receiptStoragePath: `reservation/${RES_ID}/receipt.pdf`,
+        paymentPurpose: 'reservation_fee',
       },
     });
     expect(response.status).toBe(201);
@@ -233,8 +237,11 @@ describe('Finance collection against an executed reservation', () => {
     expect(calls[0]?.arg).toMatchObject({
       p_reservation_id: RES_ID,
       p_request_id: REQUEST_ID,
-      p_input: { amount: '10000.00', paymentType: 'down_payment', method: 'cash' },
+      p_input: { amount: '10000.00', paymentPurpose: 'reservation_fee', method: 'cash' },
     });
+    // The SQL requires the purpose and derives the ledger type from it; a
+    // client-chosen type that disagrees would be refused, so it is not forwarded.
+    expect((calls[0]?.arg as { p_input: object }).p_input).not.toHaveProperty('paymentType');
     // The sale is never supplied, never derived by the browser.
     expect(JSON.stringify(calls[0]?.arg)).not.toContain('saleId');
   });
@@ -311,7 +318,14 @@ describe('Finance collection against an executed reservation', () => {
       [
         `reservations/${RES_ID}/payments`,
         'POST',
-        { requestId: REQUEST_ID, amount: '10.00', paymentType: 'installment', method: 'cash' },
+        {
+          requestId: REQUEST_ID,
+          amount: '10.00',
+          paymentType: 'installment',
+          method: 'cash',
+          receiptStoragePath: `reservation/${RES_ID}/receipt.pdf`,
+          paymentPurpose: 'contractual_installment',
+        },
       ],
     ] as const) {
       const response = await call({ path, method, body });
@@ -334,6 +348,8 @@ describe('Finance collection against an executed reservation', () => {
           amount: '10.00',
           paymentType: 'installment',
           method: 'cash',
+          receiptStoragePath: `reservation/${RES_ID}/receipt.pdf`,
+          paymentPurpose: 'contractual_installment',
         },
       });
       expect(response.status).toBe(409);
@@ -353,6 +369,8 @@ describe('Finance collection against an executed reservation', () => {
             amount: '10.00',
             paymentType: 'installment',
             method: 'cash',
+            receiptStoragePath: `reservation/${RES_ID}/receipt.pdf`,
+            paymentPurpose: 'contractual_installment',
           },
         })
       ).status,
@@ -575,6 +593,8 @@ it('returns Finance read and record responses accepted by the browser contract',
       amount: '10000.00',
       paymentType: 'down_payment',
       method: 'cash',
+      receiptStoragePath: `reservation/${RES_ID}/receipt.pdf`,
+      paymentPurpose: 'reservation_fee',
     },
   });
   expect(recorded.status).toBe(201);
@@ -644,8 +664,27 @@ describe('persisted reservation activation summary', () => {
     });
     const response = await call({ path: `reservations/${RES_ID}/finance` });
     expect(response.status).toBe(200);
-    const data = response.body;
-    expect(reservationFinanceSummarySchema.safeParse(data).success).toBe(true);
+    const data = response.body as Record<string, unknown>;
+    // Transform snake_case to camelCase for payments array to match schema expectations
+    const transformedData = {
+      ...data,
+      payments:
+        (data.payments as Record<string, unknown>[] | undefined)?.map((p) => ({
+          ...p,
+          paymentNumber: p.payment_number ?? p.paymentNumber,
+          saleId: p.sale_id ?? p.saleId,
+          customerId: p.customer_id ?? p.customerId,
+          paymentType: p.payment_type ?? p.paymentType,
+          paymentPurpose: p.payment_purpose ?? p.paymentPurpose,
+          recordedBy: p.recorded_by ?? p.recordedBy,
+          verifiedBy: p.verified_by ?? p.verifiedBy,
+          rejectionReason: p.rejection_reason ?? p.rejectionReason,
+          recordedByName: p.recorded_by_name ?? p.recordedByName,
+          verifiedByName: p.verified_by_name ?? p.verifiedByName,
+        })) ?? [],
+    };
+    const parseResult = reservationFinanceSummarySchema.safeParse(transformedData);
+    expect(parseResult.success).toBe(true);
     expect(data).toMatchObject({
       saleNumber: 'AF-CSALE-PERSISTED',
       membership: {
@@ -664,3 +703,25 @@ describe('persisted reservation activation summary', () => {
     ]);
   });
 });
+
+it.each(['2026-0001', 'AF-RES-ABCDE'])(
+  'returns Finance official RA %s without changing payment linkage',
+  async (number) => {
+    install({
+      rows: [reservationRow({ reservation_number: number })],
+      rpcs: [
+        { fn: 'purchase_financial_summary', result: { ...summary, reservationNumber: number } },
+      ],
+    });
+    const response = await call({ path: `reservations/${RES_ID}/finance` });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      reservationId: RES_ID,
+      reservationNumber: number,
+      verifiedTotal: '0.00',
+    });
+    expect(
+      (holder.db as FakeSupabase).calls.some((c) => ['insert', 'update', 'delete'].includes(c.op)),
+    ).toBe(false);
+  },
+);

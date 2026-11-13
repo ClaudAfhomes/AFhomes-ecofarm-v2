@@ -396,7 +396,7 @@ describe('category-gated selling', () => {
     const ok = await call('sales', {
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(ok.status).toBe(201);
@@ -433,7 +433,7 @@ describe('category-gated selling', () => {
     const refused = await call('sales', {
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(refused.status).toBe(409);
@@ -458,7 +458,7 @@ describe('category-gated selling', () => {
     const sale = await call('sales', {
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(sale.status).toBe(201);
@@ -469,7 +469,7 @@ describe('category-gated selling', () => {
     await call('sales', {
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     const db = holder.db as FakeSupabase;

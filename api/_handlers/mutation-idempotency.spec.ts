@@ -54,7 +54,14 @@ const reservation = {
     email: 'qa@example.invalid',
   },
 };
-const payment = { requestId, amount: '100.00', paymentType: 'installment', method: 'cash' };
+const payment = {
+  requestId,
+  amount: '100.00',
+  paymentType: 'installment',
+  method: 'cash',
+  receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+  paymentPurpose: 'contractual_installment',
+};
 const cases = [
   {
     name: 'payment',
@@ -133,6 +140,14 @@ for (const test of cases)
 it('retains legacy nonblank-reference payment support without a token', async () => {
   holder.db!.rpcs.push({ fn: 'record_card_payment', result: UUID.viewerStaff });
   expect(
-    (await call(cases[0]!, { ...payment, requestId: undefined, reference: 'QA-REFERENCE' })).status,
+    (
+      await call(cases[0]!, {
+        ...payment,
+        requestId: undefined,
+        reference: 'QA-REFERENCE',
+        receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+        paymentPurpose: 'contractual_installment',
+      })
+    ).status,
   ).toBe(201);
 });

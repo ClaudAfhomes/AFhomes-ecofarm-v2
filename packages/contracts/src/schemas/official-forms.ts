@@ -227,6 +227,7 @@ const optionalGovernmentIdNumber = z.preprocess(
 export const applicationRaDraftSchema = z.object({
   reservationDate: z.iso.date().optional(),
   agreementDate: z.iso.date().optional(),
+  /** Legacy draft proposal only. Never an issued official RA number. */
   reservationNumber: z.string().trim().max(100).optional(),
   revisionNumber: z.string().trim().max(50).optional(),
   reservationPaymentDate: z.iso.date().optional(),

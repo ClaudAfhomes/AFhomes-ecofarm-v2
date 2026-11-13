@@ -47,10 +47,10 @@ export const hashIdentifier = (value: string) => createHash('sha256').update(val
 
 
 const SELECT_MEMBERSHIP =
-  '*, customers!inner(first_name, middle_name, last_name, suffix, status), card_plans!inner(name,category_id)';
+  '*, customers!inner(first_name, middle_name, last_name, suffix, status, vip_card_number), card_plans!inner(name,category_id)';
 
 const SELECT_CARD =
-  '*, customers!inner(first_name, middle_name, last_name, suffix, status), card_plans!inner(name, code, category_id)';
+  '*, customers!inner(first_name, middle_name, last_name, suffix, status, vip_card_number), card_plans!inner(name, code, category_id)';
 
 /** Category names for plan rows (the plan embed carries no category). */
 async function categoryDirectory(db: Db): Promise<Map<string, CategoryInfo>> {

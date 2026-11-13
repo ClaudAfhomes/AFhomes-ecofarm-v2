@@ -47,6 +47,7 @@ export const REFERRAL = {
   vdToSsm: 'eeeeeeee-0000-4000-8000-000000000001',
   ssmToSm: 'eeeeeeee-0000-4000-8000-000000000002',
   smToOst: 'eeeeeeee-0000-4000-8000-000000000003',
+  smToSsm: 'eeeeeeee-0000-4000-8000-000000000011',
 } as const;
 
 const iso = (daysAgo: number, hour = 9) => {
@@ -812,7 +813,10 @@ export function phase2World(overrides: Partial<FakeTables> = {}): FakeTables {
     roles: rolesPhase2Table(),
     staff_users: staffUsersPhase2Table(),
     staff_role_assignments: staffAssignmentsPhase2Table(),
-    role_permissions: rolePermissionsPhase2Table(),
+    role_permissions: [
+      ...baseTables().role_permissions as FakeRow[],
+      ...rolePermissionsPhase2Table(),
+    ],
     referral_relationships: [
       ...referralRelationshipsTable(),
       ...referralPhase2Table(),

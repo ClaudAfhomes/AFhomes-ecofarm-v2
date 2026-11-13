@@ -124,7 +124,7 @@ describe('CustomerRecordActions', () => {
     renderActions({ ...FULLSTAFF, roleSlug: 'super_admin' }, [SALE]);
     const names = [
       'Issue / Reissue activation link',
-      'Record payment',
+      'Record & verify payment',
       'Verify payment',
     ];
     for (const name of names) {
@@ -152,18 +152,18 @@ describe('CustomerRecordActions', () => {
   it('hides sale buttons without sale grants or sales', async () => {
     renderActions(STAFF, []);
     await screen.findByText('Actions');
-    expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Record & verify payment' })).not.toBeInTheDocument();
   });
 
   it('aims the sale buttons at the selected sale', async () => {
     const other = { ...SALE, id: 's-2', saleNumber: 'SALE-000002' };
     vi.mocked(getSaleSummary).mockResolvedValue({ paymentScheme: 'spot_cash' } as never);
     renderActions(FULLSTAFF, [SALE, other]);
-    await screen.findByRole('button', { name: 'Record payment' });
+    await screen.findByRole('button', { name: 'Record & verify payment' });
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Sale for actions'), 's-2');
-    await user.click(screen.getByRole('button', { name: 'Record payment' }));
-    expect(await screen.findByRole('dialog', { name: 'Record a payment' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Record & verify payment' }));
+    expect(await screen.findByRole('dialog', { name: 'Record & verify payment' })).toBeInTheDocument();
     expect(vi.mocked(getSaleSummary)).toHaveBeenCalledWith('s-2');
   });
 

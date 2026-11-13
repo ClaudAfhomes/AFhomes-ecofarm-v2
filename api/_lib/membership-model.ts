@@ -20,6 +20,7 @@ export const toMembership = (
         .filter((p) => typeof p === 'string' && p)
         .join(' ') || 'Unknown customer',
     customerStatus: (customer.status as string | null) ?? null,
+    vipCardNumber: isoOrNull(customer.vip_card_number),
     saleId: row.sale_id,
     membershipNumber: row.membership_number,
     productId: isoOrNull(row.product_id),
@@ -62,6 +63,7 @@ export const toCard = (
         .filter((p) => typeof p === 'string' && p)
         .join(' ') || 'Unknown customer',
     customerStatus: (customer.status as string | null) ?? null,
+    vipCardNumber: isoOrNull(customer.vip_card_number),
     tierName: typeof product.name === 'string' && product.name ? product.name : 'AFHomes card',
     tierCode: typeof product.code === 'string' ? product.code : '',
     categoryName: categories.get(String(product.category_id ?? ''))?.name ?? null,

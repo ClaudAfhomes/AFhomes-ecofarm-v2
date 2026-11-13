@@ -10,6 +10,12 @@ const plan = {
   standardInstallmentMonths: 4,
 } as CardProduct;
 describe('preliminary RA review', () => {
+ it('keeps official issuance pending and preserves a separately labelled legacy proposal', () => {
+  renderWithProviders(<ApplicationRaReview value={{reservationNumber:'OLD-DRAFT'}} defaults={{}} onChange={vi.fn()} />);
+  expect(screen.getByLabelText('Official Reservation Agreement Number')).toHaveValue('Pending authorized reservation issuance');
+  expect(screen.getByLabelText('Official Reservation Agreement Number')).toHaveAttribute('readonly');
+  expect(screen.getByText(/Legacy proposed reference: OLD-DRAFT/)).toBeVisible();
+ });
   it('prints without submitting or changing the document and reports print errors', async () => {
     const onPrint = vi.fn().mockRejectedValueOnce(new Error('Printer unavailable')).mockResolvedValueOnce(undefined);
     const onChange = vi.fn();
@@ -44,6 +50,16 @@ describe('preliminary RA review', () => {
       { paymentDueDay: 32 },
     ])
       expect(applicationRaDraftSchema.safeParse(value).success).toBe(false);
+  });
+
+  it('defaults the reservation and agreement dates to today', () => {
+    const today = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const iso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    expect(suggestedRaTerms(plan, 'spot_cash')).toMatchObject({
+      reservationDate: iso,
+      agreementDate: iso,
+    });
   });
   it('edits document dates and can restore scheme suggestions without submitting', () => {
     const onChange = vi.fn();

@@ -75,3 +75,6 @@ supabase/migrations/archive/
 /scripts/setup-atlas-indexes.ts
 /scripts/smoke-test-purchase.ts
 /scripts/verify-password.ts
+
+# Personal Claude Code overrides (never committed)
+.claude/settings.local.json

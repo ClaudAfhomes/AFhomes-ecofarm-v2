@@ -9,7 +9,7 @@
  */
 
 import { HumanInput as NormalizedInput } from '../../lib/HumanInput';
-import { useId, useEffect, useRef, useState } from 'react';
+import { useId, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ApplicationHolder, Customer, GenealogyNode } from '@afhomes/contracts';
 import {
@@ -22,6 +22,9 @@ import {
   tinNumberSchema,
   optionalContactNumberSchema,
   aaNumberSchema,
+  SELLER_OF_RECORD_ROLE,
+  canCreateVipSale,
+  mustNameSellerOfRecord,
 } from '@afhomes/contracts';
 import type { ZodType } from 'zod';
 import { Alert, Button, Select } from '@afhomes/ui';
@@ -958,12 +961,17 @@ export function UplineChain({
   nodes,
   staffId,
   badge,
+  leading,
+  help,
 }: {
   nodes: readonly GenealogyNode[];
   staffId: string | null;
   /** "✓ Same team verified" once both sides resolve and match, "Read only"
    * otherwise - the same distinction the reference's own badge makes. */
   badge?: string;
+  /** The SM card (seller of record), rendered before the SSM/SVD cards. */
+  leading?: ReactNode;
+  help?: string;
 }) {
   const byId = new Map(nodes.map((node) => [node.staffId, node]));
   const chain: GenealogyNode[] = [];
@@ -985,8 +993,8 @@ export function UplineChain({
     refetchOnWindowFocus: false,
     retry: false,
   });
-  if (!staffId) return null;
-  if (!chain.length)
+  if (!staffId && !leading) return null;
+  if (!chain.length && !leading)
     return (
       <section className={v4.sharedTeam} aria-label="Upline">
         <div className={v4.sharedTeamHead}>
@@ -1002,11 +1010,12 @@ export function UplineChain({
       <div className={v4.sharedTeamHead}>
         <div>
           <h3>SM / SSM / SVD upline</h3>
-          <p>Automatically resolved from the existing sales genealogy.</p>
+          <p>{help ?? 'Automatically resolved from the existing sales genealogy.'}</p>
         </div>
         {badge ? <span className={v4.hintpill}>{badge}</span> : null}
       </div>
       <div className={v4.sharedTeamChain}>
+        {leading}
         {chain.map((node) => (
           <div key={node.staffId}>
             <small>{ROLE_LABEL[node.role]}</small>
@@ -1085,7 +1094,16 @@ export function RecommenderFields({
   onChain,
   networkSelection,
   onNetworkError,
+  seller,
 }: {
+  /** Seller of record (Customer Application only). An SM creator is the seller
+   * and sees their own account read-only; any other permitted creator picks
+   * the active SM here. UX only - the server re-validates. */
+  seller?: {
+    account: { id?: string; name?: string; roleSlug?: string; status?: string } | null | undefined;
+    value: string;
+    onChange: (staffId: string) => void;
+  };
   /** New Customer Application only. The Network screen is a flat pair of AA
    * number inputs (no IST/OST classification - both Referrer and VIP
    * Recommender are always OST), so this is now just a mode flag. */
@@ -1314,14 +1332,116 @@ export function RecommenderFields({
   // Chain derivation for submission: SVD/SSM/SM always come from the shared
   // team (whichever side resolved); `referrerStaffId` is always the
   // referrer's OWN id, never reinterpreted from the chain walk above.
+  // Seller of record. An SM creator is the seller; any other permitted creator
+  // names the active SM, defaulting to the SM of the referrer's own team.
+  const sellerAccount = seller?.account;
+  const sellerIsCreator = Boolean(
+    seller && canCreateVipSale(sellerAccount) && !mustNameSellerOfRecord(sellerAccount),
+  );
+  const sellerEditable = Boolean(
+    seller && canCreateVipSale(sellerAccount) && mustNameSellerOfRecord(sellerAccount),
+  );
+  const sellerId = seller?.value ?? '';
+  const teamSmId = (() => {
+    if (!sharedTeamStaffId) return '';
+    try {
+      return resolveApplicationNetwork(nodes, sharedTeamStaffId).chain.smStaffId;
+    } catch {
+      return '';
+    }
+  })();
+  const sellerTouched = useRef(false);
+  const onSellerRef = useRef(seller?.onChange);
+  useEffect(() => {
+    onSellerRef.current = seller?.onChange;
+  });
+  useEffect(() => {
+    if (!sellerEditable || sellerTouched.current) return;
+    onSellerRef.current?.(teamSmId);
+  }, [sellerEditable, teamSmId]);
+  const smOptionsAll = chainOptions(nodes, SELLER_OF_RECORD_ROLE, null);
+  const [sellerSearch, setSellerSearch] = useState('');
+  const smIds = smOptionsAll.map((node) => node.staffId);
+  const smNumbers = useQuery({
+    queryKey: ['aa-numbers', 'sellers', smIds.slice().sort().join(',')],
+    queryFn: () => getAccreditationNumbers(smIds),
+    enabled: sellerEditable && smIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const ownNumber = useQuery({
+    queryKey: ['aa-numbers', 'own', sellerAccount?.id ?? ''],
+    queryFn: () => getAccreditationNumbers([sellerAccount!.id!]),
+    enabled: sellerIsCreator && Boolean(sellerAccount?.id),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const smLabel = (node: GenealogyNode) =>
+    smNumbers.data?.[node.staffId] ? `${node.fullName} · ${smNumbers.data[node.staffId]}` : node.fullName;
+  const needle = sellerSearch.trim().toLowerCase();
+  const smChoices = smOptionsAll.filter(
+    (node) =>
+      node.staffId === sellerId ||
+      !needle ||
+      smLabel(node).toLowerCase().includes(needle),
+  );
+  const sellerMismatch = sellerEditable && Boolean(sellerId && teamSmId && sellerId !== teamSmId);
+  const sellerCard = sellerIsCreator ? (
+    <div>
+      <small>SM · seller of record</small>
+      <strong>
+        {sellerAccount?.name ?? 'Your account'}
+        {ownNumber.data?.[sellerAccount?.id ?? ''] ? (
+          <span> · {ownNumber.data[sellerAccount?.id ?? '']}</span>
+        ) : null}
+      </strong>
+    </div>
+  ) : sellerEditable ? (
+    <div>
+      <small>SM · seller of record</small>
+      <input
+        type="search"
+        aria-label="Search Sales Managers"
+        placeholder="Search by name or AAI number"
+        value={sellerSearch}
+        onChange={(event) => setSellerSearch(event.target.value)}
+      />
+      <Select
+        aria-label="Seller of record"
+        required
+        value={sellerId}
+        disabled={chain.isPending}
+        onChange={(event) => {
+          sellerTouched.current = true;
+          seller!.onChange(event.target.value);
+        }}
+        options={[
+          {
+            value: '',
+            label: chain.isError ? 'Sales Managers could not be loaded' : 'Select a Sales Manager',
+          },
+          ...smChoices.map((node) => ({ value: node.staffId, label: smLabel(node) })),
+        ]}
+      />
+      {sellerMismatch ? (
+        <p role="status" className={v4.networkBrief}>
+          Selected SM is not the referrer&apos;s team SM.
+        </p>
+      ) : null}
+    </div>
+  ) : null;
+  // The SM/SSM/SVD cards follow the SELECTED seller, not the referrer.
+  const chainSubject = sellerEditable && sellerId ? sellerId : sharedTeamStaffId;
   useEffect(() => {
     if (!networkSelection) return;
-    if (!sharedTeamStaffId) {
+    if (!chainSubject) {
       onChain({ svdStaffId: '', ssmStaffId: '', smStaffId: '', referrerStaffId: referrerId ?? '' });
       return;
     }
     try {
-      const derived = resolveApplicationNetwork(nodes, sharedTeamStaffId).chain;
+      const derived = resolveApplicationNetwork(nodes, chainSubject).chain;
       onChain({
         svdStaffId: derived.svdStaffId,
         ssmStaffId: derived.ssmStaffId,
@@ -1332,7 +1452,7 @@ export function RecommenderFields({
       // Left as-is; `teamErrorMessage` above already reports the same failure.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [networkSelection, sharedTeamStaffId, referrerId, nodes.length]);
+  }, [networkSelection, chainSubject, referrerId, nodes.length]);
 
   // Build contact options from selected recommenders
   const contactOptions = contactsQuery.data
@@ -1471,15 +1591,33 @@ export function RecommenderFields({
               <Alert variant="danger">{teamErrorMessage}</Alert>
             </div>
           ) : null}
-          {sharedTeamStaffId ? (
+          {sharedTeamStaffId || sellerCard ? (
             <div style={{ gridColumn: '1 / -1' }}>
               <UplineChain
                 nodes={nodes}
-                staffId={sharedTeamStaffId}
+                // SSM/SVD follow the seller of record (the SM creator, or the
+                // picked SM); with neither, the referrer's team as before.
+                staffId={
+                  sellerIsCreator
+                    ? (sellerAccount?.id ?? null)
+                    : sellerEditable
+                      ? sellerId || null
+                      : sharedTeamStaffId
+                }
+                leading={sellerCard}
+                help={
+                  sellerEditable
+                    ? 'Choose the active Sales Manager who is the seller of record. SSM and SVD follow the selected SM.'
+                    : sellerIsCreator
+                      ? 'You are the seller of record. SSM and SVD follow your own upline.'
+                      : undefined
+                }
                 badge={
-                  referrerId && recommenderId && !teamErrorMessage
-                    ? '✓ Same team verified'
-                    : 'Read only'
+                  sellerEditable
+                    ? 'Select SM'
+                    : referrerId && recommenderId && !teamErrorMessage
+                      ? '✓ Same team verified'
+                      : 'Read only'
                 }
               />
             </div>
@@ -1491,6 +1629,11 @@ export function RecommenderFields({
             <p className={styles.subGroupTitle}>Organization chain (staff linkage)</p>
             <p className={styles.hint}>Referrer must be active OST staff.</p>
           </div>
+          {sellerEditable ? (
+            <div className={v4.sharedTeam} style={{ gridColumn: '1 / -1' }}>
+              {sellerCard}
+            </div>
+          ) : null}
           {CHAIN_LEVELS.map((level, index) => (
             <label key={level.key} className={`${styles.filterLabel} ${v4.field}`}>
               <span>{level.label}</span>

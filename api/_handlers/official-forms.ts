@@ -1,4 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { handleSignedDocuments } from '../_lib/signed-documents.js';
+import { receiptDetailsOf, saveReceiptDetails } from '../_lib/payment-extras.js';
+import {
+  issuePaymentReceiptUploadGrant,
+  receiptBelongsTo,
+  UUID_PATTERN,
+} from '../_lib/payment-receipts.js';
 import { workbookApplicationPrefill } from '../_lib/customer-workbook.js';
 import { z } from 'zod';
 import { addMoney, compareMoney } from '@afhomes/shared';
@@ -812,6 +819,11 @@ function shapePayment(row: Record<string, unknown>) {
     verifiedBy: isoOrNull(row.verified_by),
     recordedAt: isoOrNull(row.recorded_at) ?? '',
     verifiedAt: isoOrNull(row.verified_at),
+    orNumber: isoOrNull(row.or_number),
+    paidOn: row.paid_on ? String(row.paid_on).slice(0, 10) : null,
+    paidByName: isoOrNull(row.paid_by_name),
+    postingPeriod: isoOrNull(row.posting_period),
+    paymentPurpose: isoOrNull(row.payment_purpose),
   };
 }
 
@@ -1119,6 +1131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
   try {
     const path = subPath(req);
+    if (await handleSignedDocuments(req, res, db)) return;
     const importPrefill = route(req, 'GET', /^customer-import-prefill\/([0-9a-f-]+)$/);
     if (importPrefill) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
@@ -1217,10 +1230,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...header
         } = newRegistration.data;
         if (!(await prefixStorageReady(db, res, primary, secondary))) return;
-      if (header.raDraft) {
-        const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
-        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
-      }
+        if (header.raDraft) {
+          const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
+          if (error)
+            return fail(
+              res,
+              'RA_DRAFT_STORAGE_UNAVAILABLE',
+              'RA draft storage requires its database migration. Nothing has been saved.',
+              503,
+            );
+        }
         if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
         const locations = await resolveHolderLocations(primary, secondary);
         if ('status' in locations)
@@ -1258,7 +1277,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!(await prefixStorageReady(db, res, primary, secondary))) return;
       if (header.raDraft) {
         const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
-        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
+        if (error)
+          return fail(
+            res,
+            'RA_DRAFT_STORAGE_UNAVAILABLE',
+            'RA draft storage requires its database migration. Nothing has been saved.',
+            503,
+          );
       }
       if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
       const locations = await resolveHolderLocations(primary, secondary);
@@ -1348,7 +1373,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!(await prefixStorageReady(db, res, primary, secondary))) return;
       if (header.raDraft) {
         const { error } = await db.from('customer_applications').select('ra_draft').limit(0);
-        if (error) return fail(res, 'RA_DRAFT_STORAGE_UNAVAILABLE', 'RA draft storage requires its database migration. Nothing has been saved.', 503);
+        if (error)
+          return fail(
+            res,
+            'RA_DRAFT_STORAGE_UNAVAILABLE',
+            'RA draft storage requires its database migration. Nothing has been saved.',
+            503,
+          );
       }
       if (!(await assertSameTeam(db, res, header.referrerStaffId, recommenderAaNumber))) return;
       const { error } = await db.rpc('save_customer_application', {
@@ -1777,6 +1808,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (data ?? []).map((row: Record<string, unknown>) => shapePayment(row)),
       );
     }
+    const agreementReceiptUpload = route(
+      req,
+      'POST',
+      /^reservations\/([0-9a-f-]+)\/payments\/receipt-upload$/,
+    );
+    if (agreementReceiptUpload) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
+      if ('error' in auth) return deny(res, auth);
+      if (!UUID_PATTERN.test(agreementReceiptUpload[1]!))
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      const current = await getAgreement(db, agreementReceiptUpload[1]!);
+      if (!current || current.origin !== 'application')
+        return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
+      return issuePaymentReceiptUploadGrant(
+        res,
+        'reservation',
+        agreementReceiptUpload[1]!,
+        jsonBody(req),
+      );
+    }
     const agreementRecordPayment = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/payments$/);
     if (agreementRecordPayment) {
       const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
@@ -1787,22 +1838,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!current) return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
       if (current.origin !== 'application')
         return fail(res, 'NOT_FOUND', 'Reservation agreement not found', 404);
-      const { requestId, amount, paymentType, method, reference, notes, receiptStoragePath } =
+      const { requestId, amount, method, reference, notes, receiptStoragePath, paymentPurpose } =
         parsed.data;
-      const { error } = await db.rpc('record_reservation_payment_once', {
+      // The purpose is authoritative; the SQL derives the ledger type from it.
+      if (!paymentPurpose)
+        return fail(res, 'VALIDATION_ERROR', 'Choose what this payment is for.', 400);
+      if (!receiptBelongsTo(receiptStoragePath, 'reservation', agreementRecordPayment[1]!))
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Upload the receipt for this reservation, then record the payment.',
+          400,
+        );
+      const { data: recordedId, error } = await db.rpc('record_reservation_payment_once', {
         p_request_id: requestId,
         p_reservation_id: agreementRecordPayment[1],
         p_actor_id: auth.userId,
         p_input: {
           amount,
-          paymentType,
+          paymentPurpose,
           method,
           reference: reference ?? null,
           notes: notes ?? null,
-          receiptStoragePath: receiptStoragePath ?? null,
+          receiptStoragePath,
         },
       });
       if (error) return mapRpcError(res, error);
+      const detailsError = await saveReceiptDetails(
+        db,
+        recordedId,
+        auth.userId,
+        receiptDetailsOf(parsed.data),
+      );
+      if (detailsError) return mapRpcError(res, detailsError);
       return res.status(201).json(await agreementFinanceSummary(db, agreementRecordPayment[1]!));
     }
     const paymentVerify = route(

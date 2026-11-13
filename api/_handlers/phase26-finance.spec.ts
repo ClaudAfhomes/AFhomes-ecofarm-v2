@@ -177,6 +177,8 @@ describe('Phase 26 payment recording', () => {
         paymentType: 'down_payment',
         method: 'bank_transfer',
         reference: 'TRF-26-1',
+        receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+        paymentPurpose: 'contractual_down_payment',
       },
     });
     expect(state.status).toBe(201);
@@ -195,7 +197,13 @@ describe('Phase 26 payment recording', () => {
         method: 'POST',
         path: `${SALE.unpaid}/payments`,
         token: TOKEN.admin,
-        body: { amount, paymentType: 'installment', method: 'cash' },
+        body: {
+          amount,
+          paymentType: 'installment',
+          method: 'cash',
+          receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+          paymentPurpose: 'contractual_installment',
+        },
       });
       expect(state.status).toBe(400);
     }
@@ -206,7 +214,13 @@ describe('Phase 26 payment recording', () => {
       method: 'POST',
       path: `${SALE.unpaid}/payments`,
       token: TOKEN.viewer,
-      body: { amount: '100.00', paymentType: 'installment', method: 'cash' },
+      body: {
+        amount: '100.00',
+        paymentType: 'installment',
+        method: 'cash',
+        receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+        paymentPurpose: 'contractual_installment',
+      },
     });
     expect(state.status).toBe(403);
   });
@@ -1042,7 +1056,11 @@ describe('D-12 one membership per customer at sale creation', () => {
       method: 'POST',
       path: '',
       token: TOKEN.admin,
-      body: { customerId: CUSTOMER.active, productId: PRODUCT.gold },
+      body: {
+        customerId: CUSTOMER.active,
+        productId: PRODUCT.gold,
+        sellerStaffId: STAFF2.salesManager,
+      },
     });
     expect(state.status).toBe(409);
     expect(JSON.stringify(state.body)).toMatch(/already has an active membership/);
@@ -1054,7 +1072,7 @@ describe('D-12 one membership per customer at sale creation', () => {
     const state = await callSales({
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
     expect(state.status).toBe(201);

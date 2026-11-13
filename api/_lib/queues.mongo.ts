@@ -94,6 +94,7 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
         'customers.last_name': 1,
         'customers.suffix': 1,
         'card_plans.name': 1,
+        'card_plans.code': 1,
         'customer_applications.application_number': 1,
         'customer_applications.status': 1,
       };
@@ -212,6 +213,7 @@ export function createMongoQueuesHandler(db: Db, authorize: typeof authorizeAfHo
             customer_id: String(row.customer_id),
             customerName: name(customer) || 'Unknown customer',
             productName: String(product.name),
+            planCode: typeof product.code === 'string' ? product.code : null,
             payments: (paymentsBySale.get(row._id) ?? [])
               .map((payment) => ({
                 amount: String(payment.amount),

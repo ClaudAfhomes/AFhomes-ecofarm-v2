@@ -61,7 +61,7 @@ const activeMembershipOf = async (db: Db, customerId: string) => {
   const { data, error } = await db
     .from('memberships')
     .select(
-      'id, sale_id, membership_number, status, product_id, activated_at, expires_at, renewal_due_at, yearly_points_allocated, points_balance, card_plans!inner(name, code)',
+      'id, sale_id, membership_number, status, product_id, activated_at, expires_at, renewal_due_at, yearly_points_allocated, points_balance, card_plans!inner(name, code), customers!inner(vip_card_number)',
     )
     .eq('customer_id', customerId)
     .eq('status', 'active')
@@ -112,6 +112,7 @@ const toMembership = (
   return {
     id: row.id,
     membershipNumber,
+    vipCardNumber: isoOrNull((row.customers as Record<string, unknown> | undefined)?.vip_card_number),
     productName: isoOrNull(product.name),
     productCode: isoOrNull(product.code),
     status: row.status,

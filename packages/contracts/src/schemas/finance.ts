@@ -4,15 +4,30 @@
 import { z } from 'zod';
 
 import { exactDecimalRateSchema, exactDecimalStringSchema } from './money.js';
+import { vipTierSchema } from './official-forms.js';
 import {
+  activationBlockerSchema,
   commissionStatusSchema,
   membershipStatusSchema,
   paymentSchemeSchema,
   paymentStatusSchema,
   paymentTypeSchema,
   pointsEntryTypeSchema,
+  saleStatusSchema,
   spotCashStateSchema,
 } from './lifecycle.js';
+
+/* ================================================================== */
+/* Payment Purpose                                                     */
+/* ================================================================== */
+
+export const paymentPurposeSchema = z.enum([
+  'reservation_fee',
+  'contractual_down_payment',
+  'contractual_installment',
+  'contractual_full',
+]);
+export type PaymentPurpose = z.infer<typeof paymentPurposeSchema>;
 
 /* ================================================================== */
 /* Payments                                                            */
@@ -33,13 +48,118 @@ export const paymentSchema = z.object({
   rejectionReason: z.string().nullable(),
   recordedBy: z.string().uuid(),
   verifiedBy: z.string().uuid().nullable(),
+  /** Authoritative payment purpose. Server-controlled, never client-supplied. */
+  paymentPurpose: paymentPurposeSchema.nullable(),
   /** Display names resolved server-side; UUIDs stay the source of truth. */
   recordedByName: z.string().nullable().optional(),
   verifiedByName: z.string().nullable().optional(),
   recordedAt: z.string(),
   verifiedAt: z.string().nullable(),
+  /** Official Receipt number, when one was issued. */
+  orNumber: z.string().nullable().optional(),
+  /** Actual payment date on the receipt (YYYY-MM-DD); distinct from recordedAt/verifiedAt. */
+  paidOn: z.string().nullable().optional(),
+  /** Who paid. Information only - a relative may pay; never an identifier. */
+  paidByName: z.string().nullable().optional(),
+  /** Accounting month (YYYY-MM, Asia/Manila) stamped at verification. */
+  postingPeriod: z.string().nullable().optional(),
 });
 export type Payment = z.infer<typeof paymentSchema>;
+
+/** Optional receipt details Finance may add while a payment is pending. */
+export const paymentReceiptDetailsShape = {
+  orNumber: z.string().trim().min(1).max(60).optional(),
+  paidOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  paidByName: z.string().trim().min(1).max(120).optional(),
+} as const;
+
+/**
+ * Why a payment whose bank reference / OR also appears on ANOTHER contract is
+ * legitimate (for example one transfer split across two contracts). Required
+ * before such a payment can be verified.
+ */
+export const paymentDuplicateReviewSchema = z.object({
+  duplicateReviewNote: z.string().trim().min(5).max(500),
+});
+
+/** A live payment on another contract sharing the reference or OR number. */
+export const paymentReferenceMatchSchema = z.object({
+  paymentId: z.string().uuid(),
+  saleId: z.string().uuid().nullable(),
+  reservationId: z.string().uuid().nullable(),
+  amount: exactDecimalStringSchema,
+  status: paymentStatusSchema,
+  reference: z.string().nullable(),
+  orNumber: z.string().nullable(),
+  recordedAt: z.string(),
+});
+export type PaymentReferenceMatch = z.infer<typeof paymentReferenceMatchSchema>;
+
+/** Figures for one accounting month: dashboard cards and the pre-close checklist. */
+export const financePeriodSummarySchema = z.object({
+  period: z.string(),
+  status: z.enum(['open', 'ready_for_approval', 'closed']),
+  verifiedCount: z.number(),
+  verifiedTotal: exactDecimalStringSchema,
+  latePostings: z.number(),
+  pendingVerification: z.number(),
+  heldForDuplicateReview: z.number(),
+  proposedAdjustments: z.number(),
+  earlierOpenPeriods: z.array(z.string()),
+  /** Verified payments that belong to no period (should always be 0). */
+  unassignedVerified: z.number().optional(),
+  /** Fingerprint of the payments that make up the period. */
+  paymentSetHash: z.string().optional(),
+});
+export type FinancePeriodSummary = z.infer<typeof financePeriodSummarySchema>;
+
+export const accountingPeriodSchema = z.object({
+  period: z.string(),
+  status: z.enum(['open', 'ready_for_approval', 'closed']),
+  submittedBy: z.string().uuid().nullable(),
+  submittedAt: z.string().nullable(),
+  closedBy: z.string().uuid().nullable(),
+  closedAt: z.string().nullable(),
+  returnedReason: z.string().nullable(),
+  /** The frozen figures stored at close; null until then. */
+  snapshot: z.record(z.string(), z.unknown()).nullable(),
+});
+export type AccountingPeriod = z.infer<typeof accountingPeriodSchema>;
+
+export const returnAccountingPeriodSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
+/**
+ * Reversal / returned check / refund of a VERIFIED payment. Proposals only: no
+ * approval authority is configured, so a proposal never changes a balance.
+ */
+export const paymentAdjustmentKindSchema = z.enum(['reversal', 'returned_check', 'refund']);
+export const proposePaymentAdjustmentSchema = z.object({
+  kind: paymentAdjustmentKindSchema,
+  amount: exactDecimalStringSchema.refine((v) => /[1-9]/.test(v), {
+    message: 'amount must be greater than zero',
+  }),
+  reason: z.string().trim().min(5).max(500),
+  effectiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type ProposePaymentAdjustmentRequest = z.infer<typeof proposePaymentAdjustmentSchema>;
+export const paymentAdjustmentSchema = z.object({
+  id: z.string().uuid(),
+  paymentId: z.string().uuid(),
+  kind: paymentAdjustmentKindSchema,
+  amount: exactDecimalStringSchema,
+  reason: z.string(),
+  effectiveDate: z.string(),
+  status: z.enum(['proposed', 'approved', 'rejected', 'withdrawn']),
+  requestedBy: z.string().uuid(),
+  requestedByName: z.string().nullable(),
+  requestedAt: z.string(),
+});
+export type PaymentAdjustment = z.infer<typeof paymentAdjustmentSchema>;
 
 /**
  * Record a payment. `amount` must be a positive exact-decimal string. The
@@ -56,20 +176,54 @@ export const recordPaymentSchema = z.object({
   method: z.string().trim().min(1).max(40),
   reference: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
-  /** Private bucket path for a receipt. Never a public URL. */
-  receiptStoragePath: z.string().trim().max(300).optional(),
+  /** Private bucket path for a receipt. Required. Never a public URL. */
+  receiptStoragePath: z.string().trim().min(1).max(300),
+  /** Authoritative payment purpose. Server-validated, not inferred from amount. */
+  paymentPurpose: paymentPurposeSchema.optional(),
+  ...paymentReceiptDetailsShape,
 });
+
+/** Types the private `afhomes-payment-receipts` bucket accepts (10 MB limit). */
+export const PAYMENT_RECEIPT_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+] as const;
+export const PAYMENT_RECEIPT_MAX_BYTES = 10_485_760;
+
+/** Ask for a signed upload grant; the server chooses the object path. */
+export const paymentReceiptUploadRequestSchema = z.object({
+  contentType: z.enum(PAYMENT_RECEIPT_CONTENT_TYPES),
+  byteSize: z.number().int().positive().max(PAYMENT_RECEIPT_MAX_BYTES),
+});
+export type PaymentReceiptUploadRequest = z.infer<typeof paymentReceiptUploadRequestSchema>;
+
+/** PUT the file to `uploadUrl`, then send `receiptStoragePath` when recording the payment. */
+export const paymentReceiptUploadGrantSchema = z.object({
+  receiptStoragePath: z.string().min(1),
+  uploadUrl: z.string().url(),
+  expiresAt: z.string(),
+});
+export type PaymentReceiptUploadGrant = z.infer<typeof paymentReceiptUploadGrantSchema>;
 export type RecordPaymentRequest = z.infer<typeof recordPaymentSchema>;
+
+/** Same minimum the SQL verification and document-review functions enforce. */
+export const REJECTION_REASON_MIN_LENGTH = 5;
 
 export const verifyPaymentSchema = z
   .object({
     decision: z.enum(['verified', 'rejected']),
     reason: z.string().trim().max(500).optional(),
   })
-  .refine((v) => v.decision !== 'rejected' || (v.reason && v.reason.trim().length >= 3), {
-    message: 'A rejection requires a reason',
-    path: ['reason'],
-  });
+  .refine(
+    (v) =>
+      v.decision !== 'rejected' ||
+      (v.reason && v.reason.trim().length >= REJECTION_REASON_MIN_LENGTH),
+    {
+      message: `A rejection requires a reason of at least ${REJECTION_REASON_MIN_LENGTH} characters`,
+      path: ['reason'],
+    },
+  );
 export type VerifyPaymentRequest = z.infer<typeof verifyPaymentSchema>;
 
 /* ================================================================== */
@@ -116,6 +270,7 @@ export type ActivationResult = z.infer<typeof activationResultSchema>;
 /* ================================================================== */
 
 export const membershipSchema = z.object({
+  vipCardNumber: z.string().nullable().optional(),
   id: z.string().uuid(),
   customerId: z.string().uuid(),
   customerName: z.string(),
@@ -397,7 +552,10 @@ export const financeQueueItemSchema = z.object({
   customerId: z.string().uuid(),
   customerName: z.string(),
   productName: z.string(),
-  status: z.string(),
+  /** VIP tier from the sale's card plan code; null only for a non-tier plan. */
+  tier: vipTierSchema.nullable(),
+  /** Authoritative sale lifecycle state; unknown codes are rejected, never coerced. */
+  status: saleStatusSchema,
   cashPrice: exactDecimalStringSchema,
   paymentScheme: paymentSchemeSchema,
   reservationFee: exactDecimalStringSchema,
@@ -414,5 +572,37 @@ export const financeQueueItemSchema = z.object({
   /** First VERIFIED payment instant (spot_cash_started_at). Null until one exists. */
   firstVerifiedPayment: z.string().nullable(),
   activatable: z.boolean(),
+  /** Server-computed reason activation is unavailable; null exactly when `activatable`. */
+  activationBlocker: activationBlockerSchema.nullable(),
 });
 export type FinanceQueueItem = z.infer<typeof financeQueueItemSchema>;
+
+/* ================================================================== */
+/* Commission Records (pre-finalization entitlements)                  */
+/* ================================================================== */
+
+export const commissionRecordSchema = z.object({
+  id: z.string().uuid(),
+  reservationId: z.string().uuid(),
+  saleId: z.string().uuid().nullable(),
+  beneficiaryType: z.enum(['staff', 'ost']),
+  beneficiaryStaffId: z.string().uuid().nullable(),
+  beneficiaryOstId: z.string().uuid().nullable(),
+  commissionRuleId: z.string().uuid().nullable(),
+  rateSnapshot: exactDecimalRateSchema,
+  basisAmountSnapshot: exactDecimalStringSchema,
+  expectedAmount: exactDecimalStringSchema,
+  cumulativeVerified: exactDecimalStringSchema,
+  status: z.enum(['pending', 'eligible', 'paid', 'cancelled']),
+  eligibleAt: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  paidReference: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CommissionRecord = z.infer<typeof commissionRecordSchema>;
+
+export const requestCommissionPayoutSchema = z.object({
+  reference: z.string().trim().min(3).max(100),
+});
+export type RequestCommissionPayoutRequest = z.infer<typeof requestCommissionPayoutSchema>;

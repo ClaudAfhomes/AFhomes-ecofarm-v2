@@ -68,6 +68,7 @@ export const REPORT_DEFS: ReportDef[] = [
     modules: ['finance.payment_verification'],
     columns: [
       { key: 'paymentDate', label: 'Payment date' },
+      { key: 'reservationNumber', label: 'Official Reservation Agreement Number' },
       { key: 'saleNumber', label: 'Sale number' },
       { key: 'customer', label: 'Customer' },
       { key: 'amount', label: 'Amount' },

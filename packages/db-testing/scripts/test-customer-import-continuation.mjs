@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { startDisposablePostgres } from './lib/local-postgres.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 
 let postgres;
@@ -28,6 +28,61 @@ try {
     "insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug='super_admin'",
     [actor],
   );
+  // Purchase-workflow rules (repair 20261231000001): a non-SM originator (this
+  // super admin) must name an ACTIVE Sales Manager as seller of record, and the
+  // signed documents are reviewed by someone other than the uploader.
+  const earlyStaff = async (name, role) => {
+    const id = randomUUID(),
+      email = id + '@example.invalid';
+    await db.query('insert into auth.users(id,email) values($1,$2)', [id, email]);
+    await db.query(
+      "insert into public.staff_users(id,email,full_name,status) values($1,$2,$3,'active')",
+      [id, email, name],
+    );
+    await db.query(
+      'insert into public.staff_role_assignments(staff_id,role_id) select $1,id from public.roles where slug=$2',
+      [id, role],
+    );
+    return id;
+  };
+  const sellerOfRecord = await earlyStaff('SYNTHETIC SELLER SM', 'sales_manager');
+  const documentReviewer = await earlyStaff('SYNTHETIC DOCUMENT REVIEWER', 'admin');
+  /** Real private object, registered by the actor, ACCEPTED by a different reviewer. */
+  const acceptSignedDocument = async (kind, entityId) => {
+    const prefix = kind === 'signed_customer_application' ? 'applications' : 'reservations';
+    const path = `${prefix}/${entityId}/signed-${randomUUID()}.pdf`;
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('afhomes-signed-documents',$1)",
+      [path],
+    );
+    const id = (
+      await db.query(
+        'select public.register_purchase_signed_document_once($1,$2,$3,$4,$5,$6,$7,$8) as id',
+        [
+          actor,
+          kind,
+          entityId,
+          path,
+          `${kind}.pdf`,
+          'application/pdf',
+          2048,
+          createHash('sha256').update(path).digest('hex'),
+        ],
+      )
+    ).rows[0].id;
+    await db.query("select public.review_purchase_signed_document_once($1,$2,'accepted',null)", [
+      documentReviewer,
+      id,
+    ]);
+  };
+  /** The RA the purchase submission created (one live RA per application). */
+  const reservationOf = async (applicationId) =>
+    (
+      await db.query(
+        "select id from public.reservation_agreements where customer_application_id=$1 and status<>'cancelled'",
+        [applicationId],
+      )
+    ).rows[0].id;
   const issueYear = Number(
     (
       await db.query(
@@ -248,48 +303,32 @@ try {
     draft.applicationId,
     'two purchases for one customer must remain separate',
   );
+  // The seller candidate is part of the proposal hash, so the proposal and the
+  // submission name the same SM.
   const offer = (
-    await db.query('select public.purchase_terms_proposal($1,$2,null) as offer', [
+    await db.query('select public.purchase_terms_proposal($1,$2,$3) as offer', [
       draft.applicationId,
       actor,
+      sellerOfRecord,
     ])
   ).rows[0].offer;
-  await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,null)', [
+  await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,$5)', [
     randomUUID(),
     actor,
     draft.applicationId,
     offer.expectedProposalHash,
+    sellerOfRecord,
   ]);
+  await acceptSignedDocument('signed_customer_application', draft.applicationId);
   await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
     randomUUID(),
     actor,
     draft.applicationId,
   ]);
-  const terms = (
-    await db.query(
-      'select id from public.customer_application_purchase_terms where application_id=$1 order by version desc limit 1',
-      [draft.applicationId],
-    )
-  ).rows[0];
-  const reservation = (
-    await db.query('select public.reserve_application_purchase_once($1,$2,$3,$4,$5) as id', [
-      randomUUID(),
-      actor,
-      draft.applicationId,
-      terms.id,
-      {
-        reservationDate: '2026-10-16',
-        agreementDate: '2026-10-16',
-        primarySignatureStatus: 'received',
-        primaryAddress: 'Synthetic Street',
-      },
-    ])
-  ).rows[0].id;
-  await db.query("select public.transition_purchase_reservation_once($1,$2,$3,'submit','{}')", [
-    randomUUID(),
-    actor,
-    reservation,
-  ]);
+  // The RA was created at submission and approval moved it to `submitted`;
+  // execution needs an ACCEPTED signed RA.
+  const reservation = await reservationOf(draft.applicationId);
+  await acceptSignedDocument('signed_reservation_agreement', reservation);
   await db.query("select public.transition_purchase_reservation_once($1,$2,$3,'execute','{}')", [
     randomUUID(),
     actor,
@@ -336,6 +375,12 @@ try {
       actor,
     ])
   ).rows[0].result;
+  // The browser upload: a real object at the prepared bucket-relative path, which
+  // recording requires (require_payment_receipt_object, no bypass).
+  await db.query('insert into storage.objects(bucket_id,name) values($1,$2)', [
+    proof.bucket,
+    proof.path,
+  ]);
   await db.query('select public.complete_import_claim_proof($1,$2,$3,$4)', [
     claim.id,
     actor,
@@ -661,38 +706,27 @@ try {
     ])
   ).rows[0].id;
   const normalOffer = (
-    await db.query('select public.purchase_terms_proposal($1,$2,null) offer', [normalApp, actor])
+    await db.query('select public.purchase_terms_proposal($1,$2,$3) offer', [
+      normalApp,
+      actor,
+      sellerOfRecord,
+    ])
   ).rows[0].offer;
-  await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,null)', [
+  await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,$5)', [
     randomUUID(),
     actor,
     normalApp,
     normalOffer.expectedProposalHash,
+    sellerOfRecord,
   ]);
+  await acceptSignedDocument('signed_customer_application', normalApp);
   await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
     randomUUID(),
     actor,
     normalApp,
   ]);
-  const normalTerms = (
-    await db.query('select purchase_terms_id id from public.customer_applications where id=$1', [
-      normalApp,
-    ])
-  ).rows[0].id;
-  const normalReservation = (
-    await db.query('select public.reserve_application_purchase_once($1,$2,$3,$4,$5) id', [
-      randomUUID(),
-      actor,
-      normalApp,
-      normalTerms,
-      {
-        reservationDate: '2026-10-16',
-        agreementDate: '2026-10-16',
-        primarySignatureStatus: 'received',
-        primaryAddress: 'Synthetic Street',
-      },
-    ])
-  ).rows[0].id;
+  // The RA comes from the submission (RA created atomically at submission).
+  const normalReservation = await reservationOf(normalApp);
   const normalReference = (
     await db.query('select reservation_number from public.reservation_agreements where id=$1', [
       normalReservation,
@@ -935,8 +969,12 @@ try {
   ).rows[0];
   assert.equal(afterLower.ra_number, `${issueYear}-900009`);
   await db.query('begin');
+  // Changed with the rule in 20261215000001/2: the annual serial EXPANDS past
+  // 4/6 digits (lpad never truncates) and is exhausted only at the integer
+  // limit, so exhaustion is probed at 2147483647. It used to set 999999, which
+  // the current allocator correctly treats as an ordinary, non-exhausted value.
   await db.query(
-    'update private.company_customer_id_counters set last_issued=999999 where issue_year=$1',
+    'update private.company_customer_id_counters set last_issued=2147483647 where issue_year=$1',
     [issueYear],
   );
   await assert.rejects(

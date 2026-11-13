@@ -8,6 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { paymentReceipt } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -75,6 +76,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
     reference: 'DOC-READ',
     method: 'cash',
     paymentType: 'down_payment',
+    paymentPurpose: 'contractual_down_payment',
   });
   const documentOf = async (kind: string, source: string, actor: string, revision: number | null = null) =>
     db.query<{ purchase_document: Record<string, unknown> }>(
@@ -204,14 +206,24 @@ export async function runPurchaseConcurrencyChecks(world: World) {
     const other = await second();
     try {
       const request = randomUUID();
+      // One real receipt object, committed before the race, so both sessions
+      // replay the identical payload.
+      const input = {
+        amount: '5000.00',
+        method: 'cash',
+        paymentType: 'installment',
+        reference: 'RACE-2',
+        paymentPurpose: 'contractual_installment',
+        receiptStoragePath: await paymentReceipt(db),
+      };
       const [a, b] = await Promise.allSettled([
         db.query(
           'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)',
-          [request, target.reservationId, { amount: '5000.00', method: 'cash', paymentType: 'installment', reference: 'RACE-2' }, finance],
+          [request, target.reservationId, input, finance],
         ),
         other.query(
           'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)',
-          [request, target.reservationId, { amount: '5000.00', method: 'cash', paymentType: 'installment', reference: 'RACE-2' }, finance],
+          [request, target.reservationId, input, finance],
         ),
       ]);
       const rows = (
@@ -313,6 +325,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       reference: 'RACE-5',
       method: 'cash',
       paymentType: 'full',
+      paymentPurpose: 'contractual_full',
     });
     for (const id of (
       await db.query<{ id: string }>(
@@ -372,6 +385,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       reference: 'RACE-6',
       method: 'cash',
       paymentType: 'full',
+      paymentPurpose: 'contractual_full',
     });
     for (const id of (
       await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
@@ -379,6 +393,9 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       ])
     ).rows)
       await world.verify(id.id);
+    // A complete, valid late recording (purpose + real receipt), so whatever
+    // refuses it is the business rule, not a malformed input.
+    const lateReceipt = await paymentReceipt(db);
     const other = await second();
     try {
       const [finalize, record] = await Promise.allSettled([
@@ -386,7 +403,17 @@ export async function runPurchaseConcurrencyChecks(world: World) {
           randomUUID(), target.reservationId, finance,
         ]),
         other.query('select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)', [
-          randomUUID(), target.reservationId, { amount: '250.00', method: 'cash', paymentType: 'installment', reference: 'RACE-6-LATE' }, finance,
+          randomUUID(),
+          target.reservationId,
+          {
+            amount: '250.00',
+            method: 'cash',
+            paymentType: 'installment',
+            reference: 'RACE-6-LATE',
+            paymentPurpose: 'contractual_installment',
+            receiptStoragePath: lateReceipt,
+          },
+          finance,
         ]),
       ]);
       check(
@@ -426,6 +453,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       reference: 'RACE-7',
       method: 'cash',
       paymentType: 'full',
+      paymentPurpose: 'contractual_full',
     });
     const payments = (
       await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
@@ -479,6 +507,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       reference: 'RACE-8',
       method: 'cash',
       paymentType: 'full',
+      paymentPurpose: 'contractual_full',
     });
     for (const id of (
       await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
@@ -583,10 +612,12 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       try {
         const payment = (
           await db.query<{ id: string }>(
-            `insert into public.payments(sale_id,customer_id,amount,payment_type,method,reference,status,recorded_by)
+            // Verification needs the receipt object to exist, so the row carries one.
+            `insert into public.payments(sale_id,customer_id,amount,payment_type,method,reference,status,recorded_by,
+               receipt_storage_path)
              values ($1,(select customer_id from public.card_sales where id=$1),'100.00','installment','cash',
-                     $2,'recorded',$3) returning id`,
-            [legacySale.id, `RACE-10-${randomUUID()}`, finance],
+                     $2,'recorded',$3,$4) returning id`,
+            [legacySale.id, `RACE-10-${randomUUID()}`, finance, await paymentReceipt(db)],
           )
         ).rows[0]!.id;
         ownedSales.push(legacySale.id);
@@ -627,6 +658,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
       reference: 'RACE-11',
       method: 'cash',
       paymentType: 'full',
+      paymentPurpose: 'contractual_full',
     });
     for (const id of (
       await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
@@ -741,6 +773,8 @@ export async function runPurchaseConcurrencyChecks(world: World) {
     await db.query(`update public.card_sales set status='payment_verified', activated_at=null, updated_at=now() where id = any($1::uuid[])`, [ownedSales]);
     await db.query(`delete from public.payments where sale_id = any($1::uuid[])`, [ownedSales]);
     await db.query(`delete from public.payments where reservation_id = any($1::uuid[])`, [ownedReservations]);
+    // Signed RA documents RESTRICT their agreement (owner-only cleanup escape is set).
+    await db.query(`delete from public.purchase_signed_documents where reservation_id = any($1::uuid[])`, [ownedReservations]);
     await db.query(`delete from public.reservation_agreement_schedule where agreement_id = any($1::uuid[])`, [ownedReservations]);
     await db.query(`delete from public.reservation_agreement_holders where agreement_id = any($1::uuid[])`, [ownedReservations]);
     // The agreements go BEFORE the pointer is cleared: nulling purchase_terms_id

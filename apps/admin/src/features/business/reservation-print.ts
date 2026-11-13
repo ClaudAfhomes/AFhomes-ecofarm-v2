@@ -89,10 +89,11 @@ export function reservationPaperRows(data: ReservationPaper): PaperRow[] {
   const cells = (...values: ReturnType<typeof field>[]) => rows.push({ cells: values });
   cells(
     field('Reservation date', d?.reservationDate),
-    field('Reservation number', d?.reservationNumber),
+    field('Official Reservation Agreement Number', a?.reservationNumber),
     field('Revision', d?.revisionNumber),
     field('Agreement date', d?.agreementDate),
   );
+  if (!a && data.draft?.reservationNumber) cells(field('Legacy proposed reference (not official)', data.draft.reservationNumber));
   heading('RESERVATION FEE PAYMENT DETAILS');
   cells(
     field('Required reservation fee', money(d?.reservationFee)),

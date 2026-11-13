@@ -232,3 +232,16 @@ describe('customer company-stated fields', () => {
     expect(updated.stated_rf).toBe('RF-002');
   });
 });
+
+it('editing a customer preserves identifiers and never allocates a final VIP card early', async () => {
+ const db=install();
+ const before={...db.rows('customers').find(r=>r.id===CUSTOMER.prospectTwo)};
+ const {res,state}=makeRes();
+ await customers(makeReq({method:'PATCH',token:TOKEN.admin,familyPath:CUSTOMER.prospectTwo,body:{notes:'Contact review'}}),res);
+ expect(state.status).toBe(200);
+ expect(db.calls.some(c=>c.op==='rpc' && c.table==='generate_vip_card_number')).toBe(false);
+ const after=db.rows('customers').find(r=>r.id===CUSTOMER.prospectTwo)!;
+ expect(after.vip_card_number).toBe(before.vip_card_number);
+ expect(after.ra_number).toBe(before.ra_number);
+ expect(after.customer_number).toBe(before.customer_number);
+});

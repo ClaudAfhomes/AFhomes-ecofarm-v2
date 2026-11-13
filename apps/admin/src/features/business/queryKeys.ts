@@ -27,6 +27,9 @@ export const businessKeys = {
   queue: key('business', 'queue'),
   activationQueue: (search: string = '') => key('business', 'queue', 'activation', search),
   financeQueue: (settled: string) => key('business', 'queue', 'finance', settled),
+  // Under `queue`, so every Finance refresh() invalidates it too.
+  financeSummary: (period: string) => key('business', 'queue', 'finance-summary', period),
+  accountingPeriods: key('business', 'queue', 'periods'),
   saleSummary: saleSummaryKey,
   saleSummaryScope: key('business', 'sale-summary'),
   reservationFinance: reservationFinanceKey,

@@ -10,6 +10,7 @@ import {
   istNavItemsForPermissions,
 } from './navigation';
 import { AdminForbiddenPage } from './AdminForbiddenPage';
+import { GlobalSearch } from './GlobalSearch';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
 import { useProfilePhoto } from '../features/account/profile-photo';
@@ -121,6 +122,8 @@ export function AdminLayout() {
           </button>
         }
         topbarActions={
+          <>
+          {gated ? null : <GlobalSearch />}
           <UserMenu
             photoUrl={photo.photo.data?.url}
             name={user?.name}
@@ -135,6 +138,7 @@ export function AdminLayout() {
               { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
             ]}
           />
+          </>
         }
       >
         <div className={styles.content}>

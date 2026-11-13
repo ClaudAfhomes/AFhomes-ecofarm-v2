@@ -176,7 +176,8 @@ export function MembershipDetailPage() {
         <section className={`${styles.panel} ${styles.hero}`} aria-label="Membership summary">
           <div className={styles.heroHead}>
             <div className={styles.heroIdentity}>
-              <span className={styles.heroNumber}>{data.membershipNumber}</span>
+              <span className={styles.heroNumber}>Membership Code: {data.membershipNumber}</span>
+              <span>VIP Card ID: {data.vipCardNumber ?? 'Not issued'}</span>
               <h2 className={styles.heroName}>{data.memberName}</h2>
               <span className={styles.heroTier}>
                 <TierBadge tier={tierCode || null} />

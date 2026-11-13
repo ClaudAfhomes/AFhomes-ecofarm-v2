@@ -489,6 +489,12 @@ export async function runActivationIntegrationChecks(world: World) {
       [ownedSales],
     );
     await db.query(`delete from public.payments where sale_id = any($1::uuid[])`, [ownedSales]);
+    // Signed RA documents RESTRICT their agreement (owner-only cleanup escape is set).
+    await db.query(
+      `delete from public.purchase_signed_documents where reservation_id in
+         (select id from public.reservation_agreements where sale_id = any($1::uuid[]))`,
+      [ownedSales],
+    );
     await db.query(
       `delete from public.reservation_agreement_schedule where agreement_id in
          (select id from public.reservation_agreements where sale_id = any($1::uuid[]))`,

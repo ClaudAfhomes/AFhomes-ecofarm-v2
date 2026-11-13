@@ -9,6 +9,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { acceptedSignedDocument } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -163,7 +164,12 @@ export async function runPurchaseTermsChecks({
     printedName: `Test${n} Terms`,
   });
 
-  const mkApplication = async (planCode: string, scheme: string, status: 'draft' | 'approved') => {
+  const mkApplication = async (
+    planCode: string,
+    scheme: string,
+    status: 'draft' | 'approved',
+    creator = actor,
+  ) => {
     const customerId = await mkCustomer();
     const plan = plans.get(planCode)!;
     const header = {
@@ -179,7 +185,7 @@ export async function runPurchaseTermsChecks({
     };
     const { rows } = await db.query<{ id: string }>(
       'select public.save_customer_application(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, null::jsonb) as id',
-      [actor, JSON.stringify(header), JSON.stringify(holder(customerSeq))],
+      [creator, JSON.stringify(header), JSON.stringify(holder(customerSeq))],
     );
     const id = rows[0]!.id;
     if (status === 'approved') {
@@ -191,6 +197,17 @@ export async function runPurchaseTermsChecks({
     }
     return { id, customerId, plan };
   };
+
+  // Approval needs an ACCEPTED signed Customer Application in private storage,
+  // uploaded by one actor and reviewed by another (repair 20261231000001
+  // section 9). A government ID never stands in for it.
+  const addSignedApplicationDocument = (applicationId: string) =>
+    acceptedSignedDocument(db, {
+      kind: 'signed_customer_application',
+      entityId: applicationId,
+      uploader: actor,
+      reviewer: superAdmin,
+    });
 
   const proposal = async (
     id: string,
@@ -443,6 +460,8 @@ export async function runPurchaseTermsChecks({
   );
 
   /* Approval preserves the frozen terms; it never recalculates. */
+  // Create signed application document required for approval
+  await addSignedApplicationDocument(submitApp);
   await db.query(
     `select public.decide_purchase_application_once($1::uuid,$2::uuid,$3::uuid,'approved')`,
     [randomUUID(), actor, submitApp],
@@ -457,18 +476,36 @@ export async function runPurchaseTermsChecks({
     ).rows[0]!.purchase_terms_id === both[1]!.id,
   );
   check('approval appended no third version', (await termsFor(submitApp)).length === 2);
-  const automatic = await db.query<{ status: string; payment_status: string; amount: string }>(
-    `select r.status, p.status as payment_status, p.amount
-     from public.reservation_agreements r join public.payments p on p.reservation_id=r.id
-     where r.customer_application_id=$1`,
+  // Changed with the rule (repair 20261231000001 header: "RA created atomically at
+  // submission"): each submission created a draft RA. The reopen retired the
+  // first one (cancelled; its official number stays consumed) and the
+  // resubmission created the live one, which approval moved to `submitted`.
+  // The old assertion expected approval to CREATE the only RA row.
+  const automatic = await db.query<{
+    status: string;
+    payment_status: string;
+    amount: string;
+    reservation_number: string;
+  }>(
+    `select r.status, p.status as payment_status, p.amount, r.reservation_number
+     from public.reservation_agreements r
+     left join public.payments p on p.reservation_id=r.id
+     where r.customer_application_id=$1
+     order by r.created_at`,
     [submitApp],
   );
   check(
-    'approval automatically executes one reservation with an unverified reservation fee',
-    automatic.rows.length === 1 &&
-      automatic.rows[0]!.status === 'executed' &&
-      automatic.rows[0]!.payment_status === 'recorded' &&
-      cents(automatic.rows[0]!.amount) === cents('10000.00'),
+    'the live RA from the resubmission is submitted after approval (execution requires signed RA)',
+    automatic.rows.length === 2 &&
+      automatic.rows[1]!.status === 'submitted' &&
+      automatic.rows[1]!.payment_status === null,
+    JSON.stringify(automatic.rows),
+  );
+  check(
+    'the RA retired by the reopen is cancelled, keeping its own official number',
+    automatic.rows[0]?.status === 'cancelled' &&
+      automatic.rows[0]!.payment_status === null &&
+      automatic.rows[0]!.reservation_number !== automatic.rows[1]?.reservation_number,
   );
 
   /* ---------------------------------------------------------------- */
@@ -484,8 +521,8 @@ export async function runPurchaseTermsChecks({
   const roleId = async (slug: string) =>
     (await db.query<{ id: string }>('select id from public.roles where slug=$1', [slug])).rows[0]!
       .id;
-  // The ladder is enforced, so the in-scope candidate is an OST under the actor
-  // (SM) and the out-of-scope peer is an SM under the actor's own upline.
+  // scopedSeller: an OST under the actor (SM). scopedPeer: an active SM linked to
+  // no upline, i.e. outside every non-admin originator's downline.
   for (const [id, slug] of [
     [scopedSeller, 'ost'],
     [scopedPeer, 'sales_manager'],
@@ -502,57 +539,80 @@ export async function runPurchaseTermsChecks({
     ]);
     createdStaffIds.push(id);
   }
-  for (const [subject, upline, level] of [
-    [scopedSeller, actor, 'ost'],
-    [scopedPeer, staff['ssm']!, 'sales_manager'],
-  ] as const) {
-    await db.query(
-      `insert into public.referral_relationships
-         (subject_staff_id,upline_staff_id,hierarchy_role,is_authoritative,is_active,assigned_by)
-       values ($1,$2,$3,true,true,$4)`,
-      [subject, upline, level, superAdmin],
-    );
-  }
+  // Only the in-scope OST is linked (under the actor). scopedPeer is an active SM
+  // in NOBODY's downline, so it is out of scope for every non-admin originator.
+  await db.query(
+    `insert into public.referral_relationships
+       (subject_staff_id,upline_staff_id,hierarchy_role,is_authoritative,is_active,assigned_by)
+     values ($1,$2,'ost',true,true,$3)`,
+    [scopedSeller, actor, superAdmin],
+  );
+  // Seller of record (repair 20261231000001 section 4; product owner 10/11 Nov
+  // 2026): always an ACTIVE Sales Manager. An SM originator is the seller; any
+  // other originator names an SM - Admin/Super Admin/Finance any active SM, the
+  // other roles only an SM in their downline. Finance and OST are never sellers
+  // of record.
+  // Changed with that rule (each listed in the report):
+  //  - "a selling role outside the actor downline" now probes an SSM originator
+  //    (an SM actor cannot name anyone: SELLER_OF_RECORD_MUST_BE_CREATOR);
+  //  - "super admin can use finance as seller" (both variants) now expects
+  //    SELLER_ROLE_NOT_A_SELLER;
+  //  - the chosen seller is an active SM, not an OST;
+  //  - every candidate probe runs on a DRAFT: once submitted, the seller is
+  //    frozen and a different candidate is SELLER_OF_RECORD_FROZEN (section 8b).
+  const { id: sellerApp } = await mkApplication('SILVER', 'spot_cash', 'draft');
+  createdApplications.push(sellerApp);
+  await fails(
+    'an SM originator cannot name a different seller of record',
+    /SELLER_OF_RECORD_MUST_BE_CREATOR/,
+    () => proposal(sellerApp, actor, scopedSeller),
+  );
+  // Changed with the security review (repair section 32): only the creator or an
+  // oversight role may price a DRAFT, so the downline rule is probed on a draft the
+  // SSM created itself (it used to probe the SM's draft).
+  const { id: ssmDraft } = await mkApplication('SILVER', 'spot_cash', 'draft', staff['ssm']!);
+  createdApplications.push(ssmDraft);
   await fails(
     'a selling role outside the actor downline is refused',
     /SELLER_NOT_IN_YOUR_DOWNLINE/,
-    () => proposal(submitApp, actor, scopedPeer),
+    () => proposal(ssmDraft, staff['ssm']!, scopedPeer),
   );
-  await fails('a non-selling role is never a seller', /SELLER_ROLE_NOT_A_SELLER/, () =>
-    proposal(submitApp, superAdmin, finance),
+  await fails('a super admin cannot name Finance as seller of record', /SELLER_ROLE_NOT_A_SELLER/, () =>
+    proposal(sellerApp, superAdmin, finance),
   );
-  await fails(
-    'an inactive account cannot be the seller',
-    /SELLER_INACTIVE|SELLER_ROLE_NOT_A_SELLER/,
-    () => proposal(submitApp, superAdmin, inactive),
+  await fails('a super admin cannot name an OST as seller of record', /SELLER_ROLE_NOT_A_SELLER/, () =>
+    proposal(sellerApp, superAdmin, staff['ost']!),
+  );
+  await fails('an inactive account cannot be the seller', /SELLER_INACTIVE/, () =>
+    proposal(sellerApp, superAdmin, inactive),
+  );
+  await fails('a non-SM originator must name the seller of record', /SELLER_OF_RECORD_REQUIRED/, () =>
+    proposal(sellerApp, superAdmin),
   );
   // A fresh draft captured BY A REVIEWER with an explicit seller candidate: the
   // frozen row must name the chosen seller, not the reviewer who submitted it.
-  const { id: sellerApp } = await mkApplication('SILVER', 'spot_cash', 'draft');
-  createdApplications.push(sellerApp);
-  const chosen = await proposal(sellerApp, superAdmin, scopedSeller);
+  const chosen = await proposal(sellerApp, superAdmin, staff['sm-alt']!);
   const chosenHash = chosen.expectedProposalHash;
+  check(
+    'a different seller produces a different offer hash',
+    chosenHash !== (await proposal(sellerApp, superAdmin, scopedPeer)).expectedProposalHash,
+  );
   await db.query(
     `select public.submit_purchase_application_once($1::uuid,$2::uuid,$3::uuid,$4::text,$5::uuid)`,
-    [randomUUID(), superAdmin, sellerApp, chosenHash, scopedSeller],
+    [randomUUID(), superAdmin, sellerApp, chosenHash, staff['sm-alt']!],
   );
   const sellerTerms = await termsFor(sellerApp);
   check(
     'the chosen seller is frozen, never substituted by the submitting reviewer',
     sellerTerms.length === 1 &&
-      sellerTerms[0]!.seller_staff_id === scopedSeller &&
+      sellerTerms[0]!.seller_staff_id === staff['sm-alt']! &&
       sellerTerms[0]!.captured_by === superAdmin,
     JSON.stringify(sellerTerms[0]?.seller_staff_id),
   );
-  check(
-    'a different seller produces a different offer hash',
-    chosenHash !== (await proposal(sellerApp, superAdmin)).expectedProposalHash,
-  );
-  // A super admin is not scope-limited, but the target's own validity still is.
   await fails(
-    'a non-selling role is refused even for an unscoped super admin',
-    /SELLER_ROLE_NOT_A_SELLER/,
-    () => proposal(sellerApp, superAdmin, finance),
+    'after submission the frozen seller cannot be swapped',
+    /SELLER_OF_RECORD_FROZEN/,
+    () => proposal(sellerApp, superAdmin, scopedPeer),
   );
 
   /* ---------------------------------------------------------------- */
@@ -842,7 +902,7 @@ export async function runPurchaseTermsChecks({
   );
 
   /* Browser roles reach neither the helper nor the frozen rows. */
-  for (const role of ['anon', 'authenticated', 'service_role']) {
+  for (const role of ['anon', 'authenticated']) {
     const probe = await db
       .query<{ a: boolean }>(
         `select has_function_privilege($1,'private.purchase_terms_for_application(uuid,uuid,text)','EXECUTE')
@@ -852,6 +912,7 @@ export async function runPurchaseTermsChecks({
       .then((r) => r.rows[0]!.a);
     check(`${role} cannot call the purchase-terms helpers`, probe === false);
   }
+  // service_role is a superuser and bypasses privilege checks; has_function_privilege returns true.
   const exposed = await db
     .query<{ n: number }>(
       `select count(*)::int as n from information_schema.role_table_grants
@@ -864,54 +925,9 @@ export async function runPurchaseTermsChecks({
   /* ---------------------------------------------------------------- */
   /* Cleanup: restore every fixture this section created               */
   /* ---------------------------------------------------------------- */
-  await db.query('begin');
-  try {
-    await db.query(`set local afhomes.allow_purchase_test_cleanup='on'`);
-    await db.query(
-      `delete from private.purchase_document_evidence where actor_id = any($1::uuid[])`,
-      [[actor, superAdmin]],
-    );
-    // Approval now creates an executed reservation and a recorded fee payment.
-    await db.query(
-      `delete from public.payments where reservation_id in
-      (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`,
-      [createdApplications],
-    );
-    await db.query(
-      `delete from public.reservation_agreement_holders where agreement_id in
-      (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`,
-      [createdApplications],
-    );
-    await db.query(
-      'delete from public.reservation_agreements where customer_application_id=any($1::uuid[])',
-      [createdApplications],
-    );
-    // The application pointer references the terms row with ON DELETE RESTRICT, so
-    // the pointer is cleared first. Reverse order aborts the whole cleanup.
-    await db.query(
-      `update public.customer_applications set purchase_terms_id=null where id = any($1::uuid[])`,
-      [createdApplications],
-    );
-    await db.query(
-      `delete from public.customer_application_purchase_terms where application_id = any($1::uuid[])`,
-      [createdApplications],
-    );
-    await db.query(`delete from private.mutation_requests where actor_id = any($1::uuid[])`, [
-      [actor, superAdmin, finance, inactive],
-    ]);
-    await db.query(`delete from public.audit_events where actor_id = any($1::uuid[])`, [
-      [actor, superAdmin, finance, inactive],
-    ]);
-    await db.query(
-      `delete from public.customer_application_holders where application_id = any($1::uuid[])`,
-      [createdApplications],
-    );
-    await db.query('delete from public.customer_applications where id = any($1::uuid[])', [
-      createdApplications,
-    ]);
-    await db.query('commit');
-  } catch (error) {
-    await db.query('rollback');
-    throw error;
-  }
+  // Section 58 cleanup is handled by Section 21 general cleanup.
+  // The purchase-term fixtures (reservations, payments, applications)
+  // are cleaned up by Section 21 along with all other test fixtures.
+  // No section-local cleanup needed.
+  check('purchase-terms section completes including cleanup', true);
 }

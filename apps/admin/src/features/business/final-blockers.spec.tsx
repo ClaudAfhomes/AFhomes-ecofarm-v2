@@ -12,7 +12,21 @@ import {
   CustomerApplicationEditorPage,
   ReservationAgreementEditorPage,
 } from './OfficialFormsPages';
-vi.mock('../../lib/session', () => ({ useSession: () => ({ user: null }) }));
+// A real, active Sales Manager by default: they ARE the seller of record, so
+// the seller-picker blocker never fires. One test swaps in an Admin.
+const session = vi.hoisted(() => ({
+  user: {
+    id: '00000000-0000-4000-8000-0000000000f1',
+    name: 'QA SM',
+    email: 'sm@example.com',
+    roleId: '00000000-0000-4000-8000-0000000000f2',
+    roleSlug: 'sales_manager',
+    roleName: 'Sales Manager',
+    afHomesPermissions: [] as never[],
+    status: 'active' as const,
+  } as Record<string, unknown>,
+}));
+vi.mock('../../lib/session', () => ({ useSession: () => ({ user: session.user }) }));
 vi.mock('../address/services', () => ({
   getAddressProvinces: async () => [{ code: '0403400000', name: 'Laguna' }],
   getAddressLocalities: async () => [
@@ -74,6 +88,10 @@ vi.mock('./services', async (original) => ({
     {
       id: '00000000-0000-4000-8000-000000000001',
       code: 'GOLD',
+      cashPrice: '100000.00',
+      installmentPrice: '120000.00',
+      reservationFee: '10000.00',
+      standardInstallmentMonths: 4,
       name: 'Gold',
       isActive: true,
       categoryIsActive: true,
@@ -88,6 +106,10 @@ vi.mock('./services', async (original) => ({
     {
       id: '00000000-0000-4000-8000-000000000006',
       code: 'SILVER',
+      cashPrice: '60000.00',
+      installmentPrice: '70000.00',
+      reservationFee: '10000.00',
+      standardInstallmentMonths: 4,
       name: 'Silver',
       isActive: true,
       categoryIsActive: true,
@@ -102,6 +124,10 @@ vi.mock('./services', async (original) => ({
     {
       id: '00000000-0000-4000-8000-000000000007',
       code: 'BRONZE',
+      cashPrice: '30000.00',
+      installmentPrice: '36000.00',
+      reservationFee: '10000.00',
+      standardInstallmentMonths: 4,
       name: 'Bronze',
       isActive: true,
       categoryIsActive: true,
@@ -390,6 +416,40 @@ it('primary landline refuses letters and blocks save while the number is invalid
   // Clearing the field removes its blocker; the remaining blockers are other,
   // unrelated requirements.
   expect(blockersText()).not.toContain('Correct the recommender contact or landline number.');
+});
+it('a non-SM creator must pick the seller of record; an SM never does', async () => {
+  const salesManager = session.user;
+  // SM: no seller blocker.
+  const sm = mount(true);
+  await goToHolders(sm.user);
+  await sm.user.click(screen.getByRole('tab', { name: 'Contact' }));
+  await sm.user.type(screen.getByLabelText<HTMLInputElement>('Landline'), '123');
+  expect(blockersText()).not.toContain('Sales Manager who is the seller of record');
+  sm.unmount();
+  // Admin: blocked until an active Sales Manager is named.
+  session.user = { ...salesManager, roleSlug: 'admin', roleName: 'Admin' };
+  try {
+    const admin = mount(true);
+    await goToHolders(admin.user);
+    await admin.user.click(screen.getByRole('tab', { name: 'Contact' }));
+    await admin.user.type(screen.getByLabelText<HTMLInputElement>('Landline'), '123');
+    expect(blockersText()).toContain(
+      'Choose the active Sales Manager who is the seller of record in the Network step.',
+    );
+  } finally {
+    session.user = salesManager;
+  }
+});
+it('a disabled Continue/Submit says why beside it and names the step to fix', async () => {
+  const { user } = mount(true);
+  await goToHolders(user);
+  await user.click(screen.getByRole('tab', { name: 'Contact' }));
+  await user.type(screen.getByLabelText<HTMLInputElement>('Landline'), '123');
+  const notes = screen.getAllByRole('note').map((n) => n.textContent ?? '');
+  expect(notes.some((text) => /Cannot continue \((Holders or Network|Holders) step\):/.test(text))).toBe(
+    true,
+  );
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
 });
 it('supplementary landline gets its own frontend error', async () => {
   const { user } = mount(true);

@@ -48,7 +48,7 @@ it('uses frozen reservation terms, complete schedule and verified totals instead
   const agreement = reservationAgreementSchema.parse({
     id: '00000000-0000-4000-8000-000000000001',
     planId: '00000000-0000-4000-8000-000000000002',
-    reservationNumber: 'RA-2026-000123',
+    reservationNumber: '2026-0001',
     tier: 'GOLD',
     totalPrice: '90000.00',
     reservationFee: '10000.00',
@@ -89,7 +89,7 @@ it('uses frozen reservation terms, complete schedule and verified totals instead
   expect(text).toContain('12%');
   expect(text).not.toContain('17%');
   expect(text).toContain('11 years');
-  expect(text).toContain('RA-2026-000123');
+  expect(text).toContain('2026-0001');
   expect(text).toContain('2027-01-07');
   expect(text).toContain('Scheduled date (not payment verification)');
   expect(
@@ -112,4 +112,10 @@ it('prints entered RA draft details without marking money verified', () => {
  })));
  expect(text).toContain('PROPOSED-123'); expect(text).toContain('2026-11-09'); expect(text).toContain('111,111.00'); expect(text).toContain('REF-ONLY');
  expect(text).toContain('payments are unverified');
+});
+
+it('never labels a legacy draft proposal as an official RA number', () => {
+ const rows=reservationPaperRows(draftReservationPaper(primary,null,'SILVER','spot_cash',plan,{reservationNumber:'LEGACY-PROPOSAL'}));
+ expect(rows.flatMap(r=>r.cells??[]).find(c=>c.label==='Official Reservation Agreement Number')?.value).toBe('____________________');
+ expect(rows.flatMap(r=>r.cells??[]).find(c=>c.label==='Legacy proposed reference (not official)')?.value).toBe('LEGACY-PROPOSAL');
 });

@@ -83,8 +83,16 @@ describe('exact decimal money', () => {
 
 describe('afHomesModuleKeySchema', () => {
   it('exposes the base keys plus CMS, bulk import, and the Operational Services keys', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(33);
+    expect(afHomesModuleKeySchema.options).toHaveLength(37);
     const keys = afHomesModuleKeySchema.options as readonly string[];
+    // IST Payroll (12 Nov 2026): four separate keys so reviewing, approving,
+    // closing a period and setting compensation policy never authorise each other.
+    expect(keys.filter((key) => key.startsWith('finance.payroll'))).toEqual([
+      'finance.payroll',
+      'finance.payroll_approval',
+      'finance.payroll_close',
+      'finance.payroll_policy',
+    ]);
     // Phase 2 reused every existing key it could and added only these two.
     expect(keys).toContain('sales.uplines');
     expect(keys).toContain('finance.points');

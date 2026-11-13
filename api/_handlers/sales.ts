@@ -1,3 +1,14 @@
+import { requireVipSaleCreator } from '../_lib/vip-sale-creator.js';
+import {
+  handlePaymentExtras,
+  receiptDetailsOf,
+  saveReceiptDetails,
+} from '../_lib/payment-extras.js';
+import {
+  issuePaymentReceiptUploadGrant,
+  receiptBelongsTo,
+  UUID_PATTERN,
+} from '../_lib/payment-receipts.js';
 import { saleListQuerySchema, toSale, type SaleMoney } from '../_lib/sale-model.js';
 /**
  * AFHomes card sales, payments, and activation.
@@ -104,8 +115,6 @@ async function loadSaleView(db: Db, id: string) {
   return data as Record<string, unknown> | null;
 }
 
-
-
 async function moneyBySale(
   db: Db,
   rows: Record<string, unknown>[],
@@ -182,7 +191,6 @@ function saleInScope(
   return row.seller_staff_id === scope.auth.userId || row.seller_ost_id === scope.auth.userId;
 }
 
-
 /** Current money state for an idempotent verification retry (no RPC, no audit). */
 async function idempotentVerifyResult(db: Db, saleId: string) {
   const { data: sale, error } = await db
@@ -227,6 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (await handlePaymentExtras(req, res, db)) return;
     /* ---------------- list ---------------- */
     if (subPath(req) === '' && method(req) === 'GET') {
       const parsed = parseListQuery(req);
@@ -266,6 +275,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (subPath(req) === '' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.card_sales', 'create');
       if ('error' in auth) return deny(res, auth);
+      if (
+        !requireVipSaleCreator(auth, res, (jsonBody(req) as Record<string, unknown>)?.sellerStaffId)
+      )
+        return;
       const parsed = createSaleSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid sale request', 400);
       const input = parsed.data;
@@ -336,7 +349,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .eq('staff_id', sellerRow.id)
             .maybeSingle();
           const { data: role } = assignment
-            ? await db.from('roles').select('slug').eq('id', assignment.role_id).maybeSingle()
+            ? await db
+                .from('roles')
+                .select('slug')
+                .eq('id', assignment.role_id)
+                .eq('is_active', true) // same as SQL private.staff_role_slug
+                .maybeSingle()
             : { data: null };
           target = {
             staffId: sellerRow.id,
@@ -657,8 +675,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             typeof row.verified_by === 'string' ? (names.get(row.verified_by) ?? null) : null,
           recordedAt: isoOrNull(row.recorded_at) ?? '',
           verifiedAt: isoOrNull(row.verified_at),
+          orNumber: isoOrNull(row.or_number),
+          paidOn: row.paid_on ? String(row.paid_on).slice(0, 10) : null,
+          paidByName: isoOrNull(row.paid_by_name),
+          postingPeriod: isoOrNull(row.posting_period),
+          // Required by paymentSchema; the reservation list already emits it.
+          paymentPurpose: isoOrNull(row.payment_purpose),
         })),
       );
+    }
+
+    /* ---------------- receipt upload grant (before recording) ---------------- */
+    const receiptUpload = route(req, 'POST', /^([0-9a-f-]+)\/payments\/receipt-upload$/);
+    if (receiptUpload) {
+      const auth = await authorizeAfHomes(req, 'finance.payment_verification', 'update');
+      if ('error' in auth) return deny(res, auth);
+      if (!UUID_PATTERN.test(receiptUpload[1]!))
+        return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      const { data: sale, error } = await db
+        .from('card_sales')
+        .select('id')
+        .eq('id', receiptUpload[1]!)
+        .maybeSingle();
+      if (error) throw error;
+      if (!sale) return fail(res, 'NOT_FOUND', 'Sale not found', 404);
+      return issuePaymentReceiptUploadGrant(res, 'sale', String(sale.id), jsonBody(req));
     }
 
     /* ---------------- record a payment ---------------- */
@@ -669,6 +710,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = recordPaymentSchema.safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid payment', 400);
       const input = parsed.data;
+      if (!receiptBelongsTo(input.receiptStoragePath, 'sale', addPayment[1]!))
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Upload the receipt for this sale, then record the payment.',
+          400,
+        );
       if (!input.reference?.trim() && !input.requestId)
         return fail(
           res,
@@ -691,6 +739,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       );
       if (error) return mapRpcError(res, error);
+      // OR number, actual payment date and payer are stored on the pending payment.
+      const detailsError = await saveReceiptDetails(db, data, auth.userId, receiptDetailsOf(input));
+      if (detailsError) return mapRpcError(res, detailsError);
       return res.status(201).json({ id: data });
     }
 

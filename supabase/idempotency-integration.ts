@@ -85,6 +85,19 @@ export async function runIdempotencyChecks(ctx: Context) {
 
   const paymentSql = 'select public.record_card_payment_once($1,$2,$3,$4,$5,$6,$7,$8,$9) id';
   const paymentKey = randomUUID();
+  // A real synthetic receipt object: recording requires one (no test-mode
+  // bypass). Run-prefixed so the suite cleanup removes it.
+  // One receipt backs one live payment (repair 20261231000001 section 24), so
+  // every distinct payment below gets its own object; replays reuse theirs.
+  const freshReceipt = async () => {
+    const path = `${ctx.run}/receipts/idempotency-${randomUUID()}.pdf`;
+    await db.query(
+      "insert into storage.objects (bucket_id, name) values ('afhomes-payment-receipts', $1)",
+      [path],
+    );
+    return path;
+  };
+  const receiptPath = await freshReceipt();
   const paymentArgs = [
     paymentKey,
     sale,
@@ -93,7 +106,7 @@ export async function runIdempotencyChecks(ctx: Context) {
     'cash',
     null,
     'QA retry',
-    null,
+    receiptPath,
     actor,
   ];
   const payResults = await concurrent(paymentSql, paymentArgs);
@@ -129,8 +142,19 @@ export async function runIdempotencyChecks(ctx: Context) {
     changedPayment,
     /MUTATION_PAYLOAD_CONFLICT/,
   );
+  const reusedReceipt = [...paymentArgs];
+  reusedReceipt[0] = randomUUID();
+  await refused(
+    'a new request citing an already-used receipt is refused',
+    paymentSql,
+    reusedReceipt,
+    /RECEIPT_ALREADY_USED/,
+  );
+  check('a refused receipt reuse leaves no request marker', (await markerCount(String(reusedReceipt[0]))) === 0);
+  // Identical in every detail except its own receipt object.
   const newPaymentArgs = [...paymentArgs];
   newPaymentArgs[0] = randomUUID();
+  newPaymentArgs[7] = await freshReceipt();
   check(
     'new intentional identical payment gets new ID',
     (await db.query(paymentSql, newPaymentArgs)).rows[0]!.id !== payment,
@@ -142,9 +166,12 @@ export async function runIdempotencyChecks(ctx: Context) {
   const referenceArgs = [...paymentArgs];
   referenceArgs[0] = randomUUID();
   referenceArgs[5] = 'QA-REFERENCE';
+  referenceArgs[7] = await freshReceipt();
   await db.query(paymentSql, referenceArgs);
   const failedRefKey = randomUUID();
   referenceArgs[0] = failedRefKey;
+  // A fresh receipt, so only the duplicate reference can refuse it.
+  referenceArgs[7] = await freshReceipt();
   await refused(
     'same-sale nonblank reference remains unique',
     paymentSql,
@@ -158,6 +185,7 @@ export async function runIdempotencyChecks(ctx: Context) {
   const failPayment = [...paymentArgs];
   failPayment[0] = randomUUID();
   failPayment[2] = '-1.00';
+  failPayment[7] = await freshReceipt();
   await refused(
     'invalid payment rolls back business write',
     paymentSql,
@@ -466,7 +494,8 @@ export async function runIdempotencyChecks(ctx: Context) {
     await refused(
       'payment audit failure rolls back transaction',
       paymentSql,
-      [failedPayKey, ...paymentArgs.slice(1)],
+      // Own receipt, so the injected audit fault (not receipt reuse) is what refuses it.
+      [failedPayKey, ...paymentArgs.slice(1, 7), await freshReceipt(), paymentArgs[8]],
       /QA_AUDIT_FAILURE/,
     );
     check(

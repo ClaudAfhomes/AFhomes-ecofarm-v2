@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { Client } from 'pg';
 import { makePurchaseFixtures } from './reservation-purchase-integration.js';
+import { paymentReceipt } from './purchase-evidence-fixtures.js';
 
 /** Synthetic local fixtures only; the normal integration runner owns cleanup. */
 export async function runPurchaseTierMatrixChecks(world: {
   db: Client;
   check: (label: string, ok: boolean, detail?: string) => void;
   actor: string;
+  reviewer: string;
   finance: string;
   createdCustomers: string[];
   createdApplications: string[];
@@ -40,14 +42,22 @@ export async function runPurchaseTierMatrixChecks(world: {
           [purchase.termsId],
         )
       ).rows[0]!;
-      const record = async (amount: string, reference: string) =>
+      const record = async (amount: string, reference: string, paymentPurpose = 'contractual_installment') =>
         (
           await db.query<{ id: string }>(
             'select public.record_reservation_payment_once($1,$2,$3,$4) as id',
             [
               randomUUID(),
               purchase.reservationId,
-              { amount, method: 'cash', paymentType: 'installment', reference },
+              // The ledger payment_type is derived from the purpose (repair
+              // 20261231000001 section 12); a real receipt object backs each record.
+              {
+                amount,
+                method: 'cash',
+                reference,
+                paymentPurpose,
+                receiptStoragePath: await paymentReceipt(db),
+              },
               finance,
             ],
           )
@@ -67,7 +77,7 @@ export async function runPurchaseTierMatrixChecks(world: {
             [randomUUID(), purchase.reservationId, finance],
           )
         ).rows[0]!.id;
-      const initial = await record(terms.required_initial, `${label}-INITIAL`);
+      const initial = await record(terms.required_initial, `${label}-INITIAL`, 'contractual_down_payment');
       const before = (
         await db.query<{ purchase_financial_summary: { verifiedTotal: string } }>(
           'select public.purchase_financial_summary($1)',
@@ -99,7 +109,7 @@ export async function runPurchaseTierMatrixChecks(world: {
           [terms.total_price, terms.required_initial],
         )
       ).rows[0]!.amount;
-      await verify(await record(remaining, `${label}-BALANCE`));
+      await verify(await record(remaining, `${label}-BALANCE`, 'contractual_installment'));
       const sale = await finalize();
       check(`${label}: repeated finalization returns the same sale`, (await finalize()) === sale);
       const activated = (

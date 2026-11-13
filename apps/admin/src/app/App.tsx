@@ -71,6 +71,11 @@ const CustomerImportExportPage = lazy(() =>
     default: m.CustomerImportExportPage,
   })),
 );
+const MonthEndClosePage = lazy(() =>
+  import('../features/business/MonthEndClosePage').then((m) => ({
+    default: m.MonthEndClosePage,
+  })),
+);
 const BusinessFinanceQueuePage = lazy(() =>
   import('../features/business/BusinessFinanceQueuePage').then((m) => ({
     default: m.BusinessFinanceQueuePage,
@@ -342,6 +347,10 @@ export default function App() {
               <Route
                 path="/admin/finance/payments"
                 element={protectedPage(<BusinessFinanceQueuePage />)}
+              />
+              <Route
+                path="/admin/finance/month-end"
+                element={protectedPage(<MonthEndClosePage />)}
               />
               <Route
                 path="/admin/finance/activation"

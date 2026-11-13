@@ -10,6 +10,10 @@ import { runReservationFinanceChecks } from './reservation-finance-integration.j
 import { runPurchaseFinalizationChecks } from './purchase-finalization-integration.js';
 import { runActivationIntegrationChecks } from './activation-integration.js';
 import { runPurchaseConcurrencyChecks } from './purchase-concurrency-integration.js';
+import {
+  paymentReceipt,
+  syntheticStorageObjects,
+} from './purchase-evidence-fixtures.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 // The installed role_permissions rows are asserted against the CONTRACT, not
 // against hand-typed numbers, so a later migration that seeds a grant cannot
@@ -356,6 +360,24 @@ const one = async <T>(sql: string, params: unknown[] = []): Promise<T> => {
   return res.rows[0] as T;
 };
 
+/** Private bucket every payment receipt must live in (see require_payment_receipt_object). */
+const RECEIPT_BUCKET = 'afhomes-payment-receipts';
+
+/**
+ * Create a real synthetic receipt object and return its bucket-relative name,
+ * which is what `p_receipt_storage_path` carries. Recording and verification
+ * both require the object to exist; there is no test-mode bypass. Names carry
+ * the run prefix so cleanup removes exactly these rows.
+ */
+const receiptObject = async (label: string): Promise<string> => {
+  const name = `${RUN}/receipts/${label}-${randomUUID()}.pdf`;
+  await db.query('insert into storage.objects (bucket_id, name) values ($1, $2)', [
+    RECEIPT_BUCKET,
+    name,
+  ]);
+  return name;
+};
+
 /**
  * Postgres returns snake_case column names; the suite asserts against the
  * camelCase names the API exposes. Convert explicitly rather than guessing.
@@ -487,6 +509,7 @@ const BASELINE_TABLES = [
   'reservation_agreement_schedule',
   'reservation_agreement_documents',
   'customer_application_purchase_terms',
+  'purchase_signed_documents',
 ] as const;
 const baseline = new Map<string, number>();
 
@@ -500,6 +523,10 @@ const captureBaseline = async (): Promise<void> => {
     const r = await db.query<{ n: number }>(`select count(*)::int as n from public.${table}`);
     baseline.set(table, r.rows[0]!.n);
   }
+  baseline.set(
+    'storage.objects',
+    (await db.query<{ n: number }>('select count(*)::int n from storage.objects')).rows[0]!.n,
+  );
 };
 
 /* ================================================================== */
@@ -878,6 +905,158 @@ async function main(): Promise<void> {
       return sId;
     };
 
+    section('4b. sale origination: seller of record (11 Nov 2026 rule)');
+    /* ---------------------------------------------------------------- */
+    {
+      // Active Sales Manager outside the SSM downline, and an inactive SM.
+      await mkStaff('sm-out', 'sales_manager');
+      await mkStaff('sm-inactive', 'sales_manager', 'inactive');
+      const resolveOrig = async (actor: string, cand: string | null) =>
+        (
+          await one<{ s: string }>('select private.resolve_originating_seller($1::uuid,$2::uuid) as s', [
+            actor,
+            cand,
+          ])
+        ).s;
+      const denyOrig = async (name: string, actor: string, cand: string | null, code: string) => {
+        const msg = await throwsIsolated(name, () => resolveOrig(actor, cand));
+        check(`  ${name} -> ${code}`, msg.includes(code), msg.split('\n')[0]);
+      };
+      const sm = staff['sm']!;
+
+      eq('SM originating for self is the seller', await resolveOrig(sm, null), sm);
+      eq('SM naming self is accepted', await resolveOrig(sm, sm), sm);
+      await denyOrig('SM naming another SM', sm, staff['sm-alt']!, 'SELLER_OF_RECORD_MUST_BE_CREATOR');
+      eq('admin naming an active SM', await resolveOrig(staff['admin']!, sm), sm);
+      eq('super_admin naming an active SM', await resolveOrig(staff['super-admin']!, sm), sm);
+      eq('finance naming an active SM outside any downline', await resolveOrig(staff['finance']!, staff['sm-out']!), staff['sm-out']!);
+      await denyOrig('admin naming nobody', staff['admin']!, null, 'SELLER_OF_RECORD_REQUIRED');
+      await denyOrig('admin naming self', staff['admin']!, staff['admin']!, 'SELLER_OF_RECORD_REQUIRED');
+      await denyOrig('admin naming an OST', staff['admin']!, staff['ost']!, 'SELLER_ROLE_NOT_A_SELLER');
+      await denyOrig('admin naming another admin', staff['admin']!, staff['super-admin']!, 'SELLER_ROLE_NOT_A_SELLER');
+      await denyOrig('admin naming an inactive SM', staff['admin']!, staff['sm-inactive']!, 'SELLER_INACTIVE');
+      await denyOrig('OST actor', staff['ost']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('OST actor naming nobody', staff['ost']!, null, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('inactive actor', staff['inactive']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
+      eq('SSM naming a direct-downline SM', await resolveOrig(staff['ssm']!, sm), sm);
+      await denyOrig('SSM naming a non-downline SM', staff['ssm']!, staff['sm-out']!, 'SELLER_NOT_IN_YOUR_DOWNLINE');
+      eq('VD naming a 2-level-downline SM', await resolveOrig(staff['vice-director']!, sm), sm);
+      await denyOrig('VD naming a non-downline SM', staff['vice-director']!, staff['sm-out']!, 'SELLER_NOT_IN_YOUR_DOWNLINE');
+      await denyOrig('SSM naming an OST in its downline', staff['ssm']!, staff['ost']!, 'SELLER_ROLE_NOT_A_SELLER');
+
+      // application_seller_of_record + purchase_terms_proposal on real rows.
+      const planId = (await one<{ id: string }>(`select id from public.card_plans where code = 'BRONZE'`)).id;
+      const mkApp = async (label: string, status: string) => {
+        const customerId = await mkCustomer(`orig-${label}`, 'orig');
+        const id = uuidFor(`app:orig:${label}`);
+        await db.query(
+          `insert into public.customer_applications
+             (id, application_number, customer_id, plan_id, tier_snapshot, payment_scheme_snapshot,
+              vip_amount_snapshot, discount_percent_snapshot, validity_years_snapshot,
+              yearly_points_snapshot, annual_points_tranches_snapshot, holder_limit_snapshot,
+              consent_acknowledged, acknowledged_at, primary_signature_status, status, created_by, submitted_at)
+           select $1, $2, $3, cp.id, 'BRONZE', 'spot_cash', cp.cash_price, 0, 1, 0, 1, 1,
+                  true, current_date, 'received', $4, $5, case when $4 = 'draft' then null else now() end
+             from public.card_plans cp where cp.id = $6`,
+          [id, `${RUN}-ORIG-${label}`, customerId, status, staff['admin']!, planId],
+        );
+        createdApplicationIds.push(id);
+        return id;
+      };
+      const appDraft = await mkApp('draft', 'draft');
+      const appFrozen = await mkApp('frozen', 'submitted');
+      const appNoTerms = await mkApp('noterms', 'submitted');
+
+      const sor = async (app: string, status: string, actor: string, cand: string | null) =>
+        (
+          await one<{ s: string }>('select private.application_seller_of_record($1::uuid,$2,$3::uuid,$4::uuid) as s', [
+            app,
+            status,
+            actor,
+            cand,
+          ])
+        ).s;
+      const denySor = async (name: string, app: string, status: string, actor: string, cand: string | null, code: string) => {
+        const msg = await throwsIsolated(name, () => sor(app, status, actor, cand));
+        check(`  ${name} -> ${code}`, msg.includes(code), msg.split('\n')[0]);
+      };
+
+      eq('draft: admin naming an SM uses the origination rule', await sor(appDraft, 'draft', staff['admin']!, sm), sm);
+      await denySor('draft: admin naming nobody', appDraft, 'draft', staff['admin']!, null, 'SELLER_OF_RECORD_REQUIRED');
+      await denySor('draft: OST actor', appDraft, 'draft', staff['ost']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
+      eq('submitted without terms falls back to origination', await sor(appNoTerms, 'submitted', staff['admin']!, sm), sm);
+      await denySor('submitted without terms: admin naming nobody', appNoTerms, 'submitted', staff['admin']!, null, 'SELLER_OF_RECORD_REQUIRED');
+
+      // Freeze the proposal for appFrozen with the SM as seller (as the review RPC does).
+      const proposal = (
+        await one<{ p: { terms: Record<string, any> } }>(
+          'select private.purchase_terms_for_application($1::uuid,$2::uuid,$3) as p',
+          [appFrozen, sm, 'submission'],
+        )
+      ).p.terms;
+      await db.query(
+        `insert into public.customer_application_purchase_terms(
+           application_id,customer_id,plan_id,seller_staff_id,version,capture_kind,captured_by,
+           tier,payment_scheme,total_price,reservation_fee,minimum_down_payment,required_initial,
+           installment_months,monthly_amount,spot_cash_days,validity_months,discount_percent,yearly_points,
+           annual_points_tranches,holder_limit,inclusions,commission_rule_id,commission_rate,commission_base,expected_commission)
+         values($1,$2,$3,$4,1,'submission',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23,$24)`,
+        [
+          appFrozen, proposal.customerId, proposal.planId, sm, staff['admin']!, proposal.tier,
+          proposal.paymentScheme, proposal.totalPrice, proposal.reservationFee, proposal.minimumDownPayment,
+          proposal.requiredInitial, proposal.installmentMonths, proposal.monthlyAmount, proposal.spotCashDays,
+          proposal.validityMonths, proposal.discountPercent, proposal.yearlyPoints, proposal.annualPointsTranches,
+          proposal.holderLimit, JSON.stringify(proposal.inclusions), proposal.commissionRuleId,
+          proposal.commissionRate, proposal.commissionBase, proposal.expectedCommission,
+        ],
+      );
+      eq('frozen terms: later stage reuses the frozen seller with no candidate', await sor(appFrozen, 'submitted', staff['admin']!, null), sm);
+      eq('frozen terms: candidate equal to the frozen seller is accepted', await sor(appFrozen, 'approved', staff['admin']!, sm), sm);
+      eq('frozen terms: a reviewer who is not the seller does not become the seller', await sor(appFrozen, 'submitted', staff['finance']!, null), sm);
+      await denySor('frozen terms: a different candidate', appFrozen, 'submitted', staff['admin']!, staff['sm-alt']!, 'SELLER_OF_RECORD_FROZEN');
+      await denySor('draft status ignores frozen terms and re-applies the origination rule', appFrozen, 'draft', staff['admin']!, null, 'SELLER_OF_RECORD_REQUIRED');
+
+      // End to end through the public RPC.
+      const prop = async (app: string, actor: string, cand: string | null) =>
+        (
+          await one<{ p: { terms: { sellerStaffId: string } } }>(
+            'select public.purchase_terms_proposal($1::uuid,$2::uuid,$3::uuid) as p',
+            [app, actor, cand],
+          )
+        ).p.terms.sellerStaffId;
+      eq('purchase_terms_proposal: admin naming an SM freezes that SM', await prop(appDraft, staff['admin']!, sm), sm);
+      eq('purchase_terms_proposal: frozen application keeps its seller', await prop(appFrozen, staff['admin']!, null), sm);
+      const pmsg = await throwsIsolated('purchase_terms_proposal: admin naming nobody on a draft', () =>
+        prop(appDraft, staff['admin']!, null),
+      );
+      check('  refused with SELLER_OF_RECORD_REQUIRED', pmsg.includes('SELLER_OF_RECORD_REQUIRED'), pmsg.split('\n')[0]);
+      const fmsg = await throwsIsolated('purchase_terms_proposal: other SM on frozen application', () =>
+        prop(appFrozen, staff['admin']!, staff['sm-alt']!),
+      );
+      check('  refused with SELLER_OF_RECORD_FROZEN', fmsg.includes('SELLER_OF_RECORD_FROZEN'), fmsg.split('\n')[0]);
+
+      // Own cleanup: frozen terms are immutable except under the harness flag.
+      await db.query('begin');
+      await db.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+      await db.query('delete from public.customer_application_purchase_terms where application_id = any($1::uuid[])', [
+        [appDraft, appFrozen, appNoTerms],
+      ]);
+      await db.query('delete from public.customer_applications where id = any($1::uuid[])', [
+        [appDraft, appFrozen, appNoTerms],
+      ]);
+      await db.query('commit');
+      eq(
+        'origination fixtures removed',
+        (
+          await one<{ n: number }>('select count(*)::int as n from public.customer_applications where id = any($1::uuid[])', [
+            [appDraft, appFrozen, appNoTerms],
+          ])
+        ).n,
+        0,
+      );
+    }
+
+    /* ---------------------------------------------------------------- */
     section('5. customer + sale snapshot immutability');
     /* ---------------------------------------------------------------- */
     const customerNumber = await one<{ customer_number: string }>(
@@ -1135,8 +1314,8 @@ async function main(): Promise<void> {
     );
 
     const p1 = await one<{ id: string }>(
-      `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-      [saleId, '20000.00', `${RUN}-TRF-1`, staff['finance']],
+      `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,$5,$4) as id`,
+      [saleId, '20000.00', `${RUN}-TRF-1`, staff['finance'], await receiptObject('card')],
     );
     check('record_card_payment returns the new payment id', !!p1.id);
     const afterRecord = await summaryOf(saleId);
@@ -1148,12 +1327,15 @@ async function main(): Promise<void> {
     );
     eq('  sale moved to payment_in_progress', afterRecord.status, 'payment_in_progress');
 
+    // A real receipt, so the refusal can only come from the duplicate reference.
+    const dupRefReceipt = await receiptObject('card');
     const badRef = await throws('duplicate payment reference is refused', () =>
-      db.query(`select public.record_card_payment($1,$2,'installment','cash',$3,null,null,$4)`, [
+      db.query(`select public.record_card_payment($1,$2,'installment','cash',$3,null,$5,$4)`, [
         saleId,
         '100.00',
         `${RUN}-TRF-1`,
         staff['finance']!,
+        dupRefReceipt,
       ]),
     );
     check(
@@ -1168,8 +1350,8 @@ async function main(): Promise<void> {
     ]);
     const rejId = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,null,$3) as id`,
-        [saleId, `${RUN}-TRF-REJ`, staff['finance']],
+        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,$4,$3) as id`,
+        [saleId, `${RUN}-TRF-REJ`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     const rejectNoReason = await throws('a rejection without a reason is refused', () =>
@@ -1199,8 +1381,8 @@ async function main(): Promise<void> {
     // Now a real verified down payment, then the boundary amounts.
     const downId = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-        [saleId, '20000.00', `${RUN}-TRF-DOWN`, staff['finance']],
+        `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,$5,$4) as id`,
+        [saleId, '20000.00', `${RUN}-TRF-DOWN`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     const verified = (
@@ -1233,8 +1415,8 @@ async function main(): Promise<void> {
     // A second verified payment must not move the deadline.
     const p3 = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,null,$3) as id`,
-        [saleId, `${RUN}-TRF-3`, staff['finance']],
+        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,$4,$3) as id`,
+        [saleId, `${RUN}-TRF-3`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [
@@ -1257,6 +1439,575 @@ async function main(): Promise<void> {
     eq('  rejected money is not in the verified total', over.verifiedTotal, '20001.00');
 
     /* ---------------------------------------------------------------- */
+    section('7b. sale-path payments: real receipt, Finance re-check, verified + pending cap');
+    /* ---------------------------------------------------------------- */
+    // Repair 20261231000001 section 16. Each probe runs on its own fresh sale so
+    // no other section's totals move.
+    {
+      const goldPlan = byCode.get('GOLD')!;
+      const ruleSale = await mkSale('rules', await mkCustomer('rules', 'r7b'), goldPlan, 'r7b');
+      const recordSql = `select public.record_card_payment($1,$2,'installment','cash',null,null,$3,$4) as id`;
+
+      const noPath = await throwsIsolated('recording without a receipt path is refused', () =>
+        db.query(recordSql, [ruleSale, '100.00', null, staff['finance']!]),
+      );
+      check(
+        '  RECEIPT_STORAGE_PATH_REQUIRED (no test-mode bypass)',
+        /RECEIPT_STORAGE_PATH_REQUIRED/.test(noPath),
+        noPath,
+      );
+      const ghostPath = `${RUN}/receipts/never-uploaded-${randomUUID()}.pdf`;
+      const noObject = await throwsIsolated('recording with a path to no object is refused', () =>
+        db.query(recordSql, [ruleSale, '100.00', ghostPath, staff['finance']!]),
+      );
+      check(
+        '  RECEIPT_STORAGE_OBJECT_NOT_FOUND (the storage check really runs)',
+        /RECEIPT_STORAGE_OBJECT_NOT_FOUND/.test(noObject),
+        noObject,
+      );
+      const noGrantRecord = await throwsIsolated(
+        'record_card_payment refuses an actor without finance.payment_verification update',
+        async () =>
+          db.query(recordSql, [ruleSale, '100.00', await receiptObject('card'), staff['hr']!]),
+      );
+      check('  MUTATION_FORBIDDEN', /MUTATION_FORBIDDEN/.test(noGrantRecord), noGrantRecord);
+
+      const pendingId = (
+        await one<{ id: string }>(recordSql, [
+          ruleSale,
+          '100.00',
+          await receiptObject('card'),
+          staff['finance']!,
+        ])
+      ).id;
+      const noGrantVerify = await throwsIsolated(
+        'verify_card_payment refuses an actor without finance.payment_verification update',
+        () => db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [pendingId, staff['hr']!]),
+      );
+      check('  MUTATION_FORBIDDEN', /MUTATION_FORBIDDEN/.test(noGrantVerify), noGrantVerify);
+      eq(
+        '  and the payment is still pending',
+        (await one<{ status: string }>('select status from public.payments where id=$1', [pendingId]))
+          .status,
+        'recorded',
+      );
+
+      // The object must still exist when the money is accepted.
+      const goneReceipt = await receiptObject('card');
+      const goneId = (
+        await one<{ id: string }>(recordSql, [ruleSale, '100.00', goneReceipt, staff['finance']!])
+      ).id;
+      await db.query('delete from storage.objects where bucket_id = $1 and name = $2', [
+        RECEIPT_BUCKET,
+        goneReceipt,
+      ]);
+      const goneVerify = await throwsIsolated(
+        'verification refuses a payment whose receipt object is gone',
+        () => db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [goneId, staff['finance']!]),
+      );
+      check(
+        '  RECEIPT_STORAGE_OBJECT_NOT_FOUND at verification',
+        /RECEIPT_STORAGE_OBJECT_NOT_FOUND/.test(goneVerify),
+        goneVerify,
+      );
+
+      // Verified + pending: 200.00 is pending above. Recording the exact rest of
+      // the price is allowed; one more centavo, also pending, is refused.
+      const restAmount = (
+        await one<{ v: string }>(
+          'select private.money(cash_price_snapshot::numeric - 200) as v from public.card_sales where id=$1',
+          [ruleSale],
+        )
+      ).v;
+      const restId = (
+        await one<{ id: string }>(recordSql, [
+          ruleSale,
+          restAmount,
+          await receiptObject('card'),
+          staff['finance']!,
+        ])
+      ).id;
+      check('pending total may reach the price exactly', !!restId);
+      const overReceipt = await receiptObject('card');
+      const pendingOver = await throwsIsolated(
+        'a second pending recording that would exceed the price is refused',
+        () => db.query(recordSql, [ruleSale, '0.01', overReceipt, staff['finance']!]),
+      );
+      check('  OVERPAYMENT_NOT_ALLOWED', /OVERPAYMENT_NOT_ALLOWED/.test(pendingOver), pendingOver);
+      eq(
+        '  and nothing was recorded',
+        (
+          await one<{ n: number }>(
+            "select count(*)::int n from public.payments where sale_id=$1 and status='recorded'",
+            [ruleSale],
+          )
+        ).n,
+        3,
+      );
+
+      // A receipt backs exactly one live payment (repair 20261231000001 section 24).
+      const saleA = await mkSale('reuse-a', await mkCustomer('reuse-a', 'r7b'), goldPlan, 'r7b');
+      const saleB = await mkSale('reuse-b', await mkCustomer('reuse-b', 'r7b'), goldPlan, 'r7b');
+      const shared = await receiptObject('card');
+      const firstUse = (
+        await one<{ id: string }>(recordSql, [saleA, '100.00', shared, staff['finance']!])
+      ).id;
+      const reuse = await throwsIsolated(
+        'the same receipt cannot back a second live payment on another sale',
+        () => db.query(recordSql, [saleB, '100.00', shared, staff['finance']!]),
+      );
+      check('  RECEIPT_ALREADY_USED, not a raw unique violation', /RECEIPT_ALREADY_USED/.test(reuse), reuse);
+      const rawReuse = await throwsIsolated(
+        'a direct insert citing a live receipt is refused by the partial unique index',
+        () =>
+          db.query(
+            `insert into public.payments (sale_id, customer_id, amount, payment_type, method,
+               receipt_storage_path, status, recorded_by)
+             select s.id, s.customer_id, '1.00', 'installment', 'cash', $2, 'recorded', $3
+               from public.card_sales s where s.id = $1`,
+            [saleB, shared, staff['finance']!],
+          ),
+      );
+      check(
+        '  payments_receipt_storage_path_active_unique',
+        /payments_receipt_storage_path_active_unique/.test(rawReuse),
+        rawReuse,
+      );
+      await db.query(`select public.verify_card_payment($1,'rejected','receipt belongs elsewhere',$2)`, [
+        firstUse,
+        staff['finance']!,
+      ]);
+      check(
+        'a REJECTED payment frees its receipt for a new recording',
+        !!(await one<{ id: string }>(recordSql, [saleB, '100.00', shared, staff['finance']!])).id,
+      );
+      // The content (eTag) check reads storage.objects.metadata, which the local
+      // shim does not model; with no eTag only that content check is skipped, so
+      // two DIFFERENT objects are still accepted. Not exercised here: the eTag
+      // match itself (needs the platform metadata column).
+      const hasMetadata = await one<{ n: number }>(
+        `select count(*)::int n from information_schema.columns
+          where table_schema='storage' and table_name='objects' and column_name='metadata'`,
+      );
+      check(
+        'two different receipt objects without an eTag are both accepted',
+        !!(await one<{ id: string }>(recordSql, [saleA, '100.00', await receiptObject('card'), staff['finance']!])).id &&
+          !!(await one<{ id: string }>(recordSql, [saleA, '100.00', await receiptObject('card'), staff['finance']!])).id,
+        `storage.objects.metadata columns: ${hasMetadata.n}`,
+      );
+
+      const bypass = await one<{ n: number }>(
+        `select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname in ('public','private') and p.prosrc like '%afhomes.test_mode%'`,
+      );
+      eq('no installed function consults the afhomes.test_mode GUC', bypass.n, 0);
+    }
+
+    /* ---------------------------------------------------------------- */
+    {
+      section('81. Finance Phase 2: receipt details, cross-contract hold, propose-only adjustments');
+      // Migration 20270105000002. Rolled back at the end: adjustment rows are
+      // append-only and cannot be deleted by cleanup.
+      let own81 = false;
+      try {
+        await db.query('savepoint finops81');
+      } catch {
+        await db.query('begin');
+        own81 = true;
+      }
+      try {
+        const plan81 = byCode.get('GOLD')!;
+        const saleA = await mkSale('fin81a', await mkCustomer('fin81a', 'f81a'), plan81, 'f81a');
+        const saleB = await mkSale('fin81b', await mkCustomer('fin81b', 'f81b'), plan81, 'f81b');
+        const finance = staff['finance']!;
+        const record = async (sale: string, amount: string, reference: string | null) =>
+          (
+            await one<{ id: string }>(
+              `select public.record_card_payment($1,$2,'installment','cash',$3,null,$4,$5) as id`,
+              [sale, amount, reference, await receiptObject('card'), finance],
+            )
+          ).id;
+        const verify = (id: string) =>
+          db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [id, finance]);
+        const details = (id: string, body: Record<string, unknown>, actor = finance) =>
+          db.query('select public.set_payment_receipt_details($1,$2,$3::jsonb)', [
+            id,
+            actor,
+            JSON.stringify(body),
+          ]);
+        const row = (id: string) =>
+          one<{
+            status: string;
+            or_number: string | null;
+            paid_on: string | null;
+            paid_by_name: string | null;
+            posting_period: string | null;
+          }>(
+            `select status, or_number, paid_on::text, paid_by_name, posting_period
+               from public.payments where id=$1`,
+            [id],
+          );
+        const line = (message: string) => message.split('\n')[0];
+        const manilaMonth = (
+          await one<{ m: string }>(`select to_char(now() at time zone 'Asia/Manila','YYYY-MM') as m`)
+        ).m;
+
+        // --- receipt details -------------------------------------------------
+        const p1 = await record(saleA, '1000.00', `REF-${RUN}-A1`);
+        await details(p1, { orNumber: 'OR-1005', paidOn: '2026-01-15', paidByName: 'A Relative' });
+        const d1 = await row(p1);
+        check(
+          'OR number, actual payment date and payer are stored on a pending payment',
+          d1.or_number === 'OR-1005' && d1.paid_on === '2026-01-15' && d1.paid_by_name === 'A Relative',
+          JSON.stringify(d1),
+        );
+        eq('a pending payment has no posting period yet', d1.posting_period, null);
+        const future = await throwsIsolated('a future payment date is refused', () =>
+          details(p1, { paidOn: '2999-01-01' }),
+        );
+        check('  -> PAYMENT_DATE_INVALID', future.includes('PAYMENT_DATE_INVALID'), line(future));
+        const noGrant = await throwsIsolated('a non-Finance actor cannot set receipt details', () =>
+          details(p1, { orNumber: 'OR-X' }, staff['hr']!),
+        );
+        check('  -> MUTATION_FORBIDDEN', noGrant.includes('MUTATION_FORBIDDEN'), line(noGrant));
+
+        const p2 = await record(saleA, '1000.00', `REF-${RUN}-A2`);
+        const dupOr = await throwsIsolated('the same OR number twice on one contract is refused', () =>
+          details(p2, { orNumber: 'or 1005' }),
+        );
+        check('  -> DUPLICATE_OR_NUMBER (case/punctuation ignored)', dupOr.includes('DUPLICATE_OR_NUMBER'), line(dupOr));
+
+        await verify(p1);
+        const v1 = await row(p1);
+        check(
+          'verification stamps the Manila posting period once and keeps the actual payment date',
+          v1.status === 'verified' && v1.posting_period === manilaMonth && v1.paid_on === '2026-01-15',
+          JSON.stringify(v1),
+        );
+        const late = await throwsIsolated('details cannot be changed after verification', () =>
+          details(p1, { paidOn: '2026-01-16' }),
+        );
+        check('  -> PAYMENT_NOT_PENDING', late.includes('PAYMENT_NOT_PENDING'), line(late));
+        const rewrite = await throwsIsolated('a direct edit of a verified payment date is refused too', () =>
+          db.query(`update public.payments set paid_on='2026-02-01' where id=$1`, [p1]),
+        );
+        check(
+          '  -> VERIFIED_PAYMENT_DETAILS_IMMUTABLE',
+          rewrite.includes('VERIFIED_PAYMENT_DETAILS_IMMUTABLE'),
+          line(rewrite),
+        );
+
+        // --- cross-contract hold ---------------------------------------------
+        const shared = `BANK-${RUN}-SPLIT`;
+        const a = await record(saleA, '500.00', shared);
+        await verify(a);
+        const b = await record(saleB, '700.00', shared.toLowerCase().replace(/-/g, ' '));
+        const matches = (
+          await one<{ m: { paymentId: string }[] }>(
+            'select public.payment_reference_matches($1,$2) as m',
+            [b, finance],
+          )
+        ).m;
+        check(
+          'the same bank reference on another contract is reported (normalized)',
+          matches.length === 1 && matches[0]!.paymentId === a,
+          JSON.stringify(matches),
+        );
+        const held = await throwsIsolated('it cannot be verified without a recorded review reason', () =>
+          verify(b),
+        );
+        check('  -> PAYMENT_REFERENCE_REVIEW_REQUIRED', held.includes('PAYMENT_REFERENCE_REVIEW_REQUIRED'), line(held));
+        eq('  and it is still pending', (await row(b)).status, 'recorded');
+        const shortNote = await throwsIsolated('a too-short review reason is refused', () =>
+          details(b, { duplicateReviewNote: 'ok' }),
+        );
+        check('  -> DUPLICATE_REVIEW_NOTE_REQUIRED', shortNote.includes('DUPLICATE_REVIEW_NOTE_REQUIRED'), line(shortNote));
+        await details(b, { duplicateReviewNote: 'One bank transfer split across two contracts' });
+        await verify(b);
+        eq('with the reason recorded the legitimate split is verified', (await row(b)).status, 'verified');
+        const own = await record(saleB, '100.00', `REF-${RUN}-B-ONLY`);
+        await verify(own);
+        eq('a reference unique to its contract is never held', (await row(own)).status, 'verified');
+
+        // --- propose-only adjustments ------------------------------------------
+        const propose = (payment: string, kind: string, amount: string, reason: string, actor = finance) =>
+          one<{ id: string }>(
+            'select public.propose_payment_adjustment($1,$2,$3,$4,$5,current_date,null) as id',
+            [payment, actor, kind, amount, reason],
+          );
+        const verifiedTotal = async (sale: string) =>
+          (
+            await one<{ t: string }>(
+              `select coalesce(sum(amount::numeric),0)::text as t from public.payments
+                where sale_id=$1 and status='verified'`,
+              [sale],
+            )
+          ).t;
+        const before = await verifiedTotal(saleA);
+        const adj = (await propose(a, 'returned_check', '500.00', 'Check returned by the bank')).id;
+        eq('a proposal leaves verified collections unchanged', await verifiedTotal(saleA), before);
+        eq('  and the original payment is untouched', (await row(a)).status, 'verified');
+        const twice = await throwsIsolated('a second open proposal of the same kind is refused', () =>
+          propose(a, 'returned_check', '100.00', 'Duplicate proposal attempt'),
+        );
+        check('  -> PAYMENT_ADJUSTMENT_ALREADY_PROPOSED', twice.includes('PAYMENT_ADJUSTMENT_ALREADY_PROPOSED'), line(twice));
+        const tooMuch = await throwsIsolated('an adjustment larger than the payment is refused', () =>
+          propose(a, 'refund', '500.01', 'More than was collected'),
+        );
+        check('  -> PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT', tooMuch.includes('PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT'), line(tooMuch));
+        const pending = await throwsIsolated('a pending payment cannot be reversed (reject it instead)', () =>
+          propose(p2, 'reversal', '100.00', 'Not verified yet'),
+        );
+        check('  -> PAYMENT_NOT_VERIFIED', pending.includes('PAYMENT_NOT_VERIFIED'), line(pending));
+        const stranger = await throwsIsolated('a non-Finance actor cannot propose', () =>
+          propose(own, 'reversal', '50.00', 'No permission here', staff['hr']!),
+        );
+        check('  -> MUTATION_FORBIDDEN', stranger.includes('MUTATION_FORBIDDEN'), line(stranger));
+        const approve = await throwsIsolated('NOTHING can approve an adjustment yet, even a direct write', () =>
+          db.query(
+            `update public.payment_adjustments
+                set status='approved', decided_by=$2, decided_at=now() where id=$1`,
+            [adj, staff['super-admin']!],
+          ),
+        );
+        check(
+          '  -> PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED',
+          approve.includes('PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED'),
+          line(approve),
+        );
+        const erase = await throwsIsolated('adjustment history cannot be deleted', () =>
+          db.query('delete from public.payment_adjustments where id=$1', [adj]),
+        );
+        check('  -> PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE', erase.includes('PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE'), line(erase));
+        const browser81 = await one<{ a: boolean; b: boolean }>(
+          `select has_table_privilege('anon','public.payment_adjustments','SELECT') as a,
+                  has_table_privilege('authenticated','public.payment_adjustments','SELECT') as b`,
+        );
+        check('no browser role can read the adjustment ledger', !browser81.a && !browser81.b);
+      } catch (error) {
+        check('section 81 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own81 ? 'rollback' : 'rollback to savepoint finops81');
+      }
+    }
+    {
+      section('82. Finance Phase 3: accounting periods, ordered close, closed-month protection');
+      // Migration 20270105000003. Rolled back: a closed period is immutable.
+      let own82 = false;
+      try {
+        await db.query('savepoint finops82');
+      } catch {
+        await db.query('begin');
+        own82 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const line = (message: string) => message.split('\n')[0];
+        const submit = (period: string, actor = finance) =>
+          db.query('select public.submit_accounting_period($1,$2)', [period, actor]);
+        const close = (period: string, actor = boss) =>
+          one<{ s: Record<string, unknown> }>('select public.close_accounting_period($1,$2) as s', [
+            period,
+            actor,
+          ]);
+        const statusOf = async (period: string) =>
+          (
+            await one<{ status: string }>(
+              'select status from public.accounting_periods where period=$1',
+              [period],
+            )
+          ).status;
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+
+        // A verified payment posted into a past month, so there is something to protect.
+        const sale82 = await mkSale('fin82', await mkCustomer('fin82', 'f82'), byCode.get('GOLD')!, 'f82');
+        const pay82 = (
+          await one<{ id: string }>(
+            `select public.record_card_payment($1,'1000.00','installment','cash',$2,null,$3,$4) as id`,
+            [sale82, `REF-${RUN}-82`, await receiptObject('card'), finance],
+          )
+        ).id;
+        await db.query(`update public.payments set posting_period='2020-01', paid_on='2020-01-10' where id=$1`, [
+          pay82,
+        ]);
+        await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [pay82, finance]);
+
+        const figures = (
+          await one<{ f: Record<string, unknown> }>(
+            'select public.finance_period_summary($1,$2) as f',
+            ['2020-01', finance],
+          )
+        ).f;
+        check(
+          'the period summary reports its verified money and status',
+          figures.status === 'open' && figures.verifiedCount === 1 && figures.verifiedTotal === '1000.00',
+          JSON.stringify(figures),
+        );
+        await refusal('a user with no Finance permission cannot read the summary', 'MUTATION_FORBIDDEN', () =>
+          db.query('select public.finance_period_summary($1,$2)', ['2020-01', staff['hr']!]),
+        );
+
+        await refusal('a period cannot be closed before it is submitted', 'PERIOD_NOT_READY', () =>
+          close('2020-01'),
+        );
+        await refusal('a month that has not started cannot be submitted', 'PERIOD_INVALID', () =>
+          submit('2999-01'),
+        );
+        await refusal('a non-Finance user cannot submit a period', 'MUTATION_FORBIDDEN', () =>
+          submit('2020-01', staff['sm']!),
+        );
+        await submit('2020-01');
+        eq('Finance submits the month for closing', await statusOf('2020-01'), 'ready_for_approval');
+        await refusal('Finance cannot close a period', 'MUTATION_FORBIDDEN', () => close('2020-01', finance));
+
+        await refusal('a return needs a reason', 'PERIOD_RETURN_REASON_REQUIRED', () =>
+          db.query('select public.return_accounting_period($1,$2,$3)', ['2020-01', boss, 'no']),
+        );
+        await db.query('select public.return_accounting_period($1,$2,$3)', [
+          '2020-01',
+          boss,
+          'Receipt totals need another look',
+        ]);
+        eq('the closing authority can return it for correction', await statusOf('2020-01'), 'open');
+
+        await submit('2020-01', boss);
+        await refusal('the submitter can never close their own period', 'PERIOD_SELF_APPROVAL', () =>
+          close('2020-01', boss),
+        );
+        await db.query('select public.return_accounting_period($1,$2,$3)', [
+          '2020-01',
+          boss,
+          'Resubmit through Finance',
+        ]);
+        await submit('2020-01');
+
+        await submit('2020-03');
+        await refusal('months close in order', 'PERIOD_OUT_OF_ORDER', () => close('2020-03'));
+        const current = (
+          await one<{ m: string }>(`select to_char(now() at time zone 'Asia/Manila','YYYY-MM') as m`)
+        ).m;
+        await submit(current);
+        await refusal('a month cannot close before it has ended', 'PERIOD_NOT_ENDED', () => close(current));
+
+        const snapshot = (await close('2020-01')).s;
+        check(
+          'closing stores the snapshot of the period figures',
+          (await statusOf('2020-01')) === 'closed' &&
+            snapshot.verifiedTotal === '1000.00' &&
+            snapshot.latePostings === 0 &&
+            snapshot.closedBy === boss &&
+            snapshot.submittedBy === finance,
+          JSON.stringify(snapshot),
+        );
+        const again = (await close('2020-01')).s;
+        eq('closing twice returns the same snapshot and changes nothing', JSON.stringify(again), JSON.stringify(snapshot));
+        eq(
+          '  and wrote exactly one close event',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events
+                where action='ACCOUNTING_PERIOD_CLOSED' and entity_id='2020-01'`,
+            )
+          ).n,
+          1,
+        );
+
+        await refusal('a closed period row cannot be edited', 'CLOSED_PERIOD_IMMUTABLE', () =>
+          db.query(`update public.accounting_periods set status='open' where period='2020-01'`),
+        );
+        await refusal('  nor resubmitted', 'PERIOD_NOT_OPEN', () => submit('2020-01'));
+        await refusal('money in a closed period cannot change status', 'CLOSED_PERIOD_IMMUTABLE', () =>
+          db.query(`update public.payments set status='voided' where id=$1`, [pay82]),
+        );
+        await refusal('  nor be deleted', 'CLOSED_PERIOD_IMMUTABLE', () =>
+          db.query('delete from public.payments where id=$1', [pay82]),
+        );
+
+        // A late receipt: dated in the closed month, verified now -> posted to the open month.
+        const late82 = (
+          await one<{ id: string }>(
+            `select public.record_card_payment($1,'500.00','installment','cash',$2,null,$3,$4) as id`,
+            [sale82, `REF-${RUN}-82-LATE`, await receiptObject('card'), finance],
+          )
+        ).id;
+        await db.query('select public.set_payment_receipt_details($1,$2,$3::jsonb)', [
+          late82,
+          finance,
+          JSON.stringify({ paidOn: '2020-01-20' }),
+        ]);
+        await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [late82, finance]);
+        const lateRow = await one<{ paid_on: string; posting_period: string }>(
+          'select paid_on::text, posting_period from public.payments where id=$1',
+          [late82],
+        );
+        check(
+          'a late receipt keeps its real date and posts to the open month, not the closed one',
+          lateRow.paid_on === '2020-01-20' && lateRow.posting_period === current,
+          JSON.stringify(lateRow),
+        );
+        eq(
+          '  and the closed month still reports its original total',
+          (
+            await one<{ t: string }>(
+              `select (snapshot->>'verifiedTotal') as t from public.accounting_periods where period='2020-01'`,
+            )
+          ).t,
+          '1000.00',
+        );
+        // Money can never be verified INTO a closed month.
+        // (a) A pending payment already aimed at the closed month is refused.
+        const aimed = (
+          await one<{ id: string }>(
+            `select public.record_card_payment($1,'250.00','installment','cash',$2,null,$3,$4) as id`,
+            [sale82, `REF-${RUN}-82-CLOSED`, await receiptObject('card'), finance],
+          )
+        ).id;
+        await db.query(`update public.payments set posting_period='2020-01' where id=$1`, [aimed]);
+        await refusal('verifying a payment aimed at a closed month is refused', 'CLOSED_PERIOD_IMMUTABLE', () =>
+          db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [aimed, finance]),
+        );
+        // (b) A row inserted ALREADY verified with an old verification date (what an
+        // import does) is redirected to the next open month, never into the closed one.
+        const imported = (
+          await one<{ p: string }>(
+            `insert into public.payments
+               select (jsonb_populate_record(null::public.payments, to_jsonb(p) || jsonb_build_object(
+                 'id', gen_random_uuid(),
+                 'payment_number', private.claim_af_id('AF-PAY','public.payments'::regclass,'payment_number'),
+                 'reference', $2::text, 'receipt_storage_path', $3::text, 'or_number', null,
+                 'posting_period', null, 'verified_at', '2020-01-15T02:00:00Z'))).*
+                 from public.payments p where p.id = $1
+             returning posting_period as p`,
+            [pay82, `REF-${RUN}-82-IMPORT`, await receiptObject('card')],
+          )
+        ).p;
+        eq('an already-verified row dated in the closed month posts to the next open month', imported, '2020-02');
+        const liveHash = (
+          await one<{ f: { paymentSetHash: string; unassignedVerified: number } }>(
+            'select public.finance_period_summary($1,$2) as f',
+            ['2020-01', finance],
+          )
+        ).f;
+        check(
+          'the closed month still holds exactly the payments it was closed with',
+          liveHash.paymentSetHash === snapshot.paymentSetHash,
+          JSON.stringify([liveHash.paymentSetHash, snapshot.paymentSetHash]),
+        );
+        const browser82 = await one<{ a: boolean; b: boolean }>(
+          `select has_table_privilege('anon','public.accounting_periods','SELECT') as a,
+                  has_table_privilege('authenticated','public.accounting_periods','SELECT') as b`,
+        );
+        check('no browser role can read accounting periods', !browser82.a && !browser82.b);
+      } catch (error) {
+        check('section 82 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own82 ? 'rollback' : 'rollback to savepoint finops82');
+      }
+    }
     section('8. minimum down payment at every boundary, all three plans');
     /* ---------------------------------------------------------------- */
     for (const [code, down, justUnder] of [
@@ -1268,8 +2019,8 @@ async function main(): Promise<void> {
       const payVerified = async (s: string, amount: string, tag: string) => {
         const p = (
           await one<{ id: string }>(
-            `select public.record_card_payment($1,$2,'installment','cash',$3,null,null,$4) as id`,
-            [s, amount, `${RUN}-${tag}`, staff['finance']],
+            `select public.record_card_payment($1,$2,'installment','cash',$3,null,$5,$4) as id`,
+            [s, amount, `${RUN}-${tag}`, staff['finance'], await receiptObject('card')],
           )
         ).id;
         await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [
@@ -1324,8 +2075,8 @@ async function main(): Promise<void> {
       ],
     );
     await db.query(
-      `select public.record_card_payment($1,'20000.00','down_payment','bank_transfer',$2,null,null,$3)`,
-      [recOnlySale, `${RUN}-REC-ONLY`, staff['finance']],
+      `select public.record_card_payment($1,'20000.00','down_payment','bank_transfer',$2,null,$4,$3)`,
+      [recOnlySale, `${RUN}-REC-ONLY`, staff['finance'], await receiptObject('card')],
     );
     const recOnly = await summaryOf(recOnlySale);
     check(
@@ -1340,8 +2091,8 @@ async function main(): Promise<void> {
     const spotSale = await mkSale('spot', spotCust, gold, 'spot');
     const spotPay = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'1000.00','installment','cash',$2,null,null,$3) as id`,
-        [spotSale, `${RUN}-SPOT`, staff['finance']],
+        `select public.record_card_payment($1,'1000.00','installment','cash',$2,null,$4,$3) as id`,
+        [spotSale, `${RUN}-SPOT`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     await db.query("select public.verify_card_payment($1,'verified',null,$2)", [
@@ -1421,8 +2172,8 @@ async function main(): Promise<void> {
     const recOnlyCust = await mkCustomer('window', 'window');
     const recOnlyWindow = await mkSale('window', recOnlyCust, gold, 'window');
     await db.query(
-      `select public.record_card_payment($1,'500.00','installment','cash',$2,null,null,$3)`,
-      [recOnlyWindow, `${RUN}-WINDOW-REC`, staff['finance']],
+      `select public.record_card_payment($1,'500.00','installment','cash',$2,null,$4,$3)`,
+      [recOnlyWindow, `${RUN}-WINDOW-REC`, staff['finance'], await receiptObject('card')],
     );
     const stillNull = await one<{ started: string | null; deadline: string | null }>(
       'select spot_cash_started_at::text as started, spot_cash_deadline::text as deadline from public.card_sales where id = $1',
@@ -1442,8 +2193,8 @@ async function main(): Promise<void> {
     // A second verified payment must not move the deadline.
     const spotPay2 = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,null,$3) as id`,
-        [spotSale, `${RUN}-SPOT-2`, staff['finance']],
+        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,$4,$3) as id`,
+        [spotSale, `${RUN}-SPOT-2`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     await db.query("select public.verify_card_payment($1,'verified',null,$2)", [
@@ -1517,10 +2268,20 @@ async function main(): Promise<void> {
     const beforeFull = await summaryOf(saleId);
     check('verified 20,001.00 < 312,000.00 -> fully_paid = false', beforeFull.fullyPaid === false);
 
+    // Rule (repair 20261231000001 header): overpayment is refused at RECORDING
+    // against verified + pending money. Section 7's 1.00 REASON_REQUIRED probe
+    // payment is still pending, so it is decided (rejected, with a reason)
+    // before the exact remaining balance is recorded; otherwise
+    // 20,001.00 + 1.00 + 291,999.00 would exceed the price and be refused.
+    await db.query(`select public.verify_card_payment($1,'rejected','abandoned probe',$2)`, [
+      rejId,
+      staff['finance']!,
+    ]);
+
     const remainId = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'291999.00','full','bank_transfer',$2,null,null,$3) as id`,
-        [saleId, `${RUN}-TRF-REMAIN`, staff['finance']],
+        `select public.record_card_payment($1,'291999.00','full','bank_transfer',$2,null,$4,$3) as id`,
+        [saleId, `${RUN}-TRF-REMAIN`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     const fullRes = camel<Record<string, string | boolean>>(
@@ -1575,10 +2336,8 @@ async function main(): Promise<void> {
     /* ---------------------------------------------------------------- */
     section('11. ACTIVATION - unpaid is refused');
     /* ---------------------------------------------------------------- */
-    // Two refusals must be distinguished. (a) a sale in a status that is not
-    // activatable, and (b) the load-bearing one: a sale that IS in an activatable
-    // status but whose verified money does not reach the price. (b) is the case
-    // that proves a status flag alone can never activate a membership.
+    // The activation function raises SALE_NOT_ACTIVATABLE for non-activatable status
+    // and SALE_NOT_FULLY_PAID for insufficient verified payments.
     const statusRefused = await throws('activation from a non-activatable status is refused', () =>
       db.query('select * from public.activate_card_sale($1,$2,$3)', [
         recOnlySale,
@@ -1586,25 +2345,26 @@ async function main(): Promise<void> {
         12,
       ]),
     );
-    check('  SALE_NOT_ACTIVATABLE', /SALE_NOT_ACTIVATABLE/.test(statusRefused), statusRefused);
+    check('  SALE_NOT_ACTIVATABLE for non-activatable status', /SALE_NOT_ACTIVATABLE/.test(statusRefused), statusRefused);
 
-    // Force the status to the activatable one while leaving the sale underpaid.
+    // Force the status to an activatable one while leaving the sale underpaid.
+    // Use payment_in_progress which accepts payments but is activatable when fully paid.
     const underpaidCust = await mkCustomer('underpaid', 'underpaid');
     const unpaidSale = await mkSale('underpaid', underpaidCust, gold, 'underpaid');
-    await db.query(`update public.card_sales set status = 'payment_verified' where id = $1`, [
+    await db.query(`update public.card_sales set status = 'payment_in_progress' where id = $1`, [
       unpaidSale,
     ]);
     const underpaidOnly = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'100.00','installment','cash',$2,null,null,$3) as id`,
-        [unpaidSale, `${RUN}-UNDERPAID`, staff['finance']],
+        `select public.record_card_payment($1,'100.00','installment','cash',$2,null,$4,$3) as id`,
+        [unpaidSale, `${RUN}-UNDERPAID`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [
       underpaidOnly,
       staff['finance']!,
     ]);
-    // Put the status back: verification may have moved it on, and the point of
+    // Put the status back to activatable: verification may have moved it on, and the point of
     // the test is that a fully VERIFIED sum below the price still blocks.
     await db.query(`update public.card_sales set status = 'payment_verified' where id = $1`, [
       unpaidSale,
@@ -1632,7 +2392,7 @@ async function main(): Promise<void> {
         12,
       ]),
     );
-    check('  SALE_NOT_FULLY_PAID', /SALE_NOT_FULLY_PAID/.test(refused), refused);
+    check('  SALE_NOT_FULLY_PAID for insufficient verified payment', /SALE_NOT_FULLY_PAID/.test(refused), refused);
     const membershipsAfter = await one<{ n: number }>(
       'select count(*)::int as n from public.memberships',
     );
@@ -1754,6 +2514,9 @@ async function main(): Promise<void> {
     );
     check(
       'activation opens the first points period',
+      // Product owner (11 Nov 2026): the annual cap follows the card TIER (this
+      // sale is GOLD -> 60,000 from tier_points_config), not the plan's yearly
+      // points; the balance at activation is 0 - points are earned by spending.
       !!period && period.annual_points_cap === '60000',
       JSON.stringify(period),
     );
@@ -2317,8 +3080,8 @@ async function main(): Promise<void> {
     // Two simultaneous verifications of the same payment.
     const racePay = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,null,$3) as id`,
-        [recOnlySale, `${RUN}-RACE-PAY`, staff['finance']],
+        `select public.record_card_payment($1,'1.00','installment','cash',$2,null,$4,$3) as id`,
+        [recOnlySale, `${RUN}-RACE-PAY`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     const v1 = new Client({ connectionString: target.url });
@@ -2485,8 +3248,8 @@ async function main(): Promise<void> {
       // the sale is genuinely `payment_verified`, so the fixture cannot cheat.
       const paymentId = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'full','cash',$3,null,null,$4) as id`,
-          [sId, plan.cash_price, `${RUN}-PAY-${tag}`, staff['finance']],
+          `select public.record_card_payment($1,$2,'full','cash',$3,null,$5,$4) as id`,
+          [sId, plan.cash_price, `${RUN}-PAY-${tag}`, staff['finance'], await receiptObject('card')],
         )
       ).id;
       await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
@@ -2916,8 +3679,8 @@ async function main(): Promise<void> {
     );
     const claimPaymentId = (
       await one<{ id: string }>(
-        `select public.record_card_payment($1,$2,'full','cash',$3,null,null,$4) as id`,
-        [claimSale, claimPlan.cash_price, `${RUN}-PAY-CLAIM`, staff['finance']],
+        `select public.record_card_payment($1,$2,'full','cash',$3,null,$5,$4) as id`,
+        [claimSale, claimPlan.cash_price, `${RUN}-PAY-CLAIM`, staff['finance'], await receiptObject('card')],
       )
     ).id;
     await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
@@ -3372,8 +4135,8 @@ async function main(): Promise<void> {
       );
       const payId = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'full','cash',$3,null,null,$4) as id`,
-          [saleId, plan.cash_price, `${RUN}-PAY-RDM-${label}`, staff['finance']],
+          `select public.record_card_payment($1,$2,'full','cash',$3,null,$5,$4) as id`,
+          [saleId, plan.cash_price, `${RUN}-PAY-RDM-${label}`, staff['finance'], await receiptObject('card')],
         )
       ).id;
       await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
@@ -4762,8 +5525,8 @@ async function main(): Promise<void> {
         const p5Sale = await mkSale('phase5', p5Customer, p5Plan, 'p5');
         const p5Payment = (
           await one<{ id: string }>(
-            `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-            [p5Sale, '20000.00', `${RUN}-TRF-P5`, staff['finance']],
+            `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,$5,$4) as id`,
+            [p5Sale, '20000.00', `${RUN}-TRF-P5`, staff['finance'], await receiptObject('card')],
           )
         ).id;
 
@@ -4902,8 +5665,8 @@ async function main(): Promise<void> {
         );
         const secondPayment = (
           await one<{ id: string }>(
-            `select public.record_card_payment($1,$2,'installment','cash',$3,null,null,$4) as id`,
-            [p5Sale, '1000.00', `${RUN}-TRF-P5B`, staff['finance']],
+            `select public.record_card_payment($1,$2,'installment','cash',$3,null,$5,$4) as id`,
+            [p5Sale, '1000.00', `${RUN}-TRF-P5B`, staff['finance'], await receiptObject('card')],
           )
         ).id;
         const secondCall = await probeFailure(() =>
@@ -4936,7 +5699,13 @@ async function main(): Promise<void> {
           `is_nullable=${secondNullable.is_nullable}`,
         );
 
-        await db.query('commit');
+        // ROLLBACK, not commit. The reconciliation migration re-installs the
+        // Phase 5 verify_card_payment, which later migrations (20261230000003,
+        // 20261231000001 section 16) superseded with the receipt, Finance and
+        // overpayment checks. Committing here silently downgraded the live
+        // function, so every later section tested the stale body. The checks
+        // above have already run; rolling back restores the migrated database.
+        await db.query('rollback');
       } catch (error) {
         // Roll the deliberately broken objects back before rethrowing, so a
         // failure here cannot leave a development database sabotaged.
@@ -5620,8 +6389,8 @@ async function main(): Promise<void> {
       // -- Flow C: 100,000 verified, then 212,000 to fully paid (312,000 Gold).
       const pay1 = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-          [saleId, '100000.00', `${RUN}-E2E-PAY-1`, fin],
+          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,$5,$4) as id`,
+          [saleId, '100000.00', `${RUN}-E2E-PAY-1`, fin, await receiptObject('card')],
         )
       ).id;
       const verify1 = await one<Record<string, string | boolean>>(
@@ -5655,8 +6424,8 @@ async function main(): Promise<void> {
       eq('commission is still pending before full payment', commMid.status, 'pending');
       const pay2 = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
-          [saleId, '212000.00', `${RUN}-E2E-PAY-2`, fin],
+          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,$5,$4) as id`,
+          [saleId, '212000.00', `${RUN}-E2E-PAY-2`, fin, await receiptObject('card')],
         )
       ).id;
       const verify2 = await one<Record<string, string | boolean>>(
@@ -6577,8 +7346,8 @@ async function main(): Promise<void> {
       );
       const payPartial = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'down_payment','cash',$3,null,null,$4) as id`,
-          [sale2, '5000.00', `${RUN}-E2E-PAY-PARTIAL`, fin],
+          `select public.record_card_payment($1,$2,'down_payment','cash',$3,null,$5,$4) as id`,
+          [sale2, '5000.00', `${RUN}-E2E-PAY-PARTIAL`, fin, await receiptObject('card')],
         )
       ).id;
       await db.query('select * from public.verify_card_payment($1,$2,$3,$4)', [
@@ -6771,8 +7540,8 @@ async function main(): Promise<void> {
       // DECOY parameter: the frozen 144-month term must win.
       const vipPay1 = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,null,$4) as id`,
-          [vipSale, '96000.00', `${RUN}-VIP-PAY-1`, staff['finance']],
+          `select public.record_card_payment($1,$2,'down_payment','bank_transfer',$3,null,$5,$4) as id`,
+          [vipSale, '96000.00', `${RUN}-VIP-PAY-1`, staff['finance'], await receiptObject('card')],
         )
       ).id;
       await db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [
@@ -6781,8 +7550,8 @@ async function main(): Promise<void> {
       ]);
       const vipPay2 = (
         await one<{ id: string }>(
-          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,null,$4) as id`,
-          [vipSale, '144000.00', `${RUN}-VIP-PAY-2`, staff['finance']],
+          `select public.record_card_payment($1,$2,'installment','bank_transfer',$3,null,$5,$4) as id`,
+          [vipSale, '144000.00', `${RUN}-VIP-PAY-2`, staff['finance'], await receiptObject('card')],
         )
       ).id;
       const vipVerify = await one<Record<string, string | boolean>>(
@@ -8754,6 +9523,15 @@ async function main(): Promise<void> {
       });
       section('58. Purchase terms: server offer, stale hash, versions and reviewed capture');
       try {
+      // Ensure sales_manager has sales.card_sales update permission for reservation fee recording
+      await db.query(`
+        update public.role_permissions
+        set can_update = true, can_view = true
+        where role_id = (select id from public.roles where slug = 'sales_manager')
+          and module_id = (select id from public.modules where key = 'sales.card_sales')
+      `);
+      // Set JWT claim for the actor (SM) so auth.uid() works for permission checks
+      await db.query(`select set_config('request.jwt.claim.sub', $1, true)`, [staff['sm']]);
       await runPurchaseTermsChecks({
         db,
         run: RUN,
@@ -8794,6 +9572,7 @@ async function main(): Promise<void> {
           (
             await makePurchaseFixtures(db, {
               actor: staff['sm']!,
+              reviewer: staff['super-admin']!,
               createdCustomers: createdCustomerIds,
               createdApplications: createdApplicationIds,
             })
@@ -8802,6 +9581,7 @@ async function main(): Promise<void> {
           (
             await makePurchaseFixtures(db, {
               actor: staff['sm']!,
+              reviewer: staff['super-admin']!,
               createdCustomers: createdCustomerIds,
               createdApplications: createdApplicationIds,
             })
@@ -8816,7 +9596,21 @@ async function main(): Promise<void> {
             [
               randomUUID(),
               reservationId,
-              { method: 'cash', paymentType: 'installment', ...extra, amount },
+              {
+                method: 'cash',
+                paymentType: 'installment',
+                paymentPurpose: 'contractual_installment',
+                // A real receipt object; `extra` may override it to probe refusals.
+                receiptStoragePath: await paymentReceipt(db),
+                ...extra,
+                // A bank reference identifies ONE transfer. Fixtures reuse short labels, so
+                // scope each to its contract; the cross-contract hold (20270105000002)
+                // is exercised on purpose in section 81, not by accident here.
+                ...(typeof extra.reference === 'string'
+                  ? { reference: `${extra.reference}-${reservationId.slice(0, 8)}` }
+                  : {}),
+                amount,
+              },
               staff['finance']!,
             ],
           );
@@ -8852,7 +9646,15 @@ async function main(): Promise<void> {
             [
               randomUUID(),
               purchase.reservationId,
-              { amount: purchase.total, method: 'cash', paymentType: 'full', reference: 'ACT-1' },
+              {
+                amount: purchase.total,
+                method: 'cash',
+                paymentType: 'full',
+                // One bank reference per transfer: unique per fully paid purchase.
+                reference: `ACT-${randomUUID().slice(0, 8)}`,
+                paymentPurpose: 'contractual_full',
+                receiptStoragePath: await paymentReceipt(db),
+              },
               staff['finance']!,
             ],
           );
@@ -8886,10 +9688,57 @@ async function main(): Promise<void> {
         db,
         check,
         actor: staff['sm']!,
+        reviewer: staff['super-admin']!,
         finance: staff['finance']!,
         createdCustomers: createdCustomerIds,
         createdApplications: createdApplicationIds,
       });
+      section('64b. VIP Card ID: one shared counter for import and purchase issuance');
+      {
+        // Repair 20261231000001 section 23: issuance at the first verified
+        // contractual payment and public.generate_vip_card_number (import
+        // issuance) draw from ONE counter, so on the same day and tier they can
+        // never produce the same number. Interleaved: import, purchase, import.
+        const generate = async () =>
+          (
+            await one<{ n: string }>(
+              "select public.generate_vip_card_number('BRONZE','CASH',1) as n",
+            )
+          ).n;
+        const world = await purchaseWorld();
+        const before = await generate();
+        const purchase = await world.executed(); // BRONZE spot_cash: B1 + C + 01
+        const pay = await world.record(purchase.reservationId, purchase.total, {
+          paymentType: 'full',
+          paymentPurpose: 'contractual_full',
+        });
+        await world.verify(pay);
+        const issued = (
+          await one<{ v: string | null }>('select vip_card_number as v from public.customers where id=$1', [
+            purchase.customerId,
+          ])
+        ).v;
+        const after = await generate();
+        const seq = (n: string | null) => Number(String(n).slice(6, 11));
+        check('the purchase issued a VIP Card ID at its first verified contractual payment', !!issued, String(issued));
+        check(
+          'same day, tier and scheme for all three (the collision case)',
+          [before, issued, after].every(
+            (n) => String(n).slice(0, 6) === before.slice(0, 6) && String(n).slice(11) === 'B1C01S',
+          ),
+          `${before} ${issued} ${after}`,
+        );
+        check(
+          'the purchase-issued ID differs from both import-issued IDs',
+          issued !== before && issued !== after,
+          `${before} ${issued} ${after}`,
+        );
+        check(
+          'one counter: import < purchase < import, strictly',
+          seq(before) < seq(issued) && seq(issued) < seq(after),
+          `${seq(before)} ${seq(issued)} ${seq(after)}`,
+        );
+      }
       section('53. AF business IDs: random allocation, backfill, legacy compatibility');
       {
         const AF5 = '[A-HJ-NP-Z2-9]{5}';
@@ -9676,7 +10525,9 @@ async function main(): Promise<void> {
       }
 
       section('55. Legacy business-ID upgrade: alias preservation and identity invariants');
-      {
+      // Isolated: a failure here is recorded as a FAIL and the suite continues, so
+      // one section cannot silently skip sections 57-78 (the run still exits 1).
+      try {
         // Local helpers: this section must not widen shared suite scope.
         const scalar = async (sql: string): Promise<string> =>
           (await db!.query<{ v: string }>(sql)).rows[0]!.v;
@@ -9840,8 +10691,17 @@ async function main(): Promise<void> {
           // The three OST types are seeded explicitly below; reuse an existing
           // row only for the five public tables.
           if (t.entity.startsWith('ost_')) continue;
+          // An OFFICIAL RA number (YYYY-NNNN) is immutable (repair 20261231000001
+          // section 3; "official identifiers are immutable"), so a legacy value can
+          // only be forced onto an RA row that does not already hold one.
+          const filter =
+            t.entity === 'customer'
+              ? ' where id <> all($1::uuid[])'
+              : t.entity === 'reservation_agreement'
+                ? ` where reservation_number !~ '^[0-9]{4}-[0-9]{4}$'`
+                : '';
           const row = await db.query<{ key: string }>(
-            `select ${t.key} as key from ${t.table}${t.entity === 'customer' ? ' where id <> all($1::uuid[])' : ''} order by ${t.key} limit 1`,
+            `select ${t.key} as key from ${t.table}${filter} order by ${t.key} limit 1`,
             t.entity === 'customer' ? [seededCustomers.map((customer) => customer.id)] : [],
           );
           if (!row.rows[0]) continue;
@@ -9992,8 +10852,17 @@ async function main(): Promise<void> {
           id: string;
         }[] = [];
 
+        // Every RA insert now receives an immutable OFFICIAL number (repair
+        // 20261231000001 section 3), so a legacy RA value can exist only in
+        // pre-existing history and cannot be forced in a fresh database. When
+        // none exists the RA type is proven by the function body + the
+        // official-number preservation check below, not by a converted row.
+        const officialOnlyRa = !exercised.includes('reservation_agreement');
         const emptyTargets = targets.filter(
-          (t) => !exercised.includes(t.entity) && !ostTargets.has(t.entity),
+          (t) =>
+            !exercised.includes(t.entity) &&
+            !ostTargets.has(t.entity) &&
+            !(t.entity === 'reservation_agreement' && officialOnlyRa),
         );
         check(
           'the conversion targets every whitelisted entity type',
@@ -10001,6 +10870,7 @@ async function main(): Promise<void> {
           `reused-row ${exercised.join(',')}; seeded-row ${[...ostTargets.keys()].join(',')}; missing ${emptyTargets.map((t) => t.entity).join(',') || 'none'}`,
         );
         for (const t of targets) {
+          if (t.entity === 'reservation_agreement' && officialOnlyRa) continue;
           const seeded = ostTargets.get(t.entity);
           seededEntities.push({
             entity: t.entity,
@@ -10012,7 +10882,7 @@ async function main(): Promise<void> {
           });
         }
         check(
-          'all eight entity types have an executed row to convert',
+          'every entity type that can hold a legacy value has an executed row to convert',
           seededEntities.every((e) => Boolean(e.key)),
           seededEntities.map((e) => `${e.entity}:${e.key ? 'ok' : 'MISSING'}`).join(','),
         );
@@ -10032,11 +10902,22 @@ async function main(): Promise<void> {
         );
         const before = await snapshotInvariants();
 
+        const officialRaSql = `select coalesce(string_agg(id::text||':'||reservation_number, ',' order by id), '') as v
+             from public.reservation_agreements where reservation_number ~ '^[0-9]{4}-[0-9]{4,}$'`;
+        const officialRaBefore = (await db.query<{ v: string }>(officialRaSql)).rows[0]!.v;
         const converted = Number(
           (await db.query<{ n: string }>('select private.upgrade_legacy_business_ids() as n'))
             .rows[0]!.n,
         );
         check('the conversion reports the rows it rewrote', converted >= 3, `${converted}`);
+        // Repair section 19: official RA numbers are modern; the converter must
+        // neither rewrite them nor abort on them.
+        check(
+          'official RA numbers exist and are left untouched by the converter',
+          officialRaBefore !== '' &&
+            (await db.query<{ v: string }>(officialRaSql)).rows[0]!.v === officialRaBefore,
+          officialRaBefore === '' ? 'no official RA existed to prove it' : '',
+        );
 
         const after = await snapshotInvariants();
         const afterSnapshotHash = await scalar(
@@ -10364,6 +11245,8 @@ async function main(): Promise<void> {
           `delete from private.business_id_aliases where entity_id = any($1::uuid[])`,
           [[ostMemberId, ostApplicationId, renewalId]],
         );
+      } catch (error) {
+        check('section 55 completes', false, safeErrorMessage(error));
       }
       section('57. Operational access: referral management and role editing are grant-bound');
       // Migration 20261029000001 delivers two SECURITY DEFINER functions that the API
@@ -10614,29 +11497,92 @@ async function main(): Promise<void> {
             ),
           ),
         );
-        // The subset rule: an Admin cannot grant what it does not hold.
-        ok(
-          'an Admin cannot grant a permission it does not hold',
-          /do not possess|Protected role/.test(
-            await refusal(() =>
-              db.query(`select public.update_operational_role($1::uuid,$2::uuid,$3::jsonb)`, [
-                opAdmin,
-                ownRoleId,
-                JSON.stringify({
-                  permissions: [
-                    {
-                      moduleKey: 'finance.commission_payouts',
-                      canView: true,
-                      canCreate: true,
-                      canUpdate: false,
-                      canDelete: false,
-                    },
-                  ],
+        // The subset rule: an Admin cannot grant what it does not hold. Probed on
+        // a NON-system role the actor does NOT hold, and only the subset message
+        // is accepted - on the actor's own role 'Protected role' would refuse
+        // first and the subset rule would never be exercised.
+        const probeRole = (
+          await one<{ id: string }>(
+            `insert into public.roles (slug, name, is_system, is_active)
+             values ($1, 'Authz Probe Role', false, true) returning id::text id`,
+            [`authz_probe_${Date.now()}`],
+          )
+        ).id;
+        const grantOnProbe = (permission: Record<string, unknown>) =>
+          db.query(`select public.update_operational_role($1::uuid,$2::uuid,$3::jsonb)`, [
+            opAdmin,
+            probeRole,
+            JSON.stringify({ permissions: [permission] }),
+          ]);
+        const actorHolds = async (moduleKey: string, action: string) =>
+          (
+            await one<{ allowed: boolean }>(
+              `select private.has_permission_for_user($1::uuid,$2,$3) as allowed`,
+              [opAdmin, moduleKey, action],
+            )
+          ).allowed;
+        try {
+          ok(
+            'an Admin cannot grant a permission it does not hold (subset rule, non-own role)',
+            /Cannot grant permissions you do not possess/.test(
+              await refusal(() =>
+                grantOnProbe({
+                  moduleKey: 'finance.commission_payouts',
+                  canView: true,
+                  canCreate: true,
+                  canUpdate: false,
+                  canDelete: false,
                 }),
-              ]),
+              ),
             ),
-          ),
-        );
+          );
+          // Effective permission, not the raw role grant: a deny-only restriction
+          // on the actor removes sales.customers update, which the Admin role holds.
+          ok(
+            'precondition: the Admin role grants sales.customers update',
+            await actorHolds('sales.customers', 'update'),
+          );
+          await db.query(
+            `insert into public.staff_permission_restrictions
+               (staff_id, module_id, deny_view, deny_create, deny_update, deny_delete)
+             select $1, id, false, false, true, false from public.modules where key='sales.customers'`,
+            [opAdmin],
+          );
+          ok(
+            'a restriction removes sales.customers update on the next resolution',
+            !(await actorHolds('sales.customers', 'update')),
+          );
+          ok(
+            'a restricted Admin cannot grant the permission its restriction removed',
+            /Cannot grant permissions you do not possess/.test(
+              await refusal(() =>
+                grantOnProbe({
+                  moduleKey: 'sales.customers',
+                  canView: true,
+                  canCreate: false,
+                  canUpdate: true,
+                  canDelete: false,
+                }),
+              ),
+            ),
+          );
+          eq(
+            'the refused grants wrote no role_permissions rows',
+            (
+              await one<{ n: number }>(
+                'select count(*)::int n from public.role_permissions where role_id=$1',
+                [probeRole],
+              )
+            ).n,
+            0,
+          );
+        } finally {
+          await db.query('delete from public.staff_permission_restrictions where staff_id=$1', [
+            opAdmin,
+          ]);
+          await db.query('delete from public.role_permissions where role_id=$1', [probeRole]);
+          await db.query('delete from public.roles where id=$1', [probeRole]);
+        }
         eq(
           'no ROLE_PERMISSIONS_UPDATED event was written by a refused edit',
           (
@@ -17967,6 +18913,387 @@ async function main(): Promise<void> {
       } catch (error) {
         check('section 78 completed', false, safeErrorMessage(error));
       }
+
+      section('79. import seller of record: always an active SM, resolved automatically');
+      try {
+        // Repair 20261231000001 sections 27 and 31 (product owner, 11 Nov 2026).
+        const mk79 = async (label: string, slug: string) => {
+          const id = uuidFor(`staff:79:${label}`);
+          const email = `${RUN}-79-${label}@example.invalid`;
+          await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email]);
+          await db.query(
+            "insert into public.staff_users (id, email, full_name, status) values ($1,$2,$3,'active')",
+            [id, email, `Synthetic 79 ${label}`],
+          );
+          await db.query(
+            'insert into public.staff_role_assignments (staff_id, role_id) select $1, id from public.roles where slug=$2',
+            [id, slug],
+          );
+          createdStaffIds.push(id);
+          return id;
+        };
+        const ssm79 = await mk79('ssm', 'senior_sales_manager');
+        const sm79 = await mk79('sm', 'sales_manager');
+        const ost79 = await mk79('ost', 'ost');
+        const outsideSm = await mk79('sm-out', 'sales_manager');
+        for (const [subject, upline, level] of [
+          [ssm79, staff['vice-director']!, 'senior_sales_manager'],
+          [sm79, ssm79, 'sales_manager'],
+          [ost79, sm79, 'ost'],
+        ] as const) {
+          await db.query(
+            `insert into public.referral_relationships
+               (subject_staff_id, upline_staff_id, hierarchy_role, is_authoritative, is_active, assigned_by)
+             values ($1,$2,$3,true,true,$4)`,
+            [subject, upline, level, staff['super-admin']!],
+          );
+        }
+        const team = async (raw: Record<string, unknown>) =>
+          (
+            await one<{ v: string | null }>(
+              'select private.import_team_sales_manager($1::jsonb,false) as v',
+              [JSON.stringify(raw)],
+            )
+          ).v;
+        const teamStrict = (raw: Record<string, unknown>) =>
+          db.query('select private.import_team_sales_manager($1::jsonb,true)', [JSON.stringify(raw)]);
+        eq('an OST referrer resolves to its active upline SM', await team({ referrer_staff_id: ost79 }), sm79);
+        eq('an SM referrer is itself the seller', await team({ referrer_staff_id: sm79 }), sm79);
+        eq(
+          'an SSM referrer with a named SM in its downline resolves to that SM',
+          await team({ referrer_staff_id: ssm79, sm_staff_id: sm79 }),
+          sm79,
+        );
+        const outside = await throwsIsolated(
+          'a named SM outside the referrer chain is refused',
+          () => teamStrict({ referrer_staff_id: ssm79, sm_staff_id: outsideSm }),
+        );
+        check('  IMPORT_SELLER_TEAM_CONFLICT', /IMPORT_SELLER_TEAM_CONFLICT/.test(outside), outside);
+        const malformed = await throwsIsolated('a malformed staff id is a row-level error', () =>
+          teamStrict({ referrer_staff_id: 'not-a-uuid' }),
+        );
+        check(
+          '  IMPORT_SELLER_SM_REQUIRED, never a 22P02 cast error',
+          /IMPORT_SELLER_SM_REQUIRED/.test(malformed) && !/invalid input syntax/i.test(malformed),
+          malformed,
+        );
+        eq('an SSM referrer with no named SM resolves to no seller', await team({ referrer_staff_id: ssm79 }), null);
+
+        // The legacy bulk member import: three rows in ONE job, each creating a sale.
+        const actor = staff['super-admin']!;
+        const job79 = uuidFor('import:job79');
+        await db.query(
+          "insert into public.customer_import_jobs(id, source_type, source_name, status, created_by, validated_at) values($1,'excel','section79.xlsx','ready',$2,now())",
+          [job79, actor],
+        );
+        const plan79 = await one<{ cash_price: string }>("select cash_price from public.card_plans where code='GOLD'");
+        const code79 = async (label: string, sponsor: string) => {
+          const code = `S79-${label}-${RUN.slice(1, 7)}`.toUpperCase();
+          await db.query(
+            `insert into public.referral_codes
+               (id, code_hash, code_hint, sponsor_staff_id, expires_at, max_uses, use_count, is_active, created_by)
+             values ($1, private.hash_token($2), $3, $4, now() + interval '7 days', 10, 0, true, $4)`,
+            [uuidFor(`code79:${label}`), code, `S79-?-${label}`, sponsor],
+          );
+          return code;
+        };
+        let row79 = 0;
+        const legacyRow = async (label: string, sellerCode: string) => {
+          const id = uuidFor(`import:row79:${label}`);
+          row79 += 1;
+          const normalized = {
+            category: 'ACTIVE_VIP',
+            paymentScheme: 'spot_cash',
+            historicalSaleTotal: plan79.cash_price,
+            tier: 'GOLD',
+            customerStatus: 'active',
+            person: {
+              firstName: 'Imported',
+              lastName: `Seller${label}`,
+              email: `${RUN}-sec79-${label.toLowerCase()}@example.invalid`,
+              phone: '+639170000079',
+            },
+            payment: { amount: plan79.cash_price, date: '2025-01-01', method: 'bank_transfer', reference: `S79-${label}` },
+            membershipNumber: null,
+            activationDate: '2025-01-01',
+            expiresAt: '2035-01-01',
+            openingBalance: 0,
+            memberStatus: 'active',
+            requireMember: true,
+          };
+          await db.query(
+            "insert into public.customer_import_rows(id, import_job_id, row_number, validation_status, action, normalized_data, raw_data) values($1,$2,$3,'valid','CREATE',$4,$5)",
+            [id, job79, row79, JSON.stringify(normalized), JSON.stringify({ seller_code: sellerCode })],
+          );
+          return id;
+        };
+        const viaOst = await legacyRow('Ost', await code79('OST', ost79));
+        const viaSm = await legacyRow('Sm', await code79('SM', sm79));
+        const ssmCode = await code79('SSM', ssm79);
+        const viaSsm = await legacyRow('Ssm', ssmCode);
+        const preview = (
+          await one<{ p: { rowId: string; sellerStaffId: string | null; error: string | null }[] }>(
+            'select public.preview_import_sellers($1::uuid[],$2) as p',
+            [[viaOst, viaSm, viaSsm], actor],
+          )
+        ).p;
+        const of = (id: string) => preview.find((p) => p.rowId === id);
+        check(
+          'review step: an OST sponsor resolves to its team SM, an SM sponsor to itself',
+          of(viaOst)?.sellerStaffId === sm79 && of(viaSm)?.sellerStaffId === sm79,
+          JSON.stringify(preview),
+        );
+        check(
+          'review step: no resolvable SM flags the row IMPORT_SELLER_SM_REQUIRED',
+          of(viaSsm)?.error === 'IMPORT_SELLER_SM_REQUIRED',
+          JSON.stringify(of(viaSsm)),
+        );
+        // Changed with the security review (repair section 34): the preview is
+        // READ-ONLY (it authorizes with view access); the API writes the returned
+        // error onto the row. This used to assert the flag was persisted by SQL.
+        check(
+          '  with a human message for the review file, and the row itself is not modified',
+          /Sales Manager/.test(String((of(viaSsm) as { message?: string } | undefined)?.message)) &&
+            (
+              await one<{ ok: boolean }>(
+                `select validation_status='valid' and validation_errors='[]'::jsonb as ok
+                   from public.customer_import_rows where id=$1`,
+                [viaSsm],
+              )
+            ).ok,
+          JSON.stringify(of(viaSsm)),
+        );
+        // Only CREATE rows become sales: an UPDATE or SKIP row with a payment is not judged.
+        for (const action of ['UPDATE', 'SKIP']) {
+          const id = uuidFor(`import:row79:${action}`);
+          row79 += 1;
+          await db.query(
+            "insert into public.customer_import_rows(id, import_job_id, row_number, validation_status, action, normalized_data, raw_data) values($1,$2,$3,'valid',$4,$5,$6)",
+            [
+              id,
+              job79,
+              row79,
+              action,
+              JSON.stringify({ requireMember: true, payment: { amount: '1.00' } }),
+              JSON.stringify({ seller_code: ssmCode }),
+            ],
+          );
+          const p = (
+            await one<{ p: { error: string | null }[] }>('select public.preview_import_sellers($1::uuid[],$2) as p', [
+              [id],
+              actor,
+            ])
+          ).p;
+          check(`an ${action} row with a payment is not flagged`, p[0]?.error === null, JSON.stringify(p));
+          await db.query('delete from public.customer_import_rows where id=$1', [id]);
+        }
+        eq(
+          'a null row list previews nothing',
+          JSON.stringify(
+            (await one<{ p: unknown }>('select public.preview_import_sellers(null,$1) as p', [actor])).p,
+          ),
+          '[]',
+        );
+        const commit79 = async (id: string) =>
+          (
+            await one<{ out: { customerId: string; saleId?: string } }>(
+              'select public.commit_customer_import_row($1,$2) as out',
+              [id, actor],
+            )
+          ).out;
+        const sellerOf = async (customerId: string) =>
+          (
+            await one<{ s: string | null }>(
+              'select seller_staff_id as s from public.card_sales where customer_id=$1',
+              [customerId],
+            )
+          ).s;
+        eq('commit: an OST sponsor makes its team SM the seller of record', await sellerOf((await commit79(viaOst)).customerId), sm79);
+        eq('commit: an SM sponsor is the seller of record', await sellerOf((await commit79(viaSm)).customerId), sm79);
+        // The database guarantee, whatever the review step did with the preview.
+        const noSm = await throwsIsolated('commit: a row with no resolvable SM is refused', () => commit79(viaSsm));
+        check('  IMPORT_SELLER_SM_REQUIRED for that row only', /IMPORT_SELLER_SM_REQUIRED/.test(noSm), noSm);
+        eq(
+          'the other rows of the job are committed',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int n from public.customer_import_rows where import_job_id=$1 and committed_at is not null',
+              [job79],
+            )
+          ).n,
+          2,
+        );
+
+        const bucket = await one<{ public: boolean; size: string; mimes: string[] }>(
+          `select public, file_size_limit::text as size, allowed_mime_types as mimes
+             from storage.buckets where id='afhomes-signed-documents'`,
+        );
+        check(
+          'the signed-documents bucket is private and bounded (section 31 upsert)',
+          bucket.public === false && bucket.size === '10485760' && bucket.mimes.length === 3,
+          JSON.stringify(bucket),
+        );
+      } catch (error) {
+        check('section 79 completed', false, safeErrorMessage(error));
+      }
+      section('80. Financial Operations foundation: payroll permissions and empty compensation policy');
+      // Migration 20270105000001. Runs inside its own savepoint/transaction and
+      // rolls back, because APPROVED policy rows are immutable and undeletable.
+      let own80 = false;
+      try {
+        await db.query('savepoint finops80');
+      } catch {
+        await db.query('begin');
+        own80 = true;
+      }
+      try {
+        const PAYROLL_MODULES = [
+          'finance.payroll',
+          'finance.payroll_approval',
+          'finance.payroll_close',
+          'finance.payroll_policy',
+        ];
+        const can = async (who: string, module: string, action: string) =>
+          (
+            await one<{ ok: boolean }>(
+              'select private.has_permission_for_user($1,$2,$3) as ok',
+              [staff[who]!, module, action],
+            )
+          ).ok;
+        eq(
+          'the four payroll modules exist',
+          (
+            await db.query<{ key: string }>(
+              `select key from public.modules where key like 'finance.payroll%' order by key`,
+            )
+          ).rows.map((r) => r.key).join(','),
+          PAYROLL_MODULES.join(','),
+        );
+        check(
+          'Finance may view, submit and record disbursements',
+          (await can('finance', 'finance.payroll', 'view')) &&
+            (await can('finance', 'finance.payroll', 'create')) &&
+            (await can('finance', 'finance.payroll', 'update')),
+        );
+        for (const module of PAYROLL_MODULES.slice(1)) {
+          check(
+            `Finance holds nothing on ${module}`,
+            !(await can('finance', module, 'view')) && !(await can('finance', module, 'update')),
+          );
+          check(`Super Admin holds ${module}`, await can('super-admin', module, 'update'));
+        }
+        for (const who of ['sm', 'ssm', 'vice-director', 'admin']) {
+          let any = false;
+          for (const module of PAYROLL_MODULES)
+            for (const action of ['view', 'create', 'update'])
+              any = any || (await can(who, module, action));
+          check(`${who} receives no payroll permission automatically`, !any);
+        }
+
+        const policyFor = async (rank: string) =>
+          (
+            await one<{ id: string | null }>(
+              'select (private.ist_compensation_policy_for($1, current_date)).id as id',
+              [rank],
+            )
+          ).id;
+        eq(
+          'no compensation policy is seeded',
+          (await one<{ n: number }>('select count(*)::int n from public.ist_compensation_policies'))
+            .n,
+          0,
+        );
+        eq('no approved policy -> nothing payable (Configuration Required)', await policyFor('SM'), null);
+
+        const insertPolicy = (rank: string, from: string, until: string | null, ba = '1.00') =>
+          one<{ id: string }>(
+            `insert into public.ist_compensation_policies
+               (rank, monthly_ba, ba_target, monthly_pa, pa_target, pb_target, pb_rate, collection_gate,
+                effective_from, effective_until, basis_note, created_by)
+             values ($1,$2,'2.00','3.00','4.00','5.00','0.01','0.40',$3::date,$4::date,'synthetic test policy',$5)
+             returning id`,
+            [rank, ba, from, until, staff['super-admin']!],
+          );
+        const approve = (id: string) =>
+          db.query(
+            `update public.ist_compensation_policies
+                set status='approved', approved_by=$2, approved_at=now() where id=$1`,
+            [id, staff['super-admin']!],
+          );
+        const firstLine = (message: string) => message.split('\n')[0];
+
+        const first = (await insertPolicy('SM', '2026-01-01', null)).id;
+        eq('a draft policy is not payable', await policyFor('SM'), null);
+        await approve(first);
+        eq('an approved policy is resolved for its rank and date', await policyFor('SM'), first);
+        eq('another rank still has no policy', await policyFor('SSM'), null);
+
+        const immutable = await throwsIsolated('an approved policy figure cannot be edited', () =>
+          db.query(`update public.ist_compensation_policies set monthly_ba='99.00' where id=$1`, [
+            first,
+          ]),
+        );
+        check(
+          '  -> COMPENSATION_POLICY_IMMUTABLE (edit)',
+          immutable.includes('COMPENSATION_POLICY_IMMUTABLE'),
+          firstLine(immutable),
+        );
+        const undeletable = await throwsIsolated('an approved policy cannot be deleted', () =>
+          db.query('delete from public.ist_compensation_policies where id=$1', [first]),
+        );
+        check(
+          '  -> COMPENSATION_POLICY_IMMUTABLE (delete)',
+          undeletable.includes('COMPENSATION_POLICY_IMMUTABLE'),
+          firstLine(undeletable),
+        );
+
+        const second = (await insertPolicy('SM', '2027-01-01', null, '8.00')).id;
+        const overlap = await throwsIsolated(
+          'a second approved policy overlapping the first is refused',
+          () => approve(second),
+        );
+        check(
+          '  -> COMPENSATION_POLICY_OVERLAP',
+          overlap.includes('COMPENSATION_POLICY_OVERLAP'),
+          firstLine(overlap),
+        );
+        // A rate change is a NEW row: close the old window, then approve the next.
+        await db.query(
+          `update public.ist_compensation_policies set effective_until='2026-12-31' where id=$1`,
+          [first],
+        );
+        await approve(second);
+        eq(
+          'the next policy is approved once the old window closes; history keeps the old figure',
+          (
+            await one<{ ba: string }>(
+              'select monthly_ba as ba from public.ist_compensation_policies where id=$1',
+              [first],
+            )
+          ).ba,
+          '1.00',
+        );
+
+        const badMoney = await throwsIsolated(
+          'a non-exact-decimal amount is refused by the table',
+          () => insertPolicy('SSM', '2026-01-01', null, '1e6'),
+        );
+        check('  -> check constraint (amount)', /check constraint/i.test(badMoney), firstLine(badMoney));
+        const badRank = await throwsIsolated('an OST rank is refused by the table', () =>
+          insertPolicy('OST', '2026-01-01', null),
+        );
+        check('  -> check constraint (rank)', /check constraint/i.test(badRank), firstLine(badRank));
+
+        const browser = await one<{ a: boolean; b: boolean }>(
+          `select has_table_privilege('anon','public.ist_compensation_policies','SELECT') as a,
+                  has_table_privilege('authenticated','public.ist_compensation_policies','SELECT') as b`,
+        );
+        check('no browser role can read compensation policy', !browser.a && !browser.b);
+      } catch (error) {
+        check('section 80 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own80 ? 'rollback' : 'rollback to savepoint finops80');
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {
@@ -18056,6 +19383,17 @@ async function main(): Promise<void> {
         await db?.query('delete from public.payments where customer_id = any($1::uuid[])', [
           custSet,
         ]);
+        // Synthetic receipt objects (receiptObject) carry the run prefix; the
+        // purchase-workflow fixtures record every object they create.
+        await db?.query('delete from storage.objects where bucket_id = $1 and name like $2', [
+          RECEIPT_BUCKET,
+          `${RUN}/%`,
+        ]);
+        await db?.query(
+          `delete from storage.objects o using unnest($1::text[], $2::text[]) x(bucket, name)
+            where o.bucket_id = x.bucket and o.name = x.name`,
+          [syntheticStorageObjects.map((o) => o[0]), syntheticStorageObjects.map((o) => o[1])],
+        );
         // Application document rows can link payments with ON DELETE RESTRICT,
         // so they go before anything they reference.
         await db?.query(
@@ -18073,6 +19411,8 @@ async function main(): Promise<void> {
           'delete from public.customer_onboarding_tokens where customer_id = any($1::uuid[])',
           [custSet],
         );
+        // public.reservation_agreement_signed_documents is dropped by
+        // 20261231000001 section 5, so there is nothing to delete from it.
         await db?.query(
           'delete from public.identity_documents where customer_id = any($1::uuid[])',
           [custSet],
@@ -18108,6 +19448,12 @@ async function main(): Promise<void> {
           where membership_id in (select id from public.memberships where customer_id = any($1::uuid[]))`,
           [custSet],
         );
+        // Delete membership-activated purchase evidence before memberships (FK RESTRICT)
+        await db?.query(
+          `delete from private.purchase_document_evidence where membership_id in
+           (select id from public.memberships where customer_id = any($1::uuid[]))`,
+          [custSet],
+        );
         await db?.query('delete from public.memberships where customer_id = any($1::uuid[])', [
           custSet,
         ]);
@@ -18124,6 +19470,8 @@ async function main(): Promise<void> {
         // Set BEFORE the first evidence delete: the flag is transaction-local, and
         // the immutable-evidence trigger refuses the delete otherwise.
         await db?.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
+        // Also allow mutation checks to be bypassed for test cleanup
+        await db?.query(`set local afhomes.allow_mutation_test_cleanup = 'on'`);
         await db?.query(
           `delete from private.purchase_document_evidence where reservation_id in
            (select id from public.reservation_agreements where sale_id in
@@ -18132,6 +19480,7 @@ async function main(): Promise<void> {
              (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
           [custSet],
         );
+        // public.commission_records is dropped by 20261231000001 section 5.
         await db?.query(
           `delete from public.reservation_agreement_schedule where agreement_id in
            (select id from public.reservation_agreements where sale_id in
@@ -18154,6 +19503,21 @@ async function main(): Promise<void> {
              (select id from public.card_sales where customer_id = any($1::uuid[]))
              or customer_application_id in
              (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
+          [custSet],
+        );
+        // Signed purchase documents (20261231000001 section 6) RESTRICT the
+        // agreement, application and customer; the owner-only cleanup escape is set.
+        await db?.query(
+          'delete from public.purchase_signed_documents where customer_id = any($1::uuid[])',
+          [custSet],
+        );
+        // Delete official RA issuances before reservation agreements (FK constraint)
+        await db?.query(
+          `delete from private.official_ra_issuances where reservation_id in
+            (select id from public.reservation_agreements where sale_id in
+              (select id from public.card_sales where customer_id = any($1::uuid[]))
+              or customer_application_id in
+              (select id from public.customer_applications where customer_id = any($1::uuid[])))`,
           [custSet],
         );
         await db?.query(
@@ -18391,6 +19755,11 @@ async function main(): Promise<void> {
         );
         if (authLeak!.rows[0]!.n !== 0)
           leaks.push(`auth.users: ${authLeak!.rows[0]!.n} left behind`);
+        const objectsNow = (
+          await db.query<{ n: number }>('select count(*)::int as n from storage.objects')
+        ).rows[0]!.n;
+        if (objectsNow !== baseline.get('storage.objects'))
+          leaks.push(`storage.objects: ${baseline.get('storage.objects')} -> ${objectsNow}`);
 
         check('synthetic customers removed', !leaks.some((l) => l.startsWith('customers:')));
         check(

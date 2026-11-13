@@ -52,7 +52,7 @@ const push = (rows: Row[], label: string, value: unknown) => {
 };
 
 const identity = (rows: Row[], fields: Record<string, unknown>) => {
-  push(rows, 'Reservation (AF-RES)', fields.reservationNumber);
+  push(rows, 'Official Reservation Agreement Number', fields.reservationNumber);
   push(rows, 'Sale (AF-CSALE)', fields.saleNumber);
   push(rows, 'Application (AF-APP)', fields.applicationNumber);
   push(rows, 'Payment (AF-PAY)', fields.paymentNumber);

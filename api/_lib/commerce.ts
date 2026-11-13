@@ -10,13 +10,20 @@
  * Money is an exact-decimal STRING end to end. Arithmetic goes through
  * `@afhomes/shared`, which uses BigInt centavo - no float ever participates.
  */
-import { addMoney, compareMoney, divideMoneyExact, multiplyMoney, subtractMoney } from '@afhomes/shared';
+import {
+  addMoney,
+  compareMoney,
+  divideMoneyExact,
+  multiplyMoney,
+  subtractMoney,
+} from '@afhomes/shared';
 import type {
   PaymentScheme,
   PaymentStatus,
   SaleFinancialSummary,
   SpotCashState,
 } from '@afhomes/contracts';
+import { SELLER_OF_RECORD_ROLE } from '@afhomes/contracts';
 
 import { SPOT_CASH_DAYS } from './constants.js';
 
@@ -136,7 +143,9 @@ export function deriveSpotCashState(input: {
   if (input.fullyPaid) return 'fully_paid';
   if (!input.spotCashDeadline) return 'not_started';
   const now = input.now ?? new Date();
-  return now.valueOf() <= new Date(input.spotCashDeadline).valueOf() ? 'within_deadline' : 'expired';
+  return now.valueOf() <= new Date(input.spotCashDeadline).valueOf()
+    ? 'within_deadline'
+    : 'expired';
 }
 
 /* ------------------------------------------------------------------ */
@@ -159,10 +168,7 @@ export type SellableProduct = {
 };
 
 export type ProductRejection =
-  | 'PRODUCT_CATEGORY_INACTIVE'
-  | 'PRODUCT_INACTIVE'
-  | 'DOWN_PAYMENT_EXCEEDS_PRICE'
-  | 'ZERO_PRICE';
+  'PRODUCT_CATEGORY_INACTIVE' | 'PRODUCT_INACTIVE' | 'DOWN_PAYMENT_EXCEEDS_PRICE' | 'ZERO_PRICE';
 
 /**
  * A product may only be sold when it is active, its category is active, and
@@ -237,9 +243,7 @@ export type SchemeEconomics = {
 };
 
 export type SchemeRejection =
-  | 'SCHEME_NOT_ALLOWED_FOR_TIER'
-  | 'INSTALLMENT_PRICE_NOT_SET'
-  | 'INEXACT_SCHEDULE';
+  'SCHEME_NOT_ALLOWED_FOR_TIER' | 'INSTALLMENT_PRICE_NOT_SET' | 'INEXACT_SCHEDULE';
 
 /** Database defaults for plan columns older rows may lack. */
 const SCHEME_DEFAULTS = {
@@ -410,14 +414,16 @@ export type SellerRejection =
   | 'SELLER_INACTIVE'
   | 'SELLER_ROLE_NOT_A_SELLER'
   | 'SELLER_NOT_IN_YOUR_DOWNLINE'
-  | 'SELLER_CANNOT_SELL_FOR_SELF';
+  | 'SELLER_CANNOT_SELL_FOR_SELF'
+  | 'SELLER_OF_RECORD_MUST_BE_CREATOR'
+  | 'SELLER_OF_RECORD_REQUIRED';
 
 /** Roles permitted to appear as the seller of record on a card sale. */
 export const SELLING_ROLES: readonly string[] = [
-  'ost',
-  'sales_manager',
-  'senior_sales_manager',
   'vice_director',
+  'senior_sales_manager',
+  'sales_manager',
+  'ost',
   'admin',
   'super_admin',
 ];
@@ -433,6 +439,8 @@ export function isSellingRole(roleSlug: string): boolean {
  * value means "me". A supplied value is honoured only when the target is an
  * active seller inside the caller's own downline, so a caller can never
  * impersonate an unrelated seller by editing request JSON.
+ *
+ * Mirrors private.purchase_seller_for in migration 20261230000005.
  */
 export function resolveSeller(input: {
   actorId: string;
@@ -442,25 +450,30 @@ export function resolveSeller(input: {
   /** Staff ids the actor may sell on behalf of (their downline + themselves). */
   downlineIds: readonly string[];
 }): { staffId: string } | { error: SellerRejection } {
-  const { actorId, actorRole, requestedSellerId, target, downlineIds } = input;
+  const { actorId, actorRole, requestedSellerId, target } = input;
+  const namesOther = Boolean(requestedSellerId) && requestedSellerId !== actorId;
 
-  if (!requestedSellerId || requestedSellerId === actorId) {
-    if (target && target.staffId === actorId && target.status !== 'active') {
-      return { error: 'SELLER_INACTIVE' };
-    }
-    if (target && target.staffId === actorId && !isSellingRole(target.roleSlug)) {
-      return { error: 'SELLER_ROLE_NOT_A_SELLER' };
-    }
-    return { staffId: actorId };
+  // Who may create is the module permission (checked by the caller). OST never originates.
+  if (actorRole === 'ost') return { error: 'SELLER_ROLE_NOT_A_SELLER' };
+
+  // The seller of record is always an ACTIVE Sales Manager (product owner, 11 Nov 2026).
+  // An SM creator is the seller and cannot name anyone else.
+  if (actorRole === SELLER_OF_RECORD_ROLE) {
+    return namesOther ? { error: 'SELLER_OF_RECORD_MUST_BE_CREATOR' } : { staffId: actorId };
   }
 
+  // Any other permitted creator must name the SM.
+  if (!namesOther || !requestedSellerId) return { error: 'SELLER_OF_RECORD_REQUIRED' };
   if (!target) return { error: 'SELLER_NOT_IN_YOUR_DOWNLINE' };
   if (target.status !== 'active') return { error: 'SELLER_INACTIVE' };
-  if (!isSellingRole(target.roleSlug)) return { error: 'SELLER_ROLE_NOT_A_SELLER' };
-  if (actorRole !== 'super_admin' && !downlineIds.includes(target.staffId)) {
+  if (target.roleSlug !== SELLER_OF_RECORD_ROLE) return { error: 'SELLER_ROLE_NOT_A_SELLER' };
+
+  // Admin, Super Admin and Finance may name any active SM; other roles only one in their downline.
+  const privilegedRoles: readonly string[] = ['finance', 'admin', 'super_admin'];
+  if (!privilegedRoles.includes(actorRole) && !input.downlineIds.includes(requestedSellerId)) {
     return { error: 'SELLER_NOT_IN_YOUR_DOWNLINE' };
   }
-  return { staffId: target.staffId };
+  return { staffId: requestedSellerId };
 }
 
 /* ------------------------------------------------------------------ */
@@ -500,4 +513,18 @@ export function toSummaryResponse(
     spotCashDeadline: totals.spotCashDeadline,
     spotCashState: totals.spotCashState,
   };
+}
+
+/**
+ * Check if cumulative verified payments reach 40% of the frozen contract total.
+ * Used for commission eligibility determination.
+ */
+export function checkCommission40pctEligibility(
+  cumulativeVerified: string,
+  basisAmount: string,
+): boolean {
+  const verified = BigInt(cumulativeVerified.replace('.', ''));
+  const basis = BigInt(basisAmount.replace('.', ''));
+  // 40% = 2/5, so verified * 5 >= basis * 2
+  return verified * 5n >= basis * 2n;
 }

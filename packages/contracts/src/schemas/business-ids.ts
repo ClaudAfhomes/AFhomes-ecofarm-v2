@@ -19,7 +19,7 @@ export const AF_ID_PREFIXES = [
   'AF-CSALE',
   'AF-EMP',
   'AF-APP',
-  'AF-RES',
+  'AF-RES', // Historical reservation identifiers; new official RAs use YYYY-NNNN.
   'AF-OST',
   'AF-ACC',
   'AF-REN',

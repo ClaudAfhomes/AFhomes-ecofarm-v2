@@ -313,6 +313,8 @@ describe('payment recording and verification', () => {
         amount: '10000.00',
         paymentType: 'down_payment',
         method: 'cash',
+        receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
+        paymentPurpose: 'contractual_down_payment',
       },
     });
     expect(state.status).toBe(201);

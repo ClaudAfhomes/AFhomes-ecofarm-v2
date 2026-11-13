@@ -15,8 +15,9 @@ import { z } from 'zod';
  *   (submitted/under_review/changes_requested). Terminal states
  *   (approved/rejected/withdrawn) are decided work, never pending work.
  * - `paymentVerification`: `card_sales` in the finance-queue status set
- *   (submitted/payment_pending/payment_in_progress/overdue) - the exact set
- *   `GET /queues/finance` lists, so the card and the queue can never disagree.
+ *   (submitted/payment_pending/payment_in_progress/overdue) PLUS executed,
+ *   application-origin reservations not yet converted to a sale - the exact
+ *   rows `GET /queues/finance` lists, so the card and the queue never disagree.
  *
  * Withdrawals are deliberately absent: the payout workflow does not exist yet
  * (Phase 4), and a zero/placeholder card would be a fake count with a dead

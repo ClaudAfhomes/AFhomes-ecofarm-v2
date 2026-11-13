@@ -207,6 +207,7 @@ export function rolePermissionsTable(): FakeRow[] {
       'organization.departments',
       'organization.roles',
       'sales.card_sales',
+      'sales.customers',
       'governance.audit',
     ],
     { can_create: true, can_update: true },

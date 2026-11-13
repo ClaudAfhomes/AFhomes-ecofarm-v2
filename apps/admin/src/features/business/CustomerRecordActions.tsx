@@ -120,7 +120,7 @@ export function CustomerRecordActions({
                       saleActions.openPaymentDialog({ saleId: selectedSale.id, kind: 'record' })
                     }
                   >
-                    Record payment
+                    Record &amp; verify payment
                   </Button>
                   <Button
                     variant="secondary"

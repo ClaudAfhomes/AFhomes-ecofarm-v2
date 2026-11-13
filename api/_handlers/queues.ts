@@ -1,4 +1,5 @@
 import { shape, type QueueRow } from '../_lib/queue-model.js';
+import { handleAccountingPeriods } from '../_lib/accounting-periods.js';
 import { matchesSearch, readBoundedRows, readSearchRows } from '../_lib/list-search.js';
 /**
  * AFHomes operational queues: Finance payment handling and activation readiness.
@@ -36,9 +37,8 @@ const parseListQuery = (req: VercelRequest) =>
     })
     .safeParse(req.query);
 
-
 const SELECT_QUEUE =
-  'id, sale_number, status, cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amount_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_id, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name)';
+  'id, sale_number, status, cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amount_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_id, customers!inner(first_name, middle_name, last_name, suffix), card_plans!inner(name, code)';
 
 /**
  * Sales awaiting money, or with money recorded but not yet verified. The
@@ -53,7 +53,6 @@ const PAYMENT_VERIFICATION_STATUSES = [
   'overdue',
 ];
 
-
 async function buildQueue(
   db: Db,
   statuses: string[],
@@ -66,17 +65,12 @@ async function buildQueue(
   // filter columns across these embedded relations.
   const term = (search ?? '').trim();
   const loadAll = options?.loadAll === true;
-  let query = db
-    .from('card_sales')
-    .select(SELECT_QUEUE, { count: 'exact' })
-    .in('status', statuses);
+  let query = db.from('card_sales').select(SELECT_QUEUE, { count: 'exact' }).in('status', statuses);
 
   // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
   // bounded window contains the rows that sort first in the merged queue.
   // Nulls first matches the merge sort, which treats a missing payment as ''.
-  query = query
-    .order('spot_cash_started_at', { ascending: true, nullsFirst: true })
-    .order('id');
+  query = query.order('spot_cash_started_at', { ascending: true, nullsFirst: true }).order('id');
   // When not loading all (finance merge path), bound the read to `limit` rows
   // instead of paging through the entire population. `limit` is expected to be
   // the window size (page size + offset) in that mode. Searches exhaust the
@@ -106,8 +100,7 @@ async function buildQueue(
   });
   // When the read was bounded (no search), the true total comes from the DB
   // count captured during the bounded read, not from the (window-sized) slice.
-  const count =
-    loadAll || term ? filtered.length : boundedCount ?? filtered.length;
+  const count = loadAll || term ? filtered.length : (boundedCount ?? filtered.length);
   const data = filtered.slice(offset, offset + limit);
 
   const saleIds = (data ?? []).map((row) => String(row.id));
@@ -158,6 +151,7 @@ async function buildQueue(
           .filter((p) => typeof p === 'string' && p)
           .join(' ') || 'Unknown customer',
       productName: String(product.name ?? 'Unknown product'),
+      planCode: typeof product.code === 'string' ? product.code : null,
       payments: paymentsBySale.get(String(row.id)) ?? [],
     };
   });
@@ -191,9 +185,7 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
 
   // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
   // bounded window contains the rows that sort first in the merged queue.
-  query = query
-    .order('spot_cash_started_at', { ascending: true, nullsFirst: true })
-    .order('id');
+  query = query.order('spot_cash_started_at', { ascending: true, nullsFirst: true }).order('id');
   // Searches exhaust the authorized status set. Other reads stay bounded to
   // the finance window instead of paging through every executed reservation.
   let rows: Record<string, unknown>[];
@@ -329,6 +321,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (await handleAccountingPeriods(req, res, db)) return;
     if (method(req) !== 'GET') return fail(res, 'NOT_FOUND', 'Queue endpoint not found', 404);
     const parsed = parseListQuery(req);
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
@@ -346,14 +339,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // `limit + offset` rows from each source is enough to produce the correct
       // page. `loadAll` is false so the no-search path bounds the read.
       const windowSize = limit + offset;
-      const sales = await buildQueue(
-        db,
-        PAYMENT_VERIFICATION_STATUSES,
-        windowSize,
-        0,
-        search,
-        { loadAll: false },
-      );
+      const sales = await buildQueue(db, PAYMENT_VERIFICATION_STATUSES, windowSize, 0, search, {
+        loadAll: false,
+      });
       const reservations = await buildReservationQueue(db, windowSize, 0, search);
       // One combined page, ordered by readiness then origin/UUID so the order is
       // total and stable across the two sources.
@@ -442,7 +430,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .select('id', { count: 'exact', head: true })
           .in('status', PAYMENT_VERIFICATION_STATUSES);
         if (verifying.error) throw verifying.error;
-        counts.paymentVerification = verifying.count ?? 0;
+        // Same reservation filter as the finance queue, so card and queue total agree.
+        const reserving = await db
+          .from('reservation_agreements')
+          .select('id', { count: 'exact', head: true })
+          .eq('origin', 'application')
+          .eq('status', 'executed')
+          .is('sale_id', null);
+        if (reserving.error) throw reserving.error;
+        counts.paymentVerification = (verifying.count ?? 0) + (reserving.count ?? 0);
       }
       const parsed = dashboardQueuesSchema.safeParse(counts);
       if (!parsed.success) return fail(res, 'INTERNAL', 'Internal server error', 500);

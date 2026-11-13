@@ -1,3 +1,4 @@
+import { MyWorkToday } from './MyWorkToday';
 import { useState, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
@@ -362,6 +363,7 @@ export function AfHomesDashboardPage() {
           </div>
         ) : null}
       </div>
+      <MyWorkToday />
       {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
         user?.roleSlug ?? '',
       ) ? (

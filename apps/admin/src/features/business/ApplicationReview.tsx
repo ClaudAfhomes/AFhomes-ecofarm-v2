@@ -63,7 +63,7 @@ const personal: [keyof ApplicationHolder, string, boolean?][] = [
   ['suffix', 'Suffix'],
   ['birthDate', 'Birth date', true],
   ['printedName', 'Printed name', true],
-  ['raNumber', 'RA Number (Customer ID)'],
+  ['raNumber', 'Customer ID'],
 ];
 const contact: [keyof ApplicationHolder, string, boolean?][] = [
   ['mobile', 'Mobile', true],
@@ -335,7 +335,7 @@ export function ApplicationReview({
                     .filter(Boolean)
                     .join(', '),
                 },
-                { label: 'RA number', value: primary.raNumber || 'Server-generated' },
+                { label: 'Customer ID', value: primary.raNumber || 'Server-generated' },
                 { label: 'Printed name', value: primary.printedName },
               ]}
               onEdit={() => onEdit(2, 'primary-address')}

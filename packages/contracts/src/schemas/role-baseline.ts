@@ -91,6 +91,11 @@ export type BaselineRole = (typeof BASELINE_ROLES)[number];
 export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
   'finance.final_qualification',
   'finance.commission_payouts',
+  // Payroll approval, period closing and compensation policy are held only by
+  // Super Admin (every module, by slug) until explicitly delegated (12 Nov 2026).
+  'finance.payroll_approval',
+  'finance.payroll_close',
+  'finance.payroll_policy',
   'network.withdrawals',
   'governance.config',
   // Phase 6 CMS is invitation/assignment only. Existing operational roles do
@@ -113,6 +118,9 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   roles: readonly string[];
 }[] = [
   { moduleKey: 'governance.customer_import', roles: ['admin'] },
+  // IST Payroll, seeded by 20270105000001: Finance reviews, submits batches and
+  // records disbursements. No sales role (SM/SSM/SVD) and not Admin.
+  { moduleKey: 'finance.payroll', roles: ['finance'] },
   // Operational Services selling, seeded by 20261105000001. `employee` (the GSD)
   // holds view+create: enough to record a service sale and a receipt, and
   // deliberately NOT update/delete, because no operation needs them. `finance`

@@ -18,11 +18,35 @@ import {
   toSummaryResponse,
 } from './commerce.js';
 
-const GOLD = { id: 'g', isActive: true, cashPrice: '60000.00', minimumDownPayment: '20000.00', yearlyPoints: 60000, commissionRate: '0.04' };
-const SILVER = { id: 's', isActive: true, cashPrice: '40000.00', minimumDownPayment: '15000.00', yearlyPoints: 40000, commissionRate: '0.04' };
-const BRONZE = { id: 'b', isActive: true, cashPrice: '30000.00', minimumDownPayment: '10000.00', yearlyPoints: 25000, commissionRate: '0.04' };
+const GOLD = {
+  id: 'g',
+  isActive: true,
+  cashPrice: '60000.00',
+  minimumDownPayment: '20000.00',
+  yearlyPoints: 60000,
+  commissionRate: '0.04',
+};
+const SILVER = {
+  id: 's',
+  isActive: true,
+  cashPrice: '40000.00',
+  minimumDownPayment: '15000.00',
+  yearlyPoints: 40000,
+  commissionRate: '0.04',
+};
+const BRONZE = {
+  id: 'b',
+  isActive: true,
+  cashPrice: '30000.00',
+  minimumDownPayment: '10000.00',
+  yearlyPoints: 25000,
+  commissionRate: '0.04',
+};
 
-const pay = (amount: string, status: 'recorded' | 'verified' | 'rejected' | 'voided') => ({ amount, status });
+const pay = (amount: string, status: 'recorded' | 'verified' | 'rejected' | 'voided') => ({
+  amount,
+  status,
+});
 
 describe('commission is 4% of the card price, exactly', () => {
   it.each([
@@ -235,103 +259,130 @@ describe('a product can only be sold when it is active and coherent', () => {
   });
 
   it('rejects a down payment above the price (un-payable sale)', () => {
-    expect(
-      productSaleRejection({ ...GOLD, minimumDownPayment: '60000.01' }),
-    ).toBe('DOWN_PAYMENT_EXCEEDS_PRICE');
+    expect(productSaleRejection({ ...GOLD, minimumDownPayment: '60000.01' })).toBe(
+      'DOWN_PAYMENT_EXCEEDS_PRICE',
+    );
   });
 
   it('accepts a down payment exactly equal to the price', () => {
-    expect(
-      productSaleRejection({ ...GOLD, minimumDownPayment: '60000.00' }),
-    ).toBeNull();
+    expect(productSaleRejection({ ...GOLD, minimumDownPayment: '60000.00' })).toBeNull();
   });
 });
 
-describe('seller identity cannot be spoofed by the request body', () => {
-  const actor = { actorId: 'sm-1', actorRole: 'sales_manager' };
-  const downline = ['sm-1', 'ost-1', 'ost-2'];
+describe('seller of record: always an active SM, never spoofable by the request body', () => {
+  const sm = { actorId: 'sm-1', actorRole: 'sales_manager' };
+  const activeSm = (id: string) => ({ staffId: id, roleSlug: 'sales_manager', status: 'active' });
 
-  it('defaults to the caller when no seller is named', () => {
-    expect(resolveSeller({ ...actor, downlineIds: downline })).toEqual({ staffId: 'sm-1' });
+  it('an SM creator is the seller when no seller is named', () => {
+    expect(resolveSeller({ ...sm, downlineIds: [] })).toEqual({ staffId: 'sm-1' });
   });
 
-  it('treats an explicit self-reference as the caller', () => {
-    expect(resolveSeller({ ...actor, requestedSellerId: 'sm-1', downlineIds: downline })).toEqual({
+  it('treats an SM explicit self-reference as the caller', () => {
+    expect(resolveSeller({ ...sm, requestedSellerId: 'sm-1', downlineIds: [] })).toEqual({
       staffId: 'sm-1',
     });
   });
 
-  it('accepts an active seller inside the caller own downline', () => {
+  it('refuses an SM naming any other seller, even one in their downline', () => {
     expect(
       resolveSeller({
-        ...actor,
+        ...sm,
         requestedSellerId: 'ost-1',
         target: { staffId: 'ost-1', roleSlug: 'ost', status: 'active' },
-        downlineIds: downline,
+        downlineIds: ['ost-1'],
       }),
-    ).toEqual({ staffId: 'ost-1' });
+    ).toEqual({ error: 'SELLER_OF_RECORD_MUST_BE_CREATOR' });
   });
 
-  it('refuses a seller outside the downline', () => {
+  it('refuses an OST creator outright', () => {
     expect(
       resolveSeller({
-        ...actor,
-        requestedSellerId: 'ost-9',
-        target: { staffId: 'ost-9', roleSlug: 'ost', status: 'active' },
-        downlineIds: downline,
+        actorId: 'ost-1',
+        actorRole: 'ost',
+        requestedSellerId: 'sm-1',
+        target: activeSm('sm-1'),
+        downlineIds: ['sm-1'],
       }),
-    ).toEqual({ error: 'SELLER_NOT_IN_YOUR_DOWNLINE' });
+    ).toEqual({ error: 'SELLER_ROLE_NOT_A_SELLER' });
   });
 
-  it('refuses an unknown seller id', () => {
-    expect(
-      resolveSeller({ ...actor, requestedSellerId: 'ghost', target: null, downlineIds: downline }),
-    ).toEqual({ error: 'SELLER_NOT_IN_YOUR_DOWNLINE' });
+  for (const role of ['admin', 'super_admin'] as const) {
+    it(`lets ${role} originate for any active SM, who is the seller of record`, () => {
+      expect(
+        resolveSeller({
+          actorId: 'a-1',
+          actorRole: role,
+          requestedSellerId: 'sm-9',
+          target: activeSm('sm-9'),
+          downlineIds: [],
+        }),
+      ).toEqual({ staffId: 'sm-9' });
+    });
+
+    it(`refuses ${role} originating without naming an SM, or naming themselves`, () => {
+      const admin = { actorId: 'a-1', actorRole: role, downlineIds: [] };
+      expect(resolveSeller(admin)).toEqual({ error: 'SELLER_OF_RECORD_REQUIRED' });
+      expect(resolveSeller({ ...admin, requestedSellerId: 'a-1' })).toEqual({
+        error: 'SELLER_OF_RECORD_REQUIRED',
+      });
+    });
+  }
+
+  it('refuses a named seller who is not a Sales Manager (OST, admin, finance)', () => {
+    for (const roleSlug of ['ost', 'admin', 'finance', 'senior_sales_manager']) {
+      expect(
+        resolveSeller({
+          actorId: 'a-1',
+          actorRole: 'admin',
+          requestedSellerId: 'x-1',
+          target: { staffId: 'x-1', roleSlug, status: 'active' },
+          downlineIds: [],
+        }),
+      ).toEqual({ error: 'SELLER_ROLE_NOT_A_SELLER' });
+    }
   });
 
-  it('refuses an inactive seller', () => {
+  it('refuses an inactive SM', () => {
     expect(
       resolveSeller({
-        ...actor,
-        requestedSellerId: 'ost-1',
-        target: { staffId: 'ost-1', roleSlug: 'ost', status: 'suspended' },
-        downlineIds: downline,
+        actorId: 'a-1',
+        actorRole: 'admin',
+        requestedSellerId: 'sm-2',
+        target: { staffId: 'sm-2', roleSlug: 'sales_manager', status: 'suspended' },
+        downlineIds: [],
       }),
     ).toEqual({ error: 'SELLER_INACTIVE' });
   });
 
-  it('refuses a role that may not sell', () => {
+  it('refuses an unknown seller id', () => {
     expect(
       resolveSeller({
-        ...actor,
-        requestedSellerId: 'hr-1',
-        target: { staffId: 'hr-1', roleSlug: 'hr', status: 'active' },
-        downlineIds: [...downline, 'hr-1'],
-      }),
-    ).toEqual({ error: 'SELLER_ROLE_NOT_A_SELLER' });
-  });
-
-  it('a super admin may sell on behalf of anyone', () => {
-    expect(
-      resolveSeller({
-        actorId: 'sa-1',
-        actorRole: 'super_admin',
-        requestedSellerId: 'ost-9',
-        target: { staffId: 'ost-9', roleSlug: 'ost', status: 'active' },
+        actorId: 'a-1',
+        actorRole: 'admin',
+        requestedSellerId: 'ghost',
+        target: null,
         downlineIds: [],
       }),
-    ).toEqual({ staffId: 'ost-9' });
+    ).toEqual({ error: 'SELLER_NOT_IN_YOUR_DOWNLINE' });
   });
 
-  it('refuses when the caller own account is not an active seller', () => {
+  it('limits a non-privileged permitted creator (e.g. SSM) to an SM in their downline', () => {
+    const ssm = { actorId: 'ssm-1', actorRole: 'senior_sales_manager' };
     expect(
       resolveSeller({
-        actorId: 'hr-2',
-        actorRole: 'hr',
-        requestedSellerId: 'hr-2',
-        target: { staffId: 'hr-2', roleSlug: 'hr', status: 'active' },
-        downlineIds: ['hr-2'],
+        ...ssm,
+        requestedSellerId: 'sm-1',
+        target: activeSm('sm-1'),
+        downlineIds: ['sm-1'],
       }),
-    ).toEqual({ error: 'SELLER_ROLE_NOT_A_SELLER' });
+    ).toEqual({ staffId: 'sm-1' });
+    expect(
+      resolveSeller({
+        ...ssm,
+        requestedSellerId: 'sm-9',
+        target: activeSm('sm-9'),
+        downlineIds: ['sm-1'],
+      }),
+    ).toEqual({ error: 'SELLER_NOT_IN_YOUR_DOWNLINE' });
   });
 });

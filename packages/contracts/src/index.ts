@@ -53,7 +53,12 @@ export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
 /* ---- Cross-portal identity (portal routing + OST self-service) ----
    `GET /auth/portals` answers which AFHomes identities the bearer's own
    Auth user holds. Login screens route on it; it authorizes nothing. */
-export { authPortalsSchema, ostMeSchema, cookieAuthSessionSchema, cookieAuthSignInSchema } from './schemas/auth.js';
+export {
+  authPortalsSchema,
+  ostMeSchema,
+  cookieAuthSessionSchema,
+  cookieAuthSignInSchema,
+} from './schemas/auth.js';
 export type { AuthPortals, OstMe } from './schemas/auth.js';
 
 export {
@@ -236,6 +241,13 @@ export {
   SALE_ACCEPTS_PAYMENT,
   SALE_AWAITING_FULL_PAYMENT,
   SALE_ACTIVATABLE,
+  activationBlockerSchema,
+  activationBlocker,
+  SALE_STATUS_LABELS,
+  PAYMENT_STATUS_LABELS,
+  RESERVATION_AGREEMENT_STATUS_LABELS,
+  MEMBERSHIP_STATUS_LABELS,
+  ACTIVATION_BLOCKER_LABELS,
   canTransitionCustomer,
   canTransitionSale,
   canTransitionPayment,
@@ -259,6 +271,7 @@ export type {
   SpotCashState,
   PaymentScheme,
   SchemeTransitionRejection,
+  ActivationBlocker,
 } from './schemas/lifecycle.js';
 
 export {
@@ -351,8 +364,29 @@ export {
   onboardingTokenSchema,
   customerOnboardingRecoverySchema,
   financeQueueItemSchema,
+  PAYMENT_RECEIPT_CONTENT_TYPES,
+  REJECTION_REASON_MIN_LENGTH,
+  paymentReceiptDetailsShape,
+  paymentDuplicateReviewSchema,
+  paymentReferenceMatchSchema,
+  paymentAdjustmentKindSchema,
+  proposePaymentAdjustmentSchema,
+  paymentAdjustmentSchema,
+  financePeriodSummarySchema,
+  accountingPeriodSchema,
+  returnAccountingPeriodSchema,
+  PAYMENT_RECEIPT_MAX_BYTES,
+  paymentReceiptUploadRequestSchema,
+  paymentReceiptUploadGrantSchema,
 } from './schemas/finance.js';
 export type {
+  PaymentReceiptUploadRequest,
+  PaymentReferenceMatch,
+  ProposePaymentAdjustmentRequest,
+  PaymentAdjustment,
+  FinancePeriodSummary,
+  AccountingPeriod,
+  PaymentReceiptUploadGrant,
   Payment,
   RecordPaymentRequest,
   VerifyPaymentRequest,
@@ -794,6 +828,7 @@ export {
 } from './schemas/official-forms.js';
 
 export * from './schemas/purchase-flow.js';
+export * from './schemas/signed-documents.js';
 
 export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.js';
 
@@ -814,3 +849,9 @@ export * from './schemas/cms-content.js';
 export * from './schemas/media.js';
 
 export { applicationRaDraftSchema, type ApplicationRaDraft } from './schemas/official-forms.js';
+
+export {
+  canCreateVipSale,
+  mustNameSellerOfRecord,
+  SELLER_OF_RECORD_ROLE,
+} from './schemas/vip-sale-creator.js';

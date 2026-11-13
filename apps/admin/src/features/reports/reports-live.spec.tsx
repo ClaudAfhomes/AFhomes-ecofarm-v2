@@ -228,6 +228,7 @@ describe('activation refreshes lookups without reload', () => {
         customerId: 'aaaaaaaa-0000-4000-8000-000000002602',
         customerName: 'Ana R Reyes',
         productName: 'Gold',
+        tier: 'GOLD',
         status: 'payment_verified',
         cashPrice: '60000.00',
         paymentScheme: 'spot_cash',
@@ -244,6 +245,7 @@ describe('activation refreshes lookups without reload', () => {
         spotCashDeadline: null,
         firstVerifiedPayment: '2026-09-27T10:00:00.000Z',
         activatable: true,
+        activationBlocker: null,
       };
       vi.stubGlobal(
         'fetch',

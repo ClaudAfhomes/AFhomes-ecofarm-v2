@@ -75,6 +75,7 @@ const payment = {
   verifiedBy: null,
   recordedAt: '2026-10-07T00:00:00Z',
   verifiedAt: null,
+  paymentPurpose: 'reservation_fee',
 };
 
 describe('application-first purchase contracts', () => {
@@ -166,7 +167,7 @@ describe('application-first purchase contracts', () => {
     ).toBe(true);
   });
   it('requires reservation payment request identity and rejects totals', () => {
-    const input = { requestId, amount: '10000.00', paymentType: 'down_payment', method: 'cash' };
+    const input = { requestId, amount: '10000.00', paymentType: 'down_payment', method: 'cash', paymentPurpose: 'reservation_fee', receiptStoragePath: 'private/test-receipt.pdf' };
     expect(recordPurchasePaymentSchema.safeParse(input).success).toBe(true);
     expect(recordPurchasePaymentSchema.safeParse({ ...input, requestId: undefined }).success).toBe(
       false,

@@ -302,6 +302,12 @@ describe('keyless Preview fallback (no service role)', () => {
   });
 
   it('reports an unavailable staff self-session RPC without granting access', async () => {
+    // Simulate RPC failure by adding an RPC error
+    holder.userDb = new FakeSupabase({
+      tables: { customers: [ownedRow] },
+      tokens: {},
+      rpcErrors: { afhomes_self_session: { code: 'P0001', message: 'RPC unavailable' } },
+    });
     const result = await resolveAfHomesPrincipal(req(CUSTOMER_TOKEN));
     expect('error' in result).toBe(true);
     if (!('error' in result)) return;

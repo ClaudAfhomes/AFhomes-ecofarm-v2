@@ -655,3 +655,52 @@ typechecking.
 
 **Do not deploy, run migrations against production, or trigger remote crons
 without explicit approval.**
+
+## Claude Code session efficiency
+
+Claude Code ignores the OpenCode section below (those skill names do not exist
+here). It follows the global `lean-execute` rule and loads only skills the task
+clearly needs. None of this relaxes a business, security or verification rule.
+
+- One objective per session. Start from `workflow/claude/explore-session.md`;
+  save with `workflow/claude/update-session.md` before a fresh session. Reuse
+  the handoff's confirmed findings instead of re-auditing.
+- Targeted reads: Grep headings/symbols first, read line ranges, never re-read
+  this file or sweep the repo.
+- No Workflow/multi-agent fan-out unless the user asks in this conversation; a
+  subagent only for real isolation or parallel work, returning a short summary.
+- Focused spec after each change; full suites at integration/release gates. Send
+  long output to a file under the scratchpad or `.tmp-bin/` and report only
+  counts and failing lines (`vitest --reporter=json --outputFile=...`).
+- `pnpm test:db:local` and `pnpm test:db:harness` share one port and data dir:
+  run them one at a time, never concurrently.
+
+## Automatic Skill Invocation (OpenCode)
+
+This section applies to OpenCode only.
+
+This project uses OpenCode with global plugins (Ponytail, Superpowers, Caveman),
+MCP servers (Context7, Playwright), and 30+ global skills. OpenCode v2.2.6
+automatically discovers these when the project config is minimal.
+
+**At task start:** Identify task type → load relevant skills via native `skill`
+tool → follow their instructions. Do not wait for user to invoke skills.
+
+**Task-type → skill mapping (from engineering-router):**
+- Bugs/errors: `systematic-debugging` + `root-cause-debugger`
+- Features: `feature-completion-engineer` + `architecture-guardian` + `evidence-first-engineer`
+- UI/frontend: `product-ui-ux` + `frontend-quality-engineer` + `accessibility-guardian`
+- Database: `secure-database-engineer` + `data-integrity-guardian`
+- Auth/permissions: `security-reviewer`
+- APIs: `api-contract-guardian`
+- Dependencies: `dependency-guardian`
+- Refactor: `safe-refactor`
+- Performance: `performance-engineer` (only when justified)
+
+**Always-active:** `ponytail` (full), `caveman` (full), `using-superpowers`
+**MCP:** `context7` for library docs, `playwright` for browser verification
+**Subagents:** `explore` for code search, `code-reviewer`/`security-reviewer`/`database-reviewer` for reviews
+
+**Progressive discovery:** Read AGENTS.md → identify skills → load only necessary → explore affected areas → verify.
+
+**Verification:** After implementation, report skills loaded, MCP/tools used, subagents invoked.

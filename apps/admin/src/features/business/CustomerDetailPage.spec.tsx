@@ -193,9 +193,9 @@ describe('CustomerDetailPage', () => {
       'Category:',
       'Portal account:',
     ]);
-    const masthead = screen.getByText('Customer ID (RA No.):').closest('dl');
+    const masthead = screen.getByText('Customer ID:').closest('dl');
     expect(Array.from(masthead?.querySelectorAll('dt') ?? []).map((dt) => dt.textContent)).toEqual([
-      'Customer ID (RA No.):',
+      'Customer ID:',
       'Internal system reference:',
       'Customer code:',
       'Registered:',
@@ -533,7 +533,7 @@ describe('CustomerDetailPage merged actions', () => {
     await screen.findByRole('heading', { name: 'Actions' });
     // Record-level workflows …
     // … beside the per-sale payment actions.
-    expect(screen.getByRole('button', { name: 'Record payment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Record & verify payment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Verify payment' })).toBeInTheDocument();
 
     // … and the removed sale buttons stay gone.
@@ -558,7 +558,7 @@ describe('CustomerDetailPage merged actions', () => {
     );
     await screen.findByRole('heading', { name: 'Actions' });
     // No sale-level actions without grants …
-    expect(screen.queryByRole('button', { name: 'Record payment' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Record & verify payment' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     // … but the record-level workflows stay.

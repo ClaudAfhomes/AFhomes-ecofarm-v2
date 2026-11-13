@@ -398,7 +398,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return fail(
             res,
             'CONFLICT',
-            'That Customer ID/RA No. already belongs to an existing customer. Review that customer instead of creating another.',
+            'That Customer ID already belongs to an existing customer. Review that customer instead of creating another.',
             409,
           );
         if ((error as { code?: string }).code === '23505')
@@ -543,25 +543,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.statedRefNo !== undefined) patch.stated_ref_no = p.statedRefNo;
       if (p.statedPaymentDate !== undefined) patch.stated_payment_date = p.statedPaymentDate;
       if (p.vipCardNumber !== undefined) patch.vip_card_number = p.vipCardNumber;
-      // Auto-generate a VIP card number when none exists and none was supplied.
-      if (p.vipCardNumber === undefined) {
-        const { data: existing } = await db
-          .from('customers')
-          .select('vip_card_number,tier,stated_vip_package')
-          .eq('id', id)
-          .single();
-        if (!existing?.vip_card_number) {
-          const tier = (
-            typeof existing?.stated_vip_package === 'string'
-              ? existing.stated_vip_package
-              : typeof existing?.tier === 'string'
-                ? existing.tier
-                : 'BRONZE'
-          ).toUpperCase();
-          const { data: gen } = await db.rpc('generate_vip_card_number', { p_tier: tier });
-          if (typeof gen === 'string') patch.vip_card_number = gen;
-        }
-      }
       if (p.status !== undefined) patch.status = p.status;
       if (p.notes !== undefined) patch.notes = p.notes;
 
@@ -571,7 +552,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return fail(
             res,
             'CONFLICT',
-            'That Customer ID/RA No. already belongs to another customer.',
+            'That Customer ID already belongs to another customer.',
             409,
           );
         if ((writeError as { code?: string }).code === '23505')

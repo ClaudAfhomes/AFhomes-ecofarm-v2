@@ -54,59 +54,43 @@ Report: handoff updated; current branch and HEAD; completed work captured; pendi
 # Latest Session Handoff (Region B, replaceable)
 
 <!-- BEGIN LATEST SESSION HANDOFF -->
-Saved 2026-11-05. Migrated from the root `SESSION.md` working copy; no new work verified in this save.
+Saved 2026-11-11. Branch claud/supabase. Supersedes the stale orly/develop handoff.
 
 ## Session objective
-Commission settings (`/admin/commissions/settings`): Round 1 roster-backed rates (API and contracts), Round 2 UI. Committed by the user in `3f995abc`. Also this session: replaced root `SESSION.md` with the `workflow/claude/` session workflows.
+Finish and verify the Customer Application -> RA -> Finance -> VIP Card ID -> 40% commission -> activation workflow (owner prompt 10 Nov 2026). Paused mid-implementation for a Claude Code token-optimization task.
 
 ## Repository state
-- Branch `orly/develop`, HEAD `3f995abc`.
-- Working tree at save: `SESSION.md` deleted, the two new workflow files, and reference edits in `CLAUDE.md`, `AGENTS.md`, `workflow/graphidian/{00-guide,01-explore,03-build,05-release}.md`. Nothing staged.
+- claud/supabase, HEAD 5ac98cf, nothing staged. ~100 uncommitted paths: previous agent's batch (supabase/migrations/2026123*, untracked, never applied) plus this session's fixes below.
+- Previous agent's full working tree is snapshotted in the session scratchpad (prev-agent-snapshot/tracked-changes.diff + untracked.tar).
 
-## Completed work
-Round 1 (touches API and contracts):
-- `packages/contracts/src/schemas/finance.ts`: roster query/member/position/roster schemas, `bulkCommissionRuleSchema` (open-ended, 1-200 unique members), shared `commissionRateSchema` (0-1) on create/update/bulk.
-- `api/_lib/commissions.mongo.ts` (Mongo only): `GET /commissions/rules/roster`, `POST /commissions/rules/bulk` (atomic, `sales-write` lock, end-dates earlier personal rule or disables same-day one, audit per rule); rules list returns `targetName`.
-- `resolveCommissionRule` in `api/_lib/commission-model.ts`, used by `sales.mongo.ts`, `purchase-terms.mongo.ts` and the roster (behaviour unchanged; Mongo `ost` target type never resolved, hidden in UI).
-- Specs: `commission-model.spec.ts`, `commission-roster.mongo.spec.ts`, contracts `commission-roster.spec.ts`, `format.spec.ts` (`percentToRate`).
+## Critical business rules (owner-approved)
+SM-only origination (seller of record = creating active SM); RA created atomically at submission, YYYY-NNNN, immutable; approval needs an ACCEPTED signed Customer Application (government ID never counts); RA execution needs an ACCEPTED signed RA; Finance records and verifies every payment with a real receipt object; overpayment refused at recording (verified + pending) and verification, never capped; VIP Card ID YYMMDDNNNNNVTPMMS exactly once at first verified contractual payment (Manila date), fail closed; commission eligible at >= 40% verified, payout separate; activation needs 100% verified, reuses VIP.
 
-Round 2 (UI only, `apps/admin/src/features/business/`):
-- Tabs via `?tab=` (Sellers default, Position rates, All rules); inactive panels stay mounted and hidden. Components: `CommissionSettingsPage`, `CommissionSellersTab`, `CommissionPositionRates`, `CommissionRulesTab`, `CommissionRuleHistoryDialog`, `CommissionSkeletons`; CSS `CommissionSettingsPage.module.css`.
-- Page and tab skeletons, per-action `Button loading`, busy table on refetch.
-- `notifySuccess`/`notifyError` for every mutation; `notifyConfirm` only for bulk Set rate and Disable; errors keep the dialog open.
+## Completed this session (VERIFIED unless noted)
+- api/_lib/vip-sale-creator.ts: guard made synchronous. It was async and called without await, so non-SM POST /sales wrote 403 then still created the sale.
+- New api/_handlers/sale-origination-sm-only.spec.ts (10 tests; mutation-tested: 5 fail against the old async guard).
+- Removed debug logs (sales.ts, phase2.spec.ts); restored api/_lib/testing/supabase-fake.ts to HEAD; removed junk fixture row 'force-reload-marker' (root cause of all 31 IST + 5 genealogy failures).
+- card-plans/card-categories/phase2 specs: sale-creating calls moved to TOKEN2.salesManager; phase2 relationship count back to 6.
+- Restored to HEAD: supabase/migrations/20261217000001 (applied migration had been edited to fabricate RA/application numbers), packages/db-testing/scripts/lib/local-postgres.mjs + test-db-local.mjs (removed 0.0.0.0 listen and DB-wide afhomes.test_mode), packages/db-testing/package.json + pnpm-lock.yaml (win32-only binary as required dep).
+- AGENTS.md: added "Claude Code session efficiency" section; OpenCode section scoped to OpenCode.
+- NEW supabase/migrations/20261231000001_afhomes_workflow_integrity_repair.sql: removes GUC bypasses, restores RESTRICT FKs, drops ledger FK, strict RA immutability (legacy->AF-RES only with alias), high-water seeding, restored seller resolver + require_originating_sales_manager + validate_frozen_seller, drops commission_records/dual award, upload_signed_ra_document, submit_customer_application_once, issue_vip_on_activation; adds purchase_signed_documents + register/review functions + bucket afhomes-signed-documents; RA at submission; approval/execute gates; Finance-only recording with receipt object, purpose rules, overpayment incl. pending; verification never capped, VIP fail-closed, commission_eligible_at; finalize copies eligible_at; activate_card_sale restored to committed logic + finalized-RA and VIP gates. Applied cleanly to the scratch dev DB only. NOT yet run through any suite.
 
-## Important decisions and constraints
-- Rates entered as percent (`percentToRate`/`rateToPercent` in `format.ts`).
-- Past sales frozen at 0% stay 0%. "Set their rate" selects max 100; bulk max 200.
-- Mongo-only endpoints: a Supabase-backed admin gets 404s; parity needs a SQL migration (not authorized).
-- Admin login needs a real Turnstile token (`action="login"`); automation cannot sign in. A browser pass needs the user to sign in at `http://localhost:5184/admin/login`.
+## Pending work / next action
+1. Remove the SM sales.card_sales can_update grant from the tail of unapplied 2026123000021 (baseline is create-only); make 20261230000007 a no-op note.
+2. Rename 13-digit migrations 2026123000014..22 to 14 digits (pnpm db:migrate --only requires 14).
+3. Update DB suites: real storage.objects receipts + paymentPurpose in every record call; signed docs via register/review; cleanup without afhomes.allow_mutation_test_cleanup; revert annual_points_cap 25000 -> 60000 and section 58 SM grant; add section 79 for new rules + concurrency.
+4. Fix external import fixture (BRONZE partially paid continuation needs receipt + purpose).
+5. API: pass paymentPurpose; SM guard on customer-application create/submit; signed-doc upload URL/register/review endpoints; contracts (drop commissionRecordSchema; receiptStoragePath only required on reservation payments).
+6. Admin UI: finance-lifecycle (17) + final-blockers (6) + reservation-finance-queue (1) failures; purpose selector, receipt upload, signed-doc panels, status labels.
+7. Full gates, then browser QA (Docker daemon not running; .env.local targets shared project, never use it).
 
-## Verification (all REPORTED by the previous session, not re-run)
-- Admin full suite 1045 pass (112 files); `tsc`, eslint (0 errors), admin build, `pnpm check:env` pass. API typecheck pass; commission/sales/purchase specs pass.
-- An earlier overlapping `pnpm test` showed 3 admin failures in `finance-lifecycle.spec.tsx` and `reports-audit.spec.tsx` (load-related; passed alone). An isolated full `pnpm test` ran in background task `bjpfvwiun`; its result was never read: UNVERIFIED.
-- Not run: browser pass at desktop/tablet/mobile; `pnpm test:db:harness` (known failures: section 77, also 48 and 58).
-- Focused commands:
+## Verification run this session
+- Baseline before fixes: api 2810/2850 (40 fail); admin 1081/1105 (24 fail); web 277, contracts 336, shared 59, config 7, ui 247 pass; test:db:local 2413/2413 (sections 27-36 skipped by design, 52 never existed); external import FAIL RECEIPT_STORAGE_PATH_REQUIRED; typecheck/lint/build exit 0.
+- After fixes: ist-portal, genealogy-resolve, card-plans, card-categories, phase2 (129/129), sale-creation-order, sale-origination-sm-only all pass. Full api suite NOT re-run.
 
-```sh
-pnpm --filter api typecheck
-pnpm --filter api exec vitest run _lib/commission-model.spec.ts _lib/commission-roster.mongo.spec.ts _lib/sales.mongo.spec.ts --maxWorkers=1
-pnpm --filter @afhomes/admin exec vitest run src/features/business/CommissionSettingsPage.spec.tsx --maxWorkers=1
-pnpm --filter @afhomes/admin exec tsc --noEmit
-pnpm check:env
-```
-
-## Known issues and unresolved questions
-- Hidden tabs still fetch Rules data on load.
-- Not built: auto-assign on first sale, tiers by sales count (needs a new settings model and a sale-creation change; plan first).
-
-## Pending work / next recommended action
-1. Re-run `pnpm test` in isolation to settle the unread `bjpfvwiun` result.
-2. Browser pass at three widths (needs the user to sign in).
-3. Plan, then build, auto-assign and tiers only if the user wants them.
+## Open owner decisions
+Commission beneficiary when an OST refers an SM sale; whether an eligible (40%) commission is payable before manual final qualification; payout role (finance.commission_payouts has no grants); VIP for legacy sale-origin/AF-RES purchases without an official RA sequence; application approver role (sales.customers update includes SM/OST).
 
 ## Operations not performed
-No git stage/commit/push/branch/stash, no database or migration changes, no deploy, no secrets or `.env.local` changes. No tests run while writing this handoff.
-
-## Handoff confidence
-Commission-work facts are REPORTED from the old `SESSION.md`; only the HEAD and branch were VERIFIED at save time. Verification results above are not re-checked.
+No commit, push, stage, deploy, shared-DB access, credential or global-config change.
 <!-- END LATEST SESSION HANDOFF -->

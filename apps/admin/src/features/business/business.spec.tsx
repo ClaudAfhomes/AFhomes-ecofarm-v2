@@ -21,7 +21,6 @@ import { renderWithProviders } from '../../test/utils';
 import { ADMIN_NAV_ITEMS, canViewModule, navItemsForPermissions } from '../../app/navigation';
 import { RequireRole } from '../../app/RequireRole';
 import {
-  SALE_STATUS_LABEL,
   SPOT_CASH_LABEL,
   formatRate,
 } from './format';
@@ -215,19 +214,8 @@ describe('business value formatting', () => {
     ]);
   });
 
-  it('labels every sale lifecycle state the migration allows', () => {
-    expect(Object.keys(SALE_STATUS_LABEL).sort()).toEqual([
-      'activation_pending',
-      'active',
-      'cancelled',
-      'draft',
-      'overdue',
-      'payment_in_progress',
-      'payment_pending',
-      'payment_verified',
-      'submitted',
-    ]);
-  });
+  // Sale-status label coverage is derived from saleStatusSchema in
+  // status-presentation.spec.ts, never from a hand-written key list.
 });
 
 /* ================================================================== */

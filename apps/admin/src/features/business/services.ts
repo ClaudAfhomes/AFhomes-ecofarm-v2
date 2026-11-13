@@ -46,6 +46,14 @@ import {
   reservationAgreementSchema,
   membershipSchema,
   paymentSchema,
+  paymentAdjustmentSchema,
+  paymentReferenceMatchSchema,
+  type PaymentAdjustment,
+  type PaymentReferenceMatch,
+  type ProposePaymentAdjustmentRequest,
+  paymentReceiptUploadGrantSchema,
+  type PaymentReceiptUploadGrant,
+  type PaymentReceiptUploadRequest,
   referralRelationshipSchema,
   saleFinancialSummarySchema,
   saleSchema,
@@ -564,6 +572,29 @@ export const recordPayment = (
 ): Promise<{ id: string }> =>
   post(`/sales/${saleId}/payments`, z.object({ id: z.string() }), input);
 
+/** Signed-upload grant for a payment receipt; PUT the bytes, then record with the path. */
+export const requestSalePaymentReceiptUpload = (
+  saleId: string,
+  input: PaymentReceiptUploadRequest,
+): Promise<PaymentReceiptUploadGrant> =>
+  post(`/sales/${saleId}/payments/receipt-upload`, paymentReceiptUploadGrantSchema, input);
+
+/** Payment-scoped routes: they work for sale AND reservation payments. */
+export const getPaymentReferenceMatches = (paymentId: string): Promise<PaymentReferenceMatch[]> =>
+  requestList(`/sales/payments/${paymentId}/reference-matches`, paymentReferenceMatchSchema);
+
+export const saveDuplicateReview = (paymentId: string, duplicateReviewNote: string) =>
+  post(`/sales/payments/${paymentId}/duplicate-review`, z.unknown(), { duplicateReviewNote });
+
+export const getPaymentAdjustments = (paymentId: string): Promise<PaymentAdjustment[]> =>
+  requestList(`/sales/payments/${paymentId}/adjustments`, paymentAdjustmentSchema);
+
+/** Proposal only: the server changes no balance. */
+export const proposePaymentAdjustment = (
+  paymentId: string,
+  input: ProposePaymentAdjustmentRequest,
+) => post(`/sales/payments/${paymentId}/adjustments`, z.unknown(), input);
+
 export const verifyPayment = (
   paymentId: string,
   input: VerifyPaymentRequest,
@@ -622,11 +653,20 @@ export const getFinanceQueue = (
   }));
 };
 
-export const getActivationQueue = (search = ''): Promise<FinanceQueueItem[]> => {
-  const query = new URLSearchParams();
+/** The server defaults to 50 rows; ask for an explicit page and keep the true total. */
+export const ACTIVATION_QUEUE_LIMIT = 200;
+export const getActivationQueue = (
+  search = '',
+  limit = ACTIVATION_QUEUE_LIMIT,
+): Promise<{ items: FinanceQueueItem[]; total: number }> => {
+  const query = new URLSearchParams({ limit: String(limit) });
   if (search) query.set('search', search);
-  const suffix = query.toString();
-  return requestList(`/queues/activation${suffix ? `?${suffix}` : ''}`, financeQueueItemSchema);
+  return requestListEnvelope(`/queues/activation?${query.toString()}`, financeQueueItemSchema).then(
+    ({ data, meta }) => ({
+      items: data,
+      total: typeof meta.total === 'number' ? meta.total : data.length,
+    }),
+  );
 };
 
 /* ------------------------------------------------------------------ */
@@ -653,6 +693,16 @@ export const recordReservationPayment = (
   input: RecordPurchasePaymentRequest,
 ): Promise<ReservationFinanceSummary> =>
   post(`/official-forms/reservations/${id}/payments`, reservationFinanceSummarySchema, input);
+
+export const requestReservationPaymentReceiptUpload = (
+  id: string,
+  input: PaymentReceiptUploadRequest,
+): Promise<PaymentReceiptUploadGrant> =>
+  post(
+    `/official-forms/reservations/${id}/payments/receipt-upload`,
+    paymentReceiptUploadGrantSchema,
+    input,
+  );
 
 /**
  * Finalize the purchase into exactly one AF-CSALE.

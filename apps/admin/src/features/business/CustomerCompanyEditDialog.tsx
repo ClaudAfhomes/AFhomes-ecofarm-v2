@@ -527,7 +527,7 @@ export function CustomerCompanyEditDialog({
         <TextField
           id="ce-ra"
           name="raNumber"
-          label="RA No. (Customer ID)"
+          label="Customer ID"
           value={form.raNumber}
           onChange={set('raNumber')}
         />

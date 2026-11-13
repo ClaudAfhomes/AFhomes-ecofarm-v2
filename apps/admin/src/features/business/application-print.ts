@@ -91,7 +91,7 @@ export function applicationPaperRows(data: ApplicationPrintData): PaperRow[] {
     },
     {
       cells: [
-        cell('RA number (Customer ID)', value.raNumber),
+        cell('Customer ID', value.raNumber),
         cell('Card printed name', value.printedName),
       ],
     },

@@ -27,3 +27,13 @@ export { withRequestDeadline } from './request-deadline.js';
 export { splitStayPoints } from './stay-points.js';
 export { FEATURE_FLAGS, isFeaturePathEnabled } from './features.js';
 export { CookieAuthError, createCookieAuthGateway, subscribeCookieAuth, notifyCookieAuth, pendingCookieMfa } from './cookie-auth.js';
+export { calculateIstPayroll, creditedTotals, qualifyingPeriodEnd } from './ist-payroll.js';
+export type {
+  IstRank,
+  IstCompensationPolicy,
+  IstStretchPerformance,
+  IstPayrollInput,
+  IstPayrollException,
+  IstStretchResult,
+  IstPayrollResult,
+} from './ist-payroll.js';

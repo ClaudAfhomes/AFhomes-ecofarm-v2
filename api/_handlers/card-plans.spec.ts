@@ -103,7 +103,7 @@ async function createSale(productId: string, saleNumber: string) {
   const state = await call('sales', {
     method: 'POST',
     path: '',
-    token: TOKEN.admin,
+    token: TOKEN2.salesManager,
     body: { customerId: CUSTOMER.prospect, productId },
   });
   expect(state.status).toBe(201);
@@ -430,7 +430,7 @@ describe('activate and deactivate', () => {
     const sale = await call('sales', {
       method: 'POST',
       path: '',
-      token: TOKEN.admin,
+      token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.silver },
     });
     expect(sale.status).toBe(409);

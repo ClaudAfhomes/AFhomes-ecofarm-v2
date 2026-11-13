@@ -1216,3 +1216,11 @@ it('refuses an RA draft before writes if its storage migration is missing', asyn
  expect(result.body).toMatchObject({ error: { code: 'RA_DRAFT_STORAGE_UNAVAILABLE' } });
  expect(db.calls.filter(c => ['rpc','insert','update','delete'].includes(c.op))).toHaveLength(0);
 });
+
+it.each(['2026-0001','AF-RES-ABCDE'])('finds official and historical RA %s by its canonical identifier', async (number) => {
+ install({reservation_agreements:[{id:'bbbbbbbb-0000-4000-8000-000000000001',reservation_number:number,status:'executed',origin:'application',sale_id:null,tier_snapshot:'GOLD',payment_scheme_snapshot:'spot_cash',total_price_snapshot:'100000.00',created_at:'2026-11-08'}]});
+ const result=await call(forms,{path:'reservations',query:{search:number}});
+ expect(result.status).toBe(200);
+ expect((result.body as {data:{reservation_number:string}[]}).data[0]?.reservation_number).toBe(number);
+
+});

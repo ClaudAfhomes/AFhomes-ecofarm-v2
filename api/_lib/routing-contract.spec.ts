@@ -184,6 +184,7 @@ describe('router -> handler contract matrix', () => {
         amount: '100.00',
         paymentType: 'installment',
         method: 'cash',
+        receiptStoragePath: `sale/${SALE.unpaid}/receipt.pdf`,
       },
     });
     expect(r.handled).toBe(true);

@@ -56,6 +56,33 @@ const buildOffer = () =>
     },
   });
 
+// An accepted signed Customer Application already exists, so approval is not gated.
+vi.mock('./services-signed-documents', async (original) => ({
+  ...(await original()),
+  listSignedDocuments: async () => [
+    {
+      id: '00000000-0000-4000-8000-0000000000d1',
+      kind: 'signed_customer_application',
+      status: 'accepted',
+      applicationId: '00000000-0000-4000-8000-000000000001',
+      reservationId: null,
+      originalFilename: 'signed.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+      uploadedBy: '00000000-0000-4000-8000-0000000000d2',
+      uploadedByName: 'Uploader',
+      uploadedAt: '2026-11-11T00:00:00.000Z',
+      reviewedBy: '00000000-0000-4000-8000-0000000000d3',
+      reviewedByName: 'Reviewer',
+      reviewedAt: '2026-11-11T01:00:00.000Z',
+      reviewNotes: null,
+    },
+  ],
+  getSignedDocumentDownload: async () => ({
+    url: 'https://files.test/signed.pdf',
+    expiresAt: '2026-11-11T02:00:00.000Z',
+  }),
+}));
 vi.mock('./services', async (original) => ({
   ...(await original()),
   getCustomers: async () => [],
@@ -182,7 +209,7 @@ it.each(['draft', 'submitted', 'approved', 'rejected', 'cancelled'] as const)(
       expect(actions).toBeInTheDocument();
       expect(actions!.closest('fieldset')).toBeNull();
       expect(within(actions!).getByRole('button', { name: 'Reopen' })).toBeEnabled();
-      for (const name of ['Approve', 'Reject']) {
+      for (const name of ['Review and approve', 'Reject']) {
         const button = within(actions!).getByRole('button', { name });
         if (status === 'submitted') expect(button).toBeEnabled();
         else expect(button).toBeDisabled();
@@ -278,7 +305,7 @@ describe('purchase workflow next step', () => {
       return detail('approved');
     });
     await show('submitted');
-    fireEvent.click(screen.getByRole('button',{name:'Approve'}));
+    fireEvent.click(screen.getByRole('button',{name:'Review and approve'}));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), { timeout:4000 });
     expect(await screen.findByRole('button',{name:'Continue Payment'}, {timeout:4000})).toBeEnabled();
     expect(reviewApplicationPurchaseTerms).not.toHaveBeenCalled();
@@ -357,7 +384,7 @@ it('dispatches submitted decisions and reopen', async () => {
   vi.mocked(decideCustomerApplication).mockResolvedValue(detail('submitted'));
   vi.mocked(reopenCustomerApplication).mockResolvedValue(detail('submitted'));
   for (const [name, decision] of [
-    ['Approve', 'approved'],
+    ['Review and approve', 'approved'],
     ['Reject', 'rejected'],
   ] as const) {
     fireEvent.click(screen.getByRole('button', { name }));
@@ -430,7 +457,7 @@ it('guides legacy submitted applications through terms capture instead of a doom
     </Routes>,
     { route: '/admin/customers/applications/' + id },
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Review and approve' }));
   expect(await screen.findByText(/Reopen to review purchase terms, check the offer/)).toBeInTheDocument();
   expect(notifyWarning).toHaveBeenCalledOnce();
   expect(decideCustomerApplication).not.toHaveBeenCalled();

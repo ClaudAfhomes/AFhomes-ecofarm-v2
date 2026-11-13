@@ -19,6 +19,7 @@ import {
   LINKS,
   PRODUCT,
   TOKEN,
+  TOKEN2,
   UNIQUE,
   UUID,
   phase2World,
@@ -90,7 +91,7 @@ const VALID_CUSTOMER = {
 const GOLD_SALE = {
   method: 'POST',
   path: '',
-  token: TOKEN.admin,
+  token: TOKEN2.salesManager,
   body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
 } as const;
 

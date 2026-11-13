@@ -12,8 +12,15 @@ import { downloadFile as saveFile } from '../../lib/download';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
+import { reservationNextStep } from './next-step';
+import {
+  SignedDocumentPanel,
+  signedDocumentBlocker,
+  useSignedDocument,
+} from './SignedDocumentPanel';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type {
+import type {
+
   ActivationResult,
   ApplicationHolder,
   PurchaseDocumentKind,
@@ -29,11 +36,13 @@ import { downloadFile } from '../../lib/download';
 import { reservationPdf, savedReservationPaper } from './reservation-print';
 import { formatCount, formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { applicationKeys, businessKeys, membershipKeys, reservationKeys, sharedScopes } from './queryKeys';
-import {
+import {
+
   notifySuccess,
   notifyWarning,
   Alert,
-  Button,
+  Button,
+
   EmptyState,
   ErrorState,
   FilterBar,
@@ -48,7 +57,8 @@ import {
 import styles from './OfficialFormsPages.module.css';
 import { TierBadge } from './TierBadge';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
+import {
+
   createReservationAgreement,
   decideReservationAgreement,
   exportReservationAgreement,
@@ -272,6 +282,7 @@ export function ReservationAgreementsPage() {
                 <th>Payment scheme</th>
                 <th className={styles.numeric}>Amount</th>
                 <th>Payment</th>
+                <th>Next step</th>
               </tr>
             </thead>
             <tbody>
@@ -315,6 +326,19 @@ export function ReservationAgreementsPage() {
                       ) : (
                         <span className={styles.settled}>—</span>
                       )}
+                    </td>
+                    <td data-label="Next step" onClick={(e) => e.stopPropagation()}>
+                      {(() => {
+                        const step = reservationNextStep(item);
+                        const target = step.to;
+                        return target ? (
+                          <Button size="sm" onClick={() => navigate(target)}>
+                            {step.label}
+                          </Button>
+                        ) : (
+                          <span>{step.label}</span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -399,6 +423,9 @@ export function ReservationAgreementEditorPage() {
    */
   const applicationOrigin =
     existing.data?.origin === 'application' || (!id && Boolean(customerApplicationId));
+  // Only application-origin agreements need an accepted signed RA before execution.
+  const needsSignedRa = existing.data?.origin === 'application';
+  const signedReservation = useSignedDocument('reservations', id, needsSignedRa);
   // The frozen offer is the ONLY source of the economics shown here. It is
   // server-derived, and a stale copy is refreshed rather than reused.
   const proposal = useQuery({
@@ -1094,6 +1121,9 @@ export function ReservationAgreementEditorPage() {
           </div>
         </section>
       </fieldset>
+      {id && existing.data?.status === 'submitted' && needsSignedRa ? (
+        <SignedDocumentPanel controller={signedReservation} disabled={decide.isPending} />
+      ) : null}
       <div className={styles.stickyFooter}>
         <div className={styles.buttonRow}>
           <Button
@@ -1104,6 +1134,11 @@ export function ReservationAgreementEditorPage() {
           >
             {applicationOrigin && !id ? 'Create' : 'Save'}
           </Button>
+          {!editable ? (
+            <span role="note">
+              This agreement is already {existing.data?.status} and can no longer be edited.
+            </span>
+          ) : null}
           {id && existing.data?.status === 'draft' ? (
             <Button
               variant="secondary"
@@ -1115,13 +1150,29 @@ export function ReservationAgreementEditorPage() {
             </Button>
           ) : null}
           {id && existing.data?.status === 'submitted' ? (
-            <Button
-              onClick={() => decide.mutate('executed')}
-              loading={decide.isPending}
-              loadingLabel="Executing…"
-            >
-              Execute
-            </Button>
+            <>
+              <Button
+                onClick={async () => {
+                  try {
+                    if (needsSignedRa) await signedReservation.ensureAccepted();
+                  } catch (error) {
+                    setMessage(
+                      error instanceof Error ? error.message : 'The signed document step failed.',
+                    );
+                    return;
+                  }
+                  decide.mutate('executed');
+                }}
+                disabled={needsSignedRa && signedDocumentBlocker(signedReservation) !== null}
+                loading={decide.isPending}
+                loadingLabel="Executing…"
+              >
+                Review and execute
+              </Button>
+              {needsSignedRa && signedDocumentBlocker(signedReservation) ? (
+                <span role="note">{signedDocumentBlocker(signedReservation)}</span>
+              ) : null}
+            </>
           ) : null}
           {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
             <Button
@@ -1189,7 +1240,8 @@ export function ReservationAgreementEditorPage() {
  * Nothing here recalculates money. Every figure is the server's, and the Finalize
  * button follows the server's own eligibility rather than a browser total.
  */
-function ApplicationOriginAgreementPanel({
+function ApplicationOriginAgreementPanel({
+
   id,
   agreement,
 }: {
@@ -1462,7 +1514,8 @@ function ApplicationOriginAgreementPanel({
  * call and are never re-displayable, so this panel could not show them even if it
  * wanted to.
  */
-function MembershipConfirmation({
+function MembershipConfirmation({
+
   saleId,
   persisted,
 }: {

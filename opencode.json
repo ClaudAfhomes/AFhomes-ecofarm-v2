@@ -1,14 +1,3 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "references": {
-    "skills": {
-      "path": ".opencode/skills",
-      "description": "Agent skill definitions for this project"
-    }
-  },
-  "permission": {
-    "edit": {
-      ".opencode/**": "deny"
-    }
-  }
+  "$schema": "https://opencode.ai/config.json"
 }

@@ -109,6 +109,31 @@ describe('GET /queues/dashboard (AFHomes queue-card pattern)', () => {
     );
   });
 
+  it('counts executed application reservations awaiting payment, like the finance queue', async () => {
+    const base = dashboardQueuesSchema.parse(
+      (await call(TOKEN2.finance)).body,
+    ).paymentVerification!;
+    const reservation = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      origin: 'application',
+      status: 'executed',
+      sale_id: null,
+      ...extra,
+    });
+    install({
+      reservation_agreements: [
+        reservation('dddddddd-0000-4000-8000-000000000001', {}), // counted
+        reservation('dddddddd-0000-4000-8000-000000000002', { status: 'cancelled' }),
+        reservation('dddddddd-0000-4000-8000-000000000003', {
+          sale_id: 'bbbbbbbb-0000-4000-8000-000000000005', // already a sale: counted there
+        }),
+        reservation('dddddddd-0000-4000-8000-000000000004', { origin: 'sale' }),
+      ],
+    });
+    const dashboard = dashboardQueuesSchema.parse((await call(TOKEN2.finance)).body);
+    expect(dashboard.paymentVerification).toBe(base + 1);
+  });
+
   it('returns null - never a zero - for queues the caller may not know', async () => {
     const finance = dashboardQueuesSchema.parse((await call(TOKEN2.finance)).body);
     expect(finance.paymentVerification).not.toBeNull();

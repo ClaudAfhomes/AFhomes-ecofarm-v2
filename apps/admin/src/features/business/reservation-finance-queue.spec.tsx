@@ -68,6 +68,8 @@ const RECORDED_PAYMENT = {
   verifiedBy: null,
   recordedAt: '2026-10-07T00:00:00.000Z',
   verifiedAt: null,
+  // Required by the payment contract (server-controlled purpose).
+  paymentPurpose: 'contractual_down_payment',
 };
 
 const FINANCE_USER = {
@@ -170,7 +172,10 @@ describe('Finance queue with an application-origin reservation', () => {
     renderQueue();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();
     expect(screen.getByText('₱54,000.00')).toBeInTheDocument();
-    expect(screen.getByText('Pending')).toBeInTheDocument();
+    const row = screen.getByText('AF-RES-ZZZZZ').closest('tr')!;
+    // Reservation lifecycle from its own map; payment progress kept separate.
+    expect(within(row).getByText('Executed')).toBeInTheDocument();
+    expect(within(row).getByText('No Verified Payments')).toBeInTheDocument();
     expect(screen.queryByText('executed')).toBeNull();
   });
 
@@ -298,6 +303,6 @@ it('offers reservation recording and verification controls', async () => {
   renderQueue();
   await screen.findByText('AF-RES-ZZZZZ');
   await openRowMenu(user);
-  expect(screen.getByRole('menuitem', { name: /^Record payment$/i })).toBeTruthy();
+  expect(screen.getByRole('menuitem', { name: /^Record & verify payment$/i })).toBeTruthy();
   expect(screen.getByRole('menuitem', { name: /^Verify$/i })).toBeTruthy();
 });
