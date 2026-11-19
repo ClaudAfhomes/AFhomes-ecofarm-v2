@@ -108,17 +108,62 @@ const IST_GOVERNED_SUFFIXES: Record<string, [FailureCode, number, (noun: string)
   NOT_PENDING: ['CONFLICT', 409, (n) => `This ${n} is not waiting for approval.`],
   NOT_APPROVED: ['CONFLICT', 409, (n) => `Only an approved ${n} can be ended.`],
   TRANSITION_INVALID: ['CONFLICT', 409, (n) => `That change is not allowed for this ${n} status.`],
-  IMMUTABLE: ['CONFLICT', 409, (n) => `An approved ${n} cannot be changed that way; each end or suspension date is set once.`],
-  IN_USE_BY_FINALIZED_PAYROLL: ['CONFLICT', 409, (n) => `This ${n} already backs an approved or closed payroll month, so it cannot be changed that way.`],
-  OVERLAP: ['CONFLICT', 409, (n) => `This ${n} overlaps an approved one. End the earlier one first.`],
-  IDEMPOTENCY_CONFLICT: ['CONFLICT', 409, () => 'This request identifier was already used with different data.'],
-  SELF_APPROVAL: ['FORBIDDEN', 403, (n) => `Whoever drafted, edited or submitted a ${n} cannot approve it.`],
-  DIRECT_WRITE_REFUSED: ['FORBIDDEN', 403, (n) => `An IST ${n} can only be changed through its workflow.`],
-  EVIDENCE_REQUIRED: ['VALIDATION_ERROR', 400, () => 'Enter the reference of the approval document (10 to 500 characters).'],
-  APPROVAL_NOTE_REQUIRED: ['VALIDATION_ERROR', 400, () => 'Give an approval note of at least 5 characters.'],
-  RETURN_REASON_REQUIRED: ['VALIDATION_ERROR', 400, (n) => `Give a reason of at least 5 characters for returning the ${n}.`],
-  END_NOTE_REQUIRED: ['VALIDATION_ERROR', 400, (n) => `Give a note of at least 5 characters for ending the ${n}.`],
-  END_DATE_INVALID: ['VALIDATION_ERROR', 400, (n) => `The end date must be a real date inside the ${n} window.`],
+  IMMUTABLE: [
+    'CONFLICT',
+    409,
+    (n) => `An approved ${n} cannot be changed that way; each end or suspension date is set once.`,
+  ],
+  IN_USE_BY_FINALIZED_PAYROLL: [
+    'CONFLICT',
+    409,
+    (n) =>
+      `This ${n} already backs an approved or closed payroll month, so it cannot be changed that way.`,
+  ],
+  OVERLAP: [
+    'CONFLICT',
+    409,
+    (n) => `This ${n} overlaps an approved one. End the earlier one first.`,
+  ],
+  IDEMPOTENCY_CONFLICT: [
+    'CONFLICT',
+    409,
+    () => 'This request identifier was already used with different data.',
+  ],
+  SELF_APPROVAL: [
+    'FORBIDDEN',
+    403,
+    (n) => `Whoever drafted, edited or submitted a ${n} cannot approve it.`,
+  ],
+  DIRECT_WRITE_REFUSED: [
+    'FORBIDDEN',
+    403,
+    (n) => `An IST ${n} can only be changed through its workflow.`,
+  ],
+  EVIDENCE_REQUIRED: [
+    'VALIDATION_ERROR',
+    400,
+    () => 'Enter the reference of the approval document (10 to 500 characters).',
+  ],
+  APPROVAL_NOTE_REQUIRED: [
+    'VALIDATION_ERROR',
+    400,
+    () => 'Give an approval note of at least 5 characters.',
+  ],
+  RETURN_REASON_REQUIRED: [
+    'VALIDATION_ERROR',
+    400,
+    (n) => `Give a reason of at least 5 characters for returning the ${n}.`,
+  ],
+  END_NOTE_REQUIRED: [
+    'VALIDATION_ERROR',
+    400,
+    (n) => `Give a note of at least 5 characters for ending the ${n}.`,
+  ],
+  END_DATE_INVALID: [
+    'VALIDATION_ERROR',
+    400,
+    (n) => `The end date must be a real date inside the ${n} window.`,
+  ],
 };
 const IST_GOVERNED_STATUS: Record<string, [FailureCode, number]> = {};
 const IST_GOVERNED_MESSAGES: Record<string, string> = {};
@@ -600,10 +645,13 @@ export function mapRpcError(
       'Payments are being recorded right now, so this payroll or month-end step could not start. Nothing was changed. Try again in a moment.',
     PAYROLL_EVIDENCE_CHANGED:
       'Payroll evidence has changed or is missing. Regenerate the draft and review the current evidence before submitting or approving.',
-    PAYROLL_PROOF_REQUIRED: 'Enter the supporting payment or reconciliation evidence reference, at least 10 characters.',
+    PAYROLL_PROOF_REQUIRED:
+      'Enter the supporting payment or reconciliation evidence reference, at least 10 characters.',
     PAYROLL_PROOF_CONFLICT: 'This external payment already carries a different proof reference.',
-    PAYROLL_RECONCILIATION_ALREADY_RECORDED: 'This external payment already has a recorded reconciliation review.',
-    PAYROLL_RECONCILIATION_REQUIRED: 'Review the changed evidence on the recorded external payment before closing this payroll batch.',
+    PAYROLL_RECONCILIATION_ALREADY_RECORDED:
+      'This external payment already has a recorded reconciliation review.',
+    PAYROLL_RECONCILIATION_REQUIRED:
+      'Review the changed evidence on the recorded external payment before closing this payroll batch.',
     PAYROLL_EVIDENCE_EXCEPTION_UNRESOLVED:
       'An external payment in this batch has no verifiable evidence. Attach a document, transaction reference or OR number, or record a reconciliation review, before closing.',
     PAYOUT_EVIDENCE_EXCEPTION_UNRESOLVED:
@@ -613,7 +661,8 @@ export function mapRpcError(
       'Evidence needs a source and exactly one of: an uploaded document, or a transaction reference / OR number with its transfer amount. A description alone is not evidence.',
     EVIDENCE_EXCEPTION_NOTE_REQUIRED: 'Explain why no evidence exists, in at least 10 characters.',
     EVIDENCE_EXCEPTION_ALREADY_REVIEWED: 'This payout already has a recorded exception review.',
-    EVIDENCE_EXCEPTION_NOT_NEEDED: 'This payout already has evidence; no exception review is needed.',
+    EVIDENCE_EXCEPTION_NOT_NEEDED:
+      'This payout already has evidence; no exception review is needed.',
     EVIDENCE_TRANSFER_AMOUNT_REQUIRED:
       'Enter the transfer amount shown on the bank statement or OR (more than zero).',
     EVIDENCE_REFERENCE_AMOUNT_MISMATCH:
@@ -647,8 +696,7 @@ export function mapRpcError(
     PAYROLL_SELF_CLOSE: 'The person who submitted this batch cannot close it.',
     PAYROLL_BATCH_NOT_FULLY_DISBURSED: 'Record every payout before closing this batch.',
     PAYROLL_NOT_SIMULATION: 'This payroll line belongs to a live batch, not a simulation.',
-    PERIOD_HAS_BLOCKERS:
-      'Resolve the blockers listed in Readiness before submitting this period.',
+    PERIOD_HAS_BLOCKERS: 'Resolve the blockers listed in Readiness before submitting this period.',
     PAYMENT_ADJUSTMENT_AUTHORITY_PENDING:
       'Who may approve, reject or withdraw payment adjustments is awaiting formal approval (Q13). Nothing was changed; the proposal stays on file.',
     PAYMENT_ADJUSTMENT_NOT_FOUND: 'Payment adjustment not found.',
@@ -672,11 +720,11 @@ export function mapRpcError(
       'The person who drafted, edited or submitted a policy cannot approve it.',
     COMPENSATION_POLICY_EVIDENCE_REQUIRED:
       'Enter the reference of the approval document (10 to 500 characters).',
-    COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED:
-      'Give an approval note of at least 5 characters.',
+    COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED: 'Give an approval note of at least 5 characters.',
     COMPENSATION_POLICY_RETURN_REASON_REQUIRED:
       'Give a reason of at least 5 characters for returning the policy.',
-    COMPENSATION_POLICY_END_NOTE_REQUIRED: 'Give a note of at least 5 characters for ending the policy.',
+    COMPENSATION_POLICY_END_NOTE_REQUIRED:
+      'Give a note of at least 5 characters for ending the policy.',
     COMPENSATION_POLICY_END_DATE_INVALID:
       'The end date must be a real date on or after the policy start date.',
     COMPENSATION_POLICY_DIRECT_WRITE_REFUSED:
@@ -723,15 +771,21 @@ export function mapRpcError(
       'An accepted signed Customer Application is required before approval.',
     SIGNED_RA_DOCUMENT_REQUIRED:
       'An accepted signed Reservation Agreement is required before approval.',
-    APPLICATION_APPROVAL_FORBIDDEN: 'Only Admin or Super Admin may approve or reject an application and RA.',
+    APPLICATION_APPROVAL_FORBIDDEN:
+      'Only Admin or Super Admin may approve or reject an application and RA.',
     APPLICATION_APPROVAL_REQUIRED: 'Approve the application and RA together from the application.',
-    APPLICATION_SUBMISSION_REQUIRED: 'Submit the application and RA before uploading signed documents.',
+    APPLICATION_SUBMISSION_REQUIRED:
+      'Submit the application and RA before uploading signed documents.',
     LINKED_RESERVATION_REQUIRED: 'The linked Reservation Agreement is required.',
-    PURCHASE_HAS_PAYMENTS: 'This purchase has payment history and cannot be cancelled through application review.',
+    PURCHASE_HAS_PAYMENTS:
+      'This purchase has payment history and cannot be cancelled through application review.',
     PURCHASE_WORKFLOW_REQUIRED: 'Use the approved Application & RA purchase workflow.',
-    RESERVATION_PAYMENT_REQUIRED: 'Verify the reservation payment required by these purchase terms first.',
-    RESERVATION_FEE_MUST_MATCH_TERMS: 'Enter the exact reservation fee required by these purchase terms.',
-    CURRENT_ID_DOCUMENT_REQUIRED: 'A current, reviewed identity document is required before submission.',
+    RESERVATION_PAYMENT_REQUIRED:
+      'Verify the reservation payment required by these purchase terms first.',
+    RESERVATION_FEE_MUST_MATCH_TERMS:
+      'Enter the exact reservation fee required by these purchase terms.',
+    CURRENT_ID_DOCUMENT_REQUIRED:
+      'A current, reviewed identity document is required before submission.',
     ACTIVATION_AGREEMENT_NOT_FINALIZED:
       'The Reservation Agreement must be finalized before this membership can be activated.',
     VIP_CARD_ID_REQUIRED:
