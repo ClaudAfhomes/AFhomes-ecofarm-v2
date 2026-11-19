@@ -895,6 +895,24 @@ describe('customer import/export handler', () => {
     expect(res.status).toBe(400);
   });
 
+  it('explains how to fix a CSV that Excel saved in the Windows code page', async () => {
+    install();
+    // "PEÑA" in Windows-1252: Ñ is the single byte 0xD1, which is invalid UTF-8.
+    const bytes = new Uint8Array([
+      ...Buffer.from('first_name,last_name\nJUAN,PE'),
+      0xd1,
+      0x41,
+      0x0a,
+    ]);
+    const res = await call({
+      path: 'parse',
+      method: 'POST',
+      body: { source: 'csv', contentBase64: b64(bytes) },
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('CSV UTF-8 (Comma delimited)');
+  });
+
   it('rejects invalid workbooks and non-sheet URLs', async () => {
     const bad = await call({
       path: 'parse',

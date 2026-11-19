@@ -78,7 +78,7 @@ export function parseCustomerWorkbookV2(
   const metadata = readWorkbookCustomProperties(parts);
   const property = (name: string) => metadata.get(name) ?? '';
   const templateVersion = property('AFHomesTemplate');
-  const mappingVersion = property('AFHomesMappingVersion');
+  let mappingVersion = property('AFHomesMappingVersion');
   const columnsBySheet =
     mappingVersion === '1'
       ? LEGACY_WORKFLOW_COLUMNS
@@ -96,8 +96,16 @@ export function parseCustomerWorkbookV2(
     (name) =>
       sheets.includes(name as WorkflowSheet) || ['Start Here', 'Reference Lists'].includes(name),
   );
+  // Google Sheets (and some other editors) drop custom document properties on
+  // download. A guided workbook with NO markers at all is read as the current
+  // mapping, but only if every entry tab's header row matches it exactly (checked
+  // below); an older mapping cannot be told apart safely, so it stays refused.
+  const unmarked = hasV2Sheets && templateVersion === '' && mappingVersion === '';
+  if (unmarked) mappingVersion = WORKFLOW_MAPPING_VERSION;
   // If workbook has v2 sheet structure, it must have valid v2 metadata
-  if (hasV2Sheets) {
+  if (unmarked) {
+    // Recognised structurally; the exact header check below decides.
+  } else if (hasV2Sheets) {
     if (templateVersion === '' || templateVersion !== WORKFLOW_TEMPLATE_VERSION) {
       throw new Error(
         templateVersion === ''
@@ -161,7 +169,8 @@ export function parseCustomerWorkbookV2(
       const text = formula.replace(/"(?:[^"]|"")*"/g, '""');
       const functions = [...text.matchAll(/([\w.]+)\s*\(/g)].map((m) => m[1]!.toUpperCase());
       const internal = text.replace(
-        /'(Customers|Supplementary Holders|Sales Team|Payments|Reference Lists|Address Lists|Postal Codes)'!/g,
+        // Excel quotes every sheet name; Google Sheets leaves single-word names bare.
+        /'(Customers|Supplementary Holders|Sales Team|Payments|Reference Lists|Address Lists|Postal Codes)'!|\b(?<![.\w])(Customers|Payments)!/g,
         '',
       );
       if (
@@ -207,9 +216,13 @@ export function parseCustomerWorkbookV2(
   for (const sheet of sheets) {
     const matrix = matrices.get(sheet)!;
     const columns = columnsBySheet[sheet];
-    const reviewTail = property('AFHomesReviewWorkbook')==='1' && matrix[0]?.length===columns.length+3 && WORKFLOW_REVIEW_HEADERS.every((h,i)=>matrix[0]![columns.length+i]===h);
+    const reviewTail = (unmarked || property('AFHomesReviewWorkbook')==='1') && matrix[0]?.length===columns.length+3 && WORKFLOW_REVIEW_HEADERS.every((h,i)=>matrix[0]![columns.length+i]===h);
     if ((!reviewTail && matrix[0]?.length !== columns.length) || columns.some((c, i) => matrix[0]![i] !== c.header))
-      throw new Error(`${sheet}: incorrect or unmapped required headers`);
+      throw new Error(
+        unmarked
+          ? `${sheet}: this workbook has no AF Homes template marker and its headers do not match the current template. Download the current template and copy the rows over.`
+          : `${sheet}: incorrect or unmapped required headers`,
+      );
     const rows: Record<string, string>[] = [];
     for (const [index, values] of matrix.slice(1).entries()) {
       if (values.length > columns.length && values.slice(columns.length + (reviewTail ? 3 : 0)).some((v) => v.trim()))

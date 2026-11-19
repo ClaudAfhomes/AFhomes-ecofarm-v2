@@ -548,7 +548,9 @@ export function CustomerImportExportPage() {
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Excel workbook (.xlsx)</h3>
                 <p className={styles.templateDesc}>
-                  Guided entry, dropdowns and automatic calculations.
+                  Guided entry, dropdowns and automatic calculations. Recommended for Excel and
+                  Google Sheets: in Google Sheets, use File &gt; Download &gt; Microsoft Excel
+                  (.xlsx) and upload that file.
                 </p>
                 <div className={styles.actions}>
                   <Button onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
@@ -556,7 +558,11 @@ export function CustomerImportExportPage() {
               </div>
               <div className={styles.templateCard}>
                 <h3 className={styles.templateName}>Plain text (.csv)</h3>
-                <p className={styles.templateDesc}>One file. No dropdowns.</p>
+                <p className={styles.templateDesc}>
+                  One file. No dropdowns. Save as &quot;CSV UTF-8&quot;. Spreadsheet apps drop
+                  leading zeros (mobile 09…) and reformat dates unless those columns are set to
+                  Text, so prefer the Excel workbook.
+                </p>
                 <div className={styles.actions}>
                   <Button variant="secondary" onClick={() => downloadTemplate('csv')}>
                     Download CSV template

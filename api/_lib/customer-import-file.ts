@@ -45,6 +45,8 @@ import { parseCustomerWorkbook } from './customer-workbook.js';
 import { parseCustomerWorkbookV2 } from './customer-workbook-v2.js';
 import { hashIdentifier } from './identifier.js';
 import { companyWorkbookReview, type ReviewWorkbook } from './customer-workflow-review.js';
+export const CSV_NOT_UTF8 =
+  'This CSV is not UTF-8. In Excel use Save As > "CSV UTF-8 (Comma delimited)", or upload the Excel template instead.';
 export type CustomerImportFileInput = {
   source: 'csv' | 'excel' | 'google_sheets';
   contentBase64?: string;
@@ -142,7 +144,15 @@ export async function readCustomerImportFile(input: CustomerImportFileInput) {
           }
         }
       } else {
-        matrix = parseCsvMatrix(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        let text: string;
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch (error) {
+          // Excel's plain "CSV (Comma delimited)" saves in the Windows code page,
+          // which turns names such as PEÑA into invalid UTF-8.
+          throw new Error(CSV_NOT_UTF8, { cause: error });
+        }
+        matrix = parseCsvMatrix(text);
         // The CSV download carries a section band row above the headers
         // so the columns read as groups; strip it here so a
         // saved-and-refilled template parses exactly like a plain header

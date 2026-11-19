@@ -328,6 +328,32 @@ describe('workflow workbook v2', () => {
       ),
     ).toThrow(/formula/i);
   });
+  it('reads a Google Sheets download (no custom properties) only when every header is current', () => {
+    // Google Sheets drops docProps/custom.xml and writes single-word sheet refs unquoted.
+    const noMarkers = { 'docProps/custom.xml': '<Properties></Properties>' };
+    const rows = {
+      Customers: [
+        {
+          ...customer(),
+          purchase_reference: '',
+          contract_date: '2026-10-14',
+          vip_id_preview: 'FORMULA:IF(LEN(Customers!A2)=0,"",Payments!B2)',
+        },
+      ],
+    };
+    const google = parseCustomerWorkbookV2(book(rows, noMarkers, '7'))!;
+    expect(google.rows).toHaveLength(1);
+    expect(google.rows).toEqual(parseCustomerWorkbookV2(book(rows, {}, '7'))!.rows);
+    // An older mapping cannot be told apart safely without its marker.
+    expect(() => parseCustomerWorkbookV2(book({ Customers: [customer()] }, noMarkers, '6'))).toThrow(
+      'no AF Homes template marker',
+    );
+    // Bare references are only accepted for the workbook's own sheets.
+    const external = {
+      Customers: [{ ...customer(), vip_id_preview: 'FORMULA:IF([1]Customers!A2="","",1)' }],
+    };
+    expect(() => parseCustomerWorkbookV2(book(external, noMarkers, '7'))).toThrow(/formula/i);
+  });
   it('ignores a blank template and calculated-only customer rows', () => {
     expect(parseCustomerWorkbookV2(book())?.rows).toEqual([]);
     expect(
@@ -508,7 +534,7 @@ describe('workflow workbook v2', () => {
     // Empty workbook with v2 sheet names but missing metadata throws (not legacy fallback)
     expect(() =>
       parseCustomerWorkbookV2(book({}, { 'docProps/custom.xml': '<Properties/>' })),
-    ).toThrow(/Missing workbook template version/);
+    ).toThrow(/no AF Homes template marker/);
     // Wrong template version throws
     expect(() =>
       parseCustomerWorkbookV2(
@@ -545,7 +571,7 @@ describe('workflow workbook v2', () => {
       { 'docProps/custom.xml': '<Properties/>' },
     );
     // Missing metadata entirely - should throw, not return null
-    expect(() => parseCustomerWorkbookV2(v2Workbook)).toThrow(/Missing workbook template version/);
+    expect(() => parseCustomerWorkbookV2(v2Workbook)).toThrow(/no AF Homes template marker/);
     // Empty AFHomesTemplate property - should throw
     const v2WorkbookEmpty = book(
       {
