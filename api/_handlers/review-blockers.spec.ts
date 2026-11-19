@@ -88,7 +88,7 @@ describe('IST direct API validation', () => {
       );
       expect(call?.arg).toMatchObject({
         p_primary: {
-          name: name.toLowerCase(),
+          name,
           address: 'UNIT 2, 123 RIZAL ST.',
           email: 'qa@example.com',
           contactNumber: '+639171234567',

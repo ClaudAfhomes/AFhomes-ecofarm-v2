@@ -51,10 +51,10 @@ export function PayrollReviewDialog({
     >
       <div className={styles.form}>
         <p className={styles.muted}>{reconciliation
-          ? 'Review the external payment and the evidence discrepancy. The approved entitlement stays recorded at its original amount.'
+          ? 'Review the external payment: an evidence discrepancy, or no verifiable evidence on file. The payment stays recorded and flagged; this review does not verify it. The approved entitlement stays at its original amount.'
           : line.reviewFlags.map(reviewFlagLabel).join('; ')}</p>
         {reconciliation ? (
-          <TextField id="payroll-reconciliation-evidence" name="evidenceReference" label="Reconciliation evidence reference" value={evidenceReference} onChange={setEvidenceReference} />
+          <TextField id="payroll-reconciliation-evidence" name="evidenceReference" label="Reconciliation reference" hint="What you checked, at least 10 characters. Attach verifiable evidence with Evidence where it exists." value={evidenceReference} onChange={setEvidenceReference} />
         ) : null}
         <TextAreaField
           id="payroll-review-note"

@@ -177,7 +177,7 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
   let query = db
     .from('reservation_agreements')
     .select(
-      'id, reservation_number, customer_application_id, customer_id, seller_staff_id, purchase_terms_id, status, tier_snapshot, payment_scheme_snapshot, total_price_snapshot, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amortization_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, customer_applications!inner(application_number, status), customers!inner(first_name, middle_name, last_name, suffix)',
+      'id, reservation_number, customer_application_id, customer_id, seller_staff_id, purchase_terms_id, status, tier_snapshot, payment_scheme_snapshot, total_price_snapshot, reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot, monthly_amortization_snapshot, validity_months_snapshot, spot_cash_started_at, spot_cash_deadline, vip_card_number, commission_eligible_at, customer_applications!inner(application_number, status), customers!inner(first_name, middle_name, last_name, suffix)',
       { count: 'exact' },
     )
     .eq('origin', 'application')
@@ -280,6 +280,10 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
             [customer.first_name, customer.middle_name, customer.last_name, customer.suffix]
               .filter((part) => typeof part === 'string' && part)
               .join(' ') || 'Unknown customer',
+          // Issued on the RA by the first verified non-reservation payment; without
+          // these the Finance screen showed "Awaiting…" after the card existed.
+          vipCardNumber: typeof row.vip_card_number === 'string' ? row.vip_card_number : null,
+          commissionEligibleAt: isoOrNull(row.commission_eligible_at),
           productName: `VIP ${String(row.tier_snapshot ?? '')}`,
           status: String(row.status),
           paymentScheme: String(row.payment_scheme_snapshot ?? 'spot_cash'),

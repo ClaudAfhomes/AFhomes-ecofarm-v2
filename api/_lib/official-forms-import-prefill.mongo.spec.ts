@@ -73,7 +73,7 @@ describe('GET official-forms/customer-import-prefill/:id', () => {
     expect(state.status).toBe(200);
     expect(state.body).toMatchObject({
       // applicationHolderSchema.mobile canonicalizes through phoneSchema.
-      primary: { firstName: 'Ana', lastName: 'Reyes', mobile: '+639171234567' },
+      primary: { firstName: 'ANA', lastName: 'REYES', mobile: '+639171234567' },
       tier: 'GOLD',
     });
     // Must not leak the raw flat field names - the client parses this
@@ -86,7 +86,7 @@ describe('GET official-forms/customer-import-prefill/:id', () => {
     await insertCommittedRow(customerId, 'company_v1');
     const state = await getPrefill(customerId);
     expect(state.status).toBe(200);
-    expect(state.body).toMatchObject({ primary: { firstName: 'Ana', lastName: 'Reyes' } });
+    expect(state.body).toMatchObject({ primary: { firstName: 'ANA', lastName: 'REYES' } });
   });
 
   it('returns a clean NOT_FOUND for a customer with no committed workbook import', async () => {

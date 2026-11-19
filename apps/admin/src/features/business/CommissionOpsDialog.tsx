@@ -22,6 +22,7 @@ import { formatMoneyOrDash } from '@afhomes/shared';
 import { formatDate } from '../../lib/format';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { useSession } from '../../lib/session';
+import { ExternalEvidencePanel } from './ExternalEvidencePanel';
 import { businessKeys } from './queryKeys';
 import {
   dismissCommissionRecovery,
@@ -53,7 +54,8 @@ const PAYOUT_TONE: Record<CommissionPayout['status'], StatusTone> = {
   reconciled: 'success',
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Today's calendar date in Asia/Manila (UTC+8, no DST). */
+const manilaToday = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
 const MONEY = /^\d+(\.\d{1,2})?$/;
 
 type Props = {
@@ -220,19 +222,29 @@ function PayoutsSection({
 }
 
 function PayoutRow({ payout, canReconcile, onDone }: { payout: CommissionPayout; canReconcile: boolean; onDone: () => Promise<void> }) {
-  const [paidOn, setPaidOn] = useState(today());
+  const [paidOn, setPaidOn] = useState(payout.paidOn ?? manilaToday());
   const [reference, setReference] = useState('');
+  const [correction, setCorrection] = useState('');
   const needsReference = !payout.bankReference;
+  // Changing a recorded payment date is a correction: it needs a reason and is audited.
+  const correcting = Boolean(payout.paidOn) && paidOn !== payout.paidOn;
+  const evidenceBlocked =
+    payout.evidenceStatus === 'EVIDENCE_EXCEPTION' && !payout.evidenceExceptionReviewed;
   const mutation = useBusinessMutation({
     mutationFn: () =>
       reconcileCommissionPayout(payout.id, {
         paidOn,
         ...(reference.trim() ? { bankReference: reference.trim() } : {}),
+        ...(correcting ? { dateCorrectionReason: correction.trim() } : {}),
       }),
     onSuccess: onDone,
   });
+  const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(paidOn) && paidOn <= manilaToday();
   const valid =
-    /^\d{4}-\d{2}-\d{2}$/.test(paidOn) && (!needsReference || reference.trim().length >= 3);
+    dateOk &&
+    (!needsReference || reference.trim().length >= 3) &&
+    (!correcting || correction.trim().length >= 5) &&
+    !evidenceBlocked;
   return (
     <li className={styles.formGrid}>
       <span>
@@ -242,18 +254,44 @@ function PayoutRow({ payout, canReconcile, onDone }: { payout: CommissionPayout;
       <span className={styles.secondary}>
         Ref {payout.bankReference ?? '—'} · recorded {formatDate(payout.recordedAt)}
         {payout.paidOn ? ` · paid ${formatDate(payout.paidOn)}` : ''}
+        {payout.postingPeriod ? ` · posted to ${payout.postingPeriod}` : ''}
         {payout.failureReason ? ` · ${payout.failureReason}` : ''}
       </span>
+      {payout.status !== 'failed' ? (
+        <ExternalEvidencePanel
+          subject="commission_payout"
+          id={payout.id}
+          canRecord={canReconcile && payout.status === 'paid'}
+          canReviewException={canReconcile && payout.status === 'paid'}
+          paymentAmount={payout.amount}
+          onChanged={onDone}
+        />
+      ) : null}
       {canReconcile && payout.status === 'paid' ? (
         <>
           <TextField
             id={`payout-paid-on-${payout.id}`}
             name="paidOn"
             label="Date on bank statement"
-            hint="YYYY-MM-DD"
+            hint="YYYY-MM-DD, Manila date. Not in the future."
             value={paidOn}
             onChange={setPaidOn}
           />
+          {correcting ? (
+            <TextField
+              id={`payout-date-correction-${payout.id}`}
+              name="dateCorrectionReason"
+              label="Reason for changing the recorded date"
+              hint={`Recorded date is ${formatDate(payout.paidOn!)}. At least 5 characters; audited.`}
+              value={correction}
+              onChange={setCorrection}
+            />
+          ) : null}
+          {evidenceBlocked ? (
+            <p className={`${styles.fullRow} ${styles.formNote}`}>
+              Attach verifiable evidence or record an exception review before confirming.
+            </p>
+          ) : null}
           {needsReference ? (
             <TextField
               id={`payout-ref-${payout.id}`}

@@ -78,7 +78,7 @@ describe('official accreditation boundaries', () => {
       form,
     });
     expect(manual.identity).toEqual(publicForm.identity);
-    expect(manual.identity.firstName).toBe('Qa');
+    expect(manual.identity.firstName).toBe('QA');
   });
   it('never accepts a public caller-selected sponsor', () =>
     expect(

@@ -23,6 +23,8 @@ import {
 
 import { authorizeAfHomes } from './afhomes-access.js';
 import { storedAccreditationNumbers } from './accreditation-numbers.js';
+import { manilaMonth } from './commission-ops.js';
+import { evidenceStatusFor, handleExternalEvidence } from './external-evidence.js';
 import {
   describeBlockers,
   handleIstGoverned,
@@ -169,6 +171,12 @@ const toDisbursement = (d: Record<string, unknown>, simulation: boolean) => ({
   evidenceChanged: d.evidence_changed === true,
   reconciled: d.reconciled === true,
   reconciliationNote: str(d.reconciliation_note),
+  ...(simulation
+    ? {}
+    : {
+        evidenceStatus: d.evidence_status === 'SUPPORTED' ? ('SUPPORTED' as const) : ('EVIDENCE_EXCEPTION' as const),
+        postingPeriod: str(d.posting_period) ?? manilaMonth(d.recorded_at),
+      }),
   simulation,
 });
 
@@ -385,12 +393,7 @@ class RpcFailure extends Error {
  *    remains blocked while that decision is absent. Approved engagement dates use calendar days.
  *  - assumed-account collections have no approved base: the rule blocker keeps a rate above zero blocked.
  */
-async function liveLines(
-  db: Db,
-  period: string,
-  staffList: RosterEntry[],
-  actorId: string,
-): Promise<LineDraft[]> {
+async function liveLines(db: Db, period: string, actorId: string): Promise<LineDraft[]> {
   const segs = await db.rpc('payroll_policy_segments', { p_period: period, p_actor_id: actorId });
   if (segs.error) throw segs.error;
   const seg = (segs.data ?? { transitionRuleApproved: false, ranks: [] }) as PolicySegments;
@@ -403,6 +406,11 @@ async function liveLines(
   const perfParsed = istPeriodPerformanceSchema.safeParse(perfRes.data);
   if (!perfParsed.success) throw new Error('ist_period_performance returned an unexpected shape');
   const perfByStaff = new Map(perfParsed.data.staff.map((s) => [s.staffId, s]));
+  // Q15(d): the live roster and each rank come from the APPROVED IST engagements in force during
+  // the month (the performance rows), never from today's RBAC role or account status.
+  const staffList: RosterEntry[] = perfParsed.data.staff
+    .map((s) => ({ staffId: s.staffId, name: null, rank: s.rank }))
+    .sort((a, b) => a.staffId.localeCompare(b.staffId));
 
   const lines: LineDraft[] = [];
   for (const staff of staffList) {
@@ -592,7 +600,9 @@ async function loadDetail(db: Db, id: string) {
       const proofs = new Map<string, Record<string, unknown>>(
         (reads[2]!.data ?? []).map((r: Record<string, unknown>) => [String(r.disbursement_id), r]),
       );
+      const supported = await evidenceStatusFor(db, 'payroll_disbursement', ids);
       for (const payment of d) {
+        payment.evidence_status = supported.has(String(payment.id)) ? 'SUPPORTED' : 'EVIDENCE_EXCEPTION';
         payment.evidence_changed = changed.has(String(payment.id));
         payment.reconciled = reviews.has(String(payment.id));
         payment.reconciliation_note = reviews.get(String(payment.id))?.note ?? null;
@@ -639,6 +649,7 @@ export async function handlePayroll(
   const path = subPath(req);
   if (!path.startsWith('payroll/')) return false;
   if (await handleIstGoverned(req, res, db)) return true;
+  if (await handleExternalEvidence(req, res, db, 'payroll_disbursement')) return true;
   const invalid = (message: string) => (fail(res, 'VALIDATION_ERROR', message, 400), true);
   const reconcile = route(req, 'POST', new RegExp(`^payroll/disbursements/${ID}/reconcile$`));
   if (reconcile) {
@@ -1029,10 +1040,11 @@ export async function handlePayroll(
         'A simulation needs a month, a source description of at least 10 characters, and valid reference policy figures',
       );
     const period = (parsedLive?.data ?? parsedSim!.data!).period;
-    const staffList = await roster(db);
 
     let lines: LineDraft[];
     if (parsedSim) {
+      // Simulations use synthetic inputs over the current IST staff; they never pay anyone.
+      const staffList = await roster(db);
       const sim = parsedSim.data!;
       const supplied = new Map(sim.lines.map((l) => [l.staffId, l]));
       if (supplied.size !== sim.lines.length) return invalid('A staff member is listed twice');
@@ -1087,7 +1099,7 @@ export async function handlePayroll(
     const batchId = String(created.data);
     if (!parsedSim) {
       try {
-        lines = await liveLines(db, period, staffList, auth.userId);
+        lines = await liveLines(db, period, auth.userId);
       } catch (e) {
         if (e instanceof RpcFailure) return (mapRpcError(res, e.error), true);
         throw e;

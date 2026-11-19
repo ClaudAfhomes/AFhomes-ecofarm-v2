@@ -8,7 +8,10 @@ import { z } from 'zod';
  * import path can never disagree on what is valid or how a value is stored:
  *
  *   NAMES    Unicode letters, spaces, apostrophes and hyphens only. No digits,
- *            ever. Entered capitalization is preserved (`normalizePersonName`).
+ *            ever. Stored UPPERCASE (`normalizePersonName`) by every writer:
+ *            manual create, update, applications and imports (owner decision
+ *            2026-11-19). Screens may format for reading; the stored value is
+ *            the canonical uppercase form.
  *   PHONES   No alphabetic characters, ever. Mobile numbers must be the local
  *            `09XXXXXXXXX` form (exactly 11 digits) and collapse to the
  *            canonical `+63XXXXXXXXXX` (`normalizePhilippinePhone`). Landlines
@@ -28,9 +31,9 @@ import { z } from 'zod';
 
 export const PERSON_NAME_RE = /^[\p{L}][\p{L}\p{M}'’\.\- ]*$/u;
 
-/** Collapse whitespace while preserving deliberately entered name casing. */
+/** Collapse whitespace and uppercase a human name for storage (the canonical form). */
 export function normalizePersonName(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
+  return value.trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
 /**
@@ -150,7 +153,7 @@ export function isPlausibleBirthDate(value: string): boolean {
 
 /**
  * A person-name part: Unicode letters plus space/apostrophe/hyphen, no digits.
- * Preserves entered casing on parse; historical records are never rewritten.
+ * Uppercases on parse so every writer stores the same form; history is never rewritten.
  */
 export const personNameSchema = z
   .string()
@@ -161,7 +164,7 @@ export const personNameSchema = z
   .transform((value) => normalizePersonName(value));
 
 /** Optional person-name part (middle names). Validated here; the owning
- *  schema/handler preserves entered capitalization on write. */
+ *  schema/handler uppercases it on write so the key stays optional. */
 export const optionalPersonNameSchema = z
   .string()
   .trim()
@@ -260,7 +263,7 @@ export const uppercasedText = (max: number) =>
 /**
  * Nullable person-name part for update payloads: null/undefined/blank pass
  * through untouched (null clears, undefined leaves). A real value must be a
- * name; the handler preserves its capitalization on write.
+ * name; the handler uppercases it on write.
  */
 export const nullablePersonNameSchema = z
   .string()

@@ -214,27 +214,64 @@ export function parseCustomerWorkbook(
           if (fields[key] === 'Seperated') fields[key] = 'Separated';
         for (const key of ['suffix', 'secondary_suffix'])
           if (fields[key] === 'N/A') fields[key] = '';
-        for (const key of [
-          'first_name',
-          'last_name',
-          'middle_name',
-          'secondary_first_name',
-          'secondary_last_name',
-          'secondary_middle_name',
-          'vd_name',
-          'ssm_name',
-          'sm_name',
-          'referrer_name',
-          'recommender_name',
-        ])
-          fields[key] = normalizeWorkbookName(fields[key] ?? '');
+        const original = { ...fields };
+        for (const key of WORKBOOK_NAME_FIELDS) fields[key] = normalizeWorkbookName(fields[key] ?? '');
         // These labels are claims, never membership/payment instructions.
         return {
           rowNumber,
-          fields: { ...fields, source_status: 'Pending', workbook_format: 'company_v1' },
+          fields: {
+            ...withSourceNames(original, fields, WORKBOOK_NAME_FIELDS),
+            source_status: 'Pending',
+            workbook_format: 'company_v1',
+          },
         };
       }),
   };
+}
+
+const WORKBOOK_NAME_FIELDS = [
+  'first_name',
+  'last_name',
+  'middle_name',
+  'secondary_first_name',
+  'secondary_last_name',
+  'secondary_middle_name',
+  'vd_name',
+  'ssm_name',
+  'sm_name',
+  'referrer_name',
+  'recommender_name',
+];
+
+/** Import-evidence key holding the original cell text of names that normalization changed. */
+export const SOURCE_NAMES_KEY = 'source_names';
+
+/**
+ * Names are stored in canonical UPPERCASE (owner decision 2026-11-19); the text the
+ * file actually contained is kept, as JSON under `source_names`, in the import row's
+ * raw_data. An earlier record (e.g. from the workbook parse) wins: it is closer to the
+ * source. Identity comparison ignores this key, so a re-import that differs only in
+ * capitalization is the same person.
+ */
+export function withSourceNames(
+  original: Record<string, string>,
+  next: Record<string, string>,
+  keys: readonly string[],
+): Record<string, string> {
+  let prior: Record<string, string> = {};
+  try {
+    prior = original[SOURCE_NAMES_KEY] ? JSON.parse(original[SOURCE_NAMES_KEY]!) : {};
+  } catch {
+    prior = {};
+  }
+  const kept: Record<string, string> = { ...prior };
+  for (const key of keys) {
+    const raw = original[key] ?? '';
+    if (!(key in kept) && raw.trim() && raw !== (next[key] ?? '')) kept[key] = raw;
+  }
+  const out = { ...next };
+  if (Object.keys(kept).length) out[SOURCE_NAMES_KEY] = JSON.stringify(kept);
+  return out;
 }
 
 export function sameWorkbookIdentity(
@@ -242,6 +279,7 @@ export function sameWorkbookIdentity(
   b: Record<string, string>,
 ): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  keys.delete(SOURCE_NAMES_KEY);
   return [...keys].every(
     (key) =>
       (['tin', 'secondary_tin'].includes(key) && !a[key]) || (a[key] ?? '') === (b[key] ?? ''),

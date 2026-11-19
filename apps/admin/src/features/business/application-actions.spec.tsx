@@ -249,7 +249,7 @@ async function show(
   );
   await screen.findByText('QA APPLICATION');
   if (status === 'draft')
-    await waitFor(() => expect(screen.getByLabelText('First name')).toHaveValue('Ana'));
+    await waitFor(() => expect(screen.getByLabelText('First name')).toHaveValue('ANA'));
 }
 it('refuses to reconstruct a missing historical agreement from current plan configuration', async () => {
   vi.mocked(getReservationAgreements).mockResolvedValue([]);

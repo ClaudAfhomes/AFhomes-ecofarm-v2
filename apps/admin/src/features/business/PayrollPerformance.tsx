@@ -77,8 +77,8 @@ export function PayrollPerformance({ period }: { period: string }) {
         <p className={styles.muted}>
           Not on the IST roster: {d.offRoster.count}{' '}
           {d.offRoster.count === 1 ? 'payment' : 'payments'} totalling{' '}
-          {formatMoney(d.offRoster.total)} belong to a seller who is not an active SM, SSM or SVD,
-          so they count for no one.
+          {formatMoney(d.offRoster.total)} belong to a seller with no approved IST engagement for
+          this month, so they count for no one until an engagement is approved.
         </p>
       ) : null}
       {d.staff.length === 0 ? (

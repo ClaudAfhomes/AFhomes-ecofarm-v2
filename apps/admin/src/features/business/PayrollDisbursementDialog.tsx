@@ -102,10 +102,10 @@ export function PayrollDisbursementDialog({ line, simulated = false, onClose, on
           <TextField
             id="disb-proof"
             name="proofReference"
-            label="Payment proof reference"
+            label="Payment description"
             value={proofReference}
             onChange={setProofReference}
-            hint="Supporting document or external payment evidence reference, at least 10 characters."
+            hint="What was paid and how, at least 10 characters. A description is not proof: attach a document, transaction reference or OR number with Evidence after recording."
           />
         ) : null}
         <DateField

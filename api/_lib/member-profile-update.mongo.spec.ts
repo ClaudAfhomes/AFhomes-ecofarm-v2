@@ -135,7 +135,7 @@ it('persists partial profile edits with masked reads and field-only audit while 
       }),
     ),
   );
-  expect(body.fullName).toBe('Updated Synthetic Member');
+  expect(body.fullName).toBe('UPDATED SYNTHETIC MEMBER');
   expect(body.governmentIdMasked).toBe('***-NEW');
   expect(body.tinMasked).toBe('***4321');
   const reread = await json(await request(`/members/${member}`));

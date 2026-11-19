@@ -633,6 +633,38 @@ it('returns a reservation Finance queue row accepted by the browser contract', a
   expect(rows[0]).toMatchObject({ sellerName: 'Ana Seller' });
   expect(financeCollectionQueueItemSchema.safeParse(rows[0]).error).toBeUndefined();
 });
+
+it('carries the issued VIP Card ID and the 40% eligibility time on the Finance queue row', async () => {
+  install({
+    rows: [
+      reservationRow({
+        required_initial_snapshot: '10000.00',
+        validity_months_snapshot: 84,
+        vip_card_number: '26111900002G1C01S',
+        commission_eligible_at: '2026-11-19T02:37:47.830Z',
+      }),
+    ],
+  });
+  const db = holder.db as FakeSupabase;
+  db.rows('reservation_agreements')[0]!.customer_applications = {
+    application_number: 'AF-APP-00000001',
+    status: 'approved',
+  };
+  db.rows('reservation_agreements')[0]!.customers = { first_name: 'ANA', last_name: 'CRUZ' };
+  const queues = (await import('./queues.js')).default;
+  const { res, state } = makeRes();
+  await queues(
+    makeReq({ method: 'GET', familyPath: 'finance', headers: { authorization: 'Bearer finance-token' } }),
+    res,
+  );
+  expect(state.status).toBe(200);
+  const row = (state.body as { data: Record<string, unknown>[] }).data[0];
+  expect(row).toMatchObject({
+    vipCardNumber: '26111900002G1C01S',
+    commissionEligibleAt: '2026-11-19T02:37:47.830Z',
+  });
+  expect(financeCollectionQueueItemSchema.safeParse(row).error).toBeUndefined();
+});
 it('verifies a reservation payment through the source-aware transaction', async () => {
   install({
     rpcs: [

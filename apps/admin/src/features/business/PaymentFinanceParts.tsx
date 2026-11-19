@@ -8,6 +8,7 @@ import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { formatMoney, paymentStatusBadge } from './format';
+import { PAYMENT_PURPOSE_LABEL } from './payment-purposes';
 import {
   getAdjustmentResolutionGate,
   getPaymentAdjustments,
@@ -448,7 +449,12 @@ export function PaymentLedgerList({ payments }: { payments: Payment[] }) {
                 <StatusChip {...paymentStatusBadge(payment.status)} />
               </div>
               <p className={styles.timelineMeta}>
-                {payment.paymentType.replaceAll('_', ' ')} · {payment.method} ·{' '}
+                {/* The purpose is authoritative; the ledger type maps a reservation
+                    fee to "installment", which misreads as a monthly payment. */}
+                {payment.paymentPurpose
+                  ? PAYMENT_PURPOSE_LABEL[payment.paymentPurpose]
+                  : payment.paymentType.replaceAll('_', ' ')}{' '}
+                · {payment.method} ·{' '}
                 {payment.reference ?? 'No reference'}
               </p>
               {details ? <p className={styles.timelineMeta}>{details}</p> : null}

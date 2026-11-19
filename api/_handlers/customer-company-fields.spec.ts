@@ -104,7 +104,7 @@ describe('customer company-stated fields', () => {
     const row = db.rows('customers').find((r) => r.email === 'ana.company@example.com')!;
     expect(row.tin_number).toBe('123456789012');
     expect(row.ra_number).toBe('RA-2026-0001');
-    expect(row.supplementary_full_name).toBe('Maria Clara');
+    expect(row.supplementary_full_name).toBe('MARIA CLARA');
     expect(row.svd_name).toBe('SVD Santos');
     // Masked on the create response; the single-record detail read is the
     // narrow exception (see customer-detail.spec.ts).

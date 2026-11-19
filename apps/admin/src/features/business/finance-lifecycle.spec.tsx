@@ -901,6 +901,18 @@ describe('record & verify: purposes and prefill', () => {
     expect(screen.getByLabelText('Amount')).toHaveValue('');
   });
 
+  it('labels a ledger row by its purpose, not the internal payment type', async () => {
+    const user = userEvent.setup();
+    installSale([ledgerRow()]);
+    render('/admin/finance/payments');
+    await screen.findByText(QUEUE_ITEM.saleNumber);
+    await openRowMenu(user, QUEUE_ITEM.saleNumber);
+    await pickMenuItem(user, 'View details');
+    // The reservation fee is stored with payment_type 'installment'.
+    expect(await screen.findByText(/Reservation payment · bank_transfer/)).toBeInTheDocument();
+    expect(screen.queryByText(/^installment · bank_transfer/)).toBeNull();
+  });
+
   it('a pending reservation fee also blocks a second one', async () => {
     const user = userEvent.setup();
     installSale([ledgerRow({ status: 'recorded', verifiedAt: null, verifiedBy: null })]);
@@ -1415,13 +1427,13 @@ describe('finance phase 2: receipt details', () => {
     const review = within(await screen.findByRole('region', { name: 'Payment review' }));
     expect(review.getByText('OR-1234')).toBeInTheDocument();
     expect(review.getByText('2026-10-01')).toBeInTheDocument();
-    expect(review.getByText('Juan dela Cruz')).toBeInTheDocument();
+    expect(review.getByText('JUAN DELA CRUZ')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     await screen.findByText('Payment Recorded and Verified');
     expect(writes()[0]?.body).toMatchObject({
       orNumber: 'OR-1234',
       paidOn: '2026-10-01',
-      paidByName: 'Juan dela Cruz',
+      paidByName: 'JUAN DELA CRUZ',
     });
   });
 

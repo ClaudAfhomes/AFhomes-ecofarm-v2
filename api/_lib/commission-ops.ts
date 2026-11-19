@@ -7,6 +7,7 @@ import {
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from './afhomes-access.js';
+import { evidenceStatusFor, handleExternalEvidence } from './external-evidence.js';
 import {
   deny,
   fail,
@@ -27,7 +28,8 @@ import type { VercelRequest, VercelResponse } from './http.js';
  *   POST :id/hold                       { withheld, reason }
  *   GET  :id/payouts
  *   POST :id/payouts/fail               { reason, bankReference? }  (SQL takes the commission)
- *   POST payouts/:payoutId/reconcile    { bankReference?, paidOn }
+ *   POST payouts/:payoutId/reconcile    { bankReference?, paidOn, dateCorrectionReason? }
+ *   payouts/:payoutId/evidence...       see external-evidence.ts
  *   GET  :id/recoveries
  *   POST :id/recoveries                 { trigger, amount, reason }  (proposal only)
  *   POST recoveries/:caseId/dismiss     { reason }
@@ -53,7 +55,15 @@ function toPayout(r: Record<string, unknown>) {
     recordedAt: isoOrNull(r.recorded_at) ?? '',
     reconciledBy: str(r.reconciled_by),
     reconciledAt: isoOrNull(r.reconciled_at),
+    postingPeriod: str(r.posting_period) ?? manilaMonth(r.recorded_at),
   };
+}
+
+/** Older rows have no posting_period; their month is derived from recorded_at in Asia/Manila. */
+export function manilaMonth(v: unknown): string | null {
+  const iso = isoOrNull(v);
+  if (!iso) return null;
+  return new Date(new Date(iso).getTime() + 8 * 3600 * 1000).toISOString().slice(0, 7);
 }
 
 function toRecovery(r: Record<string, unknown>) {
@@ -79,6 +89,7 @@ export async function handleCommissionOps(
   res: VercelResponse,
   db: Db,
 ): Promise<boolean> {
+  if (await handleExternalEvidence(req, res, db, 'commission_payout')) return true;
   const hold = route(req, 'POST', new RegExp(`^${ID}/hold$`));
   const payouts = route(req, 'GET', new RegExp(`^${ID}/payouts$`));
   const payoutFail = route(req, 'POST', new RegExp(`^${ID}/payouts/fail$`));
@@ -107,7 +118,23 @@ export async function handleCommissionOps(
       .order(payouts ? 'recorded_at' : 'requested_at', { ascending: false });
     if (error) throw error;
     const rows = (data ?? []) as Record<string, unknown>[];
-    list(res, payouts ? rows.map(toPayout) : rows.map(toRecovery));
+    if (!payouts) return (list(res, rows.map(toRecovery)), true);
+    const ids = rows.map((r) => String(r.id));
+    const supported = await evidenceStatusFor(db, 'commission_payout', ids);
+    const reviewed = new Set<string>();
+    if (ids.length) {
+      const r = await db.from('commission_payout_evidence_reviews').select('payout_id').in('payout_id', ids);
+      if (r.error) throw r.error;
+      for (const x of (r.data ?? []) as Record<string, unknown>[]) reviewed.add(String(x.payout_id));
+    }
+    list(
+      res,
+      rows.map((r) => ({
+        ...toPayout(r),
+        evidenceStatus: supported.has(String(r.id)) ? 'SUPPORTED' : 'EVIDENCE_EXCEPTION',
+        evidenceExceptionReviewed: reviewed.has(String(r.id)),
+      })),
+    );
     return true;
   }
 
@@ -156,6 +183,7 @@ export async function handleCommissionOps(
         p_actor_id: auth.userId,
         p_bank_reference: p.data.bankReference ?? null,
         p_paid_on: p.data.paidOn,
+        p_date_correction_reason: p.data.dateCorrectionReason ?? null,
       }),
     );
   }

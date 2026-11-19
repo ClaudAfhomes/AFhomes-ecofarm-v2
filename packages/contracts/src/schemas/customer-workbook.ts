@@ -1,6 +1,7 @@
 ﻿import { z } from 'zod';
 import { applicationHolderSchema, vipTierSchema } from './official-forms.js';
 import { paymentSchemeSchema } from './lifecycle.js';
+import { normalizePersonName } from './input.js';
 export const workbookContactSchema = z
   .string()
   .regex(/^09\d{9}$/, 'Use the local 09XXXXXXXXX format: starts with 09, exactly 11 digits, no spaces or separators');
@@ -136,17 +137,14 @@ export const WORKBOOK_PAYMENT_METHODS: Record<string, string> = {
   Card: 'card',
   Cheque: 'cheque',
 };
-/** Re-case uniform input only; preserve intentional mixed-case spelling and suffixes. */
+/**
+ * Imported names take the same canonical UPPERCASE form as every other writer
+ * (`normalizePersonName`), so "dela Cruz" and "DELA CRUZ" never become two
+ * spellings of one person. The original cell text stays in the import row's
+ * raw_data as source evidence.
+ */
 export function normalizeWorkbookName(value: string): string {
-  return value
-    .trim()
-    .split(/(\s+|[-â€™'])/u)
-    .map((word) => {
-      if (['II', 'III', 'IV'].includes(word)) return word;
-      if (word !== word.toUpperCase() && word !== word.toLowerCase()) return word;
-      return word.charAt(0).toLocaleUpperCase() + word.slice(1).toLocaleLowerCase();
-    })
-    .join('');
+  return normalizePersonName(value);
 }
 export function completedAge(birthDate: string, today: string): number {
   const years = Number(today.slice(0, 4)) - Number(birthDate.slice(0, 4));

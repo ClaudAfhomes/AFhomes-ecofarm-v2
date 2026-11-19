@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { CUSTOMER_WORKBOOK_HEADERS, normalizeWorkbookName, completedAge } from '@afhomes/contracts';
 import { zipStored } from './report-export.js';
-import { parseCustomerWorkbook, workbookDate } from './customer-workbook.js';
+import { parseCustomerWorkbook, sameWorkbookIdentity, workbookDate } from './customer-workbook.js';
 import {
   validateWorkbookFields,
   resolveWorkbookGeography,
@@ -92,9 +92,26 @@ describe('company workbook adapter', () => {
     };
     const first = parseCustomerWorkbook(companyWorkbook([input]))!;
     expect(first.rows).toHaveLength(1);
-    expect(first.rows[0]?.fields).toMatchObject(input);
+    // Names are stored UPPERCASE; the original cell text is kept as import evidence.
+    expect(first.rows[0]?.fields).toMatchObject({
+      ...input,
+      first_name: 'CLAUD',
+      last_name: 'TEST',
+      secondary_first_name: 'MARIA',
+      secondary_last_name: 'TEST',
+    });
+    expect(JSON.parse(first.rows[0]!.fields.source_names!)).toEqual({
+      first_name: 'Claud',
+      last_name: 'Test',
+      secondary_first_name: 'Maria',
+      secondary_last_name: 'Test',
+    });
     const second = parseCustomerWorkbook(companyWorkbook(first.rows.map((r) => r.fields)))!;
-    expect(second.rows).toEqual(first.rows);
+    const withoutSource = (rows: typeof first.rows) =>
+      rows.map((r) => ({ ...r, fields: { ...r.fields, source_names: undefined } }));
+    expect(withoutSource(second.rows)).toEqual(withoutSource(first.rows));
+    expect(second.rows[0]!.fields.source_names).toBeUndefined();
+    expect(sameWorkbookIdentity(first.rows[0]!.fields, second.rows[0]!.fields)).toBe(true);
   }, 30000);
   it('accepts exactly 5,000 populated records within the archive budgets', () => {
     const rows = Array.from({ length: 5000 }, (_, i) => ({
@@ -118,8 +135,8 @@ describe('company workbook adapter', () => {
     expect(result?.rows[0]).toMatchObject({
       rowNumber: 4,
       fields: {
-        first_name: 'Ana',
-        secondary_first_name: 'Ben',
+        first_name: 'ANA',
+        secondary_first_name: 'BEN',
         vip_tier: 'GOLD',
         mobile: '09123456789',
       },
@@ -142,9 +159,12 @@ describe('company workbook adapter', () => {
         .stated_date,
     ).toBe('1900-01-01');
   });
-  it('preserves name exceptions and calculates completed years', () => {
-    expect(normalizeWorkbookName('maria dela cruz')).toBe('Maria Dela Cruz');
-    expect(normalizeWorkbookName("McDonald O'NEIL III")).toBe("McDonald O'Neil III");
+  it('stores names in the canonical uppercase form and calculates completed years', () => {
+    expect(normalizeWorkbookName('  maria   dela cruz ')).toBe('MARIA DELA CRUZ');
+    expect(normalizeWorkbookName("McDonald O'Neil III")).toBe("MCDONALD O'NEIL III");
+    // Capitalization differences collapse to one spelling (no duplicate person).
+    expect(normalizeWorkbookName('Dela Cruz')).toBe(normalizeWorkbookName('DELA CRUZ'));
+    expect(normalizeWorkbookName('O’neil')).toBe('O’NEIL');
     expect(completedAge('2000-02-29', '2026-02-28')).toBe(25);
     expect(completedAge('2000-02-29', '2026-03-01')).toBe(26);
   });
@@ -309,8 +329,8 @@ describe('company row rules', () => {
       secondary_first_name: 'Maria',
       secondary_last_name: 'Test',
     });
-    expect(result.primary).toMatchObject({ firstName: 'Synthetic', civilStatus: 'Separated' });
-    expect(result.secondary).toMatchObject({ firstName: 'Maria', lastName: 'Test' });
+    expect(result.primary).toMatchObject({ firstName: 'SYNTHETIC', civilStatus: 'Separated' });
+    expect(result.secondary).toMatchObject({ firstName: 'MARIA', lastName: 'TEST' });
     expect(result).not.toHaveProperty('consentAcknowledged');
     expect(result.missingFields).toContain('Customer consent');
   });

@@ -25,6 +25,7 @@ import { formatMoney } from './format';
 import { PayrollDisbursementDialog } from './PayrollDisbursementDialog';
 import { PayrollLinesTable, plainReason } from './PayrollLinesTable';
 import { PayrollReviewDialog } from './PayrollReviewDialog';
+import { ExternalEvidencePanel } from './ExternalEvidencePanel';
 import { BATCH_STATUS_LABEL, BATCH_STATUS_TONE } from './payroll-status';
 import { PayrollEngagementsRules } from './PayrollEngagementsRules';
 import { PayrollPerformance } from './PayrollPerformance';
@@ -76,6 +77,7 @@ export function IstPayrollPage() {
   const [paying, setPaying] = useState<PayrollLine | null>(null);
   const [reviewing, setReviewing] = useState<PayrollLine | null>(null);
   const [reconciling, setReconciling] = useState<PayrollLine | null>(null);
+  const [evidenceFor, setEvidenceFor] = useState<PayrollLine | null>(null);
 
   const gate = useQuery({
     queryKey: payrollKeys.gate,
@@ -160,7 +162,9 @@ export function IstPayrollPage() {
     (line) =>
       line.status === 'blocked' ||
       (line.reviewRequired && !line.reviewedAt) ||
-      (line.disbursement?.evidenceChanged && !line.disbursement.reconciled),
+      ((line.disbursement?.evidenceChanged ||
+        line.disbursement?.evidenceStatus === 'EVIDENCE_EXCEPTION') &&
+        !line.disbursement.reconciled),
   ).length;
 
   const submitterIsMe = Boolean(live?.submittedBy && live.submittedBy === user?.id);
@@ -527,6 +531,7 @@ export function IstPayrollPage() {
                             onReconcile={
                               status === 'approved' && canClose ? setReconciling : undefined
                             }
+                            onEvidence={setEvidenceFor}
                             onReview={
                               status === 'draft' && canUpdate && !locked
                                 ? (line) => {
@@ -582,7 +587,8 @@ export function IstPayrollPage() {
               </Button>
             ) : status === 'approved' &&
               canClose &&
-              viewing.disbursement?.evidenceChanged &&
+              (viewing.disbursement?.evidenceChanged ||
+                viewing.disbursement?.evidenceStatus === 'EVIDENCE_EXCEPTION') &&
               !viewing.disbursement.reconciled ? (
               <Button
                 onClick={() => {
@@ -655,6 +661,26 @@ export function IstPayrollPage() {
             await client.invalidateQueries({ queryKey: payrollKeys.all });
           }}
         />
+      ) : null}
+      {evidenceFor?.disbursement ? (
+        <Dialog
+          open
+          onClose={() => setEvidenceFor(null)}
+          title={`Payment evidence — ${evidenceFor.staffName ?? 'disbursement'}`}
+          footer={
+            <Button variant="secondary" onClick={() => setEvidenceFor(null)}>
+              Close
+            </Button>
+          }
+        >
+          <ExternalEvidencePanel
+            subject="payroll_disbursement"
+            id={evidenceFor.disbursement.id}
+            canRecord={canUpdate && status === 'approved'}
+            paymentAmount={evidenceFor.disbursement.amount}
+            onChanged={() => client.invalidateQueries({ queryKey: payrollKeys.all })}
+          />
+        </Dialog>
       ) : null}
       {paying ? (
         <PayrollDisbursementDialog

@@ -862,6 +862,7 @@ export * from './schemas/imported-sales.js';
 
 export * from './schemas/commission-ops.js';
 export * from './schemas/payroll.js';
+export * from './schemas/external-evidence.js';
 export * from './schemas/cms-content.js';
 export * from './schemas/media.js';
 

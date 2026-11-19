@@ -247,15 +247,15 @@ describe('applicationHolderSchema geographic fields', () => {
     ).toBe('123 Sampaguita Street');
   });
 
-  it('title-cases holder names and keeps the name rule', () => {
+  it('stores holder names UPPERCASE and keeps the name rule', () => {
     const parsed = applicationHolderSchema.parse({
       ...holderBase,
       lastName: 'dela cruz',
       firstName: 'jUAN',
       printedName: 'juan dela cruz',
     });
-    expect(parsed.lastName).toBe('Dela Cruz');
-    expect(parsed.firstName).toBe('Juan');
+    expect(parsed.lastName).toBe('DELA CRUZ');
+    expect(parsed.firstName).toBe('JUAN');
     expect(parsed.printedName).toBe('Juan Dela Cruz');
     // Digits are still never part of a name.
     expect(applicationHolderSchema.safeParse({ ...holderBase, firstName: 'Ju4n' }).success).toBe(

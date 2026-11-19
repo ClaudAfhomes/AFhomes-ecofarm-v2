@@ -38,6 +38,7 @@
   type CustomerSsotSection,
 } from '@afhomes/contracts';
 import { z } from 'zod';
+import { withSourceNames } from './customer-workbook.js';
 import { escapeCsvCell, toCsv, toXlsx, toXlsxMulti, type XlsxColumn } from './report-export.js';
 
 /* ------------------------------------------------------------------ */
@@ -834,7 +835,8 @@ export function validateImportRow(
             secondaryMobile ?? secondaryMobileRaw,
           ]
             .filter(Boolean)
-            .join(' Â· ') || null
+            // U+00B7 middle dot, escaped so a re-encode cannot corrupt it again.
+            .join(' · ') || null
         : null,
     // New VIP control / historical fields (mapping version 4)
     existingVipControlNumber: get('existing_vip_control_number') || null,
@@ -928,16 +930,20 @@ export function validateImportRow(
     };
   return {
     rowNumber,
-    fields: {
-      ...fields,
-      first_name: normalized.person.firstName ?? '',
-      middle_name: normalized.person.middleName ?? '',
-      last_name: normalized.person.lastName ?? '',
-      suffix: normalized.person.suffix ?? '',
-      email: normalized.person.email ?? '',
-      mobile: normalized.person.phone ?? '',
-      ...(secondaryMobile ? { secondary_mobile: secondaryMobile } : {}),
-    },
+    fields: withSourceNames(
+      fields,
+      {
+        ...fields,
+        first_name: normalized.person.firstName ?? '',
+        middle_name: normalized.person.middleName ?? '',
+        last_name: normalized.person.lastName ?? '',
+        suffix: normalized.person.suffix ?? '',
+        email: normalized.person.email ?? '',
+        mobile: normalized.person.phone ?? '',
+        ...(secondaryMobile ? { secondary_mobile: secondaryMobile } : {}),
+      },
+      ['first_name', 'middle_name', 'last_name'],
+    ),
     normalized,
     validation: warnings.length > 0 ? 'warning' : 'valid',
     errors,

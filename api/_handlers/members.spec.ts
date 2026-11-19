@@ -912,9 +912,9 @@ describe('PATCH /members/:id', () => {
       token: ADMIN_TOKEN,
     });
     expect(state.status).toBe(200);
-    expect((state.body as Record<string, unknown>).fullName).toBe('Renamed Seller');
+    expect((state.body as Record<string, unknown>).fullName).toBe('RENAMED SELLER');
     const db = holder.db as unknown as { rows: (table: string) => Row[] };
-    expect(db.rows('staff_users').find((s) => s.id === SM_ID)?.full_name).toBe('Renamed Seller');
+    expect(db.rows('staff_users').find((s) => s.id === SM_ID)?.full_name).toBe('RENAMED SELLER');
   });
 
   /** A synthetic hierarchy member with no profile: invisible to member lists. */

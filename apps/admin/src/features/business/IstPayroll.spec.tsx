@@ -11,6 +11,7 @@ const OTHER = '33333333-3333-4333-8333-333333333333';
 const BATCH = '44444444-4444-4444-8444-444444444444';
 const LINE = '55555555-5555-4555-8555-555555555555';
 const LINE2 = '66666666-6666-4666-8666-666666666666';
+const DISB = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 const perm = (moduleKey: string, canCreate: boolean, canUpdate: boolean) => ({
   moduleKey,
@@ -187,6 +188,14 @@ beforeEach(() => {
           inputs: { contractStart: '2026-01-01' },
           result: { daysInMonth: 31, ep: { days: 31 }, net: '1000.00' },
         });
+      if (url.includes('/evidence'))
+        return json(200, {
+          subjectType: 'payroll_disbursement',
+          subjectId: DISB,
+          status: 'EVIDENCE_EXCEPTION',
+          exceptionReview: null,
+          items: [],
+        });
       if (url.includes('/payroll/gate')) return json(200, gate);
       if (url.includes('/payroll/roster')) {
         const q = (new URL(url, 'http://x').searchParams.get('q') ?? '').toLowerCase();
@@ -324,7 +333,7 @@ describe('IST Payroll page', () => {
     expect(amount.readOnly).toBe(true);
     await userEvent.type(screen.getByLabelText('Bank reference'), 'REF-123');
     await userEvent.type(
-      screen.getByLabelText('Payment proof reference'),
+      screen.getByLabelText('Payment description'),
       'TEST ONLY payment evidence',
     );
     const dialogButtons = screen.getAllByRole('button', { name: 'Record disbursement' });
@@ -385,6 +394,53 @@ describe('IST Payroll page', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Close batch' }));
     expect(await screen.findByText('Live payroll is not authorized yet.')).toBeTruthy();
     expect(calls.some((c) => c.method === 'POST' && c.url.endsWith(`/${BATCH}/close`))).toBe(true);
+  });
+
+  it('live approved batch: a disbursement with no evidence is flagged, attachable and reviewable', async () => {
+    batches = [batch({ status: 'approved', submittedBy: OTHER })];
+    lines = [
+      line(LINE, {
+        disbursement: {
+          id: DISB,
+          lineId: LINE,
+          amount: '1000.00',
+          method: 'bank_transfer',
+          bankReference: 'BANK-1',
+          paidOn: '2026-10-28',
+          recordedBy: OTHER,
+          recordedAt: '2026-11-02T00:00:00Z',
+          proofReference: 'Paid by bank transfer',
+          evidenceChanged: false,
+          reconciled: false,
+          evidenceStatus: 'EVIDENCE_EXCEPTION',
+          postingPeriod: '2026-11',
+        },
+      }),
+    ];
+    const closer = userWith(
+      perm('finance.payroll', true, true),
+      perm('finance.payroll_close', false, true),
+    );
+    renderWithProviders(<IstPayrollPage />, { user: closer });
+    expect(await screen.findByText('No verifiable evidence')).toBeTruthy();
+    expect(screen.getByText('Note: Paid by bank transfer')).toBeTruthy();
+    expect(screen.getByText('Posted to 2026-11')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Review reconciliation' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    await userEvent.type(await screen.findByLabelText(/issued by/i), 'BDO');
+    await userEvent.type(screen.getByLabelText(/transaction reference/i), 'TXN-123456');
+    await userEvent.click(screen.getByRole('button', { name: 'Attach evidence' }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'POST' && c.url.endsWith(`/payroll/disbursements/${DISB}/evidence`))
+          ?.body,
+      ).toEqual({
+        evidenceType: 'external_transaction_reference',
+        transactionReference: 'TXN-123456',
+        transferAmount: '1000.00',
+        source: 'BDO',
+      }),
+    );
   });
 
   it('live approved batch: no Close without the close permission', async () => {

@@ -34,6 +34,8 @@ export const reconcileCommissionPayoutSchema = z.object({
       const d = new Date(`${v}T00:00:00Z`);
       return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
     }, 'Enter a real calendar date.'),
+  /** Required (server-checked) only when paidOn differs from the recorded payment date. */
+  dateCorrectionReason: z.string().trim().min(5).max(500).optional(),
 });
 export type ReconcileCommissionPayoutRequest = z.infer<typeof reconcileCommissionPayoutSchema>;
 
@@ -71,8 +73,13 @@ export const commissionPayoutSchema = z.object({
   recordedAt: z.string(),
   reconciledBy: z.string().uuid().nullable(),
   reconciledAt: z.string().nullable(),
+  /** SUPPORTED / EVIDENCE_EXCEPTION (20270105000023); absent on older payloads. */
+  evidenceStatus: z.enum(['SUPPORTED', 'EVIDENCE_EXCEPTION']).optional(),
+  evidenceExceptionReviewed: z.boolean().optional(),
+  /** Accounting month the payout posted to (Asia/Manila); derived from recordedAt for older rows. */
+  postingPeriod: z.string().nullable().optional(),
 });
-export type CommissionPayout = z.infer<typeof commissionPayoutSchema>;
+export type CommissionPayout =z.infer<typeof commissionPayoutSchema>;
 
 export const commissionRecoveryCaseSchema = z.object({
   id: z.string().uuid(),

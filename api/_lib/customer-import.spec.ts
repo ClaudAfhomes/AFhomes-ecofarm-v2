@@ -175,7 +175,9 @@ describe('canonical import birth dates and secondary contacts', () => {
       ctx(),
       TODAY,
     );
-    expect(row.fields.first_name).toBe('Claud');
+    expect(row.fields.first_name).toBe('CLAUD');
+    // The original text stays in the row as import evidence; email is never uppercased.
+    expect(JSON.parse(row.fields.source_names!)).toMatchObject({ first_name: 'claud' });
     expect(row.fields.email).toBe('claud@example.com');
   });
 });
@@ -633,7 +635,22 @@ describe('row validation', () => {
       TODAY,
     );
     expect(gold.errors).toEqual([]);
-    expect(gold.normalized?.secondaryNote).toContain('Rosa Cruz');
+    expect(gold.normalized?.secondaryNote).toContain('ROSA CRUZ');
+    // Parts are joined by a real middle dot, never the mis-encoded "Â·".
+    const withEmail = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Active VIP',
+        vip_tier: 'GOLD',
+        payment_amount: '312000.00',
+        secondary_first_name: 'Rosa',
+        secondary_last_name: 'Cruz',
+        secondary_email: 'rosa@example.com',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(withEmail.normalized?.secondaryNote).toBe('ROSA CRUZ · rosa@example.com');
     const silver = validateImportRow(
       2,
       baseFields({

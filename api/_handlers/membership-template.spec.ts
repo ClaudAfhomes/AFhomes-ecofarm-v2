@@ -455,9 +455,9 @@ describe('company membership template', () => {
     };
     const parsed = body.rows[0]!;
     // Split columns land on the established person fields.
-    expect(parsed.fields.first_name).toBe('Juan');
-    expect(parsed.fields.last_name).toBe('Cruz');
-    expect(parsed.fields.suffix).toBe('Jr.');
+    expect(parsed.fields.first_name).toBe('JUAN');
+    expect(parsed.fields.last_name).toBe('CRUZ');
+    expect(parsed.fields.suffix).toBe('JR.');
     expect(parsed.fields.address_line_1).toBe('1 QA Street');
     expect(parsed.fields.address_line_2).toBe('Brgy San Roque');
     expect(parsed.fields.city).toBe('Calauan');

@@ -68,9 +68,9 @@ describe('customer writes normalize server-side', () => {
     expect(state.status).toBe(201);
     const db = holder.db as FakeSupabase;
     const row = db.rows('customers').find((r) => r.email === 'claud@example.com')!;
-    expect(row.first_name).toBe('claud mars');
-    expect(row.middle_name).toBe('jimenez');
-    expect(row.last_name).toBe('dela cruz');
+    expect(row.first_name).toBe('CLAUD MARS');
+    expect(row.middle_name).toBe('JIMENEZ');
+    expect(row.last_name).toBe('DELA CRUZ');
     expect(row.email).toBe('claud@example.com');
     expect(row.phone).toBe('+639185550101');
     const address = row.address as Record<string, string>;
@@ -100,8 +100,8 @@ describe('other writers normalize through the same contracts', () => {
       birthDate: '1992-08-19',
       address: ADDRESS,
     });
-    expect(parsed.firstName).toBe('oscar');
-    expect(parsed.lastName).toBe('santos');
+    expect(parsed.firstName).toBe('OSCAR');
+    expect(parsed.lastName).toBe('SANTOS');
     expect(parsed.email).toBe('oscar@example.com');
     expect(parsed.phone).toBe('+639171234567');
     expect(parsed.address.city).toBe('QUEZON CITY');
@@ -167,12 +167,13 @@ describe('other writers normalize through the same contracts', () => {
     );
     const primary = (call?.arg as Record<string, Record<string, unknown>>).p_primary;
     expect(primary).toMatchObject({
-      // Names and street lines are Title Case now; the city/province names keep
-      // the authority's own casing and the upper-cased work fields keep theirs.
-      lastName: 'Jimenez',
-      firstName: 'Claud',
-      middleName: 'Mars',
-      suffix: 'Jr.',
+      // Name parts are stored UPPERCASE (owner decision 2026-11-19); street lines
+      // stay Title Case, city/province keep the authority's casing, and the
+      // printed signature name is display text, not a stored name part.
+      lastName: 'JIMENEZ',
+      firstName: 'CLAUD',
+      middleName: 'MARS',
+      suffix: 'JR.',
       sex: 'Male',
       civilStatus: 'Married',
       citizenship: 'Filipino',
@@ -189,7 +190,7 @@ describe('other writers normalize through the same contracts', () => {
     });
   });
 
-  it('import rows use Proper Case and preserve eleven-digit phones', () => {
+  it('import rows store UPPERCASE names and preserve eleven-digit phones', () => {
     const ctx = {
       membershipByNumber: new Map(),
       customerByNumber: new Map(),
@@ -209,8 +210,8 @@ describe('other writers normalize through the same contracts', () => {
       '2026-10-02',
     );
     expect(v.errors).toEqual([]);
-    expect(v.normalized?.person.firstName).toBe('Juan');
-    expect(v.normalized?.person.lastName).toBe('Dela Cruz');
+    expect(v.normalized?.person.firstName).toBe('JUAN');
+    expect(v.normalized?.person.lastName).toBe('DELA CRUZ');
     expect(v.normalized?.person.email).toBe('juan@example.com');
     expect(v.normalized?.person.phone).toBe('09185550101');
     const bad = validateImportRow(

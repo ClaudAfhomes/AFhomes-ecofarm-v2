@@ -10,8 +10,8 @@ it('treats an exact N/A application suffix as absent while preserving real suffi
   expect(applicationHolderSchema.shape.suffix.safeParse('1'.repeat(21)).success).toBe(false);
 });
 it('reads historical reservation names with the exact trailing N/A suffix without weakening name validation', () => {
-  expect(reservationHolderSchema.shape.name.parse('Ana Cruz n/a')).toBe('Ana Cruz');
-  expect(reservationHolderSchema.shape.name.parse('Ana Cruz Jr.')).toBe('Ana Cruz Jr.');
+  expect(reservationHolderSchema.shape.name.parse('Ana Cruz n/a')).toBe('ANA CRUZ');
+  expect(reservationHolderSchema.shape.name.parse('Ana Cruz Jr.')).toBe('ANA CRUZ JR.');
   for (const value of ['n/a', 'Ana 123', 'Ana bad/part', 'Ana n/a Cruz']) {
     expect(reservationHolderSchema.shape.name.safeParse(value).success).toBe(false);
   }

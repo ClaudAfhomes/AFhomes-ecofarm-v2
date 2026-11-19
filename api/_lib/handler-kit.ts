@@ -401,6 +401,18 @@ export function mapRpcError(
     PAYROLL_PROOF_CONFLICT: ['CONFLICT', 409],
     PAYROLL_RECONCILIATION_ALREADY_RECORDED: ['CONFLICT', 409],
     PAYROLL_RECONCILIATION_REQUIRED: ['CONFLICT', 409],
+    PAYROLL_EVIDENCE_EXCEPTION_UNRESOLVED: ['CONFLICT', 409],
+    PAYOUT_EVIDENCE_EXCEPTION_UNRESOLVED: ['CONFLICT', 409],
+    EXTERNAL_PAYMENT_NOT_FOUND: ['NOT_FOUND', 404],
+    EXTERNAL_PAYMENT_EVIDENCE_INVALID: ['VALIDATION_ERROR', 400],
+    EVIDENCE_EXCEPTION_NOTE_REQUIRED: ['VALIDATION_ERROR', 400],
+    EVIDENCE_EXCEPTION_ALREADY_REVIEWED: ['CONFLICT', 409],
+    EVIDENCE_EXCEPTION_NOT_NEEDED: ['CONFLICT', 409],
+    EVIDENCE_TRANSFER_AMOUNT_REQUIRED: ['VALIDATION_ERROR', 400],
+    EVIDENCE_REFERENCE_AMOUNT_MISMATCH: ['CONFLICT', 409],
+    EVIDENCE_OR_OTHER_PAYEE: ['CONFLICT', 409],
+    EVIDENCE_REFERENCE_OVERALLOCATED: ['CONFLICT', 409],
+    PAYMENT_DATE_CORRECTION_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
     FINANCIAL_EVIDENCE_BUSY: ['CONFLICT', 409],
     PAYROLL_BATCH_NOT_FOUND: ['NOT_FOUND', 404],
     PAYROLL_BATCH_NOT_EDITABLE: ['CONFLICT', 409],
@@ -592,6 +604,25 @@ export function mapRpcError(
     PAYROLL_PROOF_CONFLICT: 'This external payment already carries a different proof reference.',
     PAYROLL_RECONCILIATION_ALREADY_RECORDED: 'This external payment already has a recorded reconciliation review.',
     PAYROLL_RECONCILIATION_REQUIRED: 'Review the changed evidence on the recorded external payment before closing this payroll batch.',
+    PAYROLL_EVIDENCE_EXCEPTION_UNRESOLVED:
+      'An external payment in this batch has no verifiable evidence. Attach a document, transaction reference or OR number, or record a reconciliation review, before closing.',
+    PAYOUT_EVIDENCE_EXCEPTION_UNRESOLVED:
+      'This payout has no verifiable evidence. Attach a document, transaction reference or OR number, or record an exception review, before reconciling.',
+    EXTERNAL_PAYMENT_NOT_FOUND: 'That external payment was not found.',
+    EXTERNAL_PAYMENT_EVIDENCE_INVALID:
+      'Evidence needs a source and exactly one of: an uploaded document, or a transaction reference / OR number with its transfer amount. A description alone is not evidence.',
+    EVIDENCE_EXCEPTION_NOTE_REQUIRED: 'Explain why no evidence exists, in at least 10 characters.',
+    EVIDENCE_EXCEPTION_ALREADY_REVIEWED: 'This payout already has a recorded exception review.',
+    EVIDENCE_EXCEPTION_NOT_NEEDED: 'This payout already has evidence; no exception review is needed.',
+    EVIDENCE_TRANSFER_AMOUNT_REQUIRED:
+      'Enter the transfer amount shown on the bank statement or OR (more than zero).',
+    EVIDENCE_REFERENCE_AMOUNT_MISMATCH:
+      'This reference is already on file with a different transfer amount. Check the statement or OR.',
+    EVIDENCE_OR_OTHER_PAYEE: 'This OR number is already on file for a different payee.',
+    EVIDENCE_REFERENCE_OVERALLOCATED:
+      'The payments linked to this reference would exceed its transfer amount.',
+    PAYMENT_DATE_CORRECTION_REASON_REQUIRED:
+      'This changes a recorded payment date. Give the reason for the correction (at least 5 characters).',
     PAYROLL_BATCH_NOT_FOUND: 'Payroll batch not found.',
     PAYROLL_BATCH_NOT_EDITABLE: 'Only a draft or returned payroll batch can be changed.',
     PAYROLL_BATCH_EMPTY: 'This payroll batch has no lines.',

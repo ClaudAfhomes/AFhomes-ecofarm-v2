@@ -1676,8 +1676,22 @@ async function main(): Promise<void> {
           details(p1, { orNumber: 'OR-X' }, staff['hr']!),
         );
         check('  -> MUTATION_FORBIDDEN', noGrant.includes('MUTATION_FORBIDDEN'), line(noGrant));
+        // Q15(b): a recorded actual payment date is a fact; changing it is an audited correction.
+        const noReason = await throwsIsolated('changing a recorded payment date without a reason is refused', () =>
+          details(p1, { paidOn: '2026-01-14' }),
+        );
+        check('  -> PAYMENT_DATE_CORRECTION_REASON_REQUIRED', noReason.includes('PAYMENT_DATE_CORRECTION_REASON_REQUIRED'), line(noReason));
+        await details(p1, { paidOn: '2026-01-14', paidOnCorrectionReason: 'Bank slip shows the 14th' });
+        const corrected = await one<{ d: string; old: string | null; n: number }>(
+          `select (select paid_on::text from public.payments where id=$1::text::uuid) d,
+                  max(before_data->>'paidOn') old, count(*)::int n
+             from public.audit_events where action='PAYMENT_DATE_CORRECTED' and entity_id=$1::text`,
+          [p1],
+        );
+        eq('  with a reason it is corrected and audited with the old date', `${corrected.d}/${corrected.old}/${corrected.n}`, '2026-01-14/2026-01-15/1');
+        await details(p1, { paidOn: '2026-01-15', paidOnCorrectionReason: 'Restored after the slip check' });
 
-        const p2 = await record(saleA, '1000.00', `REF-${RUN}-A2`);
+        const p2 =await record(saleA, '1000.00', `REF-${RUN}-A2`);
         const dupOr = await throwsIsolated('the same OR number twice on one contract is refused', () =>
           details(p2, { orNumber: 'or 1005' }),
         );
@@ -2042,7 +2056,7 @@ async function main(): Promise<void> {
           check(`  -> ${code}`, message.includes(code), line(message));
         };
         let seq83 = 0;
-        const mkComm = async (amount: string, status = 'earned', extraSql = '') => {
+        const mkComm = async (amount: string, status = 'earned', extraSql = '', beneficiary = staff['ost']!) => {
           const tag = `c${seq83++}`;
           const saleId = await mkSale(
             `fin83-${tag}`,
@@ -2057,7 +2071,7 @@ async function main(): Promise<void> {
                   basis_amount_snapshot, status, earned_at ${extraSql ? ', ' + extraSql.split('=')[0] : ''})
                values ($1,'staff',$2,$3,$4,$5,$6,now() ${extraSql ? ', ' + extraSql.split('=')[1] : ''})
                returning id`,
-              [saleId, staff['ost']!, amount, gold.commission_rate, gold.cash_price, status],
+              [saleId, beneficiary, amount, gold.commission_rate, gold.cash_price, status],
             )
           ).id;
         };
@@ -2494,7 +2508,124 @@ async function main(): Promise<void> {
         await refusal('a future payment date is refused', 'PAYMENT_DATE_INVALID', () =>
           reconcile(livePayout, null, '2999-01-01'),
         );
-        await reconcile(livePayout, null, '2020-01-10');
+        // Q15(b): the recorded paid date is "today"; confirming another date is a correction.
+        await refusal('changing the recorded paid date needs a written reason', 'PAYMENT_DATE_CORRECTION_REASON_REQUIRED', () =>
+          reconcile(livePayout, null, '2020-01-10'),
+        );
+        const why83 = 'Bank statement shows the cheque cleared on 10 January';
+        const reconcileWhy = (id: string, on: string, why: string | null) =>
+          db.query('select public.reconcile_commission_payout($1,$2,$3,$4,$5)', [id, boss, null, on, why]);
+        await refusal('  a reason under 5 characters is refused', 'PAYMENT_DATE_CORRECTION_REASON_REQUIRED', () =>
+          reconcileWhy(livePayout, '2020-01-10', 'oops'),
+        );
+        // Q15(e): the free-text paid_evidence_reference is a description, not proof.
+        await refusal('a payout with no verifiable evidence cannot be reconciled', 'PAYOUT_EVIDENCE_EXCEPTION_UNRESOLVED', () =>
+          reconcileWhy(livePayout, '2020-01-10', why83),
+        );
+        const evidence = (type: string, id: string, ev: Record<string, unknown>, actor = boss) =>
+          one<{ id: string }>('select public.record_external_payment_evidence($1,$2,$3::jsonb,$4) id', [
+            type, id, JSON.stringify(ev), actor,
+          ]);
+        await refusal('a typed description alone is not evidence', 'EXTERNAL_PAYMENT_EVIDENCE_INVALID', () =>
+          evidence('commission_payout', livePayout, { evidenceType: 'external_transaction_reference', source: 'BDO statement', description: 'Paid by cheque' }),
+        );
+        await refusal('  a transaction reference cannot also carry an OR number', 'EXTERNAL_PAYMENT_EVIDENCE_INVALID', () =>
+          evidence('commission_payout', livePayout, { evidenceType: 'external_transaction_reference', source: 'BDO statement', transactionReference: 'CHQ-0083', orNumber: 'OR-1' }),
+        );
+        await refusal('  a document path outside this payout is refused', 'EXTERNAL_PAYMENT_EVIDENCE_INVALID', () =>
+          evidence('commission_payout', livePayout, { evidenceType: 'uploaded_document', source: 'Scanned cheque', storagePath: `external/commission_payout/${failedId}/x.pdf` }),
+        );
+        await refusal('  an uploaded document must exist in private storage', 'RECEIPT_STORAGE_OBJECT_NOT_FOUND', () =>
+          evidence('commission_payout', livePayout, { evidenceType: 'uploaded_document', source: 'Scanned cheque', storagePath: `external/commission_payout/${livePayout}/missing.pdf` }),
+        );
+        await refusal('  a user without payout update cannot attach evidence', 'MUTATION_FORBIDDEN', () =>
+          evidence('commission_payout', livePayout, { evidenceType: 'official_receipt', source: 'Payee OR', orNumber: 'OR-83' }, staff['sm']),
+        );
+        await refusal('  evidence for an unknown payout is refused', 'EXTERNAL_PAYMENT_NOT_FOUND', () =>
+          evidence('commission_payout', failedId, { evidenceType: 'official_receipt', source: 'Payee OR', orNumber: 'OR-83' }),
+        );
+        const ev1 = await evidence('commission_payout', livePayout, { evidenceType: 'external_transaction_reference', source: 'BDO statement', transactionReference: 'chq 0083', transferAmount: '2400.00' });
+        const ev2 = await evidence('commission_payout', livePayout, { evidenceType: 'external_transaction_reference', source: 'BDO statement', transactionReference: 'CHQ-0083', transferAmount: '2400.00' });
+        eq('recording the same reference again replays the same evidence row', ev2.id, ev1.id);
+        // Q15(e) decision: one reference may support several payments, capped by its transfer
+        // amount; an OR number belongs to one payee.
+        const paidPayout = async (amount: string, ref: string, beneficiary = staff['ost']!) => {
+          const c = await mkComm(amount, 'earned', '', beneficiary);
+          await pay(c, ref);
+          return (await one<{ id: string }>(`select id from public.commission_payouts where commission_id=$1 and status='paid'`, [c])).id;
+        };
+        const pA = await paidPayout('100.00', `SHR-${RUN}-A`);
+        const pB = await paidPayout('200.00', `SHR-${RUN}-B`);
+        const pC = await paidPayout('10.00', `SHR-${RUN}-C`);
+        const pOther = await paidPayout('50.00', `SHR-${RUN}-D`, staff['sm']!);
+        const bulk = `BULK-${RUN}-83`;
+        const txn = (id: string, ref: string, amount?: string) =>
+          evidence('commission_payout', id, { evidenceType: 'external_transaction_reference', source: 'BDO bulk transfer', transactionReference: ref, ...(amount ? { transferAmount: amount } : {}) });
+        const orEv = (id: string, or: string, amount: string) =>
+          evidence('commission_payout', id, { evidenceType: 'official_receipt', source: 'Payee OR', orNumber: or, transferAmount: amount });
+        await refusal('a reference without its transfer amount is refused', 'EVIDENCE_TRANSFER_AMOUNT_REQUIRED', () => txn(pA, bulk));
+        await refusal('  a zero transfer amount is refused', 'EVIDENCE_TRANSFER_AMOUNT_REQUIRED', () => txn(pA, bulk, '0.00'));
+        await refusal('a transfer smaller than the payment cannot support it', 'EVIDENCE_REFERENCE_OVERALLOCATED', () => txn(pA, bulk, '50.00'));
+        await txn(pA, bulk, '300.00');
+        await txn(pB, bulk, '300.00');
+        eq('one bulk transfer supports several payments within its amount',
+          (await one<{ s: string }>(`select private.external_payment_evidence_status('commission_payout',$1)||'/'||private.external_payment_evidence_status('commission_payout',$2) s`, [pA, pB])).s,
+          'SUPPORTED/SUPPORTED');
+        await refusal('a reference cannot support more than its transfer amount', 'EVIDENCE_REFERENCE_OVERALLOCATED', () => txn(pC, bulk, '300.00'));
+        await refusal('  every use of a reference states the same transfer amount', 'EVIDENCE_REFERENCE_AMOUNT_MISMATCH', () => txn(pC, bulk, '400.00'));
+        eq('  the refused payment stays an evidence exception',
+          (await one<{ s: string }>(`select private.external_payment_evidence_status('commission_payout',$1) s`, [pC])).s, 'EVIDENCE_EXCEPTION');
+        const multi = `MULTI-${RUN}-83`;
+        await txn(pC, multi, '1000.00');
+        await txn(pOther, multi, '1000.00');
+        check('a transaction reference may span payees (bulk transfer)', true);
+        const sharedOr = `OR-${RUN}-83-S`;
+        await orEv(pA, sharedOr, '300.00');
+        await orEv(pB, sharedOr, '300.00');
+        await refusal('an OR number cannot support a different payee', 'EVIDENCE_OR_OTHER_PAYEE', () => orEv(pOther, sharedOr, '300.00'));
+        await refusal('  a replay stating a different transfer amount is refused', 'EVIDENCE_REFERENCE_AMOUNT_MISMATCH', () => orEv(pA, sharedOr, '999.00'));
+        const pD = await paidPayout('100.00', `SHR-${RUN}-E`);
+        const pE = await paidPayout('100.00', `SHR-${RUN}-F`);
+        const switched = `SW-${RUN}-83`;
+        await txn(pD, switched, '100.00');
+        await refusal('retyping a bank reference as an OR does not open a second cap', 'EVIDENCE_REFERENCE_OVERALLOCATED', () => orEv(pE, switched, '100.00'));
+        eq('  the stored transfer amount is canonical exact-decimal text',
+          (await one<{ a: string }>(`select transfer_amount a from public.external_payment_evidence where subject_id=$1 and or_number=$2`, [pA, sharedOr])).a,
+          '300.00');
+        await refusal('evidence history is immutable', 'FINANCIAL_HISTORY_PROTECTED', () =>
+          db.query(`update public.external_payment_evidence set source='Edited' where id=$1`, [ev1.id]),
+        );
+        await refusal('  an exception review is not needed once evidence exists', 'EVIDENCE_EXCEPTION_NOT_NEEDED', () =>
+          db.query('select public.review_commission_payout_evidence_exception($1,$2,$3)', [livePayout, 'No document on file', boss]),
+        );
+        await reconcileWhy(livePayout, '2020-01-10', why83);
+        const corr = await one<{ n: number; old: string | null; why: string | null }>(
+          `select count(*)::int n, max(before_data->>'paidOn') old, max(reason) why
+             from public.audit_events where action='COMMISSION_PAYOUT_RECONCILED' and entity_id=$1`,
+          [livePayout],
+        );
+        check('the date correction is audited with the old date and the reason', corr.n === 1 && corr.old !== null && corr.old !== '2020-01-10' && corr.why === why83, JSON.stringify(corr));
+        // An explained exception: a second payout with no attachable evidence.
+        const cExc = await mkComm('10.00');
+        await pay(cExc, 'EXC-83-REF');
+        const exc = (await one<{ id: string }>(`select id from public.commission_payouts where commission_id=$1 and status='paid'`, [cExc])).id;
+        await refusal('an exception review needs a real note', 'EVIDENCE_EXCEPTION_NOTE_REQUIRED', () =>
+          db.query('select public.review_commission_payout_evidence_exception($1,$2,$3)', [exc, 'none', boss]),
+        );
+        await db.query('select public.review_commission_payout_evidence_exception($1,$2,$3)', [exc, 'Paid in cash at the branch; payee gave no receipt', boss]);
+        await refusal('  a different second review is refused', 'EVIDENCE_EXCEPTION_ALREADY_REVIEWED', () =>
+          db.query('select public.review_commission_payout_evidence_exception($1,$2,$3)', [exc, 'Another explanation entirely', boss]),
+        );
+        await db.query(
+          'select public.reconcile_commission_payout($1,$2,null,(select paid_on from public.commission_payouts where id=$1))',
+          [exc, boss],
+        );
+        const excRow = await one<{ s: string; e: string }>(
+          `select status s, private.external_payment_evidence_status('commission_payout', id) e
+             from public.commission_payouts where id=$1`,
+          [exc],
+        );
+        eq('a reviewed exception reconciles and stays visible as an exception', excRow.s + '/' + excRow.e, 'reconciled/EVIDENCE_EXCEPTION');
         const rec = await one<{ s: string; d: string; by: string }>(
           'select status s, paid_on::text d, reconciled_by::text by from public.commission_payouts where id=$1',
           [livePayout],
@@ -2633,6 +2764,12 @@ async function main(): Promise<void> {
         );
         check('service_role reaches live disbursement only through the proof-bearing RPC',
           !payrollProofAcl.legacy && payrollProofAcl.proved && !payrollProofAcl.writes, JSON.stringify(payrollProofAcl));
+        const payoutWrites = await one<{ writes: boolean }>(
+          `select exists(select 1 from unnest(array['INSERT','UPDATE','DELETE','TRUNCATE']) p
+             where has_table_privilege('service_role','public.commission_payouts',p)) writes`,
+        );
+        check('Q15(b): service_role cannot write payouts directly (date corrections only via audited reconcile)',
+          !payoutWrites.writes);
       } catch (error) {
         check('section 83 completed', false, safeErrorMessage(error));
       } finally {
@@ -3578,10 +3715,33 @@ async function main(): Promise<void> {
         await refusal('a live batch cannot be closed before its payable lines are disbursed', 'PAYROLL_BATCH_NOT_FULLY_DISBURSED', () =>
           close(live),
         );
-        check(
-          'a simulated bank reference never blocks a live disbursement with the same reference',
-          !!(await livePay(liveLine, '1750.50', simRef, today)),
+        const liveDisb = await livePay(liveLine, '1750.50', simRef, today);
+        check('a simulated bank reference never blocks a live disbursement with the same reference', !!liveDisb);
+        const stamped = await one<{ p: string | null; m: string }>(
+          `select posting_period p, to_char((now() at time zone 'Asia/Manila')::date,'YYYY-MM') m
+             from public.payroll_disbursements where id=$1`,
+          [liveDisb],
         );
+        check('Q15(b): a live disbursement is stamped with an open Manila posting period', !!stamped.p && stamped.p >= stamped.m, JSON.stringify(stamped));
+        // Q15(e): the free-text proof reference is a description; close needs evidence or a review.
+        await refusal('a live batch whose disbursement has no evidence cannot be closed', 'PAYROLL_EVIDENCE_EXCEPTION_UNRESOLVED', () =>
+          close(live),
+        );
+        eq('  it stays approved', await statusOf(live), 'approved');
+        await refusal('  evidence cannot be attached to a simulated (non-live) payout', 'EXTERNAL_PAYMENT_NOT_FOUND', () =>
+          db.query('select public.record_external_payment_evidence($1,$2,$3::jsonb,$4)', [
+            'payroll_disbursement',
+            simPaid,
+            JSON.stringify({ evidenceType: 'official_receipt', source: 'Rehearsal', orNumber: `OR-${RUN}-SIM` }),
+            finance,
+          ]),
+        );
+        await db.query('select public.record_external_payment_evidence($1,$2,$3::jsonb,$4)', [
+          'payroll_disbursement',
+          liveDisb,
+          JSON.stringify({ evidenceType: 'external_transaction_reference', source: 'Payroll bank statement', transactionReference: simRef, transferAmount: '1000000.00' }),
+          finance,
+        ]);
         eq(
           '  and the simulated row is untouched',
           (await one<{ n: number }>('select count(*)::int n from public.payroll_simulation_disbursements where id=$1', [simPaid])).n,
@@ -3765,6 +3925,15 @@ async function main(): Promise<void> {
         );
         await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
         await refusal('  an unreconciled payout alone still refuses submission', 'PERIOD_HAS_BLOCKERS', () => submit());
+        await refusal('  a payout without evidence still cannot be reconciled', 'PAYOUT_EVIDENCE_EXCEPTION_UNRESOLVED', () =>
+          db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [payout, boss, null, '2019-03-25']),
+        );
+        await db.query('select public.record_external_payment_evidence($1,$2,$3::jsonb,$4)', [
+          'commission_payout',
+          payout,
+          JSON.stringify({ evidenceType: 'official_receipt', source: 'Payee acknowledgement receipt', orNumber: `OR-${RUN}-86`, transferAmount: '1000000.00' }),
+          boss,
+        ]);
         await db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [payout, boss, null, '2019-03-25']);
         const r2 = await readiness();
         check('with every blocker cleared the month is ready', r2.ready && r2.blockers.length === 0, JSON.stringify(r2));
@@ -4953,27 +5122,13 @@ async function main(): Promise<void> {
           0,
         );
         const d0 = await perf('2022-03');
-        check(
-          'default: the IST roster is listed and every member is BLOCKED with zero money',
-          d0.staff.length >= 3 &&
-            [sm, smAlt, ssm].every((id) => d0.staff.some((x) => x.staffId === id)) &&
-            d0.staff.every(
-              (x) =>
-                x.status === 'BLOCKED' &&
-                x.kpi === '0.00' &&
-                x.collection === '0.00' &&
-                x.verifiedCash === '0.00' &&
-                x.assumedCredit === '0.00' &&
-                x.blockers.includes('RULE_NOT_APPROVED') &&
-                x.blockers.includes('MISSING_ENGAGEMENT') &&
-                x.contractStart === null &&
-                x.ruleId === null &&
-                x.engagementId === null,
-            ),
-          JSON.stringify(d0.staff.slice(0, 2)),
+        // Q15(d): payroll eligibility is the approved IST engagement, never the RBAC role.
+        eq(
+          'default: with no approved engagement nobody is on the payroll roster, whatever their role',
+          d0.staff.map((x) => x.staffId).join(','),
+          '',
         );
         eq('  with the reason stated once for the month', `${d0.ruleBlocker}/${d0.ruleId}`, 'RULE_NOT_APPROVED/null');
-        eq('  ranks follow the role (vice_director -> SVD mapping preserved)', d0.staff.find((x) => x.staffId === ssm)!.rank, 'SSM');
         await refusal('a Sales Manager cannot read IST performance', 'MUTATION_FORBIDDEN', () => perf('2022-03', sm));
         await refusal('  nor the evidence drill-down', 'MUTATION_FORBIDDEN', () => evidence('2022-03', sm, sm));
         await refusal('performance needs a valid period', 'PERIOD_INVALID', () => perf('2022-13'));
@@ -5090,32 +5245,13 @@ async function main(): Promise<void> {
         ]);
         await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', false);
 
-        // A proposal is not money: it never changes the evidence hash. An approved adjustment does.
-        await db.query('savepoint f89_hash');
-        try {
-          const hashNow = async () =>
-            (await one<{ h: string | null }>(
-              `select private.ist_period_performance_rows('2022-04', $1) -> 0 ->> 'evidenceHash' as h`, [sm])).h;
-          const h0 = await hashNow();
-          const extra = await propose(a2, 'refund', '50.00'); // a2 counts in 2022-04 and has no open proposal
-          check('a proposed adjustment leaves the evidence hash unchanged', !!h0 && (await hashNow()) === h0);
-          await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', true);
-          await db.query('select public.resolve_payment_adjustment($1,$2,$3,$4)', [extra, 'approved', 'TEST FIXTURE approval of a refund', boss]);
-          check('  an approved adjustment changes it', !!h0 && (await hashNow()) !== h0);
-        } catch (error) {
-          check('evidence hash adjustment checks completed', false, safeErrorMessage(error));
-        } finally {
-          await db.query('rollback to savepoint f89_hash');
-        }
-
         const noRule = await evidence('2022-03', sm);
         eq(
           'with no approved rule the verified payment is listed but UNDETERMINED (RULE_NOT_APPROVED)',
           noRule.items.map((i) => `${i.paymentId}/${i.amount}/${i.evidenceClass}/${i.eligibility}/${i.reasonCode}`).join(';'),
           `${a1}/${A1}/VERIFIED_CASH/UNDETERMINED/RULE_NOT_APPROVED`,
         );
-        eq('  and the member stays BLOCKED with zero money', brief(noRule.summary!), 'BLOCKED/0.00/0.00/0.00/0.00/MISSING_ENGAGEMENT,RULE_NOT_APPROVED');
-        eq('  the evidence is counted', noRule.summary!.evidenceCount, 1);
+        eq('  and a seller with no approved engagement has no payroll summary at all', noRule.summary, null);
 
         // --- engagements: RBAC, validation, idempotency, no direct write ---------------------
         const saveE = async (id: string | null, f: Record<string, unknown>, actor = finance, key: string | null = null) =>
@@ -5271,6 +5407,29 @@ async function main(): Promise<void> {
             )
           ).ok,
         );
+        // Q15(d): the approved engagement, not the role, puts the member on the roster.
+        eq(
+          'an approved engagement puts the member on the roster at the engagement rank',
+          (await perf('2022-03')).staff.map((x) => `${x.staffId === sm ? 'sm' : x.staffId}/${x.rank}/${x.engagementId === e1}`).join(','),
+          'sm/SM/true',
+        );
+        // A proposal is not money: it never changes the evidence hash. An approved adjustment does.
+        await db.query('savepoint f89_hash');
+        try {
+          const hashNow = async () =>
+            (await one<{ h: string | null }>(
+              `select private.ist_period_performance_rows('2022-04', $1) -> 0 ->> 'evidenceHash' as h`, [sm])).h;
+          const h0 = await hashNow();
+          const extra = await propose(a2, 'refund', '50.00'); // a2 counts in 2022-04 and has no open proposal
+          check('a proposed adjustment leaves the evidence hash unchanged', !!h0 && (await hashNow()) === h0);
+          await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', true);
+          await db.query('select public.resolve_payment_adjustment($1,$2,$3,$4)', [extra, 'approved', 'TEST FIXTURE approval of a refund', boss]);
+          check('  an approved adjustment changes it', !!h0 && (await hashNow()) !== h0);
+        } catch (error) {
+          check('evidence hash adjustment checks completed', false, safeErrorMessage(error));
+        } finally {
+          await db.query('rollback to savepoint f89_hash');
+        }
         // The drafter can never approve; the starting day of this one is a window boundary below.
         const e2 = await saveE(null, eFields({ staffId: smAlt, contractStart: '2022-03-15', evidenceReference: 'TEST-FIXTURE-CONTRACT-ALT-001' }), boss);
         await submitE(e2);
@@ -5426,6 +5585,28 @@ async function main(): Promise<void> {
             `${janEv.isClosingPayment}/${jan.status}/${jan.kpi}|${feb.status}/${feb.kpi}`,
             `true/CALCULABLE/${price}|CALCULABLE/0.00`,
           );
+          // Q15(b): a backdated paid_on into a month whose live payroll was approved BEFORE the
+          // payment was verified never rewrites that month; only this seller's later line is flagged.
+          // TEST FIXTURE ONLY: the January live batch is forced to approved through the write flag.
+          const janBatch = (await one<{ id: string }>('select public.create_payroll_batch($1,$2) id', ['2023-01', finance])).id;
+          await db.query(`select set_config('afhomes.payroll_write','on',true)`);
+          await db.query(
+            `update public.payroll_batches set status='submitted', submitted_by=$2, submitted_at='2023-01-31T08:00:00Z' where id=$1`,
+            [janBatch, finance],
+          );
+          await db.query(
+            `update public.payroll_batches set status='approved', decided_by=$2, decided_at='2023-02-01T08:00:00Z' where id=$1`,
+            [janBatch, boss],
+          );
+          await db.query(`select set_config('afhomes.payroll_write','off',true)`);
+          const janLate = (await evidence('2023-01', ssm)).items.find((i) => i.paymentId === c1)!;
+          const febLate = (await evidence('2023-02', ssm)).items.find((i) => i.paymentId === c1)!;
+          const febLine = await perfOf('2023-02', ssm);
+          eq(
+            'a payment verified after its paid_on month was finalized: INELIGIBLE there, UNDETERMINED (flagged) in its posting month',
+            `${janLate.eligibility}/${janLate.reasonCode}|${febLate.eligibility}/${febLate.reasonCode}|${febLine.status}/${febLine.collection}`,
+            'INELIGIBLE/PAID_ON_IN_FINALIZED_PAYROLL|UNDETERMINED/PAID_ON_IN_FINALIZED_PAYROLL|BLOCKED/0.00',
+          );
         });
         eq(
           'the variants left nothing behind: no rule is approved',
@@ -5550,9 +5731,10 @@ async function main(): Promise<void> {
           JSON.stringify(march.staff.map((x) => x.verifiedCash)),
         );
         eq('a member with an engagement and no evidence is calculable at zero', `${brief(march.staff.find((x) => x.staffId === ssm)!)}`, 'CALCULABLE/0.00/0.00/0.00/0.00/');
-        check(
-          'a member with no approved engagement stays BLOCKED (MISSING_ENGAGEMENT)',
-          march.staff.filter((x) => ![sm, smAlt, ssm].includes(x.staffId)).every((x) => x.status === 'BLOCKED' && x.blockers.join() === 'MISSING_ENGAGEMENT'),
+        eq(
+          'only members with an approved engagement in the month are on the roster (role holders without one are not)',
+          march.staff.filter((x) => ![sm, smAlt, ssm].includes(x.staffId)).length,
+          0,
         );
         const smApr = await perfOf('2022-04', sm);
         eq('SM April: the payment that reaches 25% closes the deal - KPI = the contract price snapshot', brief(smApr), `CALCULABLE/${price}/1000.00/1000.00/0.00/`);
@@ -5599,9 +5781,9 @@ async function main(): Promise<void> {
         eq('the last contract day is still inside the window', `${brief(smApr3)}|${smApr3.contractEnd}`, `CALCULABLE/${price}/1000.00/1000.00/0.00/|2022-04-05`);
         const mayEv = await evidence('2022-05', sm);
         eq(
-          'a payment after the contract end is UNDETERMINED and blocks payroll',
-          `${mayEv.items.map((i) => `${i.eligibility}/${i.reasonCode}`).join(';')}|${brief(mayEv.summary!)}`,
-          'UNDETERMINED/OUTSIDE_ENGAGEMENT_WINDOW|BLOCKED/0.00/0.00/0.00/0.00/MISSING_ENGAGEMENT,OUTSIDE_ENGAGEMENT_WINDOW',
+          'a payment after the contract end is UNDETERMINED and the member has no payroll line that month',
+          `${mayEv.items.map((i) => `${i.eligibility}/${i.reasonCode}`).join(';')}|${mayEv.summary}`,
+          'UNDETERMINED/OUTSIDE_ENGAGEMENT_WINDOW|null',
         );
         check(
           'the evidence hash covers the engagement dates: setting the end date changed the April hash',
@@ -5727,9 +5909,19 @@ async function main(): Promise<void> {
         await db.query('savepoint f89_off_roster');
         const offBefore = (await perf('2022-10')).offRoster;
         await db.query(`update public.staff_users set status='inactive' where id=$1`, [ssm]);
+        const ssmInactive = await perfOf('2022-10', ssm);
+        eq(
+          'Q15(d): a later deactivation never removes a member from a month their approved engagement covers',
+          `${ssmInactive?.rank}/${ssmInactive?.collection}/${(await perf('2022-10')).offRoster.count}`,
+          `SSM/600.00/${offBefore.count}`,
+        );
+        // A seller with no approved engagement for the month (vd, before eVd below): off roster.
+        const sOff = await mkSale89('off', staff['vice-director']!);
+        await pay89(sOff, '450.00', 'OFF', '2022-10', '2022-10-20');
         const offAfter = (await perf('2022-10')).offRoster;
-        eq('verified payments of an off-roster seller remain visible', `${offAfter.count}/${offAfter.total}`,
-          `${offBefore.count + 1}/${await money('$1::numeric + 600', [offBefore.total])}`);
+        eq('verified payments of a seller with no approved engagement stay visible as off-roster', `${offAfter.count}/${offAfter.total}`,
+          `${offBefore.count + 1}/${await money('$1::numeric + 450', [offBefore.total])}`);
+        check('  and that seller has no payroll line', (await perf('2022-10')).staff.every((x) => x.staffId !== staff['vice-director']));
         await db.query('rollback to savepoint f89_off_roster');
 
         // --- engagement rank, imported sales, payments with no staff seller ---------------------
@@ -5742,10 +5934,14 @@ async function main(): Promise<void> {
         await approveE(eVd);
         const vdOct = await perfOf('2022-10', vd);
         eq(
-          'an engagement whose rank differs from the role blocks the member (ENGAGEMENT_RANK_MISMATCH)',
+          'Q15(d): the engagement rank governs the month, not the current RBAC role (vice_director -> SM engagement)',
           `${vdOct.rank}/${brief(vdOct)}`,
-          'SVD/BLOCKED/0.00/0.00/0.00/0.00/ENGAGEMENT_RANK_MISMATCH',
+          'SM/CALCULABLE/0.00/0.00/0.00/0.00/',
         );
+        await db.query('savepoint f89_role_change');
+        await db.query(`update public.staff_role_assignments set role_id=(select id from public.roles where slug='sales_manager') where staff_id=$1`, [vd]);
+        eq('  an RBAC role change neither moves nor rewrites the engagement month', `${(await perfOf('2022-10', vd)).rank}/${(await perfOf('2022-10', vd)).evidenceHash === vdOct.evidenceHash}`, 'SM/true');
+        await db.query('rollback to savepoint f89_role_change');
         const sImp = await mkSale89('imp', sm, 'legacy_import');
         const pImp = await pay89(sImp, '700.00', 'IMP', '2022-10', '2022-10-12');
         const impEv = await evidence('2022-10', sm);
@@ -5981,8 +6177,8 @@ async function main(): Promise<void> {
             await pay89(s1, '1.00', `H1-${action}`, '2023-03', '2023-03-10');
             await call();
           });
-          await refusal(`${action} refuses a line whose member left the roster`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
-            await db.query(`update public.staff_users set status='inactive' where id=$1`, [sm]);
+          await refusal(`${action} refuses a line whose member left the roster (engagement no longer covers the month)`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await endE(e4, '2023-02-28', null);
             await call();
           });
           await refusal(`${action} refuses after the engagement is suspended inside the month`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
@@ -6052,6 +6248,11 @@ async function main(): Promise<void> {
         const eFwd = await saveE(null, eFields({ staffId: vd, rank: 'SVD', contractStart: '2023-04-01', evidenceReference: 'TEST-FIXTURE-CONTRACT-VD-003' }));
         await submitE(eFwd);
         eq('an engagement starting the day after the finalized month is approved', await approveE(eFwd), 'approved');
+        eq(
+          'Q15(d): a historical rank change keeps each month on its own engagement rank (SM in 2022-10, SVD in 2023-04)',
+          `${(await perfOf('2022-10', vd)).rank}/${(await perfOf('2023-04', vd)).rank}`,
+          'SM/SVD',
+        );
         // Who ended an engagement, when and why is recorded once (0009 guard + RPC).
         await refusal('the recorded end note of an ended engagement cannot be rewritten', 'IST_ENGAGEMENT_IMMUTABLE', async () => {
           await flagOn();

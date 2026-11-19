@@ -90,9 +90,9 @@ describe('submit normalization', () => {
   it('normalizes staff identity and profile names', () => {
     expect(normalizeStaffIdentity({ email: '  New@Example.COM ', fullName: 'new hire' })).toEqual({
       email: 'new@example.com',
-      fullName: 'new hire',
+      fullName: 'NEW HIRE',
     });
-    expect(normalizeProfileName('renamed admin')).toBe('renamed admin');
+    expect(normalizeProfileName('renamed admin')).toBe('RENAMED ADMIN');
   });
 
   it('normalizes a customer request and never touches notes or IDs', () => {
@@ -112,8 +112,8 @@ describe('submit normalization', () => {
       notes: 'Keep this Note as Typed!',
     });
     expect(normalized).toMatchObject({
-      firstName: 'claud',
-      lastName: 'dela cruz',
+      firstName: 'CLAUD',
+      lastName: 'DELA CRUZ',
       email: 'claud@example.com',
       phone: '+639185550101',
       notes: 'Keep this Note as Typed!',
@@ -199,7 +199,7 @@ describe('submit normalization', () => {
         email: 'Claud@Example.COM',
       },
     });
-    expect(reservation.primary.name).toBe('claud jimenez');
+    expect(reservation.primary.name).toBe('CLAUD JIMENEZ');
     expect(reservation.primary.contactNumber).toBe('+639171234567');
   });
 });

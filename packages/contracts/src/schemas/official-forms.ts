@@ -113,8 +113,8 @@ export const tinNumberSchema = z.preprocess(
     .optional(),
 );
 
-/** Title-cased person-name part for application holders. */
-const holderName = personNameSchema.transform(toTitleCase);
+/** Person-name part for application holders: stored UPPERCASE like every other name. */
+const holderName = personNameSchema;
 const optionalHolderName = z
   .string()
   .trim()
@@ -122,7 +122,7 @@ const optionalHolderName = z
   .refine((value) => value === '' || PERSON_NAME_RE.test(value), {
     message: 'Use letters, spaces, apostrophes and hyphens only - no numbers',
   })
-  .transform((value) => (value ? toTitleCase(value) : value))
+  .transform((value) => (value ? normalizePersonName(value) : value))
   .optional();
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);

@@ -64,7 +64,7 @@ describe('member contracts', () => {
     if (parsed.success) {
       // Casing is preserved server-side; the admin form uppercases live,
       // the same convention as staff creation.
-      expect(parsed.data.fullName).toBe('Jose Rizal');
+      expect(parsed.data.fullName).toBe('JOSE RIZAL');
       expect(parsed.data.mobileNo).toBe('+639171234567');
       expect(parsed.data.ostReferrerStaffId).toBeUndefined();
     }

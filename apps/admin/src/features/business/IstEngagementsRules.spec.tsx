@@ -563,7 +563,7 @@ describe('Payroll lines reviewer name', () => {
       amount: '3.00', evidenceChanged: true, reconciled: false, proofReference: 'TEST ONLY external receipt',
     } })]} onReconcile={vi.fn()} />, { user: VIEWER });
     expect(screen.getByText('Evidence changed after approval')).toBeTruthy();
-    expect(screen.getByText('TEST ONLY external receipt')).toBeTruthy();
+    expect(screen.getByText('Note: TEST ONLY external receipt')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Review reconciliation' })).toBeTruthy();
   });
 });

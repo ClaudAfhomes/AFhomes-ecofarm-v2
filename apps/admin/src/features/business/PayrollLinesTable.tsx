@@ -43,6 +43,8 @@ interface Props {
   /** Present only for finance.payroll update holders on a draft live batch. */
   onReview?: (line: PayrollLine) => void;
   onReconcile?: (line: PayrollLine) => void;
+  /** Opens the external-payment evidence panel for a live disbursement. */
+  onEvidence?: (line: PayrollLine) => void;
   onView?: (line: PayrollLine) => void;
 }
 
@@ -53,6 +55,7 @@ export function PayrollLinesTable({
   payoutLabel = 'Record disbursement',
   onReview,
   onReconcile,
+  onEvidence,
   onView,
 }: Props) {
   if (lines.length === 0) return <p className={styles.muted}>No staff lines in this batch.</p>;
@@ -157,7 +160,33 @@ export function PayrollLinesTable({
                             tone="success"
                           />
                           {line.disbursement.proofReference ? (
-                            <span>{line.disbursement.proofReference}</span>
+                            <span>Note: {line.disbursement.proofReference}</span>
+                          ) : null}
+                          {line.disbursement.evidenceStatus === 'EVIDENCE_EXCEPTION' ? (
+                            <StatusChip
+                              label={
+                                line.disbursement.reconciled
+                                  ? 'No evidence — exception reviewed'
+                                  : 'No verifiable evidence'
+                              }
+                              tone={line.disbursement.reconciled ? 'info' : 'warning'}
+                            />
+                          ) : null}
+                          {line.disbursement.postingPeriod ? (
+                            <span>Posted to {line.disbursement.postingPeriod}</span>
+                          ) : null}
+                          {onEvidence && line.disbursement.evidenceStatus ? (
+                            <Button size="sm" variant="secondary" onClick={() => onEvidence(line)}>
+                              Evidence
+                            </Button>
+                          ) : null}
+                          {line.disbursement.evidenceStatus === 'EVIDENCE_EXCEPTION' &&
+                          !line.disbursement.evidenceChanged &&
+                          !line.disbursement.reconciled &&
+                          onReconcile ? (
+                            <Button size="sm" onClick={() => onReconcile(line)}>
+                              Review reconciliation
+                            </Button>
                           ) : null}
                           {line.disbursement.evidenceChanged ? (
                             <>

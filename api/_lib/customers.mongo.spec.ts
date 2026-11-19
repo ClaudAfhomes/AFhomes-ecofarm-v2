@@ -79,7 +79,7 @@ it('preserves all company fields, canonical IDs and safe create/list/detail proj
   expect(isAfId('AF-CUS', created.customerNumber)).toBe(true);
   expect(isAfId('AF-CC', created.customerCode)).toBe(true);
   expect(created.raNumber).toMatch(/^\d{4}-\d{4,}$/);
-  expect(created.fullName).toBe('Ana Reyes');
+  expect(created.fullName).toBe('ANA REYES');
   expect(JSON.stringify(response.body)).not.toMatch(/PRIVATE-ID|PRIVATE-TIN|PRIVATE-SUPPLEMENTARY/);
   const detail = await call('GET', created.id);
   expect(detail.status).toBe(200);

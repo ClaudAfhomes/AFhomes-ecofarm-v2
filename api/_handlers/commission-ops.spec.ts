@@ -3,7 +3,11 @@
  * tests pin who may call what, that the actor is always the session, and that
  * bodies are validated before any rpc runs.
  */
-import { commissionPayoutSchema, commissionRecoveryCaseSchema } from '@afhomes/contracts';
+import {
+  commissionPayoutSchema,
+  commissionRecoveryCaseSchema,
+  externalEvidenceListSchema,
+} from '@afhomes/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -72,6 +76,8 @@ const RPCS = [
   'reconcile_commission_payout',
   'propose_commission_recovery',
   'dismiss_commission_recovery',
+  'record_external_payment_evidence',
+  'review_commission_payout_evidence_exception',
 ];
 
 async function call(opts: {
@@ -80,11 +86,15 @@ async function call(opts: {
   token: string;
   body?: unknown;
   rpcError?: { fn: string; message: string };
+  payouts?: Record<string, unknown>[];
+  evidence?: Record<string, unknown>[];
 }) {
   holder.db = new FakeSupabase({
     tables: phase2World({
-      commission_payouts: [payoutRow],
+      commission_payouts: opts.payouts ?? [payoutRow],
       commission_recovery_cases: [recoveryRow],
+      external_payment_evidence: opts.evidence ?? [],
+      commission_payout_evidence_reviews: [],
     }),
     tokens: phase2WorldTokens(),
     rpcs: RPCS.map((fn) => ({
@@ -171,6 +181,186 @@ describe('commission operations', () => {
       p_actor_id: UUID.adminStaff,
       p_bank_reference: 'BNK-1',
       p_paid_on: '2026-11-10',
+      p_date_correction_reason: null,
+    });
+  });
+
+  it('passes a payment-date correction reason through to SQL', async () => {
+    const out = await call({
+      method: 'POST',
+      path: `payouts/${P}/reconcile`,
+      token: TOKEN.admin,
+      body: { paidOn: '2026-11-09', dateCorrectionReason: 'Bank statement shows the 9th' },
+    });
+    expect(out.state.status).toBe(200);
+    expect(out.rpc('reconcile_commission_payout')[0]!.arg).toMatchObject({
+      p_paid_on: '2026-11-09',
+      p_date_correction_reason: 'Bank statement shows the 9th',
+    });
+    const missing = await call({
+      method: 'POST',
+      path: `payouts/${P}/reconcile`,
+      token: TOKEN.admin,
+      body: { paidOn: '2026-11-09' },
+      rpcError: {
+        fn: 'reconcile_commission_payout',
+        message: 'PAYMENT_DATE_CORRECTION_REASON_REQUIRED',
+      },
+    });
+    expect(missing.state.status).toBe(400);
+  });
+
+  it('labels a payout with no evidence as an evidence exception', async () => {
+    const out = await call({ method: 'GET', path: `${C}/payouts`, token: TOKEN2.finance });
+    const row = (out.state.body as { data: Record<string, unknown>[] }).data[0]!;
+    expect(row).toMatchObject({
+      evidenceStatus: 'EVIDENCE_EXCEPTION',
+      evidenceExceptionReviewed: false,
+      postingPeriod: '2026-11',
+    });
+  });
+
+  it('lists payout evidence in the contract shape', async () => {
+    const out = await call({ method: 'GET', path: `payouts/${P}/evidence`, token: TOKEN.admin });
+    expect(out.state.status).toBe(200);
+    const body = externalEvidenceListSchema.parse(out.state.body);
+    expect(body.status).toBe('EVIDENCE_EXCEPTION');
+    expect(body.items).toEqual([]);
+  });
+
+  it('shows how many other payments share a reference', async () => {
+    const row = (id: string, subject: string, ref: string, amount = '300.00') => ({
+      id,
+      subject_type: 'commission_payout',
+      subject_id: subject,
+      evidence_type: 'external_transaction_reference',
+      source: 'BDO',
+      storage_path: null,
+      transaction_reference: ref,
+      or_number: null,
+      transfer_amount: amount,
+      description: null,
+      recorded_by: UUID.adminStaff,
+      recorded_at: '2026-11-19T00:00:00.000Z',
+    });
+    const other = '30303030-0000-4000-8000-0000000000d2';
+    const third = '30303030-0000-4000-8000-0000000000d3';
+    const out = await call({
+      method: 'GET',
+      path: `payouts/${P}/evidence`,
+      token: TOKEN.admin,
+      evidence: [
+        row('30303030-0000-4000-8000-0000000000e1', P, 'bulk-0099'),
+        // Same reference written differently: counted (normalized like the SQL).
+        row('30303030-0000-4000-8000-0000000000e2', other, 'BULK 0099'),
+        // Same amount, different reference: not counted.
+        row('30303030-0000-4000-8000-0000000000e3', third, 'BULK-0100'),
+      ],
+    });
+    expect(out.state.status).toBe(200);
+    const body = externalEvidenceListSchema.parse(out.state.body);
+    expect(body.status).toBe('SUPPORTED');
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ transferAmount: '300.00', sharedWith: 1 });
+  });
+
+  it('records a transaction reference as evidence with the session actor', async () => {
+    const out = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence`,
+      token: TOKEN.admin,
+      body: {
+        evidenceType: 'external_transaction_reference',
+        source: 'BDO statement',
+        transactionReference: 'TXN-0001',
+        transferAmount: '2400.00',
+      },
+    });
+    expect(out.state.status).toBe(201);
+    expect(out.rpc('record_external_payment_evidence')[0]!.arg).toEqual({
+      p_subject_type: 'commission_payout',
+      p_subject_id: P,
+      p_evidence: {
+        evidenceType: 'external_transaction_reference',
+        source: 'BDO statement',
+        transactionReference: 'TXN-0001',
+        transferAmount: '2400.00',
+      },
+      p_actor_id: UUID.adminStaff,
+    });
+  });
+
+  it('refuses a reference without a positive transfer amount, before any rpc', async () => {
+    for (const transferAmount of [undefined, '0.00', '12.345']) {
+      const out = await call({
+        method: 'POST',
+        path: `payouts/${P}/evidence`,
+        token: TOKEN.admin,
+        body: {
+          evidenceType: 'official_receipt',
+          source: 'OR booklet',
+          orNumber: 'OR-1001',
+          ...(transferAmount ? { transferAmount } : {}),
+        },
+      });
+      expect(out.state.status).toBe(400);
+      expect(out.rpc('record_external_payment_evidence')).toHaveLength(0);
+    }
+  });
+
+  it('refuses a typed description alone, and a document from another payment, before any rpc', async () => {
+    const described = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence`,
+      token: TOKEN.admin,
+      body: { evidenceType: 'external_transaction_reference', source: 'BDO', description: 'Paid' },
+    });
+    expect(described.state.status).toBe(400);
+    const foreign = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence`,
+      token: TOKEN.admin,
+      body: {
+        evidenceType: 'uploaded_document',
+        source: 'Scan',
+        storagePath: `external/commission_payout/${C}/x.pdf`,
+      },
+    });
+    expect(foreign.state.status).toBe(400);
+    expect(described.rpc('record_external_payment_evidence')).toHaveLength(0);
+    expect(foreign.rpc('record_external_payment_evidence')).toHaveLength(0);
+  });
+
+  it('issues no upload grant for a failed payout', async () => {
+    const out = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence/upload`,
+      token: TOKEN.admin,
+      body: { contentType: 'application/pdf', size: 1000 },
+      payouts: [{ ...payoutRow, status: 'failed' }],
+    });
+    expect(out.state.status).toBe(404);
+  });
+
+  it('records an evidence exception review with a real note', async () => {
+    const short = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence/exception-review`,
+      token: TOKEN.admin,
+      body: { note: 'none' },
+    });
+    expect(short.state.status).toBe(400);
+    const ok = await call({
+      method: 'POST',
+      path: `payouts/${P}/evidence/exception-review`,
+      token: TOKEN.admin,
+      body: { note: 'Paid in cash; payee gave no receipt' },
+    });
+    expect(ok.state.status).toBe(200);
+    expect(ok.rpc('review_commission_payout_evidence_exception')[0]!.arg).toEqual({
+      p_payout_id: P,
+      p_note: 'Paid in cash; payee gave no receipt',
+      p_actor_id: UUID.adminStaff,
     });
   });
 

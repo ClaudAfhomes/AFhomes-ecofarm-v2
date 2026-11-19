@@ -6,6 +6,7 @@ import { renderWithProviders } from '../../test/utils';
 import type { SessionUser } from '../../lib/session';
 import { BusinessCommissionsPage } from './BusinessCommissionsPage';
 import * as ops from './services-commission-ops';
+import * as evidence from './services-external-evidence';
 
 const EARNED_ID = '11111111-0000-4000-8000-000000000001';
 const PAID_ID = '11111111-0000-4000-8000-000000000002';
@@ -98,6 +99,19 @@ vi.mock('./services-commission-ops', () => ({
   dismissCommissionRecovery: vi.fn(async () => ({ id: '11111111-0000-4000-8000-000000000001' })),
 }));
 
+vi.mock('./services-external-evidence', () => ({
+  getExternalEvidence: vi.fn(async (_s: string, id: string) => ({
+    subjectType: 'commission_payout',
+    subjectId: id,
+    status: 'EVIDENCE_EXCEPTION',
+    exceptionReview: null,
+    items: [],
+  })),
+  recordExternalEvidence: vi.fn(async () => ({ id: '66666666-0000-4000-8000-000000000001' })),
+  uploadExternalEvidence: vi.fn(),
+  reviewCommissionEvidenceException: vi.fn(async () => ({ id: 'x' })),
+}));
+
 const user = (canUpdate: boolean): SessionUser => ({
   id: '00000000-0000-4000-8000-0000000000aa',
   name: 'Finance Admin',
@@ -186,13 +200,12 @@ describe('commission operations', () => {
     });
   });
 
-  it('reconciles a paid payout with today prefilled, proposes and dismisses recoveries', async () => {
+  it('reconciles a paid payout with its recorded date prefilled, proposes and dismisses recoveries', async () => {
     renderWithProviders(<BusinessCommissionsPage />, { user: user(true) });
     const u = await openOps('BEN CRUZ');
-    const today = new Date().toISOString().slice(0, 10);
-    expect(await screen.findByLabelText(/date on bank statement/i)).toHaveValue(today);
+    expect(await screen.findByLabelText(/date on bank statement/i)).toHaveValue('2026-10-03');
     await u.click(screen.getByRole('button', { name: 'Reconcile Commission Payout' }));
-    expect(ops.reconcileCommissionPayout).toHaveBeenCalledWith(PAYOUT_ID, { paidOn: today });
+    expect(ops.reconcileCommissionPayout).toHaveBeenCalledWith(PAYOUT_ID, { paidOn: '2026-10-03' });
 
     expect(screen.getByText('Proposal only — no money is deducted.')).toBeInTheDocument();
     await u.type(screen.getByLabelText(/proposed amount/i), '1500.00');
@@ -211,5 +224,79 @@ describe('commission operations', () => {
     });
 
     expect(screen.queryByRole('button', { name: /approve|deduct|recover now/i })).toBeNull();
+  });
+
+  it('requires a reason to change a recorded payment date and refuses a future date', async () => {
+    renderWithProviders(<BusinessCommissionsPage />, { user: user(true) });
+    const u = await openOps('BEN CRUZ');
+    const date = await screen.findByLabelText(/date on bank statement/i);
+    const button = screen.getByRole('button', { name: 'Reconcile Commission Payout' });
+    await u.clear(date);
+    await u.type(date, '2999-01-01');
+    expect(button).toBeDisabled();
+    await u.clear(date);
+    await u.type(date, '2026-10-01');
+    expect(button).toBeDisabled();
+    await u.type(screen.getByLabelText(/reason for changing the recorded date/i), 'Bank statement shows Oct 1');
+    await u.click(button);
+    expect(ops.reconcileCommissionPayout).toHaveBeenCalledWith(PAYOUT_ID, {
+      paidOn: '2026-10-01',
+      dateCorrectionReason: 'Bank statement shows Oct 1',
+    });
+  });
+
+  it('blocks confirming a payout with no evidence until evidence or an exception review exists', async () => {
+    vi.mocked(ops.getCommissionPayouts).mockImplementationOnce(async (id: string) => [
+      {
+        id: PAYOUT_ID,
+        commissionId: id,
+        amount: '2400.00',
+        status: 'paid',
+        bankReference: 'BANK-123',
+        method: null,
+        paidOn: '2026-10-03',
+        failureReason: null,
+        recordedBy: null,
+        recordedAt: '2026-10-03T00:00:00.000Z',
+        reconciledBy: null,
+        reconciledAt: null,
+        evidenceStatus: 'EVIDENCE_EXCEPTION',
+        evidenceExceptionReviewed: false,
+        postingPeriod: '2026-10',
+      },
+    ]);
+    renderWithProviders(<BusinessCommissionsPage />, { user: user(true) });
+    const u = await openOps('BEN CRUZ');
+    expect(await screen.findByText('No verifiable evidence')).toBeInTheDocument();
+    expect(screen.getByText(/posted to 2026-10/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reconcile Commission Payout' })).toBeDisabled();
+
+    // A description alone cannot be attached: the reference is required.
+    await u.type(screen.getByLabelText(/issued by/i), 'BDO');
+    await u.type(screen.getByLabelText(/description \(optional\)/i), 'Paid by transfer');
+    const attach = screen.getByRole('button', { name: 'Attach evidence' });
+    expect(attach).toBeDisabled();
+    await u.type(screen.getByLabelText(/transaction reference/i), 'TXN-778899');
+    // The transfer amount is prefilled with the payout amount and is required.
+    const transfer = screen.getByLabelText(/transfer amount/i);
+    expect(transfer).toHaveValue('2400.00');
+    await u.clear(transfer);
+    expect(attach).toBeDisabled();
+    await u.type(transfer, '5000.00');
+    await u.click(attach);
+    expect(evidence.recordExternalEvidence).toHaveBeenCalledWith('commission_payout', PAYOUT_ID, {
+      evidenceType: 'external_transaction_reference',
+      transactionReference: 'TXN-778899',
+      transferAmount: '5000.00',
+      source: 'BDO',
+      description: 'Paid by transfer',
+    });
+
+    await u.type(screen.getByLabelText(/why no evidence exists/i), 'Paid in cash, no slip kept');
+    await u.click(screen.getByRole('button', { name: 'Record exception review' }));
+    expect(evidence.reviewCommissionEvidenceException).toHaveBeenCalledWith(
+      PAYOUT_ID,
+      'Paid in cash, no slip kept',
+    );
   });
 });

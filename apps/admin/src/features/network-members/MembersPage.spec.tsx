@@ -560,7 +560,7 @@ describe('Members page', () => {
     await waitFor(() =>
       expect(updateMember).toHaveBeenCalledWith(
         ROW.id,
-        expect.objectContaining({ fullName: 'Renamed Seller', tin: '999888777' }),
+        expect.objectContaining({ fullName: 'RENAMED SELLER', tin: '999888777' }),
       ),
     );
     // An untouched secret is omitted, never nulled.

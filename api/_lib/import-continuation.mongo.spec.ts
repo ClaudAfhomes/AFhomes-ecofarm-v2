@@ -200,7 +200,7 @@ it('reads native continuation stages without changing the imported evidence or c
 
 it('provides private-safe existing-form intake by row or source and preserves source revisions', async () => {
   const result = importSourceIntakeSchema.parse(await json(await request(`rows/${row}/intake`)));
-  expect(result.prefill.primary).toMatchObject({ firstName: 'Synthetic', lastName: 'Buyer' });
+  expect(result.prefill.primary).toMatchObject({ firstName: 'SYNTHETIC', lastName: 'BUYER' });
   expect(result.prefill.primary.tinNumber).toBeUndefined();
   expect(JSON.stringify(result)).not.toContain('123456789000');
   expect(JSON.stringify(result)).not.toContain('987654321000');

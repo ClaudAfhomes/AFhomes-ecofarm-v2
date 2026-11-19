@@ -150,6 +150,10 @@ export const payrollDisbursementSchema = z.object({
   evidenceChanged: z.boolean().optional(),
   reconciled: z.boolean().optional(),
   reconciliationNote: z.string().nullable().optional(),
+  /** Live only: SUPPORTED once verifiable evidence exists (20270105000023). */
+  evidenceStatus: z.enum(['SUPPORTED', 'EVIDENCE_EXCEPTION']).optional(),
+  /** Accounting month the disbursement posted to (Asia/Manila). */
+  postingPeriod: z.string().nullable().optional(),
   /** True for a rehearsal record from a simulation batch; never money. */
   simulation: z.boolean().optional(),
 });
