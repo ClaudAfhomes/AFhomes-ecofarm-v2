@@ -1,0 +1,100 @@
+.progress {
+  min-width: 0;
+}
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.summary > span {
+  white-space: nowrap;
+}
+.bars {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 40px;
+}
+.summary .bars button {
+  height: 32px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  position: relative;
+}
+.bars button::after {
+  content: '';
+  position: absolute;
+  inset: 14px 0;
+  border-radius: 4px;
+  background: var(--color-border-default);
+}
+.bars [data-state='done']::after {
+  background: var(--color-success);
+}
+.bars [data-state='current']::after {
+  background: var(--color-brand-primary);
+}
+.bars button:disabled {
+  cursor: not-allowed;
+}
+.summary button {
+  border: 0;
+  background: none;
+  color: var(--color-brand-primary);
+  font: inherit;
+  cursor: pointer;
+  padding: 10px 0;
+  white-space: nowrap;
+}
+.menu {
+  list-style: none;
+  padding: 12px 0 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 6px;
+}
+.menu[hidden] {
+  display: none;
+}
+.menu button {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  text-align: left;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.menu button[aria-current] {
+  border-color: var(--color-brand-primary);
+  font-weight: 700;
+}
+.menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.progress button:focus-visible {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+@media (max-width: 440px) {
+  .summary {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+  .bars {
+    order: 3;
+    flex-basis: 100%;
+  }
+}

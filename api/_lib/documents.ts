@@ -1,123 +1,171 @@
 /**
- * Government ID document storage (Phase B8+). Private bucket, base64-JSON
- * transport (same as the CMS upload endpoint), fail-closed ordering
- * (database row first, file second - never an orphaned file).
+ * AFHomes Phase 12 - pure document helpers.
+ *
+ * Deterministic and side-effect free: file-type validation, magic-byte
+ * checks, storage-path generation and ID masking live here so they can be
+ * tested without storage, a database, or an OCR provider.
  */
+import { randomUUID } from 'node:crypto';
 
-export const GOVERNMENT_ID_BUCKET = 'government-ids';
+import { maskGovernmentId } from '@afhomes/contracts';
 
-/** 3 MB - fits a base64 payload inside Vercel Function body limits. */
-export const GOVERNMENT_ID_MAX_BYTES = 3 * 1024 * 1024;
+export const DOCUMENT_MIME_ALLOWLIST = ['image/jpeg', 'image/png', 'application/pdf'] as const;
+export type DocumentMime = (typeof DOCUMENT_MIME_ALLOWLIST)[number];
 
-/** IDs are scans/photos: images plus PDF. */
-export const GOVERNMENT_ID_MIME_ALLOWLIST = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-] as const;
+/** Bucket file size ceiling mirrors the storage bucket limit (10 MiB). */
+export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 
-/** Signed-URL lifetime for admin viewing (seconds). */
-export const GOVERNMENT_ID_URL_TTL_SECONDS = 60;
-
-type StorageClient = {
-  storage: {
-    from: (bucket: string) => {
-      upload: (
-        path: string,
-        body: Buffer,
-        options?: { contentType?: string; upsert?: boolean },
-      ) => Promise<{ error: { message: string } | null }>;
-      createSignedUrl: (
-        path: string,
-        expiresIn: number,
-      ) => Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }>;
-    };
-  };
+const EXTENSION_BY_MIME: Record<DocumentMime, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'application/pdf': 'pdf',
 };
 
-export function safeDocumentName(fileName: string): string {
-  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
-  return safe || 'document';
-}
+export const CUSTOMER_IDS_BUCKET = 'afhomes-customer-ids';
+export const OST_IDS_BUCKET = 'afhomes-ost-ids';
 
-function decodeBase64(data: string): Buffer | null {
-  try {
-    const comma = data.indexOf(',');
-    const raw = comma === -1 ? data : data.slice(comma + 1);
-    if (!raw) return null;
-    return Buffer.from(raw, 'base64');
-  } catch {
-    return null;
-  }
-}
-
-export function validateDocumentUpload(input: {
-  fileName?: unknown;
-  mimeType?: unknown;
-  data?: unknown;
-}):
-  | { ok: true; fileName: string; mimeType: string; buffer: Buffer }
-  | { ok: false; message: string } {
-  const fileName = typeof input.fileName === 'string' ? input.fileName : '';
-  const mimeType = typeof input.mimeType === 'string' ? input.mimeType : '';
-  if (!(GOVERNMENT_ID_MIME_ALLOWLIST as readonly string[]).includes(mimeType)) {
-    return { ok: false, message: 'Government ID must be JPG, PNG, WebP, or PDF.' };
-  }
-  if (typeof input.data !== 'string' || !input.data) {
-    return { ok: false, message: 'Government ID file data is missing.' };
-  }
-  const buffer = decodeBase64(input.data);
-  if (!buffer || buffer.length === 0) {
-    return { ok: false, message: 'Government ID file data is invalid.' };
-  }
-  if (buffer.length > GOVERNMENT_ID_MAX_BYTES) {
-    return { ok: false, message: 'Government ID must be 3 MB or less.' };
-  }
-  return { ok: true, fileName, mimeType, buffer };
+export function bucketForSubject(subjectType: 'customer' | 'ost_application'): string {
+  return subjectType === 'customer' ? CUSTOMER_IDS_BUCKET : OST_IDS_BUCKET;
 }
 
 /**
- * Upload an ID document under `government-ids/<registrationId>/…`.
- * Returns the storage path (persisted on the row) or an error message.
- * Callers own row ordering: insert/update the row first, upload second.
+ * Server-generated object path. The subject id is a validated UUID supplied
+ * by the caller, the leaf defaults to random, and the extension comes from
+ * the validated MIME - so traversal and executable uploads are impossible.
+ * A non-conforming leaf is replaced rather than trusted.
  */
-export async function uploadGovernmentId(
-  supabase: StorageClient,
-  registrationId: string,
-  input: { fileName?: unknown; mimeType?: unknown; data?: unknown },
-): Promise<{ ok: true; storagePath: string } | { ok: false; message: string }> {
-  const validated = validateDocumentUpload(input);
-  if (!validated.ok) return validated;
-  const key = `${registrationId}/${Date.now()}-${safeDocumentName(validated.fileName)}`;
-  const { error } = await supabase.storage
-    .from(GOVERNMENT_ID_BUCKET)
-    .upload(key, validated.buffer, {
-      contentType: validated.mimeType,
-      upsert: false,
-    });
-  if (error) return { ok: false, message: error.message };
-  return { ok: true, storagePath: key };
+export function documentObjectPath(
+  subjectType: 'customer' | 'ost_application',
+  subjectId: string,
+  mime: DocumentMime,
+  leaf: string = randomUUID(),
+): string {
+  const scope = subjectType === 'customer' ? 'customer' : 'ost-application';
+  const safeLeaf = /^[A-Za-z0-9-]{1,64}$/.test(leaf) ? leaf : randomUUID();
+  return `${scope}/${subjectId}/${safeLeaf}.${EXTENSION_BY_MIME[mime]}`;
 }
 
-/** Mint a short-lived viewer URL for an uploaded document. */
-export async function signGovernmentIdUrl(
-  supabase: StorageClient,
-  storagePath: string,
-): Promise<{ ok: true; url: string } | { ok: false; message: string }> {
-  const { data, error } = await supabase.storage
-    .from(GOVERNMENT_ID_BUCKET)
-    .createSignedUrl(storagePath, GOVERNMENT_ID_URL_TTL_SECONDS);
-  if (error || !data?.signedUrl) return { ok: false, message: error?.message ?? 'Sign failed' };
-  return { ok: true, url: data.signedUrl };
+/** File signatures the allowlist actually permits. Extension alone proves nothing. */
+export function mimeMatchesSignature(mime: string, bytes: Uint8Array): boolean {
+  if (bytes.length < 8) return false;
+  if (mime === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mime === 'image/png')
+    return (
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
+  return (
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46 &&
+    bytes[4] === 0x2d
+  );
 }
 
-/** Strip transient upload bytes before persisting a governmentId value. */
-export function stripDocumentData(
-  document: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null | undefined {
-  if (!document || typeof document !== 'object') return document;
-  const rest = { ...document };
-  delete rest.data;
-  return rest;
+/** Fields whose values are ID numbers and must be masked on read. */
+const ID_NUMBER_KEYS = [/id[_-]?number/i, /document[_-]?number/i, /government[_-]?id/i];
+
+export const isIdNumberKey = (key: string): boolean => ID_NUMBER_KEYS.some((re) => re.test(key));
+
+/** Mask extracted/reviewed fields for list and review reads. */
+export function maskExtractedFields(
+  fields: Record<string, { value: string | null; confidence: number | null }>,
+): Record<string, { value: string | null; confidence: number | null }> {
+  const out: Record<string, { value: string | null; confidence: number | null }> = {};
+  for (const [key, field] of Object.entries(fields)) {
+    out[key] =
+      isIdNumberKey(key) && field.value
+        ? { value: maskGovernmentId(field.value), confidence: field.confidence }
+        : field;
+  }
+  return out;
+}
+
+/** Mask confirmed (reviewed) values the same way. */
+export function maskReviewedFields(
+  fields: Record<string, string | null>,
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    out[key] = isIdNumberKey(key) ? maskGovernmentId(value) : value;
+  }
+  return out;
+}
+
+/** Pull a candidate ID number out of confirmed fields for duplicate flagging. */
+export function idNumberFromFields(fields: Record<string, string | null>): string | null {
+  for (const [key, value] of Object.entries(fields)) {
+    if (isIdNumberKey(key) && value && value.trim().length >= 4) return value.trim();
+  }
+  return null;
+}
+
+/** Storage-path digest proving bytes arrived. Only a server-verified digest counts. */
+export const PENDING_SHA256 = '0'.repeat(64);
+
+/** Minimal row shape the current-ID rule reads. No hashes or paths leave this module. */
+export interface CurrentCandidateRow {
+  id?: unknown;
+  created_at?: unknown;
+  verification_status?: unknown;
+  storage_path?: unknown;
+  sha256?: unknown;
+}
+
+/**
+ * A reserved path carries no bytes until the server verifies the digest.
+ * Shared with the documents handler so both use one definition.
+ */
+export function hasPersistedFile(row: CurrentCandidateRow): boolean {
+  return (
+    typeof row.storage_path === 'string' &&
+    row.storage_path.length > 0 &&
+    typeof row.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(row.sha256) &&
+    row.sha256 !== PENDING_SHA256
+  );
+}
+
+/**
+ * THE canonical Current ID rule (server authority, UI must never re-derive).
+ *
+ * Current is the newest file-backed, non-rejected document by
+ * `created_at DESC, id DESC`. Rationale, each clause load-bearing:
+ *
+ * - File-backed only: a reserved path with no verified bytes cannot identify anyone.
+ * - Non-rejected: a rejected document is affirmatively not a valid ID.
+ * - `created_at` primary (NOT `reviewed_at`): verifying or human-confirming an
+ *   older document must never steal currentness from a newer one. VERIFY and
+ *   MAKE-CURRENT are different operations; only creating a newer document row
+ *   (an explicit replacement upload) moves currentness.
+ * - `id` tiebreak: UUID text order is arbitrary but total, so simultaneous
+ *   rows still resolve to exactly one winner deterministically.
+ *
+ * Pure function of persisted rows: no locks, no writes, idempotent under
+ * retry, and immune to completion order. Returns null when nothing qualifies.
+ */
+export function selectCurrentDocumentId(rows: CurrentCandidateRow[]): string | null {
+  const eligible = rows.filter(
+    (row) =>
+      typeof row.id === 'string' &&
+      hasPersistedFile(row) &&
+      row.verification_status !== 'rejected',
+  );
+  eligible.sort((a, b) => {
+    const aTime = Date.parse(String(a.created_at));
+    const bTime = Date.parse(String(b.created_at));
+    const aSafe = Number.isNaN(aTime) ? 0 : aTime;
+    const bSafe = Number.isNaN(bTime) ? 0 : bTime;
+    if (aSafe !== bSafe) return bSafe - aSafe;
+    return String(b.id) < String(a.id) ? -1 : String(b.id) > String(a.id) ? 1 : 0;
+  });
+  const winner = eligible[0];
+  return winner && typeof winner.id === 'string' ? winner.id : null;
 }

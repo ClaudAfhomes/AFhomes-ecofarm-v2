@@ -1,9 +1,9 @@
 {
-  "name": "@jad/admin",
+  "name": "@afhomes/admin",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "JAD admin panel frontend (React + Vite SPA). F0: dashboard shell, role-based navigation, and the registrations queue over mock data.",
+  "description": "AFHomes Ecofarm administration application.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -12,20 +12,22 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jad/config": "workspace:*",
-    "@jad/contracts": "workspace:*",
-    "@jad/mock": "workspace:*",
-    "@jad/shared": "workspace:*",
-    "@jad/ui": "workspace:*",
-    "@supabase/supabase-js": "^2.112.4",
+    "@afhomes/config": "workspace:*",
+    "@afhomes/contracts": "workspace:*",
+    "@afhomes/shared": "workspace:*",
+    "@afhomes/ui": "workspace:*",
+    "@supabase/supabase-js": "2.117.2",
     "@tanstack/react-query": "^5.101.4",
     "jsqr": "^1.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^7.18.2",
-    "recharts": "^3.10.1",
+    "recharts": "3.10.1",
     "sweetalert2": "^11.26.25",
     "zod": "^4.4.3"
+  },
+  "comments": {
+    "jsqr": "Browser-side QR DECODER for the redemption scanner. Decodes a camera frame locally; no frame and no image ever leaves the device, and the only thing sent to the API is the decoded opaque token. Chosen over a hosted scanner because uploading a frame of a member's card to a third party would be a disclosure, and over a heavyweight SDK because this is the only thing it would be used for."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

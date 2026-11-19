@@ -1,165 +1,169 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-
+import { AppShell, Breadcrumbs, ConfirmDialog, Icon, PageSkeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
-import { AppShell, Breadcrumbs, ConfirmDialog, UserMenu } from '@jad/ui';
-
-import { breadcrumbItems, navItemsForRole, ROLE_LABELS } from './navigation';
-import { resolveRoleModules, roleNameFor } from '@jad/contracts';
-import { useAdminQueues } from '../features/dashboard/hooks/useAdminQueues';
-import { useRoles } from '../features/roles/hooks/useRoles';
-import { useMessagesRealtime } from '../features/messages/hooks/useMessagesRealtime';
-import { useAdminMessagesSummary } from '../features/messages/hooks/useConversations';
+import { logoutUrlForRole } from '../lib/portal';
+import {
+  breadcrumbItems,
+  canAccessNavTarget,
+  navItemsForPermissions,
+  istNavItemsForPermissions,
+} from './navigation';
+import { AdminForbiddenPage } from './AdminForbiddenPage';
 import styles from './AdminLayout.module.css';
+import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
+import { useProfilePhoto } from '../features/account/profile-photo';
+import logo from '../assets/logo.png';
 
-/**
- * Admin app shell: persistent sidebar on desktop, drawer on tablet/mobile
- * (UI-UX §4), topbar with the signed-in staff identity, breadcrumbs, and the
- * routed page content. Navigation is filtered by the session role and
- * role id (resolved against role records, matrix seed as fallback).
- */
 export function AdminLayout() {
-  const { user, role, roleId, logout, status, mustChangePassword } = useSession();
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const photo = useProfilePhoto();
+  const { user, logout, sessionError, revalidate } = useSession();
   const location = useLocation();
-  // Admin data endpoints reject unauthenticated callers and, while a
-  // temporary-password change is required, verifyStaff 403s by design.
-  // Skip them until the session is authenticated and the flag is known
-  // (RequireRole holds every destination on My Account meanwhile). Enabling
-  // the queries refetches them fresh.
-  const queriesEnabled = status === 'authenticated' && !mustChangePassword;
-  const { data: roles } = useRoles({ enabled: queriesEnabled });
-  // Session-resolved modules are authoritative for the signed-in staff
-  // member (the roles catalog is super_admin-only, so custom-role staff
-  // could otherwise never resolve their own navigation).
-  const baseItems = mustChangePassword
-    ? []
-    : navItemsForRole(role, roleId, roles, user?.roleModules);
-  // The pending-count badge needs the registrations queue; the cheap
-  // GET /admin/queues counts endpoint serves it (the full registrations list
-  // is fetched only on the registrations page itself). Gate on the dashboard
-  // module the endpoint actually requires.
-  const canSeeDashboard = resolveRoleModules(roles, roleId, user?.roleModules).includes(
-    'dashboard',
+  const applicationWorkspace = [
+    '/admin/customers/new',
+    '/admin/customers/applications/new',
+  ].includes(operationsPath(location.pathname));
+  const [confirm, setConfirm] = useState(false);
+  const crumbs = useMemo(
+    () =>
+      breadcrumbItems(operationsPath(location.pathname))?.map((item) => ({
+        ...item,
+        ...(item.to ? { to: staffPortalPath(user?.roleSlug, item.to) } : {}),
+      })),
+    [location.pathname, user?.roleSlug],
   );
-  const { data: queues } = useAdminQueues({ enabled: queriesEnabled && canSeeDashboard });
-  const pendingCount = queues?.registrations ?? 0;
-  // Messages inbox badge (unread member messages), module-gated like the
-  // registrations queue; skip the doomed fetch for roles without the module.
-  const canSeeMessages = resolveRoleModules(roles, roleId, user?.roleModules).includes('messages');
-  useMessagesRealtime(queriesEnabled && canSeeMessages);
-  const { data: messagesSummary } = useAdminMessagesSummary({
-    enabled: queriesEnabled && canSeeMessages,
-  });
-  const messagesUnread = messagesSummary?.unreadCount ?? 0;
-  const items = baseItems.map((item) => {
-    if (item.to === '/admin/members') {
-      return { ...item, badge: pendingCount > 0 ? pendingCount : undefined };
-    }
-    if (item.to === '/admin/messages') {
-      return { ...item, badge: messagesUnread > 0 ? messagesUnread : undefined };
-    }
-    return item;
-  });
-
-  // Single breadcrumb source - page components must not render their own
-  // trail (breadcrumbItems resolves list, category, detail, and My Account
-  // routes; unmatched routes suppress the bar entirely).
-  const crumbs = useMemo(() => breadcrumbItems(location.pathname), [location.pathname]);
-
-  // Fail loud (not silent): a staff session with zero navigation modules
-  // means role resolution failed (missing MemberRole link or role lookup
-  // error). Links stay hidden (deny by default); the notice tells the user
-  // what happened instead of rendering a mysteriously empty sidebar.
-  const roleUnresolved =
-    status === 'authenticated' && role === 'admin' && items.length === 0 && !mustChangePassword;
-
-  useEffect(() => {
-    if (roleUnresolved) {
-      console.warn(
-        '[AdminLayout] staff role unresolved - sidebar hidden (roleId=%s, roleRecords=%s)',
-        String(roleId ?? null),
-        roles === undefined ? 'loading' : String(roles.length),
-      );
-    }
-  }, [roleUnresolved, roleId, roles]);
-
+  // AFHomes pattern: while the temporary password is still in force the normal
+  // navigation stays hidden (RequireRole parks the session on My Account).
+  const gated = user?.mustChangePassword === true;
+  const ist = isIstRole(user?.roleSlug);
+  const navigation = ist ? istNavItemsForPermissions : navItemsForPermissions;
+  const portalTarget = (target: string) => {
+    const path = staffPortalPath(user?.roleSlug, target);
+    if (!ist || (target !== '/admin' && !target.startsWith('/admin/ist/'))) return path;
+    const params = new URLSearchParams(location.search);
+    params.delete('page');
+    const query = params.toString();
+    return `${path}${query ? `?${query}` : ''}`;
+  };
+  // Denied paths render standalone: no sidebar, no topbar, professional card.
+  // RequireRole still guards the route; this only removes the shell chrome.
+  const denied =
+    user &&
+    !gated &&
+    !canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname));
+  if (denied) {
+    return <AdminForbiddenPage retry={sessionError ? () => void revalidate() : undefined} />;
+  }
   return (
     <>
       <AppShell
-        brand={
-          <div className={styles.brandBlock}>
-            <img src="/ja-d-logo.png" alt="JA&D" width={120} height={75} />
-            <div className={styles.brandTextBlock}>
-              <span className={styles.brandName}>JA&D Realty</span>
-              <span className={styles.brandText}>Admin Panel</span>
-            </div>
-          </div>
+        compactWorkspace={applicationWorkspace}
+        topbarContext={
+          applicationWorkspace ? (
+            <span className={styles.workspaceCrumbs}>
+              Sales <span aria-hidden="true">›</span> Customers <span aria-hidden="true">›</span>{' '}
+              <strong>Create Application &amp; RA</strong>
+            </span>
+          ) : undefined
         }
-        navItems={items}
-        navLabel="Admin navigation"
-        topbarActions={
-          <UserMenu
-            name={user?.name}
-            role={
-              user?.roleName ??
-              (roleId ? roleNameFor(roles, roleId) : role ? ROLE_LABELS[role] : undefined)
-            }
-            items={[
-              { label: 'My Account', icon: 'user', to: '/admin/profile' },
-              { label: '-', icon: '', onClick: undefined },
-              {
-                label: 'Logout',
-                icon: 'logout',
-                danger: true,
-                onClick: () => setShowLogoutConfirm(true),
-              },
-            ]}
-          />
+        brand={
+          applicationWorkspace ? (
+            <img src={logo} alt="AFhomes logo" className={styles.workspaceLogo} />
+          ) : (
+            <div className={styles.brandBlock}>
+              <img src={logo} alt="AFhomes logo" />
+              <div className={styles.brandTextBlock}>
+                <span className={styles.brandName}>AFhomes</span>
+                <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+              </div>
+            </div>
+          )
+        }
+        navItems={
+          gated
+            ? []
+            : navigation(user?.afHomesPermissions).map((item) => ({
+                ...item,
+                to: portalTarget(item.to),
+                dropdown: item.dropdown?.map((child) =>
+                  'to' in child ? { ...child, to: portalTarget(child.to) } : child,
+                ),
+              }))
         }
         topbarLeading={
-          <div className={styles.topbarBrand}>
-            <img src="/ja-d-logo.png" alt="" width={120} height={75} />
-          </div>
+          applicationWorkspace ? undefined : (
+            <div className={styles.topbarBrand}>
+              <img src={logo} alt="" />
+              <div className={styles.brandTextBlock}>
+                <span className={styles.brandName}>AFhomes</span>
+                <span className={styles.brandText}>{ist ? 'IST Portal' : 'Operations'}</span>
+              </div>
+            </div>
+          )
         }
+        navLabel="AFhomes administration"
         menuLabel="Open navigation"
-        menuPosition="right"
+        menuPosition={applicationWorkspace ? 'left' : 'right'}
+        sidebarFooter={
+          <button
+            type="button"
+            className={styles.logoutButton}
+            title="Log Out"
+            aria-label="Log Out"
+            onClick={() => setConfirm(true)}
+          >
+            <span className={styles.logoutIcon} aria-hidden="true">
+              <Icon name="logout" size={18} />
+            </span>
+            <span className="sidebar-footer-label" aria-hidden="true">
+              Log Out
+            </span>
+          </button>
+        }
+        topbarActions={
+          <>
+            <UserMenu
+              photoUrl={photo.photo.data?.url}
+              name={user?.name}
+              role={user?.roleName}
+              items={[
+                {
+                  label: 'My Account',
+                  icon: 'user',
+                  to: staffPortalPath(user?.roleSlug, '/admin/profile'),
+                },
+                { label: '-', icon: 'user' },
+                { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
+              ]}
+            />
+          </>
+        }
       >
         <div className={styles.content}>
-          {roleUnresolved && (
-            <div className={styles.roleNotice} role="alert">
-              <p className={styles.roleNoticeTitle}>Navigation unavailable</p>
-              <p className={styles.roleNoticeText}>
-                Your staff role could not be resolved, so navigation links are hidden. Try reloading
-                - if this persists, an administrator needs to check your role assignment.
-              </p>
-              <button
-                type="button"
-                className={styles.roleNoticeAction}
-                onClick={() => window.location.reload()}
-              >
-                Reload
-              </button>
-            </div>
-          )}
-          {crumbs ? <Breadcrumbs items={crumbs} /> : null}
-          <Outlet />
+          {crumbs && !applicationWorkspace ? <Breadcrumbs items={crumbs} /> : null}
+          {/* Route pages load on demand: the shell stays mounted while the
+          page chunk loads, so navigation never blanks. */}
+          <Suspense
+            fallback={<PageSkeleton />}
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </AppShell>
       <ConfirmDialog
-        open={showLogoutConfirm}
-        onCancel={() => setShowLogoutConfirm(false)}
+        open={confirm}
+        onCancel={() => setConfirm(false)}
         onConfirm={() => {
-          setShowLogoutConfirm(false);
-          logout();
-          const rawWebUrl =
-            (import.meta.env as Record<string, string | undefined>).VITE_WEB_URL ??
-            'http://localhost:5173';
-          const base = rawWebUrl.replace(/\/$/, '');
-          window.location.href = base.endsWith('/login') ? base : `${base}/login`;
+          // Sign-out leaves the staff console for the web-hosted entries
+          // (`:5173/...` locally, same origin in production). The sign-out is
+          // awaited first so no usable session survives the unload - otherwise
+          // the entry would bounce straight back into the console.
+          const target = logoutUrlForRole(user?.roleSlug);
+          setConfirm(false);
+          void logout().finally(() => window.location.replace(target));
         }}
         title="Sign out?"
-        message="Are you sure you want to sign out? You will need to sign in again to access your account."
+        message="Sign out of AFhomes administration?"
         confirmLabel="Sign out"
         cancelLabel="Cancel"
       />

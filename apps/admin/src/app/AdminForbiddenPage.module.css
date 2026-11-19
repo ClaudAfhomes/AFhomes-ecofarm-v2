@@ -1,0 +1,77 @@
+.deniedRoot {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  background:
+    radial-gradient(60rem 24rem at 50% -6rem, var(--color-brand-soft), transparent 70%),
+    var(--color-bg-surface);
+}
+
+.deniedCard {
+  width: 100%;
+  max-width: 30rem;
+  display: grid;
+  gap: var(--space-4);
+  justify-items: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-6);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-bg-surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+.deniedLogo {
+  height: 44px;
+  width: auto;
+}
+
+.deniedShield {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.deniedCode {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.deniedTitle {
+  margin: 0;
+  font-size: var(--text-h2);
+  line-height: 1.2;
+}
+
+.deniedText {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  max-width: 44ch;
+}
+
+.deniedActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+.deniedMeta {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}

@@ -1,0 +1,81 @@
+/*
+ * The current government ID image on the customer record: the scan on the left,
+ * the facts that make it trustworthy on the right. One row on desktop, stacked
+ * on a phone, so the scan never squeezes the caption into a column.
+ */
+.block {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+@media (max-width: 559px) {
+  .block {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * The scan keeps its own shape: a portrait ID photo is taller than it is wide,
+ * so the box is sized by the image and the height is capped rather than the
+ * width. `contain` inside a fixed box would letterbox a landscape scan.
+ */
+.thumb {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.thumb:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 132px;
+  object-fit: contain;
+  border-radius: var(--radius-control);
+}
+
+.caption {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  min-width: 0;
+}
+
+.filename {
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.meta,
+.empty {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.link {
+  font-size: var(--text-body-s);
+}
+
+/* The enlarged scan: as large as the dialog allows, never cropped. */
+.full {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}

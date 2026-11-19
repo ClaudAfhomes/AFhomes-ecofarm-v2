@@ -1,0 +1,1170 @@
+/**
+ * AFHomes Phase 8 - OST registration and approval handler tests.
+ *
+ * Drives the REAL handler, the REAL staff principal resolver, the REAL
+ * contracts and the REAL code hashing against the in-memory Supabase fake.
+ * The load-bearing assertions are the spoof and scope ones: no sponsor id
+ * from the browser is ever honored, an unrelated SM sees nothing, and a
+ * repeat approval cannot mint a second member.
+ */
+import { createHash } from 'node:crypto';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  buildOstRegistrationUrl,
+  normalizeOstReferralCode,
+  submitOstApplicationSchema,
+} from '@afhomes/contracts';
+
+import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
+
+const holder = vi.hoisted(() => ({ db: null as unknown }));
+
+vi.mock('../_lib/rest.js', () => ({
+  serviceClient: () => holder.db,
+  anonClient: () => holder.db,
+}));
+
+const ost = (await import('./ost.js')).default;
+const photos = vi.hoisted(() => ({ upload: vi.fn().mockResolvedValue({ error: null }) }));
+vi.mock('../_lib/storage.js', () => ({ storageClient: () => ({ from: () => photos }) }));
+const { resetIdentifierRateLimit } = await import('../_lib/rate-limit.js');
+const { selectHandler } = await import('../_lib/router.js');
+const routerSource = await import('node:fs').then((fs) =>
+  fs.readFileSync(new URL('../_lib/router.ts', import.meta.url), 'utf8'),
+);
+
+/* ------------------------------------------------------------------ */
+/* Fixture                                                             */
+/* ------------------------------------------------------------------ */
+
+const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
+const SM_ID = '22222222-2222-4222-8222-222222222222';
+const SM2_ID = '22222222-2222-4222-8222-222222222223';
+const ADMIN_SPONSOR_ID = '33333333-3333-4333-8333-333333333333';
+const SUSPENDED_SM_ID = '44444444-4444-4444-8444-444444444444';
+const OST_ID = '55555555-5555-4555-8555-555555555555';
+const NEW_OST_ID = '66666666-6666-4666-8666-666666666666';
+const OLD_ACCOUNT_ID = '88888888-8888-4888-8888-888888888888';
+const EMP_ID = '77777777-7777-4777-8777-777777777777';
+
+const ADMIN_TOKEN = 'token-admin';
+const SM_TOKEN = 'token-sm';
+const SM2_TOKEN = 'token-sm2';
+const OST_TOKEN = 'token-ost';
+const EMP_TOKEN = 'token-emp';
+
+const RAW_CODE = 'OST-ABCDEF-123456';
+const CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+const EXPIRED_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2';
+const INACTIVE_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3';
+const NON_SM_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4';
+const SUSPENDED_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5';
+const EXHAUSTED_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6';
+const SM2_CODE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7';
+
+const APP_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+const SM2_APP_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
+
+const hash = (v: string) => createHash('sha256').update(v).digest('hex');
+const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+const ahead = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+
+type Row = Record<string, unknown>;
+
+const applicant = {
+  referralCode: RAW_CODE,
+  firstName: 'Oscar',
+  lastName: 'Trainee',
+  email: 'oscar@example.invalid',
+  phone: '+639171234567',
+  birthDate: '1995-06-15',
+  address: { line1: '1 Farm Road', city: 'Tagaytay', province: 'Cavite', countryCode: 'PH' },
+};
+
+function baseTables(): Record<string, Row[]> {
+  return {
+    modules: [
+      { id: 'm-reg', key: 'network.ost_registrations', is_active: true },
+      { id: 'm-mem', key: 'network.ost_members', is_active: true },
+      { id: 'm-ref', key: 'network.referrals', is_active: true },
+    ],
+    roles: [
+      { id: 'r-admin', slug: 'admin', name: 'Admin', is_active: true },
+      { id: 'r-sm', slug: 'sales_manager', name: 'Sales Manager', is_active: true },
+      { id: 'r-ost', slug: 'ost', name: 'OST', is_active: true },
+      { id: 'r-emp', slug: 'employee', name: 'Employee', is_active: true },
+    ],
+    role_permissions: [
+      {
+        role_id: 'r-admin',
+        module_id: 'm-reg',
+        can_view: true,
+        can_create: false,
+        can_update: true,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-mem',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-admin',
+        module_id: 'm-ref',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-reg',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-mem',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: 'r-sm',
+        module_id: 'm-ref',
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+    ],
+    staff_users: [
+      { id: ADMIN_ID, email: 'admin@afhomes.test', full_name: 'Ada Admin', status: 'active' },
+      { id: SM_ID, email: 'sm@afhomes.test', full_name: 'Sam Manager', status: 'active' },
+      { id: SM2_ID, email: 'sm2@afhomes.test', full_name: 'Sue Manager', status: 'active' },
+      {
+        id: ADMIN_SPONSOR_ID,
+        email: 'boss@afhomes.test',
+        full_name: 'Boss Admin',
+        status: 'active',
+      },
+      {
+        id: SUSPENDED_SM_ID,
+        email: 'sus@afhomes.test',
+        full_name: 'Sus Pended',
+        status: 'suspended',
+      },
+      { id: OST_ID, email: 'ost@afhomes.test', full_name: 'Ollie Seller', status: 'active' },
+      { id: EMP_ID, email: 'emp@afhomes.test', full_name: 'Em Ployee', status: 'active' },
+    ],
+    staff_role_assignments: [
+      { staff_id: ADMIN_ID, role_id: 'r-admin' },
+      { staff_id: SM_ID, role_id: 'r-sm' },
+      { staff_id: SM2_ID, role_id: 'r-sm' },
+      { staff_id: ADMIN_SPONSOR_ID, role_id: 'r-admin' },
+      { staff_id: SUSPENDED_SM_ID, role_id: 'r-sm' },
+      { staff_id: OST_ID, role_id: 'r-ost' },
+      { staff_id: EMP_ID, role_id: 'r-emp' },
+    ],
+    staff_permission_restrictions: [],
+    staff_invitations: [],
+    referral_codes: [
+      {
+        id: CODE_ID,
+        code_hash: hash(RAW_CODE),
+        code_hint: 'OST-…-3456',
+        sponsor_staff_id: SM_ID,
+        expires_at: ahead(72),
+        max_uses: 10,
+        use_count: 0,
+        is_active: true,
+        created_by: SM_ID,
+        created_at: ago(5),
+      },
+      {
+        id: EXPIRED_CODE_ID,
+        code_hash: hash('OST-FFFFFE-000001'),
+        code_hint: 'OST-…-0001',
+        sponsor_staff_id: SM_ID,
+        expires_at: ago(2),
+        max_uses: 10,
+        use_count: 0,
+        is_active: true,
+        created_by: SM_ID,
+        created_at: ago(50),
+      },
+      {
+        id: INACTIVE_CODE_ID,
+        code_hash: hash('OST-FFFFFD-000002'),
+        code_hint: 'OST-…-0002',
+        sponsor_staff_id: SM_ID,
+        expires_at: ahead(72),
+        max_uses: 10,
+        use_count: 0,
+        is_active: false,
+        created_by: SM_ID,
+        created_at: ago(5),
+      },
+      {
+        id: NON_SM_CODE_ID,
+        code_hash: hash('OST-FFFFFC-000003'),
+        code_hint: 'OST-…-0003',
+        sponsor_staff_id: ADMIN_SPONSOR_ID,
+        expires_at: ahead(72),
+        max_uses: 10,
+        use_count: 0,
+        is_active: true,
+        created_by: ADMIN_SPONSOR_ID,
+        created_at: ago(5),
+      },
+      {
+        id: SUSPENDED_CODE_ID,
+        code_hash: hash('OST-FFFFFB-000004'),
+        code_hint: 'OST-…-0004',
+        sponsor_staff_id: SUSPENDED_SM_ID,
+        expires_at: ahead(72),
+        max_uses: 10,
+        use_count: 0,
+        is_active: true,
+        created_by: SUSPENDED_SM_ID,
+        created_at: ago(5),
+      },
+      {
+        id: EXHAUSTED_CODE_ID,
+        code_hash: hash('OST-FFFFFA-000005'),
+        code_hint: 'OST-…-0005',
+        sponsor_staff_id: SM_ID,
+        expires_at: ahead(72),
+        max_uses: 1,
+        use_count: 1,
+        is_active: true,
+        created_by: SM_ID,
+        created_at: ago(5),
+      },
+      {
+        id: SM2_CODE_ID,
+        code_hash: hash('OST-BBCCDD-778899'),
+        code_hint: 'OST-…-8899',
+        sponsor_staff_id: SM2_ID,
+        expires_at: ahead(72),
+        max_uses: 10,
+        use_count: 0,
+        is_active: true,
+        created_by: SM2_ID,
+        created_at: ago(5),
+      },
+    ],
+    ost_applications: [],
+    ost_members: [
+      {
+        id: OST_ID,
+        application_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb0',
+        sponsor_staff_id: SM_ID,
+        ost_number: 'OST-000007',
+        full_name: 'Ollie Seller',
+        email: 'ost@afhomes.test',
+        phone: '+639170000007',
+        status: 'active',
+        approved_by: ADMIN_ID,
+        approved_at: ago(100),
+        created_at: ago(100),
+      },
+    ],
+    referral_relationships: [],
+    audit_events: [],
+  };
+}
+
+function install(
+  tables?: Record<string, Row[]>,
+  opts: {
+    inviteUserId?: string;
+    invite?: (email: string, options: unknown) => Promise<unknown>;
+    unique?: Record<string, string[][]>;
+  } = {},
+) {
+  resetIdentifierRateLimit();
+  vi.stubEnv('AFHOMES_ADMIN_URL', 'https://admin.afhomes.test');
+  vi.stubEnv('AFHOMES_WEB_URL', 'https://web.afhomes.test');
+  const db = new FakeSupabase({
+    tables: (tables ?? baseTables()) as never,
+    tokens: {
+      [ADMIN_TOKEN]: { id: ADMIN_ID, email: 'admin@afhomes.test', email_confirmed_at: ago(200) },
+      [SM_TOKEN]: { id: SM_ID, email: 'sm@afhomes.test', email_confirmed_at: ago(200) },
+      [SM2_TOKEN]: { id: SM2_ID, email: 'sm2@afhomes.test', email_confirmed_at: ago(200) },
+      [OST_TOKEN]: { id: OST_ID, email: 'ost@afhomes.test', email_confirmed_at: ago(200) },
+      [EMP_TOKEN]: { id: EMP_ID, email: 'emp@afhomes.test', email_confirmed_at: ago(200) },
+    },
+    inviteUserId: opts.inviteUserId ?? NEW_OST_ID,
+    invite: opts.invite,
+    unique: opts.unique,
+    rpcs: [{ fn: 'next_ost_number', result: [{ ost_number: 'OST-000001' }] }],
+  });
+  holder.db = db as unknown;
+  return db;
+}
+
+beforeEach(() => {
+  vi.unstubAllEnvs();
+});
+
+// Legacy approval tests start with a historical application fixture, rather
+// than invoking the retired flat public registration contract.
+const submit = async (db: FakeSupabase, body: unknown) => {
+  const input = submitOstApplicationSchema.parse(body);
+  const code = db.rows('referral_codes').find((r) => r.code_hash === hash(input.referralCode));
+  if (!code) throw new Error('QA referral fixture missing');
+  const { data, error } = await db
+    .from('ost_applications')
+    .insert({
+      referral_code_id: code.id,
+      sponsor_staff_id: code.sponsor_staff_id,
+      email: input.email,
+      phone: input.phone,
+      first_name: input.firstName,
+      middle_name: input.middleName ?? null,
+      last_name: input.lastName,
+      birth_date: input.birthDate,
+      address: input.address,
+      registration_details: {},
+      status: 'submitted',
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  if (!data) throw new Error('Legacy QA fixture was not inserted');
+  return { status: 201, body: { applicationId: String(data.id), status: 'submitted' } };
+};
+const legacySubmission = async (body: unknown) => {
+  const { res, state } = makeRes();
+  await ost(makeReq({ method: 'POST', familyPath: 'applications', body }), res);
+  return state;
+};
+
+/* ------------------------------------------------------------------ */
+
+describe('OST referral resolution', () => {
+  it('1. resolves a valid SM code without exposing hashes or ids', async () => {
+    install();
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: `referrals/${RAW_CODE}` }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ sponsorName: 'Sam Manager', codeHint: 'OST-…-3456' });
+    expect(JSON.stringify(state.body)).not.toContain('code_hash');
+    expect(JSON.stringify(state.body)).not.toContain(SM_ID);
+  });
+
+  it('2. rejects a code whose sponsor is not a Sales Manager', async () => {
+    install();
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'referrals/OST-FFFFFC-000003' }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(409);
+  });
+
+  it('3. rejects a code whose sponsor is suspended', async () => {
+    install();
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'referrals/OST-FFFFFB-000004' }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(409);
+  });
+
+  it('4. rejects expired, inactive, exhausted and unknown codes', async () => {
+    install();
+    for (const code of [
+      'OST-FFFFFE-000001',
+      'OST-FFFFFD-000002',
+      'OST-FFFFFA-000005',
+      'OST-000000-000000',
+    ]) {
+      const { res, state } = makeRes();
+      await ost(makeReq({ method: 'GET', familyPath: `referrals/${code}` }) as never, res as never);
+      expect(state.status, code).not.toBe(200);
+    }
+  });
+});
+
+describe('OST application submission', () => {
+  it('5. rejects a flat legacy payload carrying a sponsor override', async () => {
+    const db = install();
+    expect((await legacySubmission({ ...applicant, sponsorStaffId: SM2_ID })).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
+  });
+  it('6. requires official details and a request UUID at the legacy address', async () => {
+    const db = install();
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
+    expect(db.rows('audit_events')).toHaveLength(0);
+  });
+  it('7. repeated legacy flat submissions cannot bypass official registration', async () => {
+    const db = install();
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')).toHaveLength(0);
+  });
+
+  it('8. denies unauthenticated and unpermissioned application listing', async () => {
+    install();
+    const anon = makeRes();
+    await ost(makeReq({ method: 'GET', familyPath: 'applications' }) as never, anon.res as never);
+    expect(anon.state.status).toBe(401);
+    const emp = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'applications', token: EMP_TOKEN }) as never,
+      emp.res as never,
+    );
+    expect(emp.state.status).toBe(403);
+  });
+});
+
+describe('OST review and approval', () => {
+  async function submittedApp() {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const state = await submit(db, applicant);
+    expect(state.status).toBe(201);
+    return (state.body as { applicationId: string }).applicationId;
+  }
+
+  it('9. approves: staff identity, OST role, member, genealogy, audits', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant).then((s) => s.body)) as { applicationId: string })
+      .applicationId;
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(201);
+    expect(state.body).toMatchObject({
+      applicationId: appId,
+      sponsorStaffId: SM_ID,
+      ostNumber: 'OST-000001',
+    });
+
+    const fake = holder.db as FakeSupabase;
+    expect(fake.rows('staff_users').find((r) => r.id === NEW_OST_ID)?.status).toBe('invited');
+    expect(
+      fake.rows('staff_role_assignments').find((r) => r.staff_id === NEW_OST_ID)?.role_id,
+    ).toBe('r-ost');
+    const member = fake.rows('ost_members').find((r) => r.application_id === appId);
+    expect(member).toMatchObject({ id: NEW_OST_ID, sponsor_staff_id: SM_ID, status: 'active' });
+    const edge = fake.rows('referral_relationships').find((r) => r.subject_staff_id === NEW_OST_ID);
+    expect(edge).toMatchObject({ upline_staff_id: SM_ID, hierarchy_role: 'ost', is_active: true });
+    const actions = fake.rows('audit_events').map((a) => a.action);
+    expect(actions).toContain('OST_APPLICATION_APPROVED');
+    expect(actions).toContain('OST_MEMBER_ACTIVATED');
+    expect(fake.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('approved');
+  });
+
+  it('10. repeat approval is idempotent: one member, one edge', async () => {
+    install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const first = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      first.res as never,
+    );
+    expect(first.state.status).toBe(201);
+    const second = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      second.res as never,
+    );
+    expect(second.state.status).toBe(200);
+    const fake = holder.db as FakeSupabase;
+    expect(fake.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(1);
+    expect(
+      fake.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),
+    ).toHaveLength(1);
+  });
+
+  it('11. rejects with a reason and refuses a later approval', async () => {
+    install();
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const bad = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/reject`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      bad.res as never,
+    );
+    expect(bad.state.status).toBe(400);
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/reject`,
+        token: ADMIN_TOKEN,
+        body: { reason: 'Documents do not match the applicant' },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ status: 'rejected' });
+    const late = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      late.res as never,
+    );
+    expect(late.state.status).toBe(409);
+    expect((holder.db as FakeSupabase).rows('audit_events').map((a) => a.action)).toContain(
+      'OST_APPLICATION_REJECTED',
+    );
+  });
+
+  it('requests changes with notes and an audit event', async () => {
+    install();
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/request-changes`,
+        token: ADMIN_TOKEN,
+        body: { notes: 'Please upload a clearer identity scan.' },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      status: 'changes_requested',
+      reviewNotes: 'Please upload a clearer identity scan.',
+    });
+    expect((holder.db as FakeSupabase).rows('audit_events').map((a) => a.action)).toContain(
+      'OST_APPLICATION_CHANGES_REQUESTED',
+    );
+  });
+
+  it('12. the sponsor stays frozen: approval uses the stored sponsor', async () => {
+    install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: { sponsorStaffId: SM2_ID },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(201);
+    const edge = (holder.db as FakeSupabase)
+      .rows('referral_relationships')
+      .find((r) => r.subject_staff_id === NEW_OST_ID);
+    expect(edge?.upline_staff_id).toBe(SM_ID);
+  });
+
+  it('16. blocks approval when the sponsor is no longer an SM', async () => {
+    const tables = baseTables();
+    const db = install(tables, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    // The sponsor is demoted after submission: approval must refuse.
+    const assignment = db.rows('staff_role_assignments').find((r) => r.staff_id === SM_ID)!;
+    assignment.role_id = 'r-emp';
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: ADMIN_TOKEN,
+        body: {},
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(409);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+  });
+
+  it('SM cannot approve (no update grant) even their own pipeline', async () => {
+    install();
+    const appId = (
+      (await submit(holder.db as FakeSupabase, applicant)).body as { applicationId: string }
+    ).applicationId;
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token: SM_TOKEN,
+        body: {},
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(403);
+  });
+});
+
+describe('OST visibility scopes', () => {
+  function tablesWithTwoApps(): Record<string, Row[]> {
+    const tables = baseTables();
+    tables.ost_applications = [
+      {
+        id: APP_ID,
+        referral_code_id: CODE_ID,
+        sponsor_staff_id: SM_ID,
+        email: 'a@example.invalid',
+        phone: '+639170000011',
+        first_name: 'A',
+        middle_name: null,
+        last_name: 'One',
+        birth_date: '1990-01-01',
+        address: {},
+        registration_details: {},
+        status: 'submitted',
+        review_notes: null,
+        reviewed_by: null,
+        submitted_at: ago(3),
+        reviewed_at: null,
+      },
+      {
+        id: SM2_APP_ID,
+        referral_code_id: SM2_CODE_ID,
+        sponsor_staff_id: SM2_ID,
+        email: 'b@example.invalid',
+        phone: '+639170000022',
+        first_name: 'B',
+        middle_name: null,
+        last_name: 'Two',
+        birth_date: '1991-02-02',
+        address: {},
+        registration_details: {},
+        status: 'submitted',
+        review_notes: null,
+        reviewed_by: null,
+        submitted_at: ago(2),
+        reviewed_at: null,
+      },
+    ];
+    return tables;
+  }
+
+  it('18. an SM sees only their own sponsored applications', async () => {
+    install(tablesWithTwoApps());
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'applications', token: SM_TOKEN }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(200);
+    expect((state.body as { data: { id: string }[] }).data.map((r) => r.id)).toEqual([APP_ID]);
+  });
+
+  it('19. an unrelated SM cannot open another sponsor application', async () => {
+    install(tablesWithTwoApps());
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'GET',
+        familyPath: `applications/${APP_ID}`,
+        token: SM2_TOKEN,
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(404);
+  });
+
+  it('20. an OST reads only itself', async () => {
+    install(tablesWithTwoApps());
+    const own = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: `members/${OST_ID}`, token: OST_TOKEN }) as never,
+      own.res as never,
+    );
+    expect(own.state.status).toBe(200);
+    const other = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'members', token: OST_TOKEN }) as never,
+      other.res as never,
+    );
+    expect(other.state.status).toBe(200);
+    expect((other.state.body as { data: { id: string }[] }).data.map((r) => r.id)).toEqual([
+      OST_ID,
+    ]);
+  });
+
+  it.each(['members', `members/${OST_ID}`])(
+    'blocks password-gated direct OST reads: %s',
+    async (familyPath) => {
+      const db = install(tablesWithTwoApps());
+      db.rows('staff_users').find((row) => row.id === OST_ID)!.must_change_password = true;
+      const { res, state } = makeRes();
+      await ost(makeReq({ method: 'GET', familyPath, token: OST_TOKEN }) as never, res as never);
+      expect(state.status).toBe(403);
+      expect(JSON.stringify(state.body)).not.toContain('Ollie Seller');
+    },
+  );
+});
+
+describe('OST approval state guards', () => {
+  it('creates an OST with a temporary password without sending an invitation', async () => {
+    const db = install();
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const profilePhotoBase64 = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,0,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
+    const result = await approve(appId, ADMIN_TOKEN, { temporaryPassword: 'TempPass123', profilePhotoBase64 });
+    expect(result.status).toBe(201);
+    const created = db.createdAuthUsers[0]!;
+    expect(photos.upload).toHaveBeenCalledWith(`${created.id}/profile.jpg`, expect.any(Buffer), expect.objectContaining({ upsert: true }));
+    expect(db.passwordsSeen).toEqual(['TempPass123']);
+    expect(db.rows('staff_users').find((r) => r.id === created.id)).toMatchObject({
+      status: 'active',
+      must_change_password: true,
+    });
+    expect(db.calls.some((c) => c.op === 'inviteUserByEmail')).toBe(false);
+    expect(JSON.stringify(result.body)).not.toContain('TempPass123');
+    expect(JSON.stringify(db.rows('audit_events'))).not.toContain('TempPass123');
+  });
+  async function approve(appId: string, token = ADMIN_TOKEN, body: unknown = {}) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${appId}/approve`,
+        token,
+        body,
+      }) as never,
+      res as never,
+    );
+    return state;
+  }
+
+  function seedApplication(db: FakeSupabase, over: Row): string {
+    const id = String(over.id);
+    db.rows('ost_applications').push({
+      referral_code_id: CODE_ID,
+      sponsor_staff_id: SM_ID,
+      email: 'quinn@example.invalid',
+      phone: '+639171234567',
+      first_name: 'Quinn',
+      middle_name: null,
+      last_name: 'Applicant',
+      birth_date: '1994-03-03',
+      address: { line1: '9 Farm Road', city: 'Tagaytay', province: 'Cavite', countryCode: 'PH' },
+      registration_details: {},
+      status: 'submitted',
+      review_notes: null,
+      reviewed_by: null,
+      submitted_at: ago(10),
+      reviewed_at: null,
+      ...over,
+      id,
+    });
+    return id;
+  }
+
+  it('23. a withdrawn application cannot be approved or rejected', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const id = seedApplication(db, { id: APP_ID, status: 'withdrawn' });
+    expect((await approve(id)).status).toBe(409);
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'POST',
+        familyPath: `applications/${id}/reject`,
+        token: ADMIN_TOKEN,
+        body: { reason: 'Too late to reject.' },
+      }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(409);
+    expect(db.rows('ost_members')).toHaveLength(1);
+  });
+
+  it('24. reviewable states (under_review, changes_requested) approve normally', async () => {
+    for (const status of ['under_review', 'changes_requested']) {
+      const db = install(undefined, { inviteUserId: NEW_OST_ID });
+      const id = seedApplication(db, { id: APP_ID, status });
+      const state = await approve(id);
+      expect(state.status, status).toBe(201);
+      expect(db.rows('ost_members').filter((r) => r.application_id === id)).toHaveLength(1);
+    }
+  });
+
+  it('25. a suspended sponsor at approval time is refused with nothing written', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    db.rows('staff_users').find((r) => r.id === SM_ID)!.status = 'suspended';
+    expect((await approve(appId)).status).toBe(409);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(
+      db.rows('referral_relationships').filter((r) => r.upline_staff_id === SM_ID),
+    ).toHaveLength(0);
+  });
+
+  it('26. a differently cased legacy email still requires the official contract', async () => {
+    const db = install();
+    await submit(db, applicant);
+    expect((await legacySubmission({ ...applicant, email: 'OSCAR@EXAMPLE.INVALID' })).status).toBe(
+      400,
+    );
+    expect(db.rows('ost_applications')).toHaveLength(1);
+  });
+  it('27. terminal legacy applications do not enable new flat registrations', async () => {
+    for (const status of ['rejected', 'withdrawn']) {
+      const db = install();
+      seedApplication(db, { id: APP_ID, status, email: applicant.email });
+      expect((await legacySubmission(applicant)).status).toBe(400);
+      expect(db.rows('ost_applications')).toHaveLength(1);
+    }
+  });
+  it('28. a legacy changes-requested record remains unchanged after a flat retry', async () => {
+    const db = install();
+    seedApplication(db, { id: APP_ID, status: 'changes_requested', email: applicant.email });
+    expect((await legacySubmission(applicant)).status).toBe(400);
+    expect(db.rows('ost_applications')[0]?.status).toBe('changes_requested');
+  });
+
+  it('29. approval without an admin URL fails closed before inviting', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    vi.unstubAllEnvs();
+    expect((await approve(appId)).status).toBe(500);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(0);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+  });
+
+  it('30. an invitation failure writes nothing', async () => {
+    const db = install(undefined, {
+      invite: async () => ({ data: { user: null }, error: { message: 'GoTrue is down' } }),
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    expect((await approve(appId)).status).toBe(409);
+    expect(db.rows('staff_users').find((r) => r.email === applicant.email)).toBeUndefined();
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(db.calls.filter((c) => c.op === 'deleteUser')).toHaveLength(0);
+  });
+
+  it('31. a database failure rolls back its SQL transaction and keeps the identity', async () => {
+    const db = install(undefined, {
+      inviteUserId: NEW_OST_ID,
+      unique: { staff_role_assignments: [['staff_id']] },
+    });
+    // A prior partial run left the assignment behind. The staff_users insert
+    // succeeds, the assignment insert fails, and the approval must remove the
+    // rows it created while PRESERVING the invited Auth identity.
+    db.rows('staff_role_assignments').push({ staff_id: NEW_OST_ID, role_id: 'r-ost' });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    expect((await approve(appId)).status).toBe(409);
+    expect(db.deletedAuthUsers).toEqual([]);
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(1);
+    // This run's rows are gone; the prior partial run's assignment stays.
+    expect(db.rows('staff_users').find((r) => r.id === NEW_OST_ID)).toBeUndefined();
+    expect(db.rows('staff_role_assignments').filter((r) => r.staff_id === NEW_OST_ID)).toHaveLength(
+      1,
+    );
+    expect(db.rows('staff_invitations').filter((r) => r.auth_user_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(
+      db.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),
+    ).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('34. an invitation that returns an existing staff identity stops before any write', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    // The invited id already belongs to an account, so the response cannot
+    // prove GoTrue created a new identity; the approval must stop, and no row
+    // of the pre-existing identity may be touched.
+    db.rows('staff_users').push({
+      id: NEW_OST_ID,
+      email: 'returning@afhomes.test',
+      full_name: 'Returning User',
+      status: 'active',
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /already linked to an account/,
+    );
+    expect(db.deletedAuthUsers).toEqual([]);
+    expect(db.rows('staff_users').filter((r) => r.id === NEW_OST_ID)).toHaveLength(1);
+    expect(db.rows('staff_role_assignments').filter((r) => r.staff_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('fails closed when the invited identity ownership lookup fails', async () => {
+    const db = install(undefined, {
+      invite: async () => {
+        db.errors['staff_users.id'] = { message: 'PRIVATE ownership lookup failure' };
+        return { data: { user: { id: NEW_OST_ID } }, error: null };
+      },
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const beforeApproval = db.calls.length;
+    const result = await approve(appId);
+    expect(result.status).toBe(500);
+    expect(
+      db.calls
+        .slice(beforeApproval)
+        .some((c) => ['insert', 'update', 'delete', 'deleteUser'].includes(c.op)),
+    ).toBe(false);
+    expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+  });
+
+  it.each(['returned error', 'thrown error'])(
+    'preserves the invitation and avoids compensating deletes after an RPC %s',
+    async (mode) => {
+      const db = install();
+      const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+      if (mode === 'returned error')
+        db.rpcErrors.install_legacy_ost_identity = { message: 'PRIVATE SQL failure' };
+      else {
+        const originalRpc = db.rpc.bind(db);
+        vi.spyOn(db, 'rpc').mockImplementation((name, args) => {
+          if (name === 'install_legacy_ost_identity')
+            return Promise.reject(new Error('PRIVATE transport failure'));
+          return originalRpc(name, args);
+        });
+      }
+      const result = await approve(appId);
+      expect(result.status).toBe(500);
+      expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+      expect(db.calls.some((c) => c.op === 'delete' || c.op === 'deleteUser')).toBe(false);
+      expect(db.rows('audit_events')).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action:
+              mode === 'returned error'
+                ? 'OST_APPROVAL_PROVISIONING_FAILED'
+                : 'OST_APPROVAL_RECONCILIATION_REQUIRED',
+            entity_id: appId,
+          }),
+        ]),
+      );
+    },
+  );
+
+  it('recovers a committed approval after a lost RPC response without another invite or deletion', async () => {
+    const db = install();
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const originalRpc = db.rpc.bind(db);
+    vi.spyOn(db, 'rpc').mockImplementation(async (name, args) => {
+      const result = await originalRpc(name, args);
+      if (name === 'install_legacy_ost_identity')
+        throw new Error('PRIVATE response lost after commit');
+      return result;
+    });
+    expect((await approve(appId)).status).toBe(500);
+    expect((await approve(appId)).status).toBe(200);
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(1);
+    expect(db.rows('audit_events').filter((r) => r.action === 'OST_MEMBER_ACTIVATED')).toHaveLength(
+      1,
+    );
+    expect(db.calls.filter((c) => c.op === 'inviteUserByEmail')).toHaveLength(1);
+    expect(db.calls.some((c) => c.op === 'delete' || c.op === 'deleteUser')).toBe(false);
+  });
+
+  it('35. an invitation for the applicant email of an existing account writes nothing', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    // Same email, different id: the invite would hand back an id that is new
+    // to staff_users, yet the identity behind the email already exists.
+    db.rows('staff_users').push({
+      id: OLD_ACCOUNT_ID,
+      email: applicant.email,
+      full_name: 'Previous Oscar',
+      status: 'suspended',
+    });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(409);
+    expect((state.body as { error: { message: string } }).error.message).toMatch(
+      /already linked to an account/,
+    );
+    expect(db.rows('staff_users').filter((r) => r.id === NEW_OST_ID)).toHaveLength(0);
+    expect(db.rows('staff_invitations').filter((r) => r.auth_user_id === NEW_OST_ID)).toHaveLength(
+      0,
+    );
+    expect(db.rows('ost_members').filter((r) => r.application_id === appId)).toHaveLength(0);
+    expect(
+      db.rows('referral_relationships').filter((r) => r.subject_staff_id === NEW_OST_ID),
+    ).toHaveLength(0);
+    expect(db.rows('ost_applications').find((r) => r.id === appId)?.status).toBe('submitted');
+  });
+
+  it('32. the issued OST number is non-blank and sequenced', async () => {
+    const db = install(undefined, { inviteUserId: NEW_OST_ID });
+    const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
+    const state = await approve(appId);
+    expect(state.status).toBe(201);
+    const ostNumber = (state.body as { ostNumber: string }).ostNumber;
+    expect(ostNumber).toMatch(/^OST-\d{6}$/);
+    expect(db.rows('ost_members').find((r) => r.application_id === appId)?.ost_number).toBe(
+      ostNumber,
+    );
+  });
+
+  it('33. an anonymous caller cannot open an application by id', async () => {
+    install();
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: `applications/${APP_ID}` }) as never,
+      res as never,
+    );
+    expect(state.status).toBe(401);
+  });
+});
+
+describe('OST referral QR transport', () => {
+  it('21. the QR encodes the registration URL and nothing else', () => {
+    expect(buildOstRegistrationUrl(RAW_CODE, 'https://web.afhomes.test')).toBe(
+      'https://web.afhomes.test/ost/register?code=OST-ABCDEF-123456',
+    );
+    expect(normalizeOstReferralCode('  ost-abcdef-123456 ')).toBe(RAW_CODE);
+  });
+
+  it('22. the ost family is packaged for Vercel', () => {
+    const q: Record<string, string | undefined> = {};
+    expect(selectHandler('/api/v1/ost/applications', q)?.routeKey).toBe('ost/applications');
+    expect(q.familyPath).toBe('applications');
+    expect(routerSource).toContain('../_handlers/ost.js');
+  });
+});
+
+describe('authorized OST literal search', () => {
+  async function search(path: string, term: string, token = ADMIN_TOKEN, status?: string) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({
+        method: 'GET',
+        familyPath: path,
+        token,
+        query: { search: term, ...(status ? { status } : {}) },
+      }) as never,
+      res as never,
+    );
+    return state;
+  }
+  it.each(['oscar', 'OSCAR', 'Trai', '3456', 'Sam Manager', 'submitted'])(
+    'matches safe application identity %s',
+    async (term) => {
+      const db = install();
+      await submit(db, applicant);
+      const result = await search('applications', term);
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ meta: { total: 1 } });
+    },
+  );
+  it('combines application search with workflow status', async () => {
+    const db = install();
+    await submit(db, applicant);
+    expect((await search('applications', 'oscar', ADMIN_TOKEN, 'submitted')).body).toMatchObject({
+      meta: { total: 1 },
+    });
+    expect((await search('applications', 'oscar', ADMIN_TOKEN, 'approved')).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+  it('does not reveal another sponsor application', async () => {
+    const db = install();
+    await submit(db, applicant);
+    expect((await search('applications', 'oscar', SM2_TOKEN)).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+  it('applies unmatched search to the OST self member branch', async () => {
+    install();
+    expect((await search('members', '__NO_SUCH_OST__', OST_TOKEN)).body).toMatchObject({
+      data: [],
+      meta: { total: 0 },
+    });
+  });
+});
+
+describe('OST sponsor lookup failure envelopes', () => {
+  async function lookup(token: string, search: string) {
+    const { res, state } = makeRes();
+    await ost(
+      makeReq({ method: 'GET', familyPath: 'members', token, query: { search } }) as never,
+      res as never,
+    );
+    return state;
+  }
+  it.each(['Sam Manager', '__missing__'])(
+    'distinguishes successful sponsor search %s',
+    async (search) => {
+      install();
+      const state = await lookup(ADMIN_TOKEN, search);
+      expect(state.status).toBe(200);
+      expect(state.body).toMatchObject({ meta: { total: search === 'Sam Manager' ? 1 : 0 } });
+    },
+  );
+  it.each([ADMIN_TOKEN, OST_TOKEN])(
+    'fails safely on sponsor infrastructure failure for %s',
+    async (token) => {
+      const db = install();
+      const original = db.from.bind(db);
+      vi.spyOn(db, 'from').mockImplementation((table) => {
+        const query = original(table);
+        if (table === 'staff_users') {
+          const select = query.select.bind(query);
+          vi.spyOn(query, 'select').mockImplementation((...args) => {
+            if (args[0] === 'id, full_name' || args[0] === 'full_name')
+              db.errors.staff_users = { message: 'PRIVATE SQL sponsor failure' };
+            return select(...args);
+          });
+        }
+        return query;
+      });
+      const state = await lookup(token, 'Sam Manager');
+      expect(state.status).toBe(500);
+      expect(state.body).toMatchObject({ error: { code: 'INTERNAL' } });
+      expect(JSON.stringify(state.body)).not.toContain('PRIVATE SQL');
+      expect(state.body).not.toHaveProperty('data');
+    },
+  );
+});

@@ -15,15 +15,17 @@ import 'sweetalert2/dist/sweetalert2.min.css';
 export interface NotifyInput {
   title: string;
   message?: string;
+  /** Optional second line, rendered under the message. Used for key/value detail. */
+  detail?: string;
 }
 
 const baseClasses = {
-  container: 'jad-swal-container',
-  popup: 'jad-swal-popup',
-  title: 'jad-swal-title',
-  htmlContainer: 'jad-swal-text',
-  confirmButton: 'jad-swal-confirm',
-  timerProgressBar: 'jad-swal-timer',
+  container: 'afhomes-swal-container',
+  popup: 'afhomes-swal-popup',
+  title: 'afhomes-swal-title',
+  htmlContainer: 'afhomes-swal-text',
+  confirmButton: 'afhomes-swal-confirm',
+  timerProgressBar: 'afhomes-swal-timer',
 } as const;
 
 /**
@@ -36,12 +38,53 @@ const modalBehavior = {
   allowOutsideClick: false,
 } as const;
 
+/**
+ * SweetAlert's `html` is raw markup, so anything interpolated into it must be
+ * escaped. Detail lines carry server-returned values (a customer name, a payment
+ * reference), so they are never trusted as markup.
+ */
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (ch) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string,
+  );
+}
+
+/**
+ * Confirmation before an irreversible or money-moving action.
+ *
+ * Resolves `true` only when the operator explicitly confirms. Cancellation,
+ * the close button and the backdrop all resolve `false`, so a caller cannot
+ * treat "the modal went away" as consent.
+ */
+export function notifyConfirm(input: NotifyInput & { confirmButtonText: string }): Promise<boolean> {
+  return Swal.fire({
+    icon: 'question',
+    title: input.title,
+    text: input.message,
+    confirmButtonText: input.confirmButtonText,
+    cancelButtonText: 'Cancel',
+    showCancelButton: true,
+    ...modalBehavior,
+    customClass: { ...baseClasses },
+  }).then((result) => result.isConfirmed === true);
+}
+
 /** Successful action - centered modal, auto-dismissing. */
 export function notifySuccess(input: NotifyInput): void {
   void Swal.fire({
     icon: 'success',
     title: input.title,
-    text: input.message,
+    // SweetAlert renders `html` in preference to `text`, so the two are mutually
+    // exclusive: with a detail block the message becomes the first line of it.
+    ...(input.detail
+      ? {
+          html: `${escapeHtml(input.message ?? '')}<br>${escapeHtml(input.detail)
+            .split('\n')
+            .join('<br>')}`,
+        }
+      : { text: input.message }),
     timer: 2400,
     timerProgressBar: true,
     showConfirmButton: false,
@@ -55,7 +98,13 @@ export function notifyError(input: NotifyInput): void {
   void Swal.fire({
     icon: 'error',
     title: input.title,
-    text: input.message,
+    ...(input.detail
+      ? {
+          html: `${escapeHtml(input.message ?? '')}<br>${escapeHtml(input.detail)
+            .split('\n')
+            .join('<br>')}`,
+        }
+      : { text: input.message }),
     confirmButtonText: 'OK',
     ...modalBehavior,
     customClass: { ...baseClasses },

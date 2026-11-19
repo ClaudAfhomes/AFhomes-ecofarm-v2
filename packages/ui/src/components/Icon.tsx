@@ -33,7 +33,8 @@ export type IconName =
   | 'trash'
   | 'message'
   | 'search'
-  | 'dollar-sign';
+  | 'dollar-sign'
+  | 'more-vertical';
 
 const PATHS: Record<IconName, ReactNode> = {
   menu: (
@@ -226,6 +227,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <line x1="12" y1="1" x2="12" y2="23" />
       <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+    </>
+  ),
+  'more-vertical': (
+    <>
+      <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none" />
     </>
   ),
 };

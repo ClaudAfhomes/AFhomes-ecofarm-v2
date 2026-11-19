@@ -1,0 +1,254 @@
+{
+  "project": "ikaevepedpqygdlipsei",
+  "capturedAt": "2026-10-11T12:49:50.657Z",
+  "access": "read-only",
+  "balances": [
+    {
+      "balance": "52000",
+      "membership_balance": "52000",
+      "ledger_total": "52000"
+    },
+    {
+      "balance": "25000",
+      "membership_balance": "0",
+      "ledger_total": "25000"
+    },
+    {
+      "balance": "25000",
+      "membership_balance": "0",
+      "ledger_total": "25000"
+    },
+    {
+      "balance": "20000",
+      "membership_balance": "0",
+      "ledger_total": "20000"
+    },
+    {
+      "balance": "12500",
+      "membership_balance": "12500",
+      "ledger_total": "12500"
+    },
+    {
+      "balance": "12500",
+      "membership_balance": "12500",
+      "ledger_total": "12500"
+    },
+    {
+      "balance": "10000",
+      "membership_balance": "0",
+      "ledger_total": "10000"
+    },
+    {
+      "balance": "10000",
+      "membership_balance": "0",
+      "ledger_total": "10000"
+    },
+    {
+      "balance": "0",
+      "membership_balance": "0",
+      "ledger_total": "0"
+    },
+    {
+      "balance": "0",
+      "membership_balance": "0",
+      "ledger_total": "0"
+    }
+  ],
+  "history": [
+    {
+      "version": "20260926023325",
+      "name": "afhomes_phase1_foundation",
+      "recordSha256": "6a3af37be1b93a51acd23370331ea32f74f78c800668e2c2ea8de2ef4ddc9532"
+    },
+    {
+      "version": "20260926025313",
+      "name": "afhomes_phase1_advisor_indexes",
+      "recordSha256": "31f101b5fd94246c578df3aef81891a5ad8ae2354bea28b5a90795737ba73c3c"
+    },
+    {
+      "version": "20260927000001",
+      "name": null,
+      "recordSha256": "deb91478b3102300e91f297267a56df63f786c5ea277a3c43614dc55fea9d150"
+    },
+    {
+      "version": "20260927000002",
+      "name": null,
+      "recordSha256": "f2cd60fc7c5d421b795018c5fd898134abeb4cd930fb8a828aed85bf5b497660"
+    },
+    {
+      "version": "20260927000003",
+      "name": null,
+      "recordSha256": "daf2fb3f14c26136da8b17f03d3484cb83a0a120432b16d90bf02c1f5c15ee41"
+    },
+    {
+      "version": "20260927000004",
+      "name": null,
+      "recordSha256": "1e068455ec294dceef57a515dfb684d16fbb3ae5edd2f44e36c3f15b8ce9bca6"
+    },
+    {
+      "version": "20260927000005",
+      "name": null,
+      "recordSha256": "2e99f8815ce74f36e4fda6e03f05df45e9a4f17bab685b2d592b01257d0a81e7"
+    },
+    {
+      "version": "20260928000001",
+      "name": null,
+      "recordSha256": "6dda4b120d90953d7fd2fcf4d5c6a99fbd6db3530866ef6149d9336b6588e847"
+    },
+    {
+      "version": "20260929000001",
+      "name": null,
+      "recordSha256": "a96aa0a4d702ad565a0702d7841319d7b1827f38b72ae9f33b4009d42febbe18"
+    },
+    {
+      "version": "20260930000001",
+      "name": null,
+      "recordSha256": "658a55e40bd8a1d2f2d6feef9b4a4dbd6bb2acc02864604b93f576c5d0f446b0"
+    },
+    {
+      "version": "20261001000001",
+      "name": null,
+      "recordSha256": "89c7aeb4220bae2faa89727d23acbd2e105e793244134764295750d7a62ebb6a"
+    },
+    {
+      "version": "20261002000001",
+      "name": null,
+      "recordSha256": "26c60a8720703fce5e5d523a7078a24f4948f3b089cb583de02edbf06d47d72f"
+    },
+    {
+      "version": "20261003000001",
+      "name": null,
+      "recordSha256": "d591e8ad6e0d0577fe745d7808fa8fb56055bfe4727138cde0905fc2b7b68700"
+    },
+    {
+      "version": "20261004000001",
+      "name": null,
+      "recordSha256": "3a53f20061ea0dc235030787d7c846ce4ecfa32c46bd465b4ade84d568eb4a67"
+    },
+    {
+      "version": "20261005000001",
+      "name": null,
+      "recordSha256": "01c7addc71da3be39c4dfa022c15a4b8c06cfde8969f8a9f4dda3967a714ddab"
+    },
+    {
+      "version": "20261010000001",
+      "name": null,
+      "recordSha256": "1c28b6ca2ee064852497985c5a86fcba62a8e98b5f49a4dde381183b9a009ce7"
+    },
+    {
+      "version": "20261011000001",
+      "name": null,
+      "recordSha256": "ee68f824f214578341e2f5505378bd6433b76b5c020b84f0d63c5804a430a275"
+    },
+    {
+      "version": "20261012000001",
+      "name": null,
+      "recordSha256": "b497536c6fabea0aa6f0ac54bcf80e01f92a48ed3f5ce3da0c8f78eced3d3e75"
+    },
+    {
+      "version": "20261013000001",
+      "name": null,
+      "recordSha256": "b6cd8ca56b76cf69a164d7c23133ea4e04683148b28c09a7522068141473aa3b"
+    },
+    {
+      "version": "20261014000001",
+      "name": null,
+      "recordSha256": "bcf0cb62c46d66f9cad2c8ea888d1bef7d99ab2765ab46ff67a0bd185ae1323a"
+    },
+    {
+      "version": "20261015000001",
+      "name": null,
+      "recordSha256": "c85f219b652a5b26c09b9b7e12c92487aff2c838a7b079ffa3d1e77389bfae08"
+    },
+    {
+      "version": "20261016000001",
+      "name": null,
+      "recordSha256": "c05c87980923d26edeb061bfcee0b930a4895cb4b864d7461d400db84236e7c8"
+    },
+    {
+      "version": "20261017000001",
+      "name": null,
+      "recordSha256": "aef0e24c5d8df3c378689165281f862c862692f635adcc7bd7bf4fa5af13d4c0"
+    },
+    {
+      "version": "20261018000001",
+      "name": null,
+      "recordSha256": "821ed57bb0f99a3720b771ad1822b0291b7f70cab85853182540c65a3c193eac"
+    },
+    {
+      "version": "20261018000002",
+      "name": null,
+      "recordSha256": "ef5ab55f18d19369380ed767f6becf6639547a91af4b52a3a0970b4a9242bf6d"
+    },
+    {
+      "version": "20261018000003",
+      "name": null,
+      "recordSha256": "00681bc9d3459e0be3a054ca812eaa9906dcef105d42f8ab8b9835441d3b5d56"
+    },
+    {
+      "version": "20261019000001",
+      "name": null,
+      "recordSha256": "af5fbe9e51c9443d010ea3453a48f56c76f4c8998816d73e2afc0964abda41ed"
+    },
+    {
+      "version": "20261019000002",
+      "name": null,
+      "recordSha256": "1d82b8dd5e9f521f0ad9985f9c1016de97ef86b7de73ab672a693587954b326c"
+    },
+    {
+      "version": "20261019000003",
+      "name": null,
+      "recordSha256": "4b8adc67c072309f260f1c6aa5af2a157be49bbe1bdb7542d42e06f49a9f62c1"
+    },
+    {
+      "version": "20261020000001",
+      "name": null,
+      "recordSha256": "69f02a0cfc465c63d76299c50988ef5aeb9c0318700093ae6c2a6c85c47a1c86"
+    },
+    {
+      "version": "20261021000001",
+      "name": null,
+      "recordSha256": "6fa145da9e99f93dc4541901d7e6e59b0c65a7ca7df10de334eee05292ad313c"
+    },
+    {
+      "version": "20261022000001",
+      "name": null,
+      "recordSha256": "8a29149b9558875d0e3b37e08ef30142dff3516728826f515549d23d0a80a2ee"
+    },
+    {
+      "version": "20261023000001",
+      "name": null,
+      "recordSha256": "dc2ef53330b5ded60a52386c2b9a71601734cffeacac081d8a95960326d29256"
+    },
+    {
+      "version": "20261025000001",
+      "name": null,
+      "recordSha256": "9e5930faee5fa59bf21518d1199c2e93ce12bb178a87aa5b86c592f1d53ef567"
+    },
+    {
+      "version": "20261026000001",
+      "name": null,
+      "recordSha256": "66ca24ff8e8595270e964682924c000a2d074bd348e4fbe8582533a31d60b916"
+    },
+    {
+      "version": "20261027000001",
+      "name": null,
+      "recordSha256": "fbb17d34d1ab2b2b26509f5cf190964cd63f46c793a50ccf9156dab1663a6278"
+    },
+    {
+      "version": "20261028000001",
+      "name": null,
+      "recordSha256": "b025b228700365f45ce4cf6367b728c9ad6b25cdb5a43282cd72d710e976ff14"
+    },
+    {
+      "version": "20261029000001",
+      "name": null,
+      "recordSha256": "110659accb599b8f8d6e81f52cbf5fdd9554c07ad221a5342c93a4b13e04f886"
+    },
+    {
+      "version": "20261101000001",
+      "name": null,
+      "recordSha256": "6e6599d96f5536c52f9c1500ff07e01e217fcb60c66788d40d9e37c054fc1735"
+    }
+  ]
+}

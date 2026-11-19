@@ -4,12 +4,24 @@
   min-width: 0;
   max-width: 100%;
 }
+.workspaceCrumbs { font-size: 12px; color: #819088; display: flex; gap: 12px; align-items: center; }
+.workspaceCrumbs strong { color: #335a48; }
+.workspaceLogo { display: block; width: 36px; height: 36px; object-fit: contain; }
+@media (max-width: 740px) { .workspaceCrumbs { font-size:10px; gap:7px; } }
+
+/* Grid items default to min-width:auto (their min-content), so one wide
+   descendant — a nowrap figure, a date control, a table floor — would prop
+   every page open sideways. Pages may scroll internally, never the shell. */
+.content > * {
+  min-width: 0;
+  max-width: 100%;
+}
 
 /**
- * Unresolved staff-role notice: the session carries a staff role but no
- * navigation modules resolved (e.g. MemberRole link missing or role lookup
- * failing). Fails loud instead of rendering a mysteriously empty sidebar - 
- * deny-by-default is preserved (no links are shown).
+ * Unresolved-permission notice: the session resolved a staff role but no
+ * navigation modules came back (e.g. the role assignment or its permission
+ * rows are missing). Fails loud instead of rendering a mysteriously empty
+ * sidebar - deny-by-default is preserved (no links are shown).
  */
 .roleNotice {
   display: grid;
@@ -90,6 +102,18 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.topbarBrand .brandTextBlock {
+  min-width: 0;
+}
+
+.topbarBrand .brandName,
+.topbarBrand .brandText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbarBrand > img {
@@ -97,4 +121,70 @@
   width: auto;
   max-width: 100%;
   flex-shrink: 0;
+}
+
+.topbarWordmark {
+  font-family: var(--font-family-display);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .topbarWordmark {
+    color: var(--color-on-dark);
+    max-width: 38vw;
+  }
+}
+
+/* Sidebar footer sign-out. Pinned to the bottom of the rail by the shell's
+   footer slot (below the nav, above nothing): full-width ghost action with
+   the same icon + label grammar as the links above. The text span carries the
+   global `sidebar-footer-label` class so the design system hides it when the
+   rail collapses to icons; the button keeps its accessible name throughout. */
+.logoutButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.logoutButton:hover {
+  background-color: var(--color-bg-surface);
+  color: var(--color-danger);
+}
+
+.logoutButton:hover .logoutIcon {
+  transform: translateX(2px);
+}
+
+.logoutButton:active {
+  background-color: var(--color-brand-soft);
+  color: var(--color-danger);
+}
+
+.logoutButton:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.logoutIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: transform 120ms ease;
 }

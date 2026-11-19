@@ -1,0 +1,122 @@
+.page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: var(--space-2);
+}
+
+/* Thin indeterminate progress bar pinned to the top of the content area. */
+.bar {
+  position: absolute;
+  top: calc(-1 * var(--space-2));
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-brand-primary) 12%, transparent);
+}
+
+.barFill {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  background-color: var(--color-brand-primary);
+  transform: translateX(-100%);
+  animation: travel 1.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes travel {
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  width: min(320px, 70%);
+  height: 30px;
+  border-radius: var(--radius-control);
+}
+
+.subtitle {
+  width: min(420px, 90%);
+  height: 14px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.search {
+  flex: 1 1 260px;
+  max-width: 420px;
+  height: var(--control-md);
+  border-radius: var(--radius-control);
+}
+
+.filter {
+  flex: 0 1 160px;
+  height: var(--control-md);
+  border-radius: var(--radius-control);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface-raised);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.row + .row {
+  border-top: 1px solid var(--color-border-default);
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.lineWide {
+  height: 12px;
+  width: 80%;
+}
+
+.lineNarrow {
+  height: 12px;
+  width: 60%;
+  justify-self: end;
+}
+
+.row:nth-child(even) .lineWide {
+  width: 60%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barFill {
+    animation: none;
+    width: 100%;
+    transform: none;
+    opacity: 0.5;
+  }
+}

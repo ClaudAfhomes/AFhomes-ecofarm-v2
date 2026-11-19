@@ -1,9 +1,8 @@
-import type { ApiErrorCode } from '@jad/contracts';
+import type { ApiErrorCode } from '@afhomes/contracts';
 
 /**
- * Normalized API error mapped from the API error envelope
- * (API-SPECIFICATION.md §3). Carries the stable code, the server message, and
- * the correlation `requestId` (DEVELOPMENT-GUIDELINES §10).
+ * Normalized API error mapped from the shared error envelope. Carries the
+ * stable code, the server message, and the correlation `requestId`.
  */
 export class ApiError extends Error {
   readonly code: ApiErrorCode | string;
@@ -29,8 +28,8 @@ export class ApiError extends Error {
 
 /**
  * The server responded, but the payload did not match the contract schema.
- * Surfaces as a generic, recoverable error state (UI-UX §10 "Error") - the
- * client never silently coerces mismatched data.
+ * Surfaces as a generic, recoverable error state - the client never silently
+ * coerces mismatched data.
  */
 export class ApiParseError extends Error {
   constructor(path: string, message: string) {
@@ -41,11 +40,15 @@ export class ApiParseError extends Error {
 
 /**
  * A network-level failure (offline, DNS, timeout, connection refused).
- * Maps to the UI-UX §10 "Network failure" state.
+ * Maps to the UI "Network failure" state.
  */
 export class ApiNetworkError extends Error {
   constructor(cause: unknown) {
-    super('Network failure while reaching the API');
+    super(
+      cause instanceof DOMException && cause.name === 'TimeoutError'
+        ? 'The request timed out. For changes, check whether they saved before trying again.'
+        : 'Network failure while reaching the API',
+    );
     this.name = 'ApiNetworkError';
     this.cause = cause;
   }
@@ -77,4 +80,19 @@ export function toApiError(body: unknown, status: number): ApiError {
     message: 'An unexpected error occurred.',
     status: DEFAULT_STATUS,
   });
+}
+
+/**
+ * Resolve with `[]` when the caller lacks the permission (403); rethrow
+ * anything else. Used by hooks feeding module-shared pages, so a
+ * permission-denied feed degrades to "not visible to this role" instead of
+ * breaking the page - without substituting mock data.
+ */
+export async function emptyOnForbidden<T>(load: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await load();
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) return [];
+    throw e;
+  }
 }

@@ -20,7 +20,7 @@
   width: min(320px, 86vw);
   background-color: var(--color-brand-deep);
   box-shadow: var(--shadow-lg);
-  animation: slide-in var(--transition-fast) ease;
+  animation: slide-in 160ms ease;
 }
 
 .content {

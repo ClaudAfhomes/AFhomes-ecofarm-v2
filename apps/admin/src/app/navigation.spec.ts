@@ -1,242 +1,120 @@
 import { describe, expect, it } from 'vitest';
-import type { RoleRecord } from '@jad/contracts';
+import type { AfHomesPermission } from '@afhomes/contracts';
+import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions, istNavItemsForPermissions } from './navigation';
 
-import {
-  breadcrumbItems,
-  canAccess,
-  canAccessModule,
-  canAccessSubModule,
-  filterDropdownForStaffRole,
-  findNavItem,
-  findNavSubItem,
-  navItemsForRole,
-  ADMIN_NAV_ITEMS,
-} from './navigation';
-
-describe('breadcrumbItems', () => {
-  it('renders the dashboard crumb alone for /admin', () => {
-    expect(breadcrumbItems('/admin')).toEqual([{ label: 'Dashboard' }]);
-  });
-
-  it('shows category > list for sub pages (list crumb kept distinct)', () => {
-    expect(breadcrumbItems('/admin/payouts')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'Operations' },
-      { label: 'Payouts' },
-    ]);
-    // Category and sub share the label: collapse to a single crumb.
-    expect(breadcrumbItems('/admin/members')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'Members' },
-    ]);
-  });
-
-  it('puts a clickable list link before Details on detail routes', () => {
-    expect(breadcrumbItems('/admin/sales/sal-1')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'Sales', to: '/admin/sales' },
-      { label: 'Details' },
-    ]);
-    expect(breadcrumbItems('/admin/staff/stf-1')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'Staff', to: '/admin/staff' },
-      { label: 'Details' },
-    ]);
-  });
-
-  it('covers plain sections and the account route, suppressing unknown', () => {
-    expect(breadcrumbItems('/admin/messages')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'Messages' },
-    ]);
-    expect(breadcrumbItems('/admin/profile')).toEqual([
-      { label: 'Dashboard', to: '/admin' },
-      { label: 'My Account' },
-    ]);
-    expect(breadcrumbItems('/admin/unknown')).toBeNull();
-  });
+const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermission => ({
+  moduleKey,
+  canView: true,
+  canCreate: false,
+  canUpdate: false,
+  canDelete: false,
 });
 
-describe('admin navigation registry', () => {
-  it('returns no items for an unauthenticated session', () => {
-    expect(navItemsForRole(null)).toEqual([]);
+describe('AFHomes navigation', () => {
+  it('hides disabled Reports/CMS and removes Accreditation from IST navigation',()=>{
+    const grants=[permission('dashboard.view'),permission('sales.card_sales'),permission('governance.audit'),permission('cms.pages')];
+    expect(navItemsForPermissions(grants).some(item=>['Reports','Website CMS'].includes(item.label))).toBe(false);
+    expect(canAccessNavTarget(grants,'/admin/reports')).toBe(false);
+    expect(canAccessNavTarget(grants,'/admin/cms/pages')).toBe(false);
+    expect(istNavItemsForPermissions(grants).some(item=>item.label==='Accreditation')).toBe(false);
   });
-
-  it('shows all admin sections to admin - single admin type', () => {
-    const labels = navItemsForRole('admin').map((item) => item.label);
-    expect(labels).toContain('Dashboard');
-    expect(labels).toContain('Members');
-    expect(labels).toContain('Operations');
-    expect(labels).toContain('Properties');
-    expect(labels).toContain('Marketing Tools');
-    expect(labels).toContain('Broadcasts');
-    expect(labels).toContain('System');
-    expect(labels).toContain('Website CMS');
-    expect(labels).not.toContain('Authentication');
-  });
-
-  it('restricts user to no admin access', () => {
-    const labels = navItemsForRole('user').map((item) => item.label);
-    expect(labels).toEqual([]);
-  });
-
-  it('enforces access per section for admin', () => {
-    const registrationsItem = findNavItem('/admin/registrations');
-    expect(registrationsItem).toBeDefined();
-    if (registrationsItem) {
-      expect(canAccess('admin', registrationsItem)).toBe(true);
-    }
-    const configItem = findNavItem('/admin/config');
-    expect(configItem).toBeDefined();
-    if (configItem) {
-      expect(canAccess('admin', configItem)).toBe(true);
-    }
-    // user cannot access admin sections
-    const memberItem = findNavItem('/admin/registrations');
-    if (memberItem) {
-      expect(canAccess('user', memberItem)).toBe(false);
-    }
-  });
-
-  it('resolves unknown paths to undefined', () => {
-    expect(findNavItem('/admin/nope')).toBeUndefined();
-  });
-});
-
-describe('staff role module access', () => {
-  it('grants every module to super_admin', () => {
-    for (const item of ADMIN_NAV_ITEMS) {
-      expect(canAccessModule('super_admin', undefined, item)).toBe(true);
-    }
-  });
-
-  it('denies governance modules to admin', () => {
-    const byTo = new Map(ADMIN_NAV_ITEMS.map((item) => [item.to, item]));
-    expect(canAccessModule('admin', undefined, byTo.get('/admin')!)).toBe(true);
-    expect(canAccessModule('admin', undefined, byTo.get('/admin/sales')!)).toBe(true);
-    expect(canAccessModule('admin', undefined, byTo.get('/admin/config')!)).toBe(false);
-  });
-
-  it('denies null role id everything', () => {
-    for (const item of ADMIN_NAV_ITEMS) {
-      expect(canAccessModule(null, undefined, item)).toBe(false);
-    }
-  });
-
-  it('resolves sub-item modules for breadcrumbs', () => {
-    const found = findNavSubItem('/admin/withdrawals');
-    expect(found?.sub.module).toBe('withdrawals');
-    expect(canAccessSubModule('finance', undefined, found!.sub)).toBe(true);
-    expect(canAccessSubModule('merchant', undefined, found!.sub)).toBe(false);
-  });
-
-  it('resolves custom role records over the matrix seed', () => {
-    const roles: RoleRecord[] = [
-      {
-        id: 'role-finance-reviewer',
-        name: 'Finance Reviewer',
-        permissions: ['dashboard', 'sales', 'payouts', 'withdrawals'],
-        isSystem: false,
-      },
+  it('places Customer Lookup after Dashboard for employee without weakening route guards', () => {
+    const grants = [
+      permission('dashboard.view'),
+      permission('operations.redemption'),
+      permission('operations.customer_lookup'),
+      permission('sales.id_documents'),
     ];
-    const byTo = new Map(ADMIN_NAV_ITEMS.map((item) => [item.to, item]));
-    expect(canAccessModule('role-finance-reviewer', roles, byTo.get('/admin/sales')!)).toBe(true);
-    expect(canAccessModule('role-finance-reviewer', roles, byTo.get('/admin/members')!)).toBe(
+    const items = navItemsForPermissions(grants);
+    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Dashboard', 'Customer Lookup']);
+    expect(items.map((item) => item.label)).not.toContain('Membership Lookup');
+    expect(JSON.stringify(items)).not.toContain('/admin/documents');
+    expect(canAccessNavTarget([], '/admin/documents')).toBe(false);
+    expect(canAccessNavTarget([], '/admin/documents/test')).toBe(false);
+    expect(canAccessNavTarget(grants, '/admin/documents/test')).toBe(true);
+  });
+
+  it('keeps the member-TRANSACTION lookup out of the global nav', () => {
+    // The member lookup shows Membership Codes, so it must not be presented as a
+    // system-wide general lookup. It belongs under Redemption, next to the action
+    // that follows it.
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('operations.redemption'),
+      permission('operations.customer_lookup'),
+    ]);
+    const topLevel = items.filter((item) => !item.dropdown).map((item) => item.to);
+    expect(topLevel).not.toContain('/admin/member-lookup');
+    expect(topLevel).toContain('/admin/customer-lookup');
+    const redemption = items.find((item) => item.to === '/admin/redemption');
+    // A dropdown child may be a divider rather than a link, so narrow before
+    // reading `to` instead of asserting on the union type.
+    const redemptionTargets = (redemption?.dropdown ?? []).flatMap((child) =>
+      'to' in child ? [child.to] : [],
+    );
+    expect(redemptionTargets).not.toContain('/admin/member-lookup');
+  });
+
+  it('reserves Customer Lookup to its own grant, not the till key', () => {
+    // The screen has its own module (`operations.customer_lookup`, seeded by
+    // 20261131000003 for employee and admin). Visibility is permission-driven:
+    // that grant shows the entry, the till key alone does not, and the route
+    // guard tracks the same key so hiding and refusing cannot disagree.
+    const lookupGrant = [permission('dashboard.view'), permission('operations.customer_lookup')];
+    expect(canAccessNavTarget(lookupGrant, '/admin/customer-lookup')).toBe(true);
+    const targets = navItemsForPermissions(lookupGrant).flatMap((item) =>
+      item.dropdown
+        ? item.dropdown.flatMap((child) => ('to' in child ? [child.to] : []))
+        : [item.to],
+    );
+    expect(targets.filter((to) => to?.includes('customer-lookup'))).toEqual([
+      '/admin/customer-lookup',
+    ]);
+
+    // The till permission is NOT enough: neither the entry nor the URL. The
+    // viewer's role is not consulted at all - the effective permission is the
+    // whole rule - which is why every "role" case below is the same call.
+    const tillOnly = [permission('dashboard.view'), permission('operations.redemption')];
+    expect(canAccessNavTarget(tillOnly, '/admin/customer-lookup')).toBe(false);
+    expect(
+      navItemsForPermissions(tillOnly).some((item) => item.to === '/admin/customer-lookup'),
+    ).toBe(false);
+    expect(
+      navItemsForPermissions(lookupGrant).some((item) => item.to === '/admin/customer-lookup'),
+    ).toBe(true);
+  });
+  it('does not grant employee lookup without its effective permission', () => {
+    expect(navItemsForPermissions([])).toEqual([]);
+    expect(canAccessNavTarget([], '/admin/customer-lookup')).toBe(false);
+    expect(canAccessNavTarget([permission('dashboard.view')], '/admin/customer-lookup')).toBe(
       false,
     );
-    expect(canAccessModule('role-ghost', roles, byTo.get('/admin/sales')!)).toBe(false);
-    const items = navItemsForRole('admin', 'role-finance-reviewer', roles);
-    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Operations']);
   });
-});
-
-describe('navItemsForRole with staff role', () => {
-  it('keeps legacy output when staff role is omitted', () => {
-    const labels = navItemsForRole('admin').map((item) => item.label);
-    expect(labels).toContain('System');
-    const system = navItemsForRole('admin').find((item) => item.label === 'System');
-    expect(system?.dropdown?.length).toBe(4);
-  });
-
-  it('shows the full shell to super_admin', () => {
-    const labels = navItemsForRole('admin', 'super_admin').map((item) => item.label);
-    expect(labels).toEqual([
-      'Dashboard',
-      'Members',
-      'Operations',
-      'Properties',
-      'Marketing Tools',
-      'Broadcasts',
-      'Messages',
-      'Policies',
-      'System',
-      'Website CMS',
+  it('shows only server-granted groups and links', () => {
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('organization.staff'),
     ]);
-  });
-
-  it('hides config/audit from admin but keeps the System category empty-free', () => {
-    const items = navItemsForRole('admin', 'admin');
-    expect(items.some((item) => item.label === 'System')).toBe(false);
-    expect(items.some((item) => item.label === 'Operations')).toBe(true);
-  });
-
-  it('shows Staff under System to super_admin only', () => {
-    const superItems = navItemsForRole('admin', 'super_admin');
-    const system = superItems.find((item) => item.label === 'System');
-    const links = (system?.dropdown ?? []).filter((sub) => !('divider' in sub));
-    expect(links.map((sub) => ('divider' in sub ? '' : sub.label))).toEqual([
-      'System Configuration',
-      'Audit Log',
+    // Phase 25 removes the dead Reports destination when none of its real
+    // report modules are visible.
+    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Organization']);
+    expect(items[1]?.dropdown?.map((item) => ('label' in item ? item.label : ''))).toEqual([
       'Staff',
-      'Roles',
-    ]);
-    expect(findNavSubItem('/admin/staff')?.sub.module).toBe('staff');
-    expect(canAccessSubModule('admin', undefined, findNavSubItem('/admin/staff')!.sub)).toBe(false);
-    expect(findNavSubItem('/admin/roles')?.sub.module).toBe('staff');
-    expect(canAccessSubModule('finance', undefined, findNavSubItem('/admin/roles')!.sub)).toBe(
-      false,
-    );
-  });
-
-  it('limits finance to dashboard plus sales, payouts and withdrawals', () => {
-    const items = navItemsForRole('admin', 'finance');
-    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Operations']);
-    const operations = items.find((item) => item.label === 'Operations');
-    const links = (operations?.dropdown ?? []).filter((sub) => !('divider' in sub));
-    expect(links.map((sub) => ('divider' in sub ? '' : sub.label))).toEqual([
-      'Sales',
-      'Payouts',
-      'Withdrawals',
-      'Reports',
     ]);
   });
-
-  it('keeps the Operations category for merchant with Vouchers only', () => {
-    const items = navItemsForRole('admin', 'merchant');
-    expect(items.map((item) => item.label)).toEqual(['Operations']);
-    const operations = items.find((item) => item.label === 'Operations');
-    const links = (operations?.dropdown ?? []).filter((sub) => !('divider' in sub));
-    expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ to: '/admin/vouchers', label: 'Vouchers' });
+  it('keeps Reports hidden while its feature flag is disabled, even with governance access', () => {
+    const items = navItemsForPermissions([
+      permission('dashboard.view'),
+      permission('governance.audit'),
+    ]);
+    expect(items.map((item) => item.label)).toEqual(['Dashboard']);
   });
-
-  it('returns nothing for null staff role or null session role', () => {
-    expect(navItemsForRole('admin', null)).toEqual([]);
-    expect(navItemsForRole(null, 'super_admin')).toEqual([]);
-  });
-});
-
-describe('filterDropdownForStaffRole', () => {
-  it('strips orphaned dividers after filtering', () => {
-    const operations = ADMIN_NAV_ITEMS.find((item) => item.label === 'Operations')!;
-    const filtered = filterDropdownForStaffRole(operations.dropdown, 'merchant')!;
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]).toMatchObject({ label: 'Vouchers' });
-  });
-
-  it('passes dropdowns through when staff role is null (legacy)', () => {
-    const operations = ADMIN_NAV_ITEMS.find((item) => item.label === 'Operations')!;
-    expect(filterDropdownForStaffRole(operations.dropdown, null)).toBe(operations.dropdown);
-    expect(filterDropdownForStaffRole(undefined, 'admin')).toBeUndefined();
-  });
+  it('hides every destination when the server grants nothing', () =>
+    expect(navItemsForPermissions([])).toEqual([]));
+  it('builds organization breadcrumbs', () =>
+    expect(breadcrumbItems('/admin/roles')).toEqual([
+      { label: 'Dashboard', to: '/admin' },
+      { label: 'Organization' },
+      { label: 'Roles' },
+    ]));
 });

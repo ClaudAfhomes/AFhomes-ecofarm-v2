@@ -1,164 +1,89 @@
-import { GOVERNMENT_ID_BUCKET } from './documents.js';
+import { createClient } from '@supabase/supabase-js';
+
+import { getSupabaseEnv } from './env.js';
 
 /**
- * Supabase Storage <-> database synchronization helpers.
+ * Server-only Supabase Storage access (service role, bypasses RLS).
  *
- * Every upload-enabled module funnels deletions/replacements through here so
- * storage files never outlive their database records:
+ * Identity documents live in private buckets, so every byte moves through
+ * here: signed upload URLs for intake, downloads for OCR validation, and
+ * short-lived signed URLs for reviewer preview. No storage URL with a secret
+ * or a long life ever leaves this module except inside a handler response
+ * that has already authorized the caller.
  *
- * - `marketing-tools` (public): CMS images, content-library files, policy
- *   PDFs. URLs embed the object key - extract it with
- *   `marketingToolsObjectKey` and remove it with
- *   `removeMarketingToolsObjects`.
- * - `government-ids` (private): registration ID documents at
- *   `government-ids/<registrationId>/...`. Remove the whole prefix with
- *   `removeGovernmentIdObjects`.
- *
- * All removals are best-effort and never throw: the database row is the
- * system of record, so a storage failure is logged (and audited by the
- * caller) but never blocks or rolls back the database write. Callers must
- * order operations file-last: persist/replace the row first, remove the
- * superseded object afterwards - never the reverse.
+ * Tests replace this module wholesale (`vi.mock` on `_lib/storage.js`), the
+ * same seam production uses - the handler's real code path is what runs.
  */
 
-export const MARKETING_TOOLS_BUCKET = 'marketing-tools';
+function makeStorage(url: string, serviceKey: string) {
+  return createClient(url, serviceKey, { auth: { autoRefreshToken: false } }).storage;
+}
 
-/** Bucket markers inside public download URLs (see `cms/upload/sign.ts`). */
-const MARKETING_TOOLS_OBJECT_MARKERS = [
-  '/storage/v1/object/public/marketing-tools/',
-  '/storage/v1/object/authenticated/marketing-tools/',
-];
+let cached: ReturnType<typeof makeStorage> | null = null;
+let cachedKey = '';
 
-/**
- * Extract the `marketing-tools` bucket object key from a download URL, or
- * null when the URL points elsewhere (external links are never touched).
- * Query strings are stripped; path traversal is rejected.
- */
-export function marketingToolsObjectKey(downloadUrl: unknown): string | null {
-  if (typeof downloadUrl !== 'string' || !downloadUrl) return null;
-  const path = (downloadUrl.split('?')[0] ?? '').trim();
-  for (const marker of MARKETING_TOOLS_OBJECT_MARKERS) {
-    const at = path.indexOf(marker);
-    if (at === -1) continue;
-    const key = path.slice(at + marker.length).replace(/^\/+/, '');
-    if (!key || key.includes('..')) return null;
-    return key;
+/** Service-role storage client, or null when unconfigured. Callers respond 500. */
+export function storageClient() {
+  const { url, serviceKey } = getSupabaseEnv();
+  if (!url || !serviceKey) return null;
+  if (!cached || cachedKey !== serviceKey) {
+    cached = makeStorage(url, serviceKey);
+    cachedKey = serviceKey;
   }
-  return null;
+  return cached;
 }
 
-/** Minimal storage surface the helpers need (the real client satisfies this). */
-export interface StorageBucketClient {
-  remove: (paths: string[]) => Promise<{ error: { message: string } | null }>;
-  list: (
-    path?: string,
-    options?: Record<string, unknown>,
-  ) => Promise<{ data: { name: string }[] | null; error: { message: string } | null }>;
-}
-
-export interface StorageCapableClient {
-  storage: { from: (bucket: string) => StorageBucketClient };
-}
-
-export interface StorageRemoval {
-  /** Object keys the removal was attempted for. */
-  attempted: string[];
-  /** True when every attempted removal succeeded (vacuously true when none). */
-  removed: boolean;
-}
+export type Storage = NonNullable<ReturnType<typeof storageClient>>;
 
 /**
- * Best-effort removal of exact object keys from a bucket. Keys containing
- * `..` are rejected (path traversal). Never throws.
+ * Signed intake grant for one server-generated path. The browser must start
+ * the PUT within the grant window; the object itself stays private.
  */
-export async function removeStorageKeys(
-  supabase: StorageCapableClient,
+export async function createUploadGrant(
+  storage: Storage,
   bucket: string,
-  keys: (string | null | undefined)[],
-): Promise<StorageRemoval> {
-  const clean = [...new Set(keys.filter((k): k is string => typeof k === 'string' && !!k))].filter(
-    (k) => !k.includes('..'),
-  );
-  if (clean.length === 0) return { attempted: [], removed: true };
-  try {
-    const { error } = await supabase.storage.from(bucket).remove(clean);
-    if (error) {
-      console.error(
-        `[storage:${bucket}] removal failed for ${clean.length} objects:`,
-        error.message,
-      );
-      return { attempted: clean, removed: false };
-    }
-    return { attempted: clean, removed: true };
-  } catch (e) {
-    console.error(
-      `[storage:${bucket}] removal error for ${clean.length} objects:`,
-      (e as Error).message,
-    );
-    return { attempted: clean, removed: false };
+  path: string,
+  windowSeconds = 600,
+): Promise<{ uploadUrl: string; expiresAt: string }> {
+  const { data, error } = await storage.from(bucket).createSignedUploadUrl(path);
+  if (error || !data?.signedUrl) {
+    throw new Error(`Signed upload URL failed: ${error?.message ?? 'no URL returned'}`);
   }
+  return {
+    uploadUrl: data.signedUrl,
+    expiresAt: new Date(Date.now() + windowSeconds * 1000).toISOString(),
+  };
 }
 
-/**
- * Best-effort removal of `marketing-tools` objects referenced by download
- * URLs (policy PDFs, replaced content files). URLs that do not resolve to a
- * bucket key are silently skipped. Never throws.
- */
-export async function removeMarketingToolsObjects(
-  supabase: StorageCapableClient,
-  downloadUrls: (string | null | undefined)[],
-): Promise<StorageRemoval> {
-  const keys = [
-    ...new Set(downloadUrls.map(marketingToolsObjectKey).filter(Boolean)),
-  ] as string[];
-  return removeStorageKeys(supabase, MARKETING_TOOLS_BUCKET, keys);
+/** Short-lived, single-document download grant for an authorized reviewer. */
+export async function createDownloadGrant(
+  storage: Storage,
+  bucket: string,
+  path: string,
+  ttlSeconds = 60,
+): Promise<{ url: string; expiresAt: string }> {
+  const { data, error } = await storage.from(bucket).createSignedUrl(path, ttlSeconds);
+  if (error || !data?.signedUrl) {
+    throw new Error(`Signed download URL failed: ${error?.message ?? 'no URL returned'}`);
+  }
+  return {
+    url: data.signedUrl,
+    expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+  };
 }
 
-/**
- * Best-effort removal of every ID document under
- * `government-ids/<registrationId>/...` (approval consumes the application,
- * purge destroys the identity, replays replace the file). Never throws.
- */
-export async function removeGovernmentIdObjects(
-  supabase: StorageCapableClient,
-  registrationId: string,
-): Promise<StorageRemoval> {
-  if (!registrationId) return { attempted: [], removed: true };
-  if (registrationId.includes('..') || registrationId.includes('/')) {
-    return { attempted: [], removed: true };
-  }
+/** Download an object for server-side validation and OCR. Never throws. */
+export async function downloadObject(
+  storage: Storage,
+  bucket: string,
+  path: string,
+): Promise<{ bytes: Uint8Array } | { error: string }> {
   try {
-    const { data, error } = await supabase.storage
-      .from(GOVERNMENT_ID_BUCKET)
-      .list(registrationId, { limit: 1000 });
-    if (error) {
-      console.error(
-        `[storage:${GOVERNMENT_ID_BUCKET}] list failed for ${registrationId}:`,
-        error.message,
-      );
-      return { attempted: [], removed: false };
-    }
-    const keys = ((data ?? []) as { name: string }[])
-      .map((entry) => (typeof entry?.name === 'string' ? entry.name : ''))
-      .filter(Boolean)
-      .map((name) => `${registrationId}/${name}`);
-    if (keys.length === 0) return { attempted: [], removed: true };
-    const { error: removeError } = await supabase.storage
-      .from(GOVERNMENT_ID_BUCKET)
-      .remove(keys);
-    if (removeError) {
-      console.error(
-        `[storage:${GOVERNMENT_ID_BUCKET}] removal failed for ${registrationId}:`,
-        removeError.message,
-      );
-      return { attempted: keys, removed: false };
-    }
-    return { attempted: keys, removed: true };
-  } catch (e) {
-    console.error(
-      `[storage:${GOVERNMENT_ID_BUCKET}] removal error for ${registrationId}:`,
-      (e as Error).message,
-    );
-    return { attempted: [], removed: false };
+    const { data, error } = await storage.from(bucket).download(path);
+    if (error || !data) return { error: error?.message ?? 'download returned no data' };
+    const buffer = await data.arrayBuffer();
+    return { bytes: new Uint8Array(buffer) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'download failed' };
   }
 }

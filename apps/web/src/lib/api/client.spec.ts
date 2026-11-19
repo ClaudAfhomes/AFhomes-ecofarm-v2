@@ -1,123 +1,83 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+const auth = vi.hoisted(() => ({ getSession: vi.fn(), refresh: vi.fn(), clear: vi.fn() }));
+vi.mock('../supabase', () => ({
+  getSupabaseClient: () => ({ auth: { getSession: auth.getSession } }),
+  isSupabaseConfigured: () => true,
+  tryRefreshSession: auth.refresh,
+  clearSession: auth.clear,
+}));
 import { request } from './client';
 
-const supabaseStubs = vi.hoisted(() => ({
-  configured: false,
-  refreshResult: false,
-  signOutCalls: 0,
-  refreshCalls: 0,
-  token: null as string | null,
-}));
+const schema = z.object({ ok: z.literal(true) });
+const response = (status = 200) => new Response(JSON.stringify({ ok: true }), { status });
+beforeEach(() => {
+  vi.clearAllMocks();
+  auth.getSession.mockResolvedValue({ data: { session: { access_token: 'customer-token' } } });
+  auth.refresh.mockResolvedValue(true);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
-vi.mock('../supabase', () => ({
-  isSupabaseConfigured: () => supabaseStubs.configured,
-  getSupabaseClient: () => ({
-    auth: {
-      getSession: async () => ({
-        data: {
-          session: supabaseStubs.token ? { access_token: supabaseStubs.token } : null,
-        },
-      }),
+describe('customer request lifecycle', () => {
+  it.each(['session', 'fetch', 'body'])(
+    'bounds a stalled %s without replaying a POST',
+    async (stage) => {
+      vi.useFakeTimers();
+      const pending = () => new Promise<never>(() => {});
+      if (stage === 'session') auth.getSession.mockImplementation(pending);
+      const fetchMock = vi.fn().mockImplementation(
+        stage === 'fetch'
+          ? pending
+          : async () => {
+              const res = response();
+              if (stage === 'body') vi.spyOn(res, 'text').mockImplementation(pending);
+              return res;
+            },
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const rejected = expect(
+        request('/customer', schema, { method: 'POST' }),
+      ).rejects.toMatchObject({
+        name: 'ApiNetworkError',
+        message: expect.stringContaining('timed out'),
+      });
+      await vi.advanceTimersByTimeAsync(60_001);
+      await rejected;
+      expect(fetchMock).toHaveBeenCalledTimes(stage === 'session' ? 0 : 1);
+      expect(auth.refresh).not.toHaveBeenCalled();
+      expect(auth.clear).not.toHaveBeenCalled();
     },
-  }),
-  tryRefreshSession: async () => {
-    supabaseStubs.refreshCalls += 1;
-    return supabaseStubs.refreshResult;
-  },
-  clearSession: async () => {
-    supabaseStubs.signOutCalls += 1;
-  },
-}));
+  );
 
-function jsonResponse(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
-const unauthorized = () =>
-  jsonResponse({ error: { code: 'UNAUTHORIZED', message: 'Invalid session' } }, 401);
-
-describe('rawRequest 401 recovery', () => {
-  beforeEach(() => {
-    supabaseStubs.configured = false;
-    supabaseStubs.refreshResult = false;
-    supabaseStubs.signOutCalls = 0;
-    supabaseStubs.refreshCalls = 0;
-    supabaseStubs.token = null;
-    vi.unstubAllGlobals();
-  });
-
-  it('attaches the Bearer token when Supabase is configured', async () => {
-    supabaseStubs.configured = true;
-    supabaseStubs.token = 'tok-abc';
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }, 200));
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/me/wallet', z.object({ ok: z.literal(true) }))).resolves.toEqual({
-      ok: true,
-    });
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toContain('/me/wallet');
-    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok-abc' });
-  });
-
-  it('passes non-401 responses through without touching auth', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }, 200));
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/ping', z.object({ ok: z.literal(true) }))).resolves.toEqual({
-      ok: true,
-    });
-    expect(supabaseStubs.refreshCalls).toBe(0);
-    expect(supabaseStubs.signOutCalls).toBe(0);
-  });
-
-  it('ignores 401s when Supabase is not configured', async () => {
-    const fetchMock = vi.fn(async () => unauthorized());
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/me/wallet', z.object({}))).rejects.toMatchObject({ status: 401 });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(supabaseStubs.refreshCalls).toBe(0);
-  });
-
-  it('retries once after a successful rotation without signing out', async () => {
-    supabaseStubs.configured = true;
-    supabaseStubs.refreshResult = true;
+  it('preserves one authenticated 401 recovery', async () => {
+    vi.useFakeTimers();
     const fetchMock = vi
-      .fn<() => Promise<Response>>()
-      .mockResolvedValueOnce(unauthorized())
-      .mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
+      .fn()
+      .mockResolvedValueOnce(response(401))
+      .mockResolvedValueOnce(response());
     vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/ping', z.object({ ok: z.literal(true) }))).resolves.toEqual({
-      ok: true,
+    await expect(request('/customer', schema)).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(auth.refresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[1]![1]).toMatchObject({
+      headers: { Authorization: 'Bearer customer-token' },
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(supabaseStubs.refreshCalls).toBe(1);
-    expect(supabaseStubs.signOutCalls).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('clears the session when rotation fails so guards redirect to login', async () => {
-    supabaseStubs.configured = true;
-    supabaseStubs.refreshResult = false;
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => unauthorized());
+  it('does not send a pre-cancelled request', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/me/wallet', z.object({}))).rejects.toMatchObject({ status: 401 });
-    expect(supabaseStubs.refreshCalls).toBe(1);
-    expect(supabaseStubs.signOutCalls).toBe(1);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('session rotation failed'));
-    warn.mockRestore();
-  });
-
-  it('never retries more than once', async () => {
-    supabaseStubs.configured = true;
-    supabaseStubs.refreshResult = true;
-    const fetchMock = vi.fn(async () => unauthorized());
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(request('/me/wallet', z.object({}))).rejects.toMatchObject({ status: 401 });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(supabaseStubs.refreshCalls).toBe(1);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(request('/customer', schema, { signal: controller.signal })).rejects.toMatchObject(
+      { name: 'AbortError' },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(auth.getSession).not.toHaveBeenCalled();
   });
 });

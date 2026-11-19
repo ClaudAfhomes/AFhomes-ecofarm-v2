@@ -1,7 +1,20 @@
-import { listResponseSchema } from '@jad/contracts';
+/**
+ * The single typed API client for the customer portal. Every request goes
+ * through here - no ad-hoc `fetch` in a feature - and every response is
+ * validated against a `@afhomes/contracts` schema, so a drifting payload surfaces as
+ * an error instead of silently rendering undefined.
+ *
+ * Auth: the customer's Supabase access token is attached as
+ * `Authorization: Bearer`. `/auth/customer/activate` is unauthenticated and
+ * simply sends no header.
+ */
+import { listResponseSchema } from '@afhomes/contracts';
+import { withRequestDeadline } from '@afhomes/shared';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';
+import { isMongoAuth } from '../cookie-auth';
+import { notifyCookieAuth } from '@afhomes/shared';
 import { ApiNetworkError, ApiParseError, toApiError } from './errors';
 import {
   clearSession,
@@ -10,17 +23,6 @@ import {
   tryRefreshSession,
 } from '../supabase';
 
-/**
- * Single typed fetch-based API client (FRONTEND-ARCHITECTURE §5). All requests
- * go through here - no ad-hoc `fetch` in features.
- *
- * Auth: the session is a Supabase JWT. When Supabase is configured, the access
- * token is attached as `Authorization: Bearer` on every request (the API
- * accepts Bearer or the PKCE cookie). Production stores the session in
- * localStorage, so the Bearer header is what the API actually reads. Public
- * endpoints ignore the header; expired tokens are healed via the 401 path
- * below. Credentials stay `same-origin` (the default `/api/v1` deployment).
- */
 async function rawRequest(path: string, init?: RequestInit, retried = false): Promise<Response> {
   const url = `${env.VITE_API_BASE_URL}${path}`;
   const headers: Record<string, string> = {
@@ -28,14 +30,14 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
     'Content-Type': 'application/json',
     ...(init?.headers as Record<string, string> | undefined),
   };
-  if (isSupabaseConfigured()) {
-    const client = getSupabaseClient();
-    const { data } = (await client?.auth.getSession()) ?? { data: { session: null } };
+  if (!isMongoAuth && isSupabaseConfigured()) {
+    const { data } = (await getSupabaseClient()?.auth.getSession()) ?? {
+      data: { session: null },
+    };
     const token = data.session?.access_token;
-    // No warning when the token is absent: public endpoints (CMS, config,
-    // programs, policies) legitimately run without a session.
     if (token) headers.Authorization = `Bearer ${token}`;
   }
+  init?.signal?.throwIfAborted();
   let res: Response;
   try {
     res = await fetch(url, {
@@ -44,17 +46,18 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
       credentials: init?.credentials ?? 'same-origin',
     });
   } catch (cause) {
+    init?.signal?.throwIfAborted();
     throw new ApiNetworkError(cause);
   }
-  // Expired/rotated sessions surface as 401 (the API never returns 401 for a
-  // merely under-privileged caller - that's 403). Heal once via rotation and
-  // retry; if rotation fails the session is dead, so warn (the only reliable
-  // signal that auth was actually required and lost) then clear it and let
-  // the route guards redirect to login instead of stranding an error page.
-  if (res.status === 401 && !retried && isSupabaseConfigured()) {
+  // An expired or rotated session surfaces as 401 (an under-privileged caller is
+  // always 403, never 401). Heal once via rotation, then retry; if rotation
+  // fails the session is dead, so clear it and let the guard redirect.
+  init?.signal?.throwIfAborted();
+  if (res.status === 401 && isMongoAuth) notifyCookieAuth();
+  if (res.status === 401 && !retried && !isMongoAuth && isSupabaseConfigured()) {
     const healed = await tryRefreshSession();
+    init?.signal?.throwIfAborted();
     if (healed) return rawRequest(path, init, true);
-    console.warn(`[api] ${path} returned 401 and session rotation failed - clearing session`);
     await clearSession();
   }
   return res;
@@ -70,71 +73,39 @@ async function parseBody(res: Response): Promise<unknown> {
   }
 }
 
-/** GET a single resource; validates against `schema`; throws ApiError / ApiParseError. */
+async function requestBody(path: string, init?: RequestInit) {
+  try {
+    return await withRequestDeadline(async (signal) => {
+      const res = await rawRequest(path, { ...init, signal });
+      const body = await parseBody(res);
+      return { res, body };
+    }, init?.signal);
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+      throw new ApiNetworkError(cause);
+    }
+    throw cause;
+  }
+}
+
+/** Request a single resource; validate against `schema`. */
 export async function request<T>(path: string, schema: ZodType<T>, init?: RequestInit): Promise<T> {
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
-
-  if (!res.ok) {
-    throw toApiError(body, res.status);
-  }
-
+  const { res, body } = await requestBody(path, init);
+  if (!res.ok) throw toApiError(body, res.status);
   const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    throw new ApiParseError(path, parsed.error.message);
-  }
+  if (!parsed.success) throw new ApiParseError(path, parsed.error.message);
   return parsed.data;
 }
 
-/** GET a collection; validates `{ data, meta }` and returns `data` (API-SPECIFICATION §1.1/§4). */
+/** Request a collection; validate the `{ data, meta }` envelope and return `data`. */
 export async function requestList<T>(
   path: string,
   itemSchema: ZodType<T>,
   init?: RequestInit,
 ): Promise<T[]> {
-  const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
-
-  if (!res.ok) {
-    throw toApiError(body, res.status);
-  }
-
-  const parsed = listSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new ApiParseError(path, parsed.error.message);
-  }
+  const { res, body } = await requestBody(path, init);
+  if (!res.ok) throw toApiError(body, res.status);
+  const parsed = listResponseSchema(itemSchema).safeParse(body);
+  if (!parsed.success) throw new ApiParseError(path, parsed.error.message);
   return parsed.data.data;
-}
-
-/** Cursor-paginated page of `{ data, meta.pagination.nextCursor }` (API-SPECIFICATION §4). */
-export interface PageResult<T> {
-  items: T[];
-  nextCursor?: string;
-}
-
-/**
- * GET a cursor-paginated collection (ledger/financial streams - API-SPECIFICATION
- * §4). Returns the page items plus the opaque `nextCursor` from `meta.pagination`
- * (absent on the last page).
- */
-export async function requestPage<T>(
-  path: string,
-  itemSchema: ZodType<T>,
-  init?: RequestInit,
-): Promise<PageResult<T>> {
-  const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
-
-  if (!res.ok) {
-    throw toApiError(body, res.status);
-  }
-
-  const parsed = listSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new ApiParseError(path, parsed.error.message);
-  }
-  const pagination = parsed.data.meta?.pagination as { nextCursor?: string } | undefined;
-  return { items: parsed.data.data, nextCursor: pagination?.nextCursor };
 }

@@ -1,0 +1,169 @@
+.page {
+  --color-bg-surface: #142b24;
+  --color-bg-surface-raised: #1b352d;
+  --color-text-primary: #f3f6f2;
+  --color-text-secondary: #c1cfc7;
+  --color-text-muted: #b0c4b8;
+  --color-border-default: #3d574b;
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  padding: var(--space-5);
+  background: #10231d;
+  color: var(--color-text-primary);
+  border-radius: var(--radius-lg);
+  color-scheme: dark;
+}
+.page h2,
+.page h3,
+.lightPage h2 {
+  margin: 0 0 var(--space-3);
+  color: inherit;
+}
+.lightPage {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  color: var(--color-text-primary);
+  background: var(--color-bg-canvas);
+  color-scheme: light;
+  padding-bottom: var(--space-6);
+}
+.lightPage h2 {
+  font-size: var(--text-h3);
+  line-height: 1.4;
+  font-weight: 600;
+}
+.lightPage .metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.lightPage .filters,
+.historyTable {
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.summarySection {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.summarySection h2 {
+  margin: 0;
+}
+.scope {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--color-accent);
+  color: var(--color-text-secondary);
+}
+.personalStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--color-brand-soft);
+  border-radius: var(--radius-md);
+}
+.personalStrip dt {
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+.personalStrip dd {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-h3);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.filterLabel {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+}
+@media (max-width: 1023px) {
+  .lightPage .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 639px) {
+  .lightPage .metrics,
+  .personalStrip {
+    grid-template-columns: 1fr;
+  }
+  .historyTable {
+    padding: var(--space-2);
+  }
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.filters > label {
+  display: grid;
+  gap: var(--space-2);
+}
+.period {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+.account {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+.facts dd {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+.section,
+.team {
+  min-width: 0;
+  border-top: 1px solid var(--color-border-default);
+  padding-top: var(--space-5);
+}
+.team {
+  border-top: 3px solid var(--color-accent-light);
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+}
+/* Keep qualification and payout labels distinguishable on narrow cards. */
+.metrics > article > span:nth-of-type(2) {
+  white-space: normal;
+}
+.table {
+  overflow-x: auto;
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  .page {
+    padding: var(--space-3);
+  }
+  .account {
+    grid-template-columns: 1fr;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .filters > * {
+    flex: 1 1 100%;
+  }
+}

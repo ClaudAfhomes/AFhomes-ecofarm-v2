@@ -4,6 +4,18 @@
 **/*.spec.ts
 **/*.spec.tsx
 api/dev-server.ts
+# MongoDB standalone entry points are not Vercel Functions.
+api/server.ts
+api/_server.ts
+# Standalone production artifact and operator scripts are not Vercel functions.
+api/dist/
+api/scripts/
+# Test-only harness (Supabase fake + fixtures). Never imported by production
+# code; excluded so it cannot reach a deployment snapshot.
+api/_lib/testing/
+# Operator/test rehearsal that imports the harness above (used only by api/scripts/
+# and a spec); shipping it without testing/ breaks the deploy typecheck.
+api/_lib/migration-document-rehearsal.ts
 
 # Secrets / local env — NEVER upload. The CLI uploads by .vercelignore (gitignore
 # is not consulted), so without these the root .env (service-role key, DATABASE_URL,
@@ -14,14 +26,21 @@ api/dev-server.ts
 .vercel/
 
 # Not needed on the server
+workflow/
 supabase/
+supabase/.temp/
 docs/
+legacy/
 .opencode/
+.tmp-bin/
 node_modules/
 .turbo/
 vercel-static/
+package.json.bak
 C：UsersSSD-OR~1AppDataLocalTemplint.txt
 
-# Local dev scripts (read secrets from .env at runtime) — not deployment code
+# Retired JAD dev scratch scripts (operated on the JAD `marketing-tools` bucket)
 test-cleanup.ts
 test-realtime.ts
+# Disposable SQL and HTTP fixtures are never deployed.
+packages/db-testing/

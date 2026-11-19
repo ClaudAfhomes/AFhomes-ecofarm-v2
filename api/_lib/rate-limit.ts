@@ -1,88 +1,101 @@
-import type { VercelRequest, VercelResponse } from './http.js';
-
-import { toErrorEnvelope } from './envelope.js';
-
 /**
- * Per-IP request throttling for public endpoints (API-SPEC §5.2). Sliding
- * window, in-memory per function instance - Vercel Functions are ephemeral,
- * so this is a best-effort brake (like the DB-backed ContactInquiry throttle)
- * not a distributed quota. Public, side-effect-heavy endpoints (registration
- * intake, code sends, geocoding) get a cheap protection against floods.
+ * A minimal fixed-window rate limiter for identifier resolution.
+ *
+ * WHAT THIS ACTUALLY PROTECTS AGAINST - stated plainly, because an overstated
+ * control is worse than none:
+ *
+ * The real protection against guessing a member's code is that the codes are
+ * high-entropy. The QR token is 32 random bytes base64-encoded (~256 bits) and
+ * the fallback code is 8 random hex digits (~32 bits, checked in constant time
+ * against a unique index). Enumeration is not a practical attack, and an
+ * unauthorized caller is refused with 403 by `authorizeAfHomes` BEFORE any lookup
+ * runs at all.
+ *
+ * So this limiter is defence in depth against one specific thing: an authorized
+ * employee hammering the resolve endpoint from one session. It is deliberately
+ * small and in-process, with these honest limitations:
+ *
+ *  - state is per instance, so on serverless it resets on a cold start and is not
+ *    shared between concurrent instances;
+ *  - it bounds one bad session, not a coordinated distributed attack.
+ *
+ * A genuinely distributed limit needs shared state (Redis, or a database-backed
+ * counter), which this codebase does not have. Rather than pretend otherwise,
+ * the limit is modest, the failure mode is a 429, and the identifier entropy does
+ * the real work.
  */
 
-/** Default sliding window: 15 minutes. */
-export const RATE_LIMIT_WINDOW_MS = 15 * 60_000;
+/** A caller key -> window start -> count. */
+type Window = { startedAt: number; count: number };
 
-type Bucket = { hits: number[] };
+const windows = new Map<string, Window>();
 
-const buckets = new Map<string, Bucket>();
-let lastSweep = 0;
+/** How long one window lasts. */
+const WINDOW_MS = 60_000;
+/** Attempts allowed per window, per key. */
+const MAX_ATTEMPTS = 30;
+/** Stop growing the map so a long-lived instance cannot leak memory. */
+const MAX_KEYS = 10_000;
 
-/** Extract the client IP from Vercel's proxy headers ('unknown' when absent). */
-export function clientIp(req: VercelRequest): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  const ip = (first ?? '').split(',')[0]?.trim();
-  if (ip) return ip;
-  const realIp = req.headers['x-real-ip'];
-  const real = Array.isArray(realIp) ? realIp[0] : realIp;
-  return ((real ?? '') as string).trim() || 'unknown';
-}
+export type RateVerdict = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
-export type RateLimitConfig = {
-  /** Route scope - keeps limits independent per endpoint. */
-  scope: string;
-  /** Max requests allowed inside the window. */
-  max: number;
-  /** Window length in ms (default 15 minutes). */
-  windowMs?: number;
+const keyOf = (req: {
+  headers?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
+}): string => {
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const ip = (raw?.split(',')[0] ?? req.socket?.remoteAddress ?? 'unknown').trim();
+  return ip || 'unknown';
 };
 
 /**
- * Enforce a per-IP sliding-window limit. When the limit is exceeded the 429
- * envelope (with a Retry-After header) is written to the response and the
- * handler must stop; otherwise the request is recorded and the caller
- * continues. Returns true when the request may proceed.
+ * Record one identifier-resolution attempt.
+ *
+ * The caller-supplied identity is part of the key, so one employee cannot exhaust
+ * another's budget and lock a colleague out of a busy till.
  */
-export function enforceRateLimit(
-  req: VercelRequest,
-  res: VercelResponse,
-  config: RateLimitConfig,
-): boolean {
-  const windowMs = config.windowMs ?? RATE_LIMIT_WINDOW_MS;
+function consume(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+  principalId: string,
+  maxAttempts: number,
+): RateVerdict {
   const now = Date.now();
+  const key = `${principalId}|${keyOf(req)}`;
 
-  // Periodic sweep so idle buckets do not accumulate forever per instance.
-  if (now - lastSweep > 60_000) {
-    lastSweep = now;
-    for (const [key, bucket] of buckets) {
-      const kept = bucket.hits.filter((t) => t > now - RATE_LIMIT_WINDOW_MS);
-      if (kept.length === 0) buckets.delete(key);
-      else bucket.hits = kept;
-    }
+  if (windows.size > MAX_KEYS) {
+    // Cheap sweep: drop everything whose window has certainly expired.
+    for (const [k, w] of windows) if (now - w.startedAt > WINDOW_MS) windows.delete(k);
+    if (windows.size > MAX_KEYS) windows.clear();
   }
 
-  const key = `${config.scope}:${clientIp(req)}`;
-  const bucket = buckets.get(key);
-  const hits = (bucket?.hits ?? []).filter((t) => t > now - windowMs);
-  if (hits.length >= config.max) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((hits[0] + windowMs - now) / 1000));
-    res.setHeader('Retry-After', String(retryAfterSeconds));
-    const { error, status } = toErrorEnvelope(
-      'TOO_MANY_REQUESTS',
-      'Too many requests. Please try again later.',
-      429,
-    );
-    res.status(status).json({ error });
-    return false;
+  const existing = windows.get(key);
+  if (!existing || now - existing.startedAt > WINDOW_MS) {
+    windows.set(key, { startedAt: now, count: 1 });
+    return { allowed: true };
   }
-  hits.push(now);
-  buckets.set(key, { hits });
-  return true;
+  existing.count += 1;
+  if (existing.count > maxAttempts) {
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((WINDOW_MS - (now - existing.startedAt)) / 1000)) };
+  }
+  return { allowed: true };
 }
 
-/** Test hook: clear all buckets (spec isolation). */
-export function resetRateLimits(): void {
-  buckets.clear();
-  lastSweep = 0;
+export function consumeIdentifierAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+  principalId: string,
+): RateVerdict {
+  return consume(req, principalId, MAX_ATTEMPTS);
+}
+
+/** Signed private-file downloads are cheaper than identifier guesses and pages can batch images. */
+export function consumePrivateDownloadAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+): RateVerdict {
+  return consume(req, 'private-files', 10_000);
+}
+
+/** Test seam. */
+export function resetIdentifierRateLimit(): void {
+  windows.clear();
 }

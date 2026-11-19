@@ -5,12 +5,16 @@
   flex: 0 0 auto;
 }
 
+/* Two-tone arc: a faint full track with a solid leading arc, eased so it
+   reads as smooth motion rather than a mechanical tick. */
 .ring {
   display: block;
   border-radius: 50%;
   border: 2px solid currentColor;
-  border-top-color: transparent;
-  animation: spin 0.7s linear infinite;
+  border-color: color-mix(in srgb, currentColor 18%, transparent);
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  animation: spin 0.85s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
 }
 
 .sm .ring {
@@ -22,7 +26,7 @@
 .md .ring {
   width: 20px;
   height: 20px;
-  border-width: 2px;
+  border-width: 2.5px;
 }
 
 .lg .ring {

@@ -33,6 +33,15 @@ describe('findRouteCoverageGaps (fixture source)', () => {
       { file: '_handlers/unused.ts', reason: 'imported-but-unused' },
     ]);
   });
+
+  it('rejects a quoted handler path that is imported through a variable', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routes-'));
+    fs.writeFileSync(path.join(dir, 'a.ts'), 'x');
+    const source = `const route = { handler: '../_handlers/a.js' };\nimport(route.handler);`;
+    expect(findRouteCoverageGaps(dir, source)).toEqual([
+      { file: '_handlers/a.ts', reason: 'not-imported' },
+    ]);
+  });
 });
 
 describe('listHandlerFiles', () => {

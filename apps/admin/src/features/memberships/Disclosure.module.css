@@ -1,0 +1,110 @@
+/* Animated disclosure row. Motion mirrors the Sidebar dropdown. */
+
+.item {
+  min-width: 0;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.trigger:hover {
+  background-color: var(--color-state-hover);
+}
+
+.trigger:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: -3px;
+}
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  transform: rotate(-90deg);
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.trigger[aria-expanded='true'] .chevron {
+  transform: rotate(0deg);
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 200ms ease,
+    visibility 0s linear 280ms;
+}
+
+.panelOpen {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 240ms ease 40ms,
+    visibility 0s;
+}
+
+.inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content {
+  padding: var(--space-1) var(--space-4) var(--space-4);
+  transform: translateY(-4px);
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panelOpen .content {
+  transform: translateY(0);
+}
+
+/* Caution: warning rule and tint, for credential recovery. */
+.caution {
+  border-left: 3px solid var(--color-warning);
+  background: var(--color-accent-soft);
+}
+
+.caution .trigger {
+  font-size: var(--text-body-s);
+  color: var(--color-warning-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron,
+  .panel,
+  .content {
+    transition: none;
+  }
+
+  .panelOpen .content {
+    transform: none;
+  }
+}

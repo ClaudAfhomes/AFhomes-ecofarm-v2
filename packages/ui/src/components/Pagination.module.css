@@ -22,40 +22,41 @@
 }
 
 .page {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background-color: transparent;
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: var(--text-body-s);
-  cursor: pointer;
+  width: var(--control-md);
+  min-width: var(--control-md);
+  padding: 0;
 }
-
-.page:hover:not(:disabled) {
-  background-color: var(--color-state-hover);
-}
-
-.page:disabled {
-  cursor: not-allowed;
-  color: var(--color-state-disabled-text);
-}
-
-.active {
-  background-color: var(--color-brand-soft);
+.page[aria-current='page'] {
+  background: var(--color-brand-soft);
   color: var(--color-brand-primary);
-  font-weight: 600;
   border-color: var(--color-brand-secondary);
+  font-weight: 600;
 }
-
 .ellipsis {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 28px;
   color: var(--color-text-muted);
+}
+
+/* Bordered containers around BOTH step controls so Previous and Next read as
+   one family next to the page numbers: same border, same surface, same size.
+   Each chevron stays a ghost IconButton, so there is exactly one border per
+   control. A disabled step mutes its container to match the faded chevron
+   inside instead of shouting with a raised box around a dead control. */
+.stepWrap {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--color-bg-surface-raised);
+  padding: 2px;
+}
+
+.stepWrap:has(button:disabled) {
+  border-color: var(--color-border-default);
+  background-color: var(--color-state-disabled-bg);
 }
 
 @media (max-width: 639px) {

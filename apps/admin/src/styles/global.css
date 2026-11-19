@@ -1,8 +1,108 @@
 /* Admin app global styles - the shared design system (tokens/base) comes from
- * @jad/ui. Only app-specific overrides live here. */
+ * @afhomes/ui. Only app-specific overrides live here. */
 
-/* Horizontal scroll for wide operational tables on short viewports. */
+/* Horizontal scroll for wide operational tables on short viewports.
+   Matches the shared `.table-scroll` contract in @afhomes/ui base styles. */
 .table-scroll {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+small[role='alert'] {
+  color: var(--color-danger);
+}
+
+/* Raw operational forms share the same geometry as the field primitives.
+   Zero specificity lets specialized controls retain their own behavior. */
+:where(
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']),
+  select,
+  textarea
+) {
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  line-height: 1.25;
+}
+:where(label) {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+}
+:where(fieldset) {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+:where(legend) {
+  padding-inline: var(--space-2);
+  font-weight: 700;
+}
+:where(textarea) {
+  min-height: 96px;
+  resize: vertical;
+}
+:where(input, select, textarea):focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+:where(input, select, textarea):disabled {
+  background: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+}
+
+/* Invalid fields turn red automatically. This rule must stay AFTER the base
+   control rules above: all of them are zero-specificity `:where()`, so source
+   order decides and the base border would otherwise win. */
+:where(input, textarea, select)[aria-invalid='true'] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 1px var(--color-danger);
+}
+.table-scroll > table:not([class]) {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-bg-surface-raised);
+  font-size: var(--text-body-s);
+}
+.table-scroll > table:not([class]) :where(th, td) {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.table-scroll > table:not([class]) th {
+  background: var(--color-bg-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.table-scroll > table td > button + button {
+  margin-left: var(--space-2);
+}
+.table-scroll:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+@media (max-width: 639px) {
+  /* Tables that collapse to labelled cards on phones (customers directory,
+     application/reservation queues, product categories, reservation ledger)
+     opt out of this floor inside their own modules with a winning
+     `div.<scope>.<scope> > table { min-width: 0 }` override. */
+  .table-scroll > table:not([class]) {
+    min-width: 640px;
+  }
+  .table-scroll > table td > button {
+    margin-block: var(--space-1);
+  }
 }

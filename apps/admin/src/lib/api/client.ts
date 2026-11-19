@@ -1,8 +1,11 @@
-import { listResponseSchema } from '@jad/contracts';
+import { listResponseSchema } from '@afhomes/contracts';
+import { withRequestDeadline } from '@afhomes/shared';
 import type { ZodType } from 'zod';
 
 import { env } from '../env';
-import { ApiNetworkError, ApiParseError, toApiError } from './errors';
+import { isMongoAuth } from '../cookie-auth';
+import { notifyCookieAuth } from '@afhomes/shared';
+import { ApiError, ApiNetworkError, ApiParseError, toApiError } from './errors';
 import {
   clearSession,
   getSupabaseClient,
@@ -15,47 +18,115 @@ import {
  * go through here - no ad-hoc `fetch` in features.
  *
  * Auth: the session is a Supabase JWT. When Supabase is configured, the access
- * token is attached as `Authorization: Bearer` on every request (the API
- * accepts Bearer or the PKCE cookie). Production stores the session in
- * localStorage, so the Bearer header is what the API actually reads; public
- * endpoints ignore the header and expired tokens are healed via the 401 path
- * below. Credentials stay `same-origin` (the default `/api/v1` deployment).
+ * token is attached as `Authorization: Bearer` on authenticated requests (the
+ * API accepts Bearer or the PKCE cookie). Protected requests fail locally when
+ * no token can be recovered; public requests may continue anonymously.
+ * Credentials stay `same-origin` (the default `/api/v1` deployment).
  */
-async function rawRequest(path: string, init?: RequestInit, retried = false): Promise<Response> {
+export type ApiRequestInit = RequestInit & { auth?: 'optional' | 'required' };
+
+let testAccessToken: string | null | undefined;
+
+/** Test harness seam. Production bundles reject attempts to override authentication. */
+export function setApiAccessTokenForTests(token: string | null | undefined): void {
+  if (import.meta.env.MODE !== 'test') {
+    throw new Error('API authentication overrides are available only in tests.');
+  }
+  testAccessToken = token;
+}
+
+const sessionExpired = () =>
+  new ApiError({
+    code: 'UNAUTHORIZED',
+    message: 'Your session has expired. Please sign in again.',
+    status: 401,
+  });
+
+async function currentAccessToken(): Promise<string | null> {
+  if (testAccessToken !== undefined) return testAccessToken;
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.auth.getSession();
+    return error ? null : (data.session?.access_token ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a usable token, rotating once when storage has no current session. */
+export async function getFreshAccessToken(forceRefresh = false): Promise<string | null> {
+  if (testAccessToken !== undefined) return testAccessToken;
+  if (!isSupabaseConfigured()) return null;
+  if (!forceRefresh) {
+    const current = await currentAccessToken();
+    if (current) return current;
+  }
+  if (!(await tryRefreshSession())) return null;
+  return currentAccessToken();
+}
+
+async function rawRequest(
+  path: string,
+  init?: ApiRequestInit,
+  retried = false,
+  forcedAccessToken?: string,
+): Promise<Response> {
   const url = `${env.VITE_API_BASE_URL}${path}`;
+  const { auth = 'optional', ...fetchInit } = init ?? {};
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    ...(init?.headers as Record<string, string> | undefined),
+    ...(fetchInit.headers as Record<string, string> | undefined),
   };
-  if (isSupabaseConfigured()) {
-    const client = getSupabaseClient();
-    const { data } = (await client?.auth.getSession()) ?? { data: { session: null } };
-    const token = data.session?.access_token;
-    // No warning when the token is absent: public endpoints (CMS, config,
-    // programs, policies) legitimately run without a session.
-    if (token) headers.Authorization = `Bearer ${token}`;
+  const token = isMongoAuth
+    ? null
+    : (forcedAccessToken ??
+      (auth === 'required' ? await getFreshAccessToken() : await currentAccessToken()));
+  init?.signal?.throwIfAborted();
+  if (auth === 'required' && !token && !isMongoAuth) {
+    throw sessionExpired();
   }
+  if (token) headers.Authorization = `Bearer ${token}`;
   let res: Response;
   try {
     res = await fetch(url, {
-      ...init,
+      ...fetchInit,
       headers,
-      credentials: init?.credentials ?? 'same-origin',
+      credentials: fetchInit.credentials ?? 'same-origin',
     });
   } catch (cause) {
+    init?.signal?.throwIfAborted();
     throw new ApiNetworkError(cause);
   }
-  // Expired/rotated sessions surface as 401 (the API never returns 401 for a
-  // merely under-privileged caller - that's 403). Heal once via rotation and
-  // retry; if rotation fails the session is dead, so warn (the only reliable
-  // signal that auth was actually required and lost) then clear it and let
-  // the route guards redirect to login instead of stranding an error page.
-  if (res.status === 401 && !retried && isSupabaseConfigured()) {
-    const healed = await tryRefreshSession();
-    if (healed) return rawRequest(path, init, true);
-    console.warn(`[api] ${path} returned 401 and session rotation failed - clearing session`);
+  // A 401 is rejected before a protected business mutation runs, so exactly
+  // one refreshed retry is safe even for POST/PATCH/DELETE. Rebuild the
+  // headers with the newly rotated token; never retry timeouts or 5xx errors.
+  init?.signal?.throwIfAborted();
+  if (res.status === 401 && auth === 'required') {
+    if (isMongoAuth) {
+      if (path === '/admin/afhomes/session/password') {
+        const body = await res
+          .clone()
+          .json()
+          .catch(() => null);
+        if (
+          body?.error?.details?.reason === 'CURRENT_PASSWORD_INVALID' ||
+          (body?.error?.code === 'UNAUTHORIZED' &&
+            body?.error?.message === 'Current password is incorrect')
+        )
+          return res;
+      }
+      notifyCookieAuth();
+      throw sessionExpired();
+    }
+    if (!retried) {
+      const refreshedToken = await getFreshAccessToken(true);
+      init?.signal?.throwIfAborted();
+      if (refreshedToken) return rawRequest(path, init, true, refreshedToken);
+    }
     await clearSession();
+    throw sessionExpired();
   }
   return res;
 }
@@ -70,10 +141,28 @@ async function parseBody(res: Response): Promise<unknown> {
   }
 }
 
+async function requestBody(path: string, init?: ApiRequestInit) {
+  try {
+    return await withRequestDeadline(async (signal) => {
+      const res = await rawRequest(path, { ...init, signal });
+      const body = await parseBody(res);
+      return { res, body };
+    }, init?.signal);
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+      throw new ApiNetworkError(cause);
+    }
+    throw cause;
+  }
+}
+
 /** GET a single resource; validates against `schema`; throws ApiError / ApiParseError. */
-export async function request<T>(path: string, schema: ZodType<T>, init?: RequestInit): Promise<T> {
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+export async function request<T>(
+  path: string,
+  schema: ZodType<T>,
+  init?: ApiRequestInit,
+): Promise<T> {
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -90,11 +179,10 @@ export async function request<T>(path: string, schema: ZodType<T>, init?: Reques
 export async function requestList<T>(
   path: string,
   itemSchema: ZodType<T>,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<T[]> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -116,11 +204,10 @@ export async function requestList<T>(
 export async function requestListEnvelope<T>(
   path: string,
   itemSchema: ZodType<T>,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<{ data: T[]; meta: Record<string, unknown> }> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -143,11 +230,10 @@ export interface PageResult<T> {
 export async function requestPage<T>(
   path: string,
   itemSchema: ZodType<T>,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<PageResult<T>> {
   const listSchema = listResponseSchema(itemSchema);
-  const res = await rawRequest(path, init);
-  const body = await parseBody(res);
+  const { res, body } = await requestBody(path, init);
 
   if (!res.ok) {
     throw toApiError(body, res.status);
@@ -160,3 +246,24 @@ export async function requestPage<T>(
   const pagination = parsed.data.meta?.pagination as { nextCursor?: string } | undefined;
   return { items: parsed.data.data, nextCursor: pagination?.nextCursor };
 }
+
+export const protectedRequest = <T>(path: string, schema: ZodType<T>, init?: ApiRequestInit) =>
+  request(path, schema, { ...init, auth: 'required' });
+
+export const protectedRequestList = <T>(
+  path: string,
+  itemSchema: ZodType<T>,
+  init?: ApiRequestInit,
+) => requestList(path, itemSchema, { ...init, auth: 'required' });
+
+export const protectedRequestListEnvelope = <T>(
+  path: string,
+  itemSchema: ZodType<T>,
+  init?: ApiRequestInit,
+) => requestListEnvelope(path, itemSchema, { ...init, auth: 'required' });
+
+export const protectedRequestPage = <T>(
+  path: string,
+  itemSchema: ZodType<T>,
+  init?: ApiRequestInit,
+) => requestPage(path, itemSchema, { ...init, auth: 'required' });

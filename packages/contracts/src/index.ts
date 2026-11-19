@@ -1,474 +1,875 @@
+/**
+ * AFHomes Ecofarm shared contracts - the single source of truth for every
+ * request/response shape exchanged over the REST API and validated at the
+ * browser boundary.
+ *
+ * Phase 1 surface only. The predecessor schemas (members, sales, vouchers,
+ * withdrawals, commissions, CMS, registration) were removed with the retired
+ * handlers; new domains are added here as their Phase 2+ handlers land, so
+ * client and server can never drift on a DTO.
+ */
+export {
+  afHomesActionSchema,
+  afHomesModuleKeySchema,
+  MODULE_CATALOG,
+  MODULE_LABELS,
+  moduleLabel,
+  groupedModuleCatalog,
+  afHomesPermissionSchema,
+  afHomesRestrictionSchema,
+  afHomesRoleSchema,
+  afHomesDepartmentSchema,
+  afHomesStaffSchema,
+  staffSaleInvolvementSchema,
+  afHomesSessionSchema,
+  staffTestPurgeResponseSchema,
+  staffAccountSetupSchema,
+  afHomesDashboardPointSchema,
+  afHomesDashboardSchema,
+  createAfHomesRoleSchema,
+  inviteAfHomesStaffSchema,
+  createAfHomesStaffSchema,
+  updateAfHomesStaffProfileSchema,
+  changeAfHomesStaffPasswordSchema,
+} from './schemas/afhomes.js';
+export type {
+  AfHomesAction,
+  AfHomesModuleKey,
+  AfHomesModuleDescriptor,
+  AfHomesPermission,
+  AfHomesRole,
+  AfHomesDepartment,
+  AfHomesStaff,
+  StaffSaleInvolvement,
+  AfHomesSession,
+  StaffTestPurgeResponse,
+  StaffAccountSetup,
+  AfHomesDashboard,
+} from './schemas/afhomes.js';
+
 export { errorEnvelopeSchema, apiErrorCodeSchema } from './schemas/error.js';
 export type { ErrorEnvelope, ApiErrorCode } from './schemas/error.js';
+
+/* ---- Cross-portal identity (portal routing + OST self-service) ----
+   `GET /auth/portals` answers which AFHomes identities the bearer's own
+   Auth user holds. Login screens route on it; it authorizes nothing. */
+export {
+  authPortalsSchema,
+  ostMeSchema,
+  cookieAuthSessionSchema,
+  cookieAuthSignInSchema,
+} from './schemas/auth.js';
+export type { AuthPortals, OstMe } from './schemas/auth.js';
+
+export {
+  ADMIN_PORTAL_ROLES,
+  STAFF_PORTAL_ROLES,
+  isAdminPortalRole,
+  isStaffPortalRole,
+  staffPortalRoleSchema,
+  portalDestinationSchema,
+  resolvePortalDestination,
+} from './schemas/portal-routing.js';
+export type { PortalDestination, PortalIdentity } from './schemas/portal-routing.js';
+
 export {
   exactDecimalStringSchema,
   exactDecimalRateSchema,
   EXACT_DECIMAL_STRING_RE,
   EXACT_DECIMAL_RATE_RE,
 } from './schemas/money.js';
+
+export {
+  PERSON_NAME_RE,
+  personNameSchema,
+  optionalPersonNameSchema,
+  nullablePersonNameSchema,
+  optionalPhoneSchema,
+  phoneSchema,
+  optionalContactNumberSchema,
+  emailSchema,
+  optionalLandlineSchema,
+  dateOfBirthSchema,
+  birthDateSchema,
+  uppercaseAddressSchema,
+  uppercasedText,
+  normalizePersonName,
+  normalizeAddressField,
+  normalizeGeographicName,
+  normalizePostalCode,
+  normalizePhilippinePhone,
+  philippineLandlineDigitCount,
+  normalizeEmail,
+  normalizeMoneyString,
+  isPlausibleBirthDate,
+  toTitleCase,
+} from './schemas/input.js';
+
 export { listResponseSchema } from './schemas/collection.js';
 export type { ListResponse } from './schemas/collection.js';
+
+/* ---- Staff redemption of customer points (Phase 4) ----
+   The client sends no price, balance, status or staff identity: those fields do
+   not exist in the request schema, so a tampered body cannot change what a
+   redemption costs. Points are whole units, not money. */
 export {
-  rejectionNoteSchema,
-  registrationSchema,
-  registrationStatusSchema,
-  accountStatusSchema,
-  archivedMemberSchema,
-} from './schemas/registration.js';
+  pointsAmountSchema,
+  redemptionItemSchema,
+  createRedemptionItemRequestSchema,
+  updateRedemptionItemRequestSchema,
+  redemptionPreviewSchema,
+  createRedemptionRequestSchema,
+  redemptionReceiptSchema,
+  redemptionStatusSchema,
+  redemptionSchema,
+  redemptionListSchema,
+  customerRedemptionSchema,
+  customerRedemptionListSchema,
+} from './schemas/redemption.js';
+
+/* Points (transaction-based earning, caps, anniversary periods, cash discount) */
+/* `pointsAmountSchema`, `customerPointsSummarySchema` and
+   `customerPointsEntrySchema` are deliberately NOT re-exported here: they
+   already come from customer.js / redemption.js, and a second definition under
+   the same name would be a silent contract fork. */
+export {
+  tierSchema,
+  pointsPeriodSchema,
+  pointsBalanceSummarySchema,
+  type PointsBalanceSummary,
+  earningClaimSchema,
+  claimEarningPointsRequestSchema,
+  claimEarningPointsResultSchema,
+  claimRowSchema,
+  earningClaimPreviewSchema,
+  createEarningClaimRequestSchema,
+  serviceCatalogItemSchema,
+  serviceCatalogItemInputSchema,
+  serviceCatalogPatchSchema,
+  servicePhotoInputSchema,
+  quotePointDiscountSchema,
+  redemptionServiceDatesSchema,
+  purchaseReceiptInputSchema,
+  purchaseReceiptDecisionSchema,
+  purchaseReceiptSchema,
+  pointDiscountQuoteSchema,
+  committedPointDiscountSchema,
+  pointEarningRuleSchema,
+  pointEarningRuleInputSchema,
+  pointRedemptionRuleInputSchema,
+  pointRedemptionRulePatchSchema,
+  pointRedemptionRuleSchema,
+  createDiscountQuoteSchema,
+  redemptionQuoteSchema,
+  purchaseLineSchema,
+  purchaseSchema,
+  applyPointsDiscountInputSchema,
+  appliedPointsDiscountSchema,
+  operationalSettlementSchema,
+  serviceTierDiscountInputSchema,
+  serviceTierDiscountSchema,
+  purchaseFinancialSummarySchema,
+  createPurchaseInputSchema,
+  adjustPointsInputSchema,
+  reversePurchaseInputSchema,
+  resolvedMemberSchema,
+  recordedPurchaseSchema,
+  completedPurchaseSchema,
+  issuedEarningClaimSchema,
+  reissuedEarningClaimSchema,
+  reversedPurchasePointsSchema,
+  adjustedPointsSchema,
+} from './schemas/points.js';
 export type {
-  RejectionNote,
-  Registration,
-  RegistrationStatus,
-  AccountStatus,
-  ArchivedMember,
-} from './schemas/registration.js';
-export { publicConfigSchema } from './schemas/public-config.js';
-export type { PublicConfig } from './schemas/public-config.js';
-export {
-  MAX_NAME_LENGTH,
-  MAX_BIRTH_AGE_YEARS,
-  MAX_STREET_LENGTH,
-  UNICODE_CONTROL_RE,
-  GENERIC_E164_RULE,
-  normalizeName,
-  sanitizePersonName,
-  capitalizePersonName,
-  personNameSchema,
-  normalizeMiddleInitial,
-  sanitizeMiddleInitial,
-  middleInitialSchema,
-  normalizePhoneDigits,
-  validatePhoneNumber,
-  toPhoneRule,
-  parseBirthDate,
-  birthDateSchema,
-  philippineAddressSchema,
-  genericAddressSchema,
-} from './schemas/registration-validation.js';
-export type { PhoneCountryRule, PhoneRuleInput, ParsedBirthDate } from './schemas/registration-validation.js';
-export { systemConfigEntrySchema, PUBLIC_CONFIG_KEYS } from './schemas/system-config.js';
-export type { SystemConfigEntry } from './schemas/system-config.js';
-export {
-  programSchema,
-  programAdminSchema,
-  programCreateSchema,
-  programUpdateSchema,
-  qualificationQuestionSchema,
-} from './schemas/program.js';
+  ClaimEarningPointsRequest,
+  RedemptionServiceDates,
+  ClaimEarningPointsResult,
+  CreateEarningClaimRequest,
+  CreatePurchaseInput,
+  AdjustPointsInput,
+  ReversePurchaseInput,
+  PointEarningRuleInput,
+  PointRedemptionRuleInput,
+  PointRedemptionRulePatch,
+  PurchaseReceiptInput,
+  PurchaseReceiptDecision,
+  ServiceCatalogItemInput,
+} from './schemas/points.js';
 export type {
-  Program,
-  ProgramAdmin,
-  ProgramCreateRequest,
-  ProgramUpdateRequest,
-  QualificationQuestion,
-} from './schemas/program.js';
+  RedemptionItem,
+  CreateRedemptionItemRequest,
+  UpdateRedemptionItemRequest,
+  RedemptionPreview,
+  CreateRedemptionRequest,
+  RedemptionReceipt,
+  RedemptionStatus,
+  Redemption,
+  CustomerRedemption,
+} from './schemas/redemption.js';
+
+/* ---- Phase 2: default role permission baseline (explicit grants) ----
+   `super_admin` (implicit full access) and `customer` (ownership-based, zero
+   admin modules) intentionally have no rows here. */
 export {
-  policySchema,
-  policySlugSchema,
-  policyCreateSchema,
-  policyUpdateSchema,
-} from './schemas/policy.js';
-export type { Policy, PolicyCreateRequest, PolicyUpdateRequest } from './schemas/policy.js';
+  BASELINE_EXCLUDED_MODULES,
+  BASELINE_ROLES,
+  BASELINE_ROW_COUNT,
+  DEFAULT_ROLE_BASELINE,
+  MIGRATION_SEEDED_GRANTS,
+} from './schemas/role-baseline.js';
+export type { BaselineGrant, BaselineRole } from './schemas/role-baseline.js';
+
+/* ---- Phase 2: lifecycle states (single source for every status string) ---- */
 export {
-  contactSubmissionRequestSchema,
-  contactSubmissionResponseSchema,
-  contactInquiryStatusSchema,
-  contactInquirySchema,
-  contactInquiryUpdateSchema,
-} from './schemas/contact.js';
+  customerStatusSchema,
+  saleStatusSchema,
+  paymentStatusSchema,
+  paymentTypeSchema,
+  membershipStatusSchema,
+  commissionStatusSchema,
+  customerApplicationStatusSchema,
+  reservationAgreementStatusSchema,
+  pointsEntryTypeSchema,
+  hierarchyRoleSchema,
+  spotCashStateSchema,
+  paymentSchemeSchema,
+  PAYMENT_SCHEMES,
+  PAYMENT_SCHEME_LABELS,
+  paymentSchemeLabel,
+  validateSchemeTransition,
+  HIERARCHY_ORDER,
+  SALE_ACCEPTS_PAYMENT,
+  SALE_AWAITING_FULL_PAYMENT,
+  SALE_ACTIVATABLE,
+  activationBlockerSchema,
+  activationBlocker,
+  SALE_STATUS_LABELS,
+  PAYMENT_STATUS_LABELS,
+  RESERVATION_AGREEMENT_STATUS_LABELS,
+  MEMBERSHIP_STATUS_LABELS,
+  ACTIVATION_BLOCKER_LABELS,
+  canTransitionCustomer,
+  canTransitionSale,
+  canTransitionPayment,
+  canTransitionMembership,
+  canTransitionCommission,
+  canTransitionCustomerApplication,
+  canTransitionReservationAgreement,
+  hierarchyAllowsUpline,
+} from './schemas/lifecycle.js';
 export type {
-  ContactSubmissionRequest,
-  ContactSubmissionResponse,
-  ContactInquiryStatus,
-  ContactInquiry,
-  ContactInquiryUpdateRequest,
-} from './schemas/contact.js';
-export { roleSchema, normalizeRole } from './schemas/role.js';
-export type { Role } from './schemas/role.js';
+  CustomerStatus,
+  SaleStatus,
+  PaymentStatus,
+  PaymentType,
+  MembershipStatus,
+  CommissionStatus,
+  CustomerApplicationStatus,
+  ReservationAgreementStatus,
+  PointsEntryType,
+  HierarchyRole,
+  SpotCashState,
+  PaymentScheme,
+  SchemeTransitionRejection,
+  ActivationBlocker,
+} from './schemas/lifecycle.js';
+
 export {
-  staffRoleSchema,
-  staffModuleSchema,
-  staffDomainSchema,
-  STAFF_ROLE_LABEL,
-  STAFF_MODULE_LABEL,
-  STAFF_PERMISSIONS,
-  CUSTOM_ROLE_FORBIDDEN_MODULES,
-  canStaffAccess,
-  roleRecordSchema,
-  systemRoleRecords,
-  slugifyRoleName,
-  isRoleNameUnique,
-  resolveRoleModules,
-  roleNameFor,
-  staffStatusSchema,
-  staffPasswordSchema,
-  createStaffRequestSchema,
-  updateStaffProfileRequestSchema,
-  changeStaffPasswordRequestSchema,
-  staffUserSchema,
-  staffAssignmentSchema,
-  staffSessionSchema,
-  staffMemberSchema,
-  auditLogEntrySchema,
-} from './schemas/staff-role.js';
+  cardProductSchema,
+  cardCategorySchema,
+  createCardProductSchema,
+  createCardCategorySchema,
+  updateCardProductSchema,
+  updateCardCategorySchema,
+  governmentIdTypeSchema,
+  GOVERNMENT_ID_TYPE_LABELS,
+  genderSchema,
+  customerAddressSchema,
+  createCustomerSchema,
+  updateCustomerSchema,
+  customerSchema,
+  maskGovernmentId,
+  assertProductEconomicsSane,
+  assertCardPlanEconomicsSane,
+  assertCommissionRateInRange,
+  normalizePlanCode,
+  normalizeCategorySlug,
+  createSaleSchema,
+  saleSchema,
+  saleFinancialSummarySchema,
+  referralRelationshipSchema,
+  referralListQuerySchema,
+  createReferralSchema,
+  correctReferralSchema,
+} from './schemas/sales.js';
 export type {
-  StaffRole,
-  StaffModule,
-  StaffDomain,
-  RoleRecord,
-  StaffStatus,
-  StaffPassword,
-  CreateStaffRequest,
-  UpdateStaffProfileRequest,
-  ChangeStaffPasswordRequest,
-  StaffUser,
-  StaffAssignment,
-  StaffSession,
-  StaffMember,
-  AuditLogEntry,
-} from './schemas/staff-role.js';
+  CardProduct,
+  CardCategory,
+  CreateCardProductRequest,
+  CreateCardCategoryRequest,
+  UpdateCardProductRequest,
+  UpdateCardCategoryRequest,
+  GovernmentIdType,
+  CustomerAddress,
+  CreateCustomerRequest,
+  UpdateCustomerRequest,
+  Customer,
+  CreateSaleRequest,
+  Sale,
+  SaleFinancialSummary,
+  ReferralRelationship,
+  ReferralListQuery,
+  CreateReferralRequest,
+  CorrectReferralRequest,
+} from './schemas/sales.js';
+
 export {
-  memberStatusSchema,
-  memberAccountSchema,
-  programRefSchema,
+  AF_ID_ALPHABET,
+  AF_ID_PREFIXES,
+  AF_SUFFIX_LENGTH,
+  AF_CODE_PREFIX,
+  afIdPattern,
+  isAfId,
+  afBusinessIdSchema,
+  customerCodeSchema,
+  matchesBusinessId,
+} from './schemas/business-ids.js';
+export type { AfIdPrefix, AfCodePrefix, AfBusinessPrefix } from './schemas/business-ids.js';
+
+export {
+  paymentSchema,
+  recordPaymentSchema,
+  verifyPaymentSchema,
+  activateSaleSchema,
+  onboardingDeliverySchema,
+  activationResultSchema,
+  membershipSchema,
+  membershipResolutionSchema,
+  pointsAccountSchema,
+  pointsLedgerEntrySchema,
+  commissionSchema,
+  commissionRuleTargetSchema,
+  commissionRuleSchema,
+  createCommissionRuleSchema,
+  updateCommissionRuleSchema,
+  commissionRosterQuerySchema,
+  commissionRosterMemberSchema,
+  commissionRosterPositionSchema,
+  commissionRosterSchema,
+  bulkCommissionRuleSchema,
+  bulkCommissionRuleResultSchema,
+  qualifyCommissionSchema,
+  markCommissionPaidSchema,
+  issueOnboardingTokenSchema,
+  onboardingTokenSchema,
+  customerOnboardingRecoverySchema,
+  financeQueueItemSchema,
+  PAYMENT_RECEIPT_CONTENT_TYPES,
+  REJECTION_REASON_MIN_LENGTH,
+  paymentReceiptDetailsShape,
+  paymentDuplicateReviewSchema,
+  paymentReferenceMatchSchema,
+  paymentAdjustmentKindSchema,
+  proposePaymentAdjustmentSchema,
+  paymentAdjustmentSchema,
+  paymentAdjustmentDecisionSchema,
+  resolvePaymentAdjustmentSchema,
+  resolvePaymentAdjustmentResultSchema,
+  paymentAdjustmentResolutionGateSchema,
+  financePeriodSummarySchema,
+  accountingPeriodSchema,
+  accountingPeriodReadinessSchema,
+  returnAccountingPeriodSchema,
+  PAYMENT_RECEIPT_MAX_BYTES,
+  paymentReceiptUploadRequestSchema,
+  paymentReceiptUploadGrantSchema,
+} from './schemas/finance.js';
+export type {
+  PaymentReceiptUploadRequest,
+  PaymentReferenceMatch,
+  ProposePaymentAdjustmentRequest,
+  PaymentAdjustment,
+  ResolvePaymentAdjustmentRequest,
+  PaymentAdjustmentResolutionGate,
+  FinancePeriodSummary,
+  AccountingPeriod,
+  AccountingPeriodReadiness,
+  PaymentReceiptUploadGrant,
+  Payment,
+  RecordPaymentRequest,
+  VerifyPaymentRequest,
+  ActivateSaleRequest,
+  OnboardingDelivery,
+  ActivationResult,
+  Membership,
+  MembershipResolution,
+  PointsAccount,
+  PointsLedgerEntry,
+  Commission,
+  CommissionRule,
+  CreateCommissionRuleRequest,
+  UpdateCommissionRuleRequest,
+  CommissionRosterQuery,
+  CommissionRosterMember,
+  CommissionRosterPosition,
+  CommissionRoster,
+  BulkCommissionRuleRequest,
+  BulkCommissionRuleResult,
+  QualifyCommissionRequest,
+  MarkCommissionPaidRequest,
+  IssueOnboardingTokenRequest,
+  OnboardingToken,
+  CustomerOnboardingRecovery,
+  FinanceQueueItem,
+} from './schemas/finance.js';
+
+/* ---- Customer portal (Phase 3) ----
+   Ownership-based, not permission-based: nothing here derives from the staff
+   module model. */
+export {
+  customerActivationRequestSchema,
+  customerActivationResultSchema,
+  customerProfileSchema,
+  customerMembershipSchema,
+  customerPointsSummarySchema,
+  customerPointsEntrySchema,
+  customerPointsLedgerSchema,
+  customerLedgerCursorSchema,
+  customerPaymentSchema,
+  customerPaymentListSchema,
+  customerCredentialsSchema,
+  CUSTOMER_ACTIVATION_ERRORS,
+} from './schemas/customer.js';
+
+/* ---- Bulk customer import/export (main-system feature) ----
+   Header/detail job model, tier + status mapping, and the shared display-
+   category resolver. Display categories are never persisted. */
+export {
+  CUSTOMER_IMPORT_COLUMNS,
+  CUSTOMER_EXPORT_COLUMNS,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  COMPANY_IMPORT_EXTRA_COLUMNS,
+  CUSTOMER_IMPORT_ROW_LIMIT,
+  importSourceSchema,
+  importJobStatusSchema,
+  importRowActionSchema,
+  importValidationSchema,
+  normalizeTier,
+  customerCategorySchema,
+  CUSTOMER_CATEGORY_LABELS,
+  mapSourceStatus,
+  customerStatusForCategory,
+  categoryRequiresMember,
+  compareMoney,
+  resolveCustomerCategory,
+  parseGoogleSheetUrl,
+  googleSheetCsvUrl,
+  customerImportJobSchema,
+  customerImportRowSchema,
+  customerImportParseResponseSchema,
+  customerImportCommitResponseSchema,
+} from './schemas/customer-import.js';
+export type {
+  CustomerImportColumn,
+  CustomerExportRow,
+  MembershipTemplateColumn,
+  ImportSource,
+  ImportJobStatus,
+  ImportRowAction,
+  ImportValidation,
+  VipTier,
+  CustomerCategory,
+  CustomerImportJob,
+  CustomerImportRow,
+  CustomerImportParseResponse,
+  CustomerImportCommitResponse,
+} from './schemas/customer-import.js';
+/* ---- Customer-record SSOT: the company's master field list. ---- */
+export {
+  CUSTOMER_SSOT_SECTIONS,
+  CUSTOMER_SSOT_COLUMNS,
+  CUSTOMER_SSOT_SECTION_BANDS,
+  TEMPLATE_STATUS_OPTIONS,
+  TEMPLATE_PAYMENT_METHOD_OPTIONS,
+  TEMPLATE_TIER_OPTIONS,
+} from './schemas/customer-ssot.js';
+export type { CustomerSsotColumn, CustomerSsotSection } from './schemas/customer-ssot.js';
+/* ---- Official paper-form transaction snapshots and review-first imports. ---- */
+export {
+  vipTierSchema,
+  holderTypeSchema,
+  signatureStatusSchema,
+  acquisitionChannelSchema,
+  applicationHolderSchema,
+  storedApplicationHolderSchema,
+  holderBirthDateSchema,
+  OLDEST_HOLDER_AGE,
+  SUFFIX_OPTIONS,
+  PREFIX_OPTIONS,
+  prefixOptionSchema,
+  normalizeSuffixOption,
+  normalizePrefixOption,
+  SEX_OPTIONS,
+  CITIZENSHIP_OPTIONS,
+  CIVIL_STATUS_OPTIONS,
+  suffixOptionSchema,
+  sexOptionSchema,
+  civilStatusOptionSchema,
+  tinNumberSchema,
+  reservationHolderSchema,
+  createCustomerApplicationSchema,
+  customerApplicationSchema,
+  customerApplicationListItemSchema,
+  reservationAgreementListItemSchema,
+  customerApplicationDecisionSchema,
+  createReservationAgreementSchema,
+  reservationAgreementSchema,
+  reservationAgreementDecisionSchema,
+  formImportPreviewSchema,
+  officialFormListQuerySchema,
+  SCHEDULE_PARTICULAR_OPTIONS,
+} from './schemas/official-forms.js';
+export type {
+  ApplicationHolder,
+  CreateCustomerApplicationRequest,
+  CustomerApplication,
+  CustomerApplicationListItem,
+  ReservationAgreementListItem,
+  CustomerApplicationDecision,
+  CreateReservationAgreementRequest,
+  ReservationAgreement,
+  ReservationAgreementDecision,
+  FormImportPreview,
+} from './schemas/official-forms.js';
+
+/* ---- PHASE 7: authorized sales genealogy ---- */
+export {
+  genealogyStatusSchema,
+  genealogyNodeSchema,
+  genealogySummarySchema,
+  genealogyResolveResultSchema,
+  accreditationNumberMapSchema,
+} from './schemas/genealogy.js';
+export type {
+  GenealogyNode,
+  GenealogySummary,
+  GenealogyResolvedMember,
+} from './schemas/genealogy.js';
+
+/* ---- Sales-network Members: hierarchy sellers with a linked profile ---- */
+export {
+  memberPositionSchema,
+  MEMBER_POSITIONS,
+  MEMBER_POSITION_LABELS,
+  MEMBER_UPLINE_ROLE,
+  istPositionSchema,
+  IST_POSITIONS,
+  positionKind,
+  aaNumberModeSchema,
+  manualIstAaNumberSchema,
+  issueAccreditationSchema,
+  memberSexSchema,
+  memberCivilStatusSchema,
   memberProfileSchema,
-  updateProfileRequestSchema,
-  qualificationRequirementSchema,
-  qualificationSummarySchema,
-  referralCodeSchema,
-  purgeMemberRequestSchema,
-  purgeMemberResponseSchema,
+  createMemberSchema,
+  memberIdentityDocumentSchema,
+  memberIdentityDocumentLinkSchema,
+  type MemberIdentityDocument,
+  createOstMemberModeSchema,
+  createOstMemberSchema,
+  createOstMemberResultSchema,
+  transferMemberToOstSchema,
+  transferMemberToIstSchema,
+  transferMemberSchema,
+  transferOstTeamSchema,
+  updateMemberProfileSchema,
+  memberSchema,
+  memberDetailSchema,
+  memberListQuerySchema,
+  type IssueAccreditation,
 } from './schemas/member.js';
 export type {
-  MemberStatus,
-  MemberAccount,
-  ProgramRef,
+  MemberPosition,
+  IstPosition,
+  MemberSex,
+  MemberCivilStatus,
+  AaNumberMode,
   MemberProfile,
-  UpdateProfileRequest,
-  QualificationRequirement,
-  QualificationSummary,
-  ReferralCode,
-  PurgeMemberRequest,
-  PurgeMemberResponse,
+  CreateMember,
+  CreateOstMemberMode,
+  CreateOstMember,
+  CreateOstMemberResult,
+  TransferMember,
+  TransferMemberToOst,
+  TransferMemberToIst,
+  UpdateMemberProfile,
+  Member,
+  MemberDetail,
+  MemberListQuery,
 } from './schemas/member.js';
-export { adminQueuesSchema, adminMemberSchema } from './schemas/admin.js';
-export type { AdminQueues, AdminMember } from './schemas/admin.js';
 export {
-  salesReportRowSchema,
-  commissionReportRowSchema,
-  reportBreakdownSchema,
-  salesCommissionsReportSchema,
-  operationalSummaryReportSchema,
+  analyticsOverviewSchema,
+  analyticsPeriodSchema,
+  analyticsScopeSchema,
+  analyticsTrendPointSchema,
+  salesTrendGranularitySchema,
   salesTrendPeriodSchema,
   salesTrendReportSchema,
-} from './schemas/report.js';
+  teamSalesActivitySchema,
+  teamSalesAnalyticsSchema,
+  teamSalesMemberSchema,
+  teamSalesOverviewSchema,
+  teamSalesTeamSchema,
+} from './schemas/analytics.js';
 export type {
-  SalesReportRow,
-  CommissionReportRow,
-  ReportBreakdown,
-  SalesCommissionsReport,
-  OperationalSummaryReport,
+  AnalyticsOverview,
+  AnalyticsPeriod,
+  SalesTrendGranularity,
   SalesTrendPeriod,
   SalesTrendReport,
-} from './schemas/report.js';
+  TeamSalesActivity,
+  TeamSalesAnalytics,
+  TeamSalesMember,
+  TeamSalesOverview,
+  TeamSalesTeam,
+} from './schemas/analytics.js';
+
+/* ---- Phase 2B: operational dashboard queue cards (AFHomes queue-card pattern) ----
+   Three server-side counts (null when unauthorized); no withdrawals until the
+   payout workflow exists. */
+export { dashboardQueuesSchema } from './schemas/queues.js';
+export type { DashboardQueues } from './schemas/queues.js';
+
+/* ---- Phase 15: role-scoped reports and the audit center ----
+   Exports are generated from the same scoped server-side query as the
+   on-screen table and returned as base64-in-JSON, so the browser never
+   computes a row. */
 export {
-  sessionUserSchema,
-  loginRequestSchema,
-  loginResponseSchema,
-  qualificationAnswerSchema,
-  idDocumentSchema,
-  registerRequestSchema,
-  registrationApplicationSchema,
-  registerResponseSchema,
-  verifyEmailRequestSchema,
-  verifyEmailResponseSchema,
-  resendVerificationRequestSchema,
-  resendVerificationResponseSchema,
-  resubmitRequestSchema,
-} from './schemas/auth.js';
+  reportTypeSchema,
+  reportFormatSchema,
+  reportQuerySchema,
+  reportScopeSchema,
+  reportRowSchema,
+  reportResponseSchema,
+  reportExportSchema,
+  auditQuerySchema,
+  auditEventSchema,
+  auditResponseSchema,
+  REPORT_EXPORT_CAP,
+  REPORT_PAGE_MAX,
+} from './schemas/reports.js';
 export type {
-  SessionUser,
-  LoginRequest,
-  LoginResponse,
-  QualificationAnswer,
-  IdDocument,
-  RegisterRequest,
-  RegistrationApplication,
-  RegisterResponse,
-  VerifyEmailRequest,
-  VerifyEmailResponse,
-  ResendVerificationRequest,
-  ResendVerificationResponse,
-  ResubmitRequest,
-} from './schemas/auth.js';
-export { walletSchema, ledgerEntryTypeSchema, ledgerEntrySchema } from './schemas/ewallet.js';
-export type { Wallet, LedgerEntryType, LedgerEntry } from './schemas/ewallet.js';
+  ReportType,
+  ReportFormat,
+  ReportQuery,
+  ReportScope,
+  ReportRow,
+  ReportResponse,
+  ReportExport,
+  AuditQuery,
+  AuditEvent,
+  AuditResponse,
+} from './schemas/reports.js';
+
+/* ---- Phase 8: OST registration and approval (SM -> OST) ----
+   The public request carries a referral CODE, never a sponsor id: the
+   sponsor is resolved and frozen server-side, so there is no field to
+   spoof. `submitted` is the pending state; no new lifecycle vocabulary. */
 export {
-  commissionStatusSchema,
-  commissionTypeSchema,
-  commissionSchema,
-  commissionClearBatchSchema,
-} from './schemas/commission.js';
+  ostApplicationStatusSchema,
+  OST_REVIEWABLE_STATUSES,
+  OST_TERMINAL_STATUSES,
+  canTransitionOstApplication,
+  ostMemberStatusSchema,
+  ostReferralCodeSchema,
+  normalizeOstReferralCode,
+  buildOstRegistrationUrl,
+  ostReferralResolutionSchema,
+  submitOstApplicationSchema,
+  ostApplicationSubmittedSchema,
+  ostApplicationSchema,
+  rejectOstApplicationSchema,
+  requestOstApplicationChangesSchema,
+  ostMemberSchema,
+  createOstReferralCodeSchema,
+  ostReferralCodeIssuedSchema,
+  ostReferralCodeRecordSchema,
+  ostHeadInfoSchema,
+  ostPersonalSalesSchema,
+  ostPersonalCommissionsSchema,
+  ostCommissionRecordSchema,
+  ostDashboardSchema,
+  ostSalesRecordSchema,
+  ostCommissionListRecordSchema,
+  ostSalesListSchema,
+  ostCommissionsListSchema,
+} from './schemas/ost.js';
 export type {
-  CommissionStatus,
-  CommissionType,
-  Commission,
-  CommissionClearBatch,
-} from './schemas/commission.js';
+  OstApplicationStatus,
+  OstMemberStatus,
+  OstReferralCode,
+  OstReferralResolution,
+  SubmitOstApplicationRequest,
+  OstApplicationSubmitted,
+  OstApplication,
+  RejectOstApplicationRequest,
+  RequestOstApplicationChangesRequest,
+  OstMember,
+  CreateOstReferralCodeRequest,
+  OstReferralCodeIssued,
+  OstReferralCodeRecord,
+  OstHeadInfo,
+  OstPersonalSales,
+  OstPersonalCommissions,
+  OstCommissionRecord,
+  OstDashboard,
+  OstSalesRecord,
+  OstCommissionListRecord,
+  OstSalesList,
+  OstCommissionsList,
+} from './schemas/ost.js';
+
+/* ---- Phase 10: membership card management ----
+   Hash-only credentials can be rotated but never recovered, so the card view
+   carries everything printable EXCEPT the codes, and rotation returns the
+   plaintext pair exactly once. Printing records a print; it never rotates. */
 export {
-  payoutAccountStatusSchema,
-  payoutMethodSchema,
-  payoutAccountSchema,
-  createPayoutAccountRequestSchema,
-  setPrimaryPayoutAccountRequestSchema,
-} from './schemas/payout.js';
+  membershipCardSchema,
+  reissueMembershipCardSchema,
+  reissuedMembershipCardSchema,
+  markedPrintedSchema,
+} from './schemas/card.js';
 export type {
-  PayoutAccountStatus,
-  PayoutMethod,
-  PayoutAccount,
-  CreatePayoutAccountRequest,
-  SetPrimaryPayoutAccountRequest,
-} from './schemas/payout.js';
+  MembershipCard,
+  ReissueMembershipCardRequest,
+  ReissuedMembershipCard,
+  MarkedPrinted,
+} from './schemas/card.js';
+
+/* ---- Phase 12: identity documents and OCR-assisted extraction ----
+   OCR output is suggestion data, never authoritative. Confirmed values are
+   human decisions; nothing here finalizes identity on its own. */
 export {
-  withdrawalStatusSchema,
-  withdrawalPayoutAccountSchema,
-  withdrawalSchema,
-  createWithdrawalRequestSchema,
-} from './schemas/withdrawal.js';
+  ocrStatusSchema,
+  documentVerificationStatusSchema,
+  documentSubjectSchema,
+  documentMimeSchema,
+  ocrFieldSchema,
+  identityDocumentSchema,
+  identityDocumentSummarySchema,
+  documentUploadRequestSchema,
+  documentUploadGrantSchema,
+  documentConfirmSchema,
+  documentAccessUrlSchema,
+  documentListQuerySchema,
+  currentDocumentQuerySchema,
+  currentDocumentResponseSchema,
+} from './schemas/document.js';
 export type {
-  WithdrawalStatus,
-  WithdrawalPayoutAccount,
-  Withdrawal,
-  CreateWithdrawalRequest,
-} from './schemas/withdrawal.js';
+  OcrStatus,
+  DocumentVerificationStatus,
+  DocumentSubject,
+  DocumentMime,
+  OcrField,
+  IdentityDocument,
+  IdentityDocumentSummary,
+  DocumentUploadRequest,
+  DocumentUploadGrant,
+  DocumentConfirmRequest,
+  DocumentAccessUrl,
+} from './schemas/document.js';
+
+/* ---- Phase 6: staff-managed public website CMS ---- */
 export {
-  saleStatusSchema,
-  customerSchema,
-  createCustomerRequestSchema,
-  saleSchema,
-  submitSaleRequestSchema,
-  submitSaleResponseSchema,
-  resubmitSaleRequestSchema,
-  reopenSaleRequestResponseSchema,
-} from './schemas/sales.js';
-export type {
-  SaleStatus,
-  Customer,
-  CreateCustomerRequest,
-  Sale,
-  SubmitSaleRequest,
-  SubmitSaleResponse,
-  ResubmitSaleRequest,
-  ReopenSaleRequestResponse,
-} from './schemas/sales.js';
-export {
-  notificationSchema,
-  createBroadcastRequestSchema,
-  markNotificationReadResponseSchema,
-  readAllNotificationsResponseSchema,
-} from './schemas/notification.js';
-export type {
-  Notification,
-  CreateBroadcastRequest,
-  MarkNotificationReadResponse,
-  ReadAllNotificationsResponse,
-} from './schemas/notification.js';
-export {
-  messageSenderTypeSchema,
-  messageSchema,
-  conversationSummarySchema,
-  adminConversationSchema,
-  adminMessagesSummarySchema,
-  createMessageRequestSchema,
-  markMessagesReadResponseSchema,
-} from './schemas/message.js';
-export type {
-  MessageSenderType,
-  Message,
-  ConversationSummary,
-  AdminConversation,
-  AdminMessagesSummary,
-  CreateMessageRequest,
-  MarkMessagesReadResponse,
-} from './schemas/message.js';
-export {
-  directReferralSchema,
-  groupNetworkSchema,
-  genealogyNodeSchema,
-  genealogySchema,
-} from './schemas/referral.js';
-export type { DirectReferral, GroupNetwork, GenealogyNode, Genealogy } from './schemas/referral.js';
-export {
-  voucherStatusSchema,
-  voucherSchema,
-  voucherTemplateSchema,
-  voucherAssignmentSchema,
-  createVoucherTemplateRequestSchema,
-  updateVoucherTemplateRequestSchema,
-  assignVoucherRequestSchema,
-  scanVoucherRequestSchema,
-  redeemVoucherRequestSchema,
-} from './schemas/voucher.js';
-export type {
-  VoucherStatus,
-  Voucher,
-  VoucherTemplate,
-  VoucherAssignment,
-  CreateVoucherTemplateRequest,
-  UpdateVoucherTemplateRequest,
-  AssignVoucherRequest,
-  ScanVoucherRequest,
-  RedeemVoucherRequest,
-} from './schemas/voucher.js';
-export { adjustmentEntryTypeSchema, adjustmentSchema } from './schemas/adjustment.js';
-export type { AdjustmentEntryType, Adjustment } from './schemas/adjustment.js';
-export {
-  contentKindSchema,
-  forwardableContentSchema,
-  createContentItemRequestSchema,
-  updateContentItemRequestSchema,
-  deleteContentItemResponseSchema,
-  contentUploadSignRequestSchema,
-} from './schemas/content.js';
-export type {
-  ContentKind,
-  ForwardableContent,
-  CreateContentItemRequest,
-  UpdateContentItemRequest,
-  DeleteContentItemResponse,
-  ContentUploadSignRequest,
-} from './schemas/content.js';
-export {
-  cmsCtaLinkSchema,
-  cmsPhotoSchema,
-  homepageContentSchema,
-  homepageHeroSchema,
-  homepageValueSchema,
-  homepageSectionHeaderSchema,
-  homepageFeaturedHeaderSchema,
-  homepageApproachSchema,
-  homepageTrustSchema,
-  homepageAboutPreviewSchema,
-  homepageCtaBandSchema,
-  aboutContentSchema,
-  aboutHeroSchema,
-  aboutIntroSchema,
-  aboutPhilosophySchema,
-  aboutApproachSchema,
-  aboutVisionSchema,
-  aboutMissionSchema,
-  aboutCtaSchema,
-  cmsPropertyFactSchema,
-  cmsPropertyCategorySchema,
-  cmsPropertySchema,
-  cmsPropertiesHeroSchema,
-  cmsPropertiesIntroSchema,
-  cmsPropertiesFeaturedSchema,
-  cmsPropertiesNoteSchema,
-  cmsPropertiesCtaSchema,
-  cmsPropertiesPageSchema,
-  propertiesContentSchema,
-  faqItemSchema,
-  faqHeroSchema,
-  faqIntroSchema,
-  faqCtaSchema,
-  faqContentSchema,
-  contactMethodIconSchema,
-  contactMethodSchema,
-  contactDetailSchema,
-  contactHeroSchema,
-  contactFormSchema,
-  contactCtaSchema,
-  contactContentSchema,
-  globalNavItemSchema,
-  globalFooterContactSchema,
-  globalBrandSchema,
-  globalMessengerSchema,
-  globalSeoSchema,
-  globalThemeSchema,
-  globalContentSchema,
-  pageSeoSchema,
-  authScreenCopySchema,
-  registerFieldLabelSchema,
-  registerQualificationQuestionSchema,
-  registerQualificationSchema,
-  loginContentSchema,
-  registerContentSchema,
+  cmsDocumentKeySchema,
+  cmsPublishStateSchema,
+  cmsJsonObjectSchema,
+  cmsDocumentSchema,
+  updateCmsDocumentSchema,
+  cmsBlockTypeSchema,
+  cmsSectionSchema,
+  cmsSeoSchema,
+  cmsPageSchema,
+  createCmsPageSchema,
+  updateCmsPageSchema,
+  cmsHistorySchema,
+  cmsMediaSchema,
+  createCmsMediaSchema,
+  cmsPublicContentSchema,
 } from './schemas/cms.js';
 export type {
-  CmsCtaLink,
-  CmsPhoto,
-  HomepageContent,
-  AboutContent,
-  CmsPropertyFact,
-  CmsPropertyCategory,
-  CmsProperty,
-  CmsPropertiesPage,
-  PropertiesContent,
-  FaqItem,
-  FaqContent,
-  ContactMethod,
-  ContactDetail,
-  ContactContent,
-  GlobalNavItem,
-  GlobalFooterContact,
-  GlobalContent,
-  GlobalTheme,
-  PageSeo,
-  AuthScreenCopy,
-  RegisterFieldLabel,
-  RegisterQualificationQuestion,
-  RegisterQualification,
-  LoginContent,
-  RegisterContent,
+  CmsDocumentKey,
+  CmsDocument,
+  CmsPage,
+  CmsSection,
+  CmsHistory,
+  CmsMedia,
+  CmsPublicContent,
 } from './schemas/cms.js';
-export {
-  locationVerificationRequestSchema,
-  locationVerificationResponseSchema,
-  provinceRefSchema,
-  cityRefSchema,
-  barangayRefSchema,
-  provincesQuerySchema,
-  citiesQuerySchema,
-  barangaysQuerySchema,
-} from './schemas/location.js';
 export type {
-  LocationVerificationRequest,
-  LocationVerificationResponse,
-  ProvinceRef,
-  CityRef,
-  BarangayRef,
-  ProvincesQuery,
-  CitiesQuery,
-  BarangaysQuery,
-} from './schemas/location.js';
+  CustomerActivationRequest,
+  CustomerActivationResult,
+  CustomerProfile,
+  CustomerMembership,
+  CustomerPointsSummary,
+  CustomerPointsEntry,
+  CustomerPayment,
+  CustomerCredentials,
+  CustomerActivationError,
+} from './schemas/customer.js';
+
 export {
-  catalogPropertyStatusSchema,
-  catalogPropertySchema,
-  createPropertyRequestSchema,
-  updatePropertyRequestSchema,
-} from './schemas/catalog.js';
-export type {
-  CatalogProperty,
-  CatalogPropertyStatus,
-  CreatePropertyRequest,
-  UpdatePropertyRequest,
-} from './schemas/catalog.js';
+  memberLookupSchema,
+  type MemberLookup,
+  customerLookupSchema,
+  type CustomerLookup,
+  gsdActiveVipLookupSchema,
+  type GsdActiveVipLookup,
+} from './schemas/customer-import.js';
+
+export { customerSellerOptionSchema } from './schemas/customer-import.js';
+export * from './schemas/ost-accreditation.js';
+export * from './schemas/sale-team.js';
+export * from './schemas/profile-photo.js';
+export * from './schemas/address.js';
+export { staffPortalBase, operationsPath, staffPortalPath } from './schemas/portal-routing.js';
 export {
-  CMS_HOMEPAGE_SEED,
-  CMS_ABOUT_SEED,
-  CMS_PROPERTIES_SEED,
-  CMS_FAQS_SEED,
-  CMS_CONTACT_SEED,
-  CMS_GLOBAL_SEED,
-  CMS_LOGIN_SEED,
-  CMS_REGISTER_SEED,
-  CMS_SEEDS,
-} from './seeds/cms.js';
+  registerCustomerApplicationSchema,
+  type RegisterCustomerApplicationRequest,
+} from './schemas/official-forms.js';
+
+export * from './schemas/purchase-flow.js';
+export * from './schemas/signed-documents.js';
+
+export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.js';
+
+export * from './schemas/point-approvals.js';
+
+export * from './schemas/service-refunds.js';
+export * from './schemas/customer-workbook.js';
+export * from './schemas/customer-workflow.js';
+export * from './schemas/customer-import-continuation.js';
+
+export { servicePolicyManagementResultSchema } from './schemas/points.js';
+export * from './schemas/member-workbook.js';
+export * from './schemas/public-verification-settings.js';
+export * from './schemas/ist-portal.js';
+export * from './schemas/imported-sales.js';
+
+export * from './schemas/commission-ops.js';
+export * from './schemas/payroll.js';
+export * from './schemas/external-evidence.js';
+export * from './schemas/cms-content.js';
+export * from './schemas/media.js';
+
+export { applicationRaDraftSchema, type ApplicationRaDraft } from './schemas/official-forms.js';
+
 export {
-  PROGRAM_SEEDS,
-  PROGRAM_QUESTION_SEEDS,
-  CONFIG_SEEDS,
-  POLICY_SEEDS,
-} from './seeds/reference.js';
-export type { ConfigSeed } from './seeds/reference.js';
+  canCreateVipSale,
+  mustNameSellerOfRecord,
+  SELLER_OF_RECORD_ROLE,
+} from './schemas/vip-sale-creator.js';
