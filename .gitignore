@@ -44,6 +44,9 @@ supabase/backfill-staff-domain.retire.json
 # Local pnpm shim used so turbo can find the package manager (see AGENTS.md)
 .tmp-bin/
 
+# Playwright MCP browser-session logs and snapshots (local only)
+.playwright-mcp/
+
 # Supabase CLI local cache (project ref + pooler URL - connection metadata)
 supabase/.temp/
 
