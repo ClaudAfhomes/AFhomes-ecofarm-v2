@@ -253,7 +253,8 @@ function EvidenceForm({
       <TextAreaField
         id={`${fieldId}-description`}
         name="evidenceDescription"
-        label="Description (optional)"
+        label="Description"
+        optional
         hint="Context only — a description is not proof."
         value={description}
         onChange={setDescription}

@@ -273,7 +273,7 @@ describe('commission operations', () => {
 
     // A description alone cannot be attached: the reference is required.
     await u.type(screen.getByLabelText(/issued by/i), 'BDO');
-    await u.type(screen.getByLabelText(/description \(optional\)/i), 'Paid by transfer');
+    await u.type(screen.getByLabelText(/^description/i), 'Paid by transfer');
     const attach = screen.getByRole('button', { name: 'Attach evidence' });
     expect(attach).toBeDisabled();
     await u.type(screen.getByLabelText(/transaction reference/i), 'TXN-778899');
