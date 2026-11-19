@@ -67,12 +67,14 @@ describe('default role permission baseline', () => {
   it('leaves the unresolved, payroll-authority and Phase 6 CMS modules ungranted to everyone', () => {
     expect([...BASELINE_EXCLUDED_MODULES].sort()).toEqual(
       [
-        'finance.commission_payouts',
         'finance.final_qualification',
         // Payroll approval, closing and policy: Super Admin only until delegated.
         'finance.payroll_approval',
         'finance.payroll_close',
         'finance.payroll_policy',
+        'finance.payroll_policy_approval',
+        // Payment adjustment decisions: Super Admin only, plus Q13 pending.
+        'finance.payment_adjustment_decision',
         'governance.config',
         'network.withdrawals',
         'cms.pages',

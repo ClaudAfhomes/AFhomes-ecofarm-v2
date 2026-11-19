@@ -1995,6 +1995,7 @@
 }
 .application .choiceGroup .radioRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 9px;
 }
 .application .choiceGroup .civilChoices .seg {

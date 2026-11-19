@@ -533,3 +533,93 @@ Sanitized ignored evidence: `.tmp-bin/reconciliation-live-before.json`,
 `.tmp-bin/reconciliation-mirror-postcheck.json`. No credentials or customer rows
 were written to Markdown. Authenticated browser acceptance remains unverified;
 there was no hosted application deployment.
+
+
+## 2026-11-18 ? approved commission payout details
+
+The owner explicitly approved applying exactly
+`20270105000017_afhomes_finops_commission_payout_details.sql` to the shared
+Supabase backend used by normal localhost development. The same file was first
+applied and replayed on the existing loopback local Supabase stack (port 59322).
+No other migration or policy approval was part of this operation.
+
+- Target independently verified: `ikaevepedpqygdlipsei`.
+- SHA-256: `fae8718bba873761afa7df32ae9271df705b26680588ea85733e843a52396875`.
+- Each apply used one transaction for the reviewed DDL and its history row.
+- Hosted history now contains 183 versions, including `20270105000017`.
+- `paid_method`, `paid_on` and `paid_evidence_reference` are present.
+- The payment-fact immutability trigger is enabled. The payout trigger uses the
+  recorded method and actual date; its function hash matches the local proof.
+- Browser table-wide SELECT is revoked. The explicit safe-column grant is intact;
+  `paid_evidence_reference` is the only unreadable commission column.
+- Original values and row counts were preserved for 4 commissions, 0 payouts,
+  242 audit events, 0 compensation policies and 4 governing policy decisions.
+  Preservation checks ran inside the transaction; financial row values were not
+  exported. No live payout or policy approval was used as a test.
+- PostgREST accepted a server-authorized zero-row SELECT of the new columns after
+  the schema reload. No customer/financial rows were returned by that probe.
+- The RLS audit exactly matches its baseline: zero AF Homes invariant violations;
+  the two pre-existing `cron.job` / `cron.job_run_details` platform policies remain.
+- Source proof before application: 3,942 disposable PostgreSQL checks, 139 focused
+  API tests, 70 focused UI tests, and workspace typecheck passed. Scoped lint had
+  zero errors and two existing Fast Refresh warnings.
+
+The repository schema index was regenerated. Normal `pnpm dev` remains connected
+to its existing hosted backend; credentials, administrators, compensation values,
+Q1/Q13/Q15 decisions and financial transactions were not changed. No application
+commit, push or deployment occurred. Existing unrelated customer-import test
+failures and financial policy requirements remain outstanding.
+
+Sanitized ignored operation evidence: `.tmp-bin/payout-details-local-result.json`
+and `.tmp-bin/payout-details-hosted-result.json`. These contain schema proof,
+checksums and preservation counts, not credentials or financial row contents.
+
+
+## 2026-11-18: atomic selected-seller commission rate configuration
+
+User explicitly authorized migration `20270105000018` and then instructed applying all migrations needed by the current system changes to hosted Supabase. Verified target: `ikaevepedpqygdlipsei`, the backend used by normal localhost development.
+
+- Applied exactly `20270105000018_afhomes_bulk_commission_rules.sql` and its history entry in one transaction. History: **183 -> 184**.
+- SHA-256: `185F0B9BBCA4E18D75CFC8490A4F2F566A198DE80E3B63ADA973C0827D7AAFB4`.
+- Function definition exactly matches the tested local Supabase function. Local proof includes 14 SQL assertions, two-session retry serialization and an actual API retry.
+- Browser roles `anon` and `authenticated` cannot execute it. `service_role` can, with the acting staff member revalidated inside the function.
+- Read snapshots verified all existing records across **107 public/private application tables unchanged**. No rate, compensation value, financial record or governing decision was created or edited.
+- RLS audit unchanged: zero AF Homes violations; two pre-existing platform cron policy entries remain.
+- Hosted PostgREST's schema recognizes the new RPC. No real selected-seller configuration or financial operation was executed as a test.
+
+The history audit found three other unrecorded source files. They were **not applied or falsely stamped**:
+
+- `20261206000006_afhomes_reconcile_workbook_network_version.sql`: both network-reference columns and all three workbook components already exist. The public import entry point now uses the later continuation/source pipeline and exactly matches the tested local function. Replaying this older reconciliation would incorrectly require its former direct dispatcher structure.
+- The two files sharing version `20261215000001` (customer-ID format and search-path hardening): successor `20261215000002` is recorded. Live checks confirm the modern ID allocator and canonical import search path. Replaying the old allocator could replace later improvements.
+
+No required migration for the current commission/payroll changes remains unapplied. Historical ledger gaps and the two live-only versions remain accurately recorded; they are not treated as missing functionality. The repository manifest has 187 files, not 187 distinct live history entries. Browser/mobile acceptance and real compensation-policy authorization remain separate.
+
+No commit, push, merge, application deployment, administrator modification, seed or business-policy approval was performed.
+
+
+## 2026-11-18: imported draft Application & RA next-stage correction
+
+Applied `20270105000019_afhomes_import_coordinated_approval_stage.sql` to verified project `ikaevepedpqygdlipsei` under the owner's instruction to apply all migrations needed for the current system changes. Source SHA-256: `036BF704C5106C9BC11AA294FFB1F384AB5CAE73AAE02E8B6B904B23E2C8454A`.
+
+This read-model correction keeps an imported draft/submitted application at the application approval stage when its provisional RA already exists. It does not create approvals, change paid history or relax payment guards. The write-path compatibility experiment was not retained or applied.
+
+Local verification: 188 migrations ordered successfully; replay preserves definitions; 72 workflow assertions and 27 concurrent-workflow assertions passed; RLS audit returned zero violations. The full core database suite passed 3,944 checks. Workspace typecheck passed. Managed local replay was also idempotent.
+
+Hosted application and history entry committed in one transaction: **184 -> 185**. The function definition exactly matches tested local Supabase. All existing records across 107 public/private application tables were unchanged. Its existing private EXECUTE restrictions were preserved for anon, authenticated and service_role. The RLS baseline remains unchanged, including two pre-existing platform cron entries and zero AF Homes violations.
+
+The broader external-history import suite still fails when its older writer attempts to create a second RA. It also needs alignment with the executed-agreement payment requirement. No financial guard or unresolved import authorization was weakened to pass that suite. This is a remaining release blocker, separate from the passing payroll and core suites.
+
+No policy value, business approval, customer or financial backfill, administrator change, commit, push, merge or application deployment was performed.
+
+
+## 2026-11-19 ? Reservation Paid import review and provisional agreement reuse
+
+Applied only `20270105000020_afhomes_external_import_coordinated_reservation.sql` to verified hosted project `ikaevepedpqygdlipsei` under the owner's authorization to apply required migrations. SHA-256: `7E6E37E9D5D79272D753E2F3A1C51AC114A10D3CCEFBB2BD3AC8EC45335E26D3`.
+
+Dependencies: coordinated workflow migration 16, imported read-model migration 19, the existing external-import pipeline and `set_payment_receipt_details` from financial payment migration 02. New Reservation Paid certification is an unverified claim, requiring normal combined Application & RA approval and Finance review/verification. Already accepted historical receipts remain intact. Other paid-history paths reuse the provisional unfunded agreement, and explicit claim recording retains the original payment date. No historical record was reconciled by this migration.
+
+Local proof: 189 migrations ordered; replay preserved definitions; 72 workflow assertions, 27 concurrency assertions, 3,944 core checks and the complete external-import matrix passed. External proof includes concurrent intake retries, unauthorized access, stale source conflicts, accepted-history preservation and the full approval-to-verification claim flow. Nine import UI tests and seven typecheck tasks passed. Managed local application/replay also passed.
+
+Hosted apply and history insertion committed atomically: **185 -> 186**. All existing records across 107 application tables were preserved. All four affected function definitions and existing EXECUTE ACLs match managed local; browser roles remain refused, private helpers remain refused to service_role, and only the two public RPCs remain service_role callable. RLS baseline unchanged: two pre-existing platform cron findings, zero AF Homes violations. Independent read-only post-commit ledger/hash/ACL verification passed. No seed, real import, policy/rate approval, payment, commit, push or application deployment.
+
+Evidence: `.tmp-bin/import-review-hosted-result.json`, `.tmp-bin/import-review-local-result.json`, `.tmp-bin/import-review-core-db.log`, `.tmp-bin/import-review-workflow.log`, `.tmp-bin/external-import-current.log`. The earlier three intentionally unreplayed historical source files and two live-only history versions remain untouched; they were not forced into the ledger.

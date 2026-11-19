@@ -7,6 +7,7 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   PageHeader,
   Pagination,
@@ -306,24 +307,24 @@ export function AfHomesRolesPage() {
             }
             filters={
               <>
-                <Select
-                  aria-label="Filter role type"
+                <ChoiceChips
+                  label="Filter role type"
                   value={typeFilter}
-                  onChange={(event) => {
-                    setTypeFilter(event.target.value);
+                  onChange={(next) => {
+                    setTypeFilter(next);
                     resetPage();
                   }}
                   options={[
                     { value: 'all', label: 'All types' },
-                    { value: 'system', label: 'System roles' },
-                    { value: 'custom', label: 'Custom roles' },
+                    { value: 'system', label: 'System' },
+                    { value: 'custom', label: 'Custom' },
                   ]}
                 />
-                <Select
-                  aria-label="Filter role status"
+                <ChoiceChips
+                  label="Filter role status"
                   value={statusFilter}
-                  onChange={(event) => {
-                    setStatusFilter(event.target.value);
+                  onChange={(next) => {
+                    setStatusFilter(next);
                     resetPage();
                   }}
                   options={[

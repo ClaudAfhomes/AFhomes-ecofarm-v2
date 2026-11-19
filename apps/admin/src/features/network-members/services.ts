@@ -14,6 +14,7 @@ import {
   afHomesDepartmentSchema,
   createOstMemberResultSchema,
   memberDetailSchema,
+  memberIdentityDocumentLinkSchema,
   memberSchema,
   type AfHomesDepartment,
   type CreateMember,
@@ -138,3 +139,6 @@ export const confirmMemberWorkbookRow = (jobId: string, rowId: string, evidenceV
     method: 'POST',
     body: JSON.stringify({ evidenceVerified, temporaryPassword }),
   });
+
+export const getMemberIdentityDocument = (id: string) =>
+  request(`/members/${id}/identity-document`, memberIdentityDocumentLinkSchema);

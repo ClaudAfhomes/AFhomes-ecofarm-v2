@@ -8,6 +8,7 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
+  ChoiceChips,
   OverflowMenu,
   PageHeader,
   Pagination,
@@ -18,6 +19,7 @@ import {
   TextField,
 } from '@afhomes/ui';
 import type { Customer, CustomerOnboardingRecovery } from '@afhomes/contracts';
+import { canCreateVipSale } from '@afhomes/contracts';
 
 import { formatDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
@@ -51,6 +53,9 @@ const PAGE_SIZE = 10;
 export function BusinessCustomersPage() {
   const client = useQueryClient();
   const { user } = useSession();
+  const mayCreate = canCreateVipSale(user) && (user?.roleSlug === 'super_admin' || user?.afHomesPermissions.some(
+    (p) => p.moduleKey === 'sales.customers' && p.canCreate,
+  ));
   const navigate = useNavigate();
   // The import/export workspace keeps its OWN module, the same as it does in the
   // applications view. Hiding the button is UX only - the server re-checks every
@@ -231,7 +236,7 @@ export function BusinessCustomersPage() {
             ) : null}
             {/* Creating a customer and building their application are ONE action,
                 so this opens the builder rather than a separate create page. */}
-            <Button onClick={() => navigate('/admin/customers/new')}>New customer</Button>
+            {mayCreate ? <Button onClick={() => navigate('/admin/customers/new')}>Create Application &amp; RA</Button> : null}
           </>
         }
       />
@@ -280,20 +285,20 @@ export function BusinessCustomersPage() {
                 ]}
               />
             </label>
-            <label className={styles.filterLabel}>
-              VIP Tier
-              <Select
-                aria-label="VIP Tier"
+            <div className={styles.filterLabel}>
+              <span aria-hidden="true">VIP Tier</span>
+              <ChoiceChips
+                label="VIP Tier"
                 value={filters.tier}
-                onChange={(e) => patchFilters({ tier: e.target.value })}
+                onChange={(tier) => patchFilters({ tier })}
                 options={[
-                  { value: '', label: 'All tiers' },
+                  { value: '', label: 'All' },
                   { value: 'GOLD', label: 'Gold' },
                   { value: 'SILVER', label: 'Silver' },
                   { value: 'BRONZE', label: 'Bronze' },
                 ]}
               />
-            </label>
+            </div>
 
           </>
         }

@@ -32,6 +32,7 @@ function body(field: string, value: unknown) {
     requestId: UUID.viewerStaff,
     customerId: UUID.viewerStaff,
     planId: UUID.viewerStaff,
+    smStaffId: '00000000-0000-4000-8000-000000000123',
     tier: 'GOLD',
     paymentScheme: 'spot_cash',
     primary,

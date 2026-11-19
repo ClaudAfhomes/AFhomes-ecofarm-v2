@@ -66,6 +66,7 @@ const activeMembershipOf = async (db: Db, customerId: string) => {
     .eq('customer_id', customerId)
     .eq('status', 'active')
     .order('activated_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) throw error;
@@ -81,8 +82,8 @@ const activeMembershipOf = async (db: Db, customerId: string) => {
 const schemeOfSale = async (
   db: Db,
   saleId: unknown,
-): Promise<{ paymentScheme: string; validityMonths: number | null }> => {
-  const fallback = { paymentScheme: 'spot_cash', validityMonths: null as number | null };
+): Promise<{ paymentScheme: string; validityMonths: number | null; vipCardNumber: string | null }> => {
+  const fallback = { paymentScheme: 'spot_cash', validityMonths: null as number | null, vipCardNumber: null };
   if (typeof saleId !== 'string' || !saleId) return fallback;
   const { data, error } = await db
     .from('card_sales')
@@ -90,6 +91,12 @@ const schemeOfSale = async (
     .eq('id', saleId)
     .maybeSingle();
   if (error) throw error;
+  const { data: reservation, error: reservationError } = await db
+    .from('reservation_agreements')
+    .select('vip_card_number')
+    .eq('sale_id', saleId)
+    .maybeSingle();
+  if (reservationError) throw reservationError;
   const row = (data ?? {}) as Record<string, unknown>;
   const months =
     row.validity_months_snapshot === null || row.validity_months_snapshot === undefined
@@ -97,6 +104,7 @@ const schemeOfSale = async (
       : Number(row.validity_months_snapshot);
   return {
     paymentScheme: typeof row.payment_scheme === 'string' ? row.payment_scheme : 'spot_cash',
+    vipCardNumber: typeof reservation?.vip_card_number === 'string' ? reservation.vip_card_number : null,
     validityMonths: months,
   };
 };
@@ -104,7 +112,7 @@ const schemeOfSale = async (
 const toMembership = (
   row: Record<string, unknown>,
   hasIssued: boolean,
-  scheme: { paymentScheme: string; validityMonths: number | null },
+  scheme: { paymentScheme: string; validityMonths: number | null; vipCardNumber?: string | null },
 ) => {
   const product = (row.card_plans ?? {}) as Record<string, unknown>;
   const months = scheme.validityMonths;
@@ -112,7 +120,7 @@ const toMembership = (
   return {
     id: row.id,
     membershipNumber,
-    vipCardNumber: isoOrNull((row.customers as Record<string, unknown> | undefined)?.vip_card_number),
+    vipCardNumber: scheme.vipCardNumber ?? isoOrNull((row.customers as Record<string, unknown> | undefined)?.vip_card_number),
     productName: isoOrNull(product.name),
     productCode: isoOrNull(product.code),
     status: row.status,

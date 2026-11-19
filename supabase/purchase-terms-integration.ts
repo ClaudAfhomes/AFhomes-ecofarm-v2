@@ -38,6 +38,7 @@ type Proposal = {
   asOf: string;
   offerKind: 'submission' | 'newly_confirmed_offer';
   terms: {
+    sellerStaffId: string;
     tier: string;
     paymentScheme: string;
     totalPrice: string;
@@ -171,6 +172,10 @@ export async function runPurchaseTermsChecks({
     creator = actor,
   ) => {
     const customerId = await mkCustomer();
+    await db.query(`insert into public.identity_documents(subject_type,customer_id,storage_path,original_filename,mime_type,size_bytes,sha256,
+      reviewed_by,reviewed_at,verification_status,reviewed_data,uploaded_by)
+      values('customer',$1,$2,'passport.pdf','application/pdf',2048,repeat('a',64),$3,now(),'confirmed','{"fields":{"idType":"passport"}}',$3)`,
+      [customerId, `synthetic-terms/${randomUUID()}.pdf`, actor]);
     const plan = plans.get(planCode)!;
     const header = {
       customerId,
@@ -184,7 +189,9 @@ export async function runPurchaseTermsChecks({
       reservationPaymentProofReceived: false,
     };
     const { rows } = await db.query<{ id: string }>(
-      'select public.save_customer_application(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, null::jsonb) as id',
+      status === 'approved'
+        ? 'select private.save_customer_application_before_workflow(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, null::jsonb) as id'
+        : 'select public.save_customer_application(null::uuid, $1::uuid, $2::jsonb, $3::jsonb, null::jsonb) as id',
       [creator, JSON.stringify(header), JSON.stringify(holder(customerSeq))],
     );
     const id = rows[0]!.id;
@@ -201,13 +208,11 @@ export async function runPurchaseTermsChecks({
   // Approval needs an ACCEPTED signed Customer Application in private storage,
   // uploaded by one actor and reviewed by another (repair 20261231000001
   // section 9). A government ID never stands in for it.
-  const addSignedApplicationDocument = (applicationId: string) =>
-    acceptedSignedDocument(db, {
-      kind: 'signed_customer_application',
-      entityId: applicationId,
-      uploader: actor,
-      reviewer: superAdmin,
-    });
+  const addSignedApplicationDocument = async (applicationId: string) => {
+    await acceptedSignedDocument(db, { kind: 'signed_customer_application', entityId: applicationId, uploader: actor, reviewer: superAdmin });
+    const reservation = (await db.query<{ id: string }>('select id from public.reservation_agreements where customer_application_id=$1', [applicationId])).rows[0]!;
+    await acceptedSignedDocument(db, { kind: 'signed_reservation_agreement', entityId: reservation.id, uploader: actor, reviewer: superAdmin });
+  };
 
   const proposal = async (
     id: string,
@@ -309,10 +314,8 @@ export async function runPurchaseTermsChecks({
 
   /* Bronze B1/B2 are never enabled; the resolver refuses them. */
   for (const scheme of ['move_b1_40_12', 'move_b2_25_12']) {
-    const { id } = await mkApplication('BRONZE', scheme, 'draft');
-    createdApplications.push(id);
-    await fails(`BRONZE ${scheme} refused by the resolver`, /SCHEME_NOT_ALLOWED_FOR_TIER/, () =>
-      proposal(id),
+    await fails(`BRONZE ${scheme} refused before application and RA creation`, /SCHEME_NOT_ALLOWED_FOR_TIER/, () =>
+      mkApplication('BRONZE', scheme, 'draft'),
     );
   }
 
@@ -464,7 +467,7 @@ export async function runPurchaseTermsChecks({
   await addSignedApplicationDocument(submitApp);
   await db.query(
     `select public.decide_purchase_application_once($1::uuid,$2::uuid,$3::uuid,'approved')`,
-    [randomUUID(), actor, submitApp],
+    [randomUUID(), superAdmin, submitApp],
   );
   check(
     'approval keeps the exact terms pointer',
@@ -494,19 +497,10 @@ export async function runPurchaseTermsChecks({
      order by r.created_at`,
     [submitApp],
   );
-  check(
-    'the live RA from the resubmission is submitted after approval (execution requires signed RA)',
-    automatic.rows.length === 2 &&
-      automatic.rows[1]!.status === 'submitted' &&
-      automatic.rows[1]!.payment_status === null,
-    JSON.stringify(automatic.rows),
-  );
-  check(
-    'the RA retired by the reopen is cancelled, keeping its own official number',
-    automatic.rows[0]?.status === 'cancelled' &&
-      automatic.rows[0]!.payment_status === null &&
-      automatic.rows[0]!.reservation_number !== automatic.rows[1]?.reservation_number,
-  );
+  check('approval executes the original RA without a second payment or agreement',
+    automatic.rows.length === 1 && automatic.rows[0]!.status === 'executed' && automatic.rows[0]!.payment_status === null,
+    JSON.stringify(automatic.rows));
+  check('corrections retain the original official number and agreement', automatic.rows.length === 1 && !!automatic.rows[0]!.reservation_number);
 
   /* ---------------------------------------------------------------- */
   /* Seller validation                                                */
@@ -570,13 +564,10 @@ export async function runPurchaseTermsChecks({
   // Changed with the security review (repair section 32): only the creator or an
   // oversight role may price a DRAFT, so the downline rule is probed on a draft the
   // SSM created itself (it used to probe the SM's draft).
-  const { id: ssmDraft } = await mkApplication('SILVER', 'spot_cash', 'draft', staff['ssm']!);
-  createdApplications.push(ssmDraft);
-  await fails(
-    'a selling role outside the actor downline is refused',
-    /SELLER_NOT_IN_YOUR_DOWNLINE/,
-    () => proposal(ssmDraft, staff['ssm']!, scopedPeer),
-  );
+  await fails('SSM cannot originate an application even with monitoring access', /SALE_ORIGINATION_FORBIDDEN/,
+    () => mkApplication('SILVER', 'spot_cash', 'draft', staff['ssm']!));
+  await fails('SSM monitoring cannot price an SM draft', /MUTATION_FORBIDDEN|SALE_ORIGINATION_FORBIDDEN/,
+    () => proposal(sellerApp, staff['ssm']!, scopedPeer));
   await fails('a super admin cannot name Finance as seller of record', /SELLER_ROLE_NOT_A_SELLER/, () =>
     proposal(sellerApp, superAdmin, finance),
   );
@@ -586,9 +577,7 @@ export async function runPurchaseTermsChecks({
   await fails('an inactive account cannot be the seller', /SELLER_INACTIVE/, () =>
     proposal(sellerApp, superAdmin, inactive),
   );
-  await fails('a non-SM originator must name the seller of record', /SELLER_OF_RECORD_REQUIRED/, () =>
-    proposal(sellerApp, superAdmin),
-  );
+  check('Admin proposal preserves the already assigned SM', (await proposal(sellerApp, superAdmin)).terms.sellerStaffId === actor);
   // A fresh draft captured BY A REVIEWER with an explicit seller candidate: the
   // frozen row must name the chosen seller, not the reviewer who submitted it.
   const chosen = await proposal(sellerApp, superAdmin, staff['sm-alt']!);
@@ -631,7 +620,7 @@ export async function runPurchaseTermsChecks({
     () =>
       db.query(
         `select public.decide_purchase_application_once($1::uuid,$2::uuid,$3::uuid,'approved')`,
-        [randomUUID(), actor, oldApp],
+        [randomUUID(), superAdmin, oldApp],
       ),
   );
   check(
@@ -790,8 +779,8 @@ export async function runPurchaseTermsChecks({
   await db.query(
     `insert into public.card_sales (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
        cash_price, cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
-       commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at)
-     select $1, sale_number, $2, $3, 'staff', $4, $5, $5, $6, $7, '0', '0.00', 'submitted', now(), now()
+       commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at, origin)
+     select $1, sale_number, $2, $3, 'staff', $4, $5, $5, $6, $7, '0', '0.00', 'submitted', now(), now(),'legacy_import'
      from public.next_sale_number()`,
     [
       saleId,

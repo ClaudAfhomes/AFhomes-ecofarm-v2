@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { requireVipSaleCreator } from '../_lib/vip-sale-creator.js';
 import { handleSignedDocuments } from '../_lib/signed-documents.js';
 import { receiptDetailsOf, saveReceiptDetails } from '../_lib/payment-extras.js';
 import {
@@ -541,6 +542,7 @@ async function getAgreement(db: Db, id: string) {
     customerId: row.customer_id ?? undefined,
     sellerStaffId: row.seller_staff_id ?? undefined,
     purchaseTermsId: row.purchase_terms_id ?? null,
+    vipCardNumber: row.vip_card_number ?? null,
     planId: row.plan_id,
     tier: row.tier_snapshot,
     inclusions: row.inclusions_snapshot,
@@ -598,7 +600,7 @@ async function progressedApplicationIds(db: Db): Promise<string[]> {
     .from('reservation_agreements')
     .select('customer_application_id')
     .eq('origin', 'application')
-    .neq('status', 'cancelled');
+    .eq('status', 'executed');
   if (error) throw error;
   return [
     ...new Set(
@@ -921,6 +923,8 @@ async function agreementFinanceSummary(db: Db, id: string) {
       [name.first_name, name.middle_name, name.last_name, name.suffix]
         .filter((part) => typeof part === 'string' && part)
         .join(' ') || 'Unknown customer',
+    vipCardNumber: summary.vipCardNumber ?? null,
+    commissionEligibleAt: isoOrNull(summary.commissionEligibleAt),
     productName: `VIP ${String(summary.tier)}`,
     status: summary.status,
     paymentScheme: summary.paymentScheme,
@@ -1210,6 +1214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'sales.customers', 'create');
       if ('error' in auth) return deny(res, auth);
       const incoming = jsonBody(req) as Record<string, unknown>;
+      if (!requireVipSaleCreator(auth, res, incoming?.smStaffId)) return;
       if (incoming?.registerNewCustomer && incoming?.importContext)
         return fail(
           res,
@@ -1470,6 +1475,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       const before = await getApplication(db, appSubmit[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
+      if (!requireVipSaleCreator(auth, res, parsed.data.sellerCandidateId ?? before.smStaffId)) return;
       if (typeof before.customerId !== 'string')
         return fail(res, 'VALIDATION_ERROR', 'Application customer is missing', 400);
       const currentId = await currentIdForSubject(db, auth, 'customer', before.customerId);
@@ -1512,8 +1518,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const appDecision = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/decision$/);
     if (appDecision) {
-      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
+      const auth = await authorizeAfHomes(req, 'sales.application_approval', 'update');
       if ('error' in auth) return deny(res, auth);
+      if (!['admin', 'super_admin'].includes(auth.roleSlug))
+        return fail(res, 'FORBIDDEN', 'Only Admin or Super Admin may decide an application and RA.', 403);
       const parsed = customerApplicationDecisionSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -1530,8 +1538,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const appReopen = route(req, 'POST', /^customer-applications\/([0-9a-f-]+)\/reopen$/);
     if (appReopen) {
-      const auth = await authorizeAfHomes(req, 'sales.customers', 'update');
+      const auth = await authorizeAfHomes(req, 'sales.application_approval', 'update');
       if ('error' in auth) return deny(res, auth);
+      if (!['admin', 'super_admin'].includes(auth.roleSlug))
+        return fail(res, 'FORBIDDEN', 'Only Admin or Super Admin may return an application and RA for corrections.', 403);
       const parsed = z.object({ requestId: z.string().uuid() }).safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'A request id is required', 400);
       const { error } = await db.rpc('decide_purchase_application_once', {

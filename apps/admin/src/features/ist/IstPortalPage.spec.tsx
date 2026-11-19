@@ -8,6 +8,7 @@ import { istDateRange } from './services';
 import { istNavItemsForPermissions } from '../../app/navigation';
 import App from '../../app/App';
 import type { SessionUser } from '../../lib/session';
+import { useLocation } from 'react-router';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), imported: vi.fn() }));
 vi.mock('./services', async (importOriginal) => ({
@@ -122,6 +123,25 @@ beforeEach(() => {
     .mockResolvedValue({ data: [], meta: { page: 1, pageSize: 25, total: 0 } });
   mocks.get.mockReset().mockResolvedValue(report);
 });
+
+it('opens the coordinated application builder from SM My Sales', async () => {
+  function Location() { return <output aria-label="current route">{useLocation().pathname}</output>; }
+  const user: SessionUser = { ...istUser, afHomesPermissions: [...istUser.afHomesPermissions,
+    { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: true, canDelete: false }] };
+  renderWithProviders(<><IstPortalPage view="my-sales" /><Location /></>, { user, route: '/sales/ist/my-sales' });
+  expect(screen.getByRole('button', { name: 'Applications' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create Application & RA' }));
+  expect(screen.getByLabelText('current route')).toHaveTextContent('/sales/customers/new');
+});
+
+it.each(['senior_sales_manager', 'vice_director', 'ost'])(
+  '%s monitoring permission does not expose sale origination', (roleSlug) => {
+    const user: SessionUser = { ...istUser, roleSlug, afHomesPermissions: [...istUser.afHomesPermissions,
+      { moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: true, canDelete: false }] };
+    renderWithProviders(<IstPortalPage view="my-sales" />, { user });
+    expect(screen.queryByRole('button', { name: 'Create Application & RA' })).toBeNull();
+  },
+);
 
 it('shows finalized imported purchases in normal My Sales history', async () => {
   mocks.get.mockResolvedValue({
@@ -380,7 +400,7 @@ it('retains the original independent activity presets and custom date filters in
     ['Past 28 Days', 28],
     ['Past 6 Months', 180],
   ] as const) {
-    await user.click(activity.getByRole('button', { name: label }));
+    await user.click(activity.getByRole('radio', { name: label }));
     const to = new Date();
     const from = new Date();
     from.setDate(to.getDate() - days);
@@ -394,7 +414,13 @@ it('retains the original independent activity presets and custom date filters in
     );
     expect(start).toHaveValue(from.toISOString().slice(0, 10));
     expect(end).toHaveValue(to.toISOString().slice(0, 10));
+    expect(activity.getByRole('radio', { name: label })).toBeChecked();
   }
+  await user.click(activity.getByRole('radio', { name: 'All time' }));
+  await waitFor(() =>
+    expect(getTeamSalesAnalytics).toHaveBeenLastCalledWith(istUser.id, 'month', '', ''),
+  );
+  expect(start).toHaveValue('');
   fireEvent.change(start, { target: { value: '2026-01-02' } });
   fireEvent.change(end, { target: { value: '2026-01-10' } });
   await waitFor(() =>
@@ -406,6 +432,7 @@ it('retains the original independent activity presets and custom date filters in
     ),
   );
   expect(activity.getByText('Custom range: 2026-01-02 to 2026-01-10 (UTC)')).toBeInTheDocument();
+  expect(activity.getByRole('radio', { name: 'Custom range' })).toBeChecked();
   expect(activity.getByText('Top Seller', { selector: 'dt' })).toBeInTheDocument();
   expect(activity.getByRole('columnheader', { name: 'Sales' })).toBeInTheDocument();
 });

@@ -3,7 +3,7 @@
  * month-ended rule and submitter != closer; these tests pin who may call what
  * and that the actor always comes from the session.
  */
-import { financePeriodSummarySchema } from '@afhomes/contracts';
+import { accountingPeriodReadinessSchema, financePeriodSummarySchema } from '@afhomes/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -44,6 +44,15 @@ const SUMMARY = {
   earlierOpenPeriods: [],
 };
 
+const READINESS = {
+  period: '2026-10',
+  ready: false,
+  blockers: [
+    { code: 'PAYMENTS_PENDING_VERIFICATION', count: 2, message: 'Payments are recorded but not verified.' },
+  ],
+  warnings: [{ code: 'LIVE_PAYROLL_NOT_CLOSED', count: 1, message: 'A live payroll batch is not closed.' }],
+};
+
 /** The fixture world predates the payroll modules (migration 20270105000001): add them. */
 function withPayrollModules(tables: ReturnType<typeof phase2World>) {
   const keys = [
@@ -51,6 +60,7 @@ function withPayrollModules(tables: ReturnType<typeof phase2World>) {
     'finance.payroll_approval',
     'finance.payroll_close',
     'finance.payroll_policy',
+    'finance.payroll_policy_approval',
   ];
   const modules = tables.modules as Record<string, unknown>[];
   const grants = tables.role_permissions as Record<string, unknown>[];
@@ -82,6 +92,7 @@ async function call(opts: {
   token: string;
   body?: unknown;
   query?: Record<string, string>;
+  rpcError?: { fn: string; message: string };
 }) {
   holder.db = new FakeSupabase({
     tables: withPayrollModules(phase2World({ accounting_periods: [] })),
@@ -91,7 +102,9 @@ async function call(opts: {
       { fn: 'submit_accounting_period', result: 'ready_for_approval' },
       { fn: 'return_accounting_period', result: 'open' },
       { fn: 'close_accounting_period', result: { ...SUMMARY, status: 'closed' } },
+      { fn: 'accounting_period_readiness', result: READINESS },
     ],
+    rpcErrors: opts.rpcError ? { [opts.rpcError.fn]: { message: opts.rpcError.message } } : {},
   });
   const { res, state } = makeRes();
   await queues(
@@ -187,9 +200,38 @@ describe('accounting periods', () => {
     expect(ok.state.status).toBe(200);
   });
 
+  it('passes the readiness report through to Finance and refuses others', async () => {
+    const ok = await call({ method: 'GET', path: 'periods/2026-10/readiness', token: TOKEN2.finance });
+    expect(ok.state.status).toBe(200);
+    expect(accountingPeriodReadinessSchema.parse(ok.state.body)).toEqual(READINESS);
+    expect(ok.rpc('accounting_period_readiness')[0]!.arg).toEqual({
+      p_period: '2026-10',
+      p_actor_id: STAFF2.finance,
+    });
+    const denied = await call({ method: 'GET', path: 'periods/2026-10/readiness', token: TOKEN2.hr });
+    expect(denied.state.status).toBe(403);
+    expect(denied.rpc('accounting_period_readiness')).toHaveLength(0);
+    const bad = await call({ method: 'GET', path: 'periods/2026-13/readiness', token: TOKEN2.finance });
+    expect(bad.state.status).toBe(400);
+  });
+
+  it('maps PERIOD_HAS_BLOCKERS on submit to a readable 409', async () => {
+    const out = await call({
+      method: 'POST',
+      path: 'periods/2026-10/submit',
+      token: TOKEN2.finance,
+      rpcError: { fn: 'submit_accounting_period', message: 'PERIOD_HAS_BLOCKERS' },
+    });
+    expect(out.state.status).toBe(409);
+    expect(JSON.stringify(out.state.body)).toContain(
+      'Resolve the blockers listed in Readiness before submitting this period.',
+    );
+  });
+
   it('gives a sales role nothing', async () => {
     for (const [method, path] of [
       ['GET', 'periods'],
+      ['GET', 'periods/2026-10/readiness'],
       ['POST', 'periods/2026-10/submit'],
       ['POST', 'periods/2026-10/close'],
     ] as const) {

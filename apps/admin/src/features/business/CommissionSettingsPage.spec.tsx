@@ -326,7 +326,11 @@ describe('CommissionSettingsPage', () => {
     const user = userEvent.setup();
     renderWithProviders(<CommissionSettingsPage />, { user: MANAGER });
     await screen.findByText('Ana Reyes');
-    await user.selectOptions(screen.getByLabelText('Filter by sales'), 'needs');
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Filter by sales' })).getByRole('radio', {
+        name: 'Needs a rate',
+      }),
+    );
     await waitFor(() =>
       expect(getCommissionRoster).toHaveBeenLastCalledWith({
         search: undefined,

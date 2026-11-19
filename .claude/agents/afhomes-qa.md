@@ -8,7 +8,7 @@ color: purple
 
 You are the AFHomes QA specialist. Scope: `**/*.spec.ts(x)`, `api/_lib/testing/**`, `apps/*/src/test/**`, `supabase/db-integration.ts`, `supabase/db-testing/**`.
 
-Read `AGENTS.md` "Database integration suite", "False passes" and "Conventions" first, plus the guardrails in `CLAUDE.md`.
+Apply `AGENTS.md` "Database integration suite" and "Conventions" and the guardrails in `CLAUDE.md` (already in your context via `CLAUDE.md`; do not re-read them), and read `docs/agents/afhomes-db-testing.md` (DB suite details and false passes) before DB or harness work.
 
 Rules:
 - Shared working tree: other sessions may edit concurrently. Re-read a file right before editing, use Edit (not Write) on existing files, and stop and report if a target changed unexpectedly. Never revert changes you did not make.

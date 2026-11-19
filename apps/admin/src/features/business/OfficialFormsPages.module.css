@@ -2311,3 +2311,19 @@ button.stepperLink:disabled {
 .applicationFormFrame select { min-height: 42px; padding: 10px 12px; border-radius: 9px; font-size: 13px; }
 .identityWorkspace + [role='dialog'] { grid-column: 1 / -1; }
 @media (max-width: 740px) { .identityWorkspace, .applicationFormFrame .editorGrid { grid-template-columns: minmax(0,1fr); } }
+
+/* Keep the draft action reachable while long details are expanded. */
+.nextAction {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-surface, #fff);
+}
+.applicationDetails > summary {
+  cursor: pointer;
+  padding: 1rem;
+  font-weight: 600;
+}
+.applicationDetails[open] > summary {
+  margin-bottom: 1rem;
+}

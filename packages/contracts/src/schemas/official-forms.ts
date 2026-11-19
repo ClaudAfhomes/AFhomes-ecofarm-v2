@@ -44,6 +44,7 @@ export const acquisitionChannelSchema = z.enum([
  * outside them is a mis-key rather than a real answer.
  */
 export const SUFFIX_OPTIONS = ['Jr.', 'Sr.', 'II', 'III', 'IV'] as const;
+export const PREFIX_OPTIONS = ['Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Atty.', 'Engr.'] as const;
 export const SEX_OPTIONS = ['Male', 'Female'] as const;
 export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated'] as const;
 /**
@@ -54,6 +55,43 @@ export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated'
  */
 export const CITIZENSHIP_OPTIONS = ['Filipino', 'Dual Citizen', 'Foreign National'] as const;
 export const suffixOptionSchema = z.enum(SUFFIX_OPTIONS);
+export const prefixOptionSchema = z.enum(PREFIX_OPTIONS);
+
+/**
+ * Map a typed or legacy spelling (`jr`, `JR.`, `iii`, `mr`) onto the fixed
+ * pick-list value; blank and `N/A` mean "not provided". Anything else is left
+ * as-is so the enum rejects it with a clear message.
+ */
+const toPickListValue =
+  (options: readonly string[]) =>
+  (value: unknown): unknown => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    if (!trimmed || /^n\/?a$/i.test(trimmed)) return undefined;
+    const key = trimmed.replace(/\.$/, '').toLowerCase();
+    return options.find((option) => option.replace(/\.$/, '').toLowerCase() === key) ?? trimmed;
+  };
+export const normalizeSuffixOption = toPickListValue(SUFFIX_OPTIONS);
+export const normalizePrefixOption = toPickListValue(PREFIX_OPTIONS);
+/** A string that must be one of `options` (typed `string`, so callers stay unchanged). */
+const pickListString = (options: readonly string[]) =>
+  z.string().refine((value) => options.includes(value), {
+    message: `Choose one of: ${options.join(', ')}`,
+  });
+/** Optional fixed suffix: typed spellings normalized, blank/N/A = not provided. */
+export const optionalSuffixSchema = z.preprocess(
+  normalizeSuffixOption,
+  pickListString(SUFFIX_OPTIONS).optional(),
+);
+export const optionalPrefixSchema = z.preprocess(
+  normalizePrefixOption,
+  pickListString(PREFIX_OPTIONS).optional(),
+);
+/** Update form: null or blank clears the suffix; otherwise a fixed value. */
+export const nullableSuffixSchema = z.preprocess(
+  (v) => (v === null || v === undefined ? v : (normalizeSuffixOption(v) ?? null)),
+  pickListString(SUFFIX_OPTIONS).nullable().optional(),
+);
 export const sexOptionSchema = z.enum(SEX_OPTIONS);
 export const civilStatusOptionSchema = z.enum(CIVIL_STATUS_OPTIONS);
 
@@ -124,21 +162,17 @@ const optionalUuid = z.preprocess(blankToUndefined, z.string().uuid().optional()
 
 export const applicationHolderSchema = z.object({
   holderType: holderTypeSchema,
-  prefix: z.preprocess(blankToUndefinedOption, z.string().trim().max(20).optional()),
+  /** Fixed pick-list on write; stored legacy values still read back (see below). */
+  prefix: optionalPrefixSchema,
   lastName: holderName,
   firstName: holderName,
   middleName: optionalHolderName,
   /**
-   * Free text, not a pick-list: `customer_application_holders.suffix` is a
-   * plain `text` column with no database-level enum, and the read side
-   * (`storedApplicationHolderSchema`) already accepts any string here, so
-   * this only widens the write side to match what is already stored and
-   * already rendered - not a new capability, not a migration.
+   * Fixed pick-list on write. The column stays plain `text` and
+   * `storedApplicationHolderSchema` still reads any stored value, so historical
+   * records are never rewritten.
    */
-  suffix: z.preprocess(
-    (value) => (typeof value === 'string' && /^n\/a$/i.test(value.trim()) ? undefined : value),
-    z.preprocess(blankToUndefinedOption, z.string().trim().max(20).optional()),
-  ),
+  suffix: optionalSuffixSchema,
   birthDate: holderBirthDateSchema,
   sex: z.preprocess(blankToUndefinedOption, sexOptionSchema.optional()),
   /**
@@ -405,6 +439,7 @@ export type RegisterCustomerApplicationRequest = z.infer<typeof registerCustomer
  * only the pick-list and TIN constraints while keeping every structural one.
  */
 export const storedApplicationHolderSchema = applicationHolderSchema.extend({
+  prefix: z.string().max(20).optional(),
   suffix: z.string().max(20).optional(),
   sex: z.string().max(30).optional(),
   citizenship: z.string().max(80).optional(),
@@ -643,6 +678,8 @@ export const reservationAgreementListItemSchema = z
     ...officialFormSummaryFields,
     reservation_number: z.string(),
     sale_id: z.string().uuid().nullable(),
+    origin: z.enum(['application', 'sale']).optional(),
+    customer_application_id: z.uuid().nullable().optional(),
     payment_scheme_snapshot: paymentSchemeSchema,
     total_price_snapshot: exactDecimalStringSchema,
     has_secondary_holder: z.boolean(),
@@ -655,6 +692,8 @@ export const reservationAgreementListItemSchema = z
     id: row.id,
     reservationNumber: row.reservation_number,
     saleId: row.sale_id,
+    ...(row.origin ? { origin: row.origin } : {}),
+    ...(row.customer_application_id ? { customerApplicationId: row.customer_application_id } : {}),
     paymentScheme: row.payment_scheme_snapshot,
     totalPrice: row.total_price_snapshot,
     verifiedTotal: row.verified_total ?? null,

@@ -14,11 +14,26 @@ import {
   TableRow,
 } from '@afhomes/ui';
 import { useQuery } from '@tanstack/react-query';
-import { divideMoneyExact, formatMoney, multiplyMoney, subtractMoney } from '@afhomes/shared';
+import {
+  compareMoney,
+  divideMoneyExact,
+  formatMoney,
+  multiplyMoney,
+  subtractMoney,
+} from '@afhomes/shared';
 
 import { getCardProducts } from './services';
 import { businessKeys } from './queryKeys';
 import styles from './PaymentSchemeGuidePage.module.css';
+
+/**
+ * Sample monthly figure, or an em dash when the plan leaves nothing to spread
+ * (e.g. a spot-cash-only plan): one such catalog row must not blank the guide.
+ */
+const monthly = (total: string, upfront: string, months: number): string =>
+  months > 0 && compareMoney(total, upfront) > 0
+    ? formatMoney(divideMoneyExact(subtractMoney(total, upfront), months))
+    : '—';
 
 /**
  * Internal IST payment-scheme reference (staff only).
@@ -182,11 +197,10 @@ export function PaymentSchemeGuidePage() {
                         {formatMoney(plan.installmentPrice)}
                       </TableCell>
                       <TableCell label="Monthly" align="right" className={styles.numeric}>
-                        {formatMoney(
-                          divideMoneyExact(
-                            subtractMoney(plan.installmentPrice, plan.reservationFee),
-                            plan.standardInstallmentMonths,
-                          ),
+                        {monthly(
+                          plan.installmentPrice,
+                          plan.reservationFee,
+                          plan.standardInstallmentMonths,
                         )}
                         <span className={styles.muted}> × {plan.standardInstallmentMonths}</span>
                       </TableCell>
@@ -328,9 +342,7 @@ export function PaymentSchemeGuidePage() {
                             {formatMoney(row.upfront)}
                           </TableCell>
                           <TableCell label="Monthly" align="right" className={styles.numeric}>
-                            {formatMoney(
-                              divideMoneyExact(subtractMoney(base, row.upfront), row.months),
-                            )}
+                            {monthly(base, row.upfront, row.months)}
                             <span className={styles.muted}> × {row.months}</span>
                           </TableCell>
                         </TableRow>

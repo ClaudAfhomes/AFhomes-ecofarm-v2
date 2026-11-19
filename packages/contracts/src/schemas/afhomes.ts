@@ -22,6 +22,7 @@ export const afHomesModuleKeySchema = z.enum([
   'sales.card_sales',
   'sales.card_plans',
   'sales.customers',
+  'sales.application_approval',
   'sales.id_documents',
   'sales.uplines',
   'finance.payment_verification',
@@ -33,6 +34,8 @@ export const afHomesModuleKeySchema = z.enum([
   'finance.payroll_approval',
   'finance.payroll_close',
   'finance.payroll_policy',
+  'finance.payroll_policy_approval',
+  'finance.payment_adjustment_decision',
   'network.ost_registrations',
   'network.ost_members',
   'network.members',
@@ -117,6 +120,7 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
     group: 'Sales & Customers',
     sortOrder: 34,
   },
+  { key: 'sales.application_approval', label: 'Application & RA Approval', group: 'Sales & Customers', sortOrder: 35 },
   {
     key: 'finance.payment_verification',
     label: 'Payment Verification',
@@ -160,6 +164,20 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
     label: 'Compensation Policy',
     group: 'Finance',
     sortOrder: 48,
+  },
+  {
+    key: 'finance.payment_adjustment_decision',
+    label: 'Payment Adjustment Decisions',
+    group: 'Finance',
+    sortOrder: 49,
+  },
+  {
+    key: 'finance.payroll_policy_approval',
+    label: 'Compensation Policy Approval',
+    group: 'Finance',
+    // The migration seeds 50, which ties with network.ost_registrations; the catalog needs a
+    // unique, increasing order, so 49.5 keeps it right after payment_adjustment_decision.
+    sortOrder: 49.5,
   },
   {
     key: 'network.ost_registrations',

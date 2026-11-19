@@ -39,6 +39,39 @@ describe('mapRpcError hierarchy codes (D4)', () => {
 });
 
 describe('operational sale reference conflicts', () => {
+  it('maps an incomplete performance rule to a readable approval refusal', () => {
+    const { res, state } = capture();
+    mapRpcError(res, { code: '55000', message: 'IST_PERFORMANCE_RULE_INCOMPLETE' });
+    expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({
+      error: {
+        code: 'CONFLICT',
+        message:
+          'Complete the performance rule choices before approval. Record the attribution, closed-deal threshold, count-date basis and adjustment treatment.',
+      },
+    });
+  });
+
+  it('maps a busy financial-evidence lock to a retryable conflict', () => {
+    const { res, state } = capture();
+    mapRpcError(res, { code: '55P03', message: 'FINANCIAL_EVIDENCE_BUSY' });
+    expect(state.status).toBe(409);
+    expect(JSON.stringify(state.body)).toMatch(/Nothing was changed\. Try again/);
+  });
+
+  it('maps changed payroll evidence to a readable conflict', () => {
+    const { res, state } = capture();
+    mapRpcError(res, { code: '55000', message: 'PAYROLL_EVIDENCE_CHANGED' });
+    expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({
+      error: {
+        code: 'CONFLICT',
+        message:
+          'Payroll evidence has changed or is missing. Regenerate the draft and review the current evidence before submitting or approving.',
+      },
+    });
+  });
+
   it('maps SQLSTATE 42501 SALE_REFERENCE_CONFLICT to a controlled 409', () => {
     const { res, state } = capture();
     mapRpcError(res, { code: '42501', message: 'SALE_REFERENCE_CONFLICT' });
@@ -65,6 +98,16 @@ describe('purchase workflow error codes never surface as a 500', () => {
     '20270105000001_afhomes_finops_foundation.sql',
     '20270105000002_afhomes_finops_payments.sql',
     '20270105000003_afhomes_finops_periods.sql',
+    '20270105000004_afhomes_finops_commissions.sql',
+    '20270105000005_afhomes_finops_payroll.sql',
+    '20270105000006_afhomes_finops_closing.sql',
+    '20270105000007_afhomes_finops_adjustment_resolution.sql',
+    '20270105000008_afhomes_finops_q1_policy_lifecycle.sql',
+    '20270105000009_afhomes_finops_ist_performance_evidence.sql',
+    '20270105000010_afhomes_finops_financial_evidence_integrity.sql',
+    '20270105000011_afhomes_finops_operational_integrity.sql',
+    '20270105000012_afhomes_finops_qp_governance.sql',
+    '20270105000013_afhomes_finops_payroll_reconciliation.sql',
   ];
   const dir = new URL('../../supabase/migrations/', import.meta.url);
   const codes = new Set<string>();
@@ -76,6 +119,8 @@ describe('purchase workflow error codes never surface as a 500', () => {
   // an internal invariant failure, where a 500 is the honest answer.
   codes.delete('MUTATION_RECEIPT_INVALID');
   // Raised only while the migration itself runs, never by a request.
+  codes.delete('PAYMENT_ADJUSTMENT_V7_CONSTRAINT_MIGRATION_INCOMPLETE');
+  codes.delete('GOVERNING_POLICY_V8_CONSTRAINT_MIGRATION_INCOMPLETE');
   for (const code of [...codes])
     if (/_PATCH_DRIFT$|_BYPASS_REMAINS$|_DUPLICATES_PRESENT$/.test(code)) codes.delete(code);
   // Removed by section 22 (the uploader may review their own document); the

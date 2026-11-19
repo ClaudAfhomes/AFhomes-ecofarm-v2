@@ -1,12 +1,6 @@
 /**
- * Sale creation ordering (BR-RATE-01 lineage, BR-RATE-06).
- *
- * Company rules: the salesperson is entered BEFORE the sale number appears; the
- * system fixes the sale's commercial terms at the moment the number is issued
- * (A4 §3.1, A6 §2.1, C1 §5.4); and invalid inputs generate NO sale number
- * (A2 Control Panel A23; duplicate prevention enforced at freeze, A25). In v2
- * terms: seller resolution AND scheme resolution must both succeed before
- * `next_sale_number` is consumed, so a rejected sale never burns a number.
+ * Legacy direct creation must refuse before consuming a sale number or writing
+ * commercial records. New sales originate through the approved Application & RA.
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +8,6 @@ import {
   CUSTOMER,
   LINKS,
   PRODUCT,
-  TOKEN,
   TOKEN2,
   UNIQUE,
   UUID,
@@ -67,84 +60,18 @@ async function create(body: unknown, token?: string): Promise<{ db: FakeSupabase
 
 const numberCalls = (db: FakeSupabase) => db.calls.filter((c) => c.table === 'next_sale_number');
 
-describe('POST /sales ordering (BR-RATE-01: seller before number)', () => {
-  it('rejects an unsellable seller before consuming a sale number', async () => {
-    const db = install();
-    const before = db.rows('card_sales').length;
-    const { res, state } = makeRes();
-    await sales(
-      makeReq({
-        method: 'POST',
-        familyPath: '',
-        body: {
-          customerId: CUSTOMER.prospect,
-          productId: PRODUCT.gold,
-          sellerStaffId: UUID.inactiveStaff,
-        },
-        token: TOKEN2.salesManager,
-      }) as never,
-      res as never,
-    );
-    expect(state.status).toBe(403);
-    expect(numberCalls(db)).toHaveLength(0);
-    expect(db.rows('card_sales')).toHaveLength(before);
-  });
-
-  it('issues exactly one sale number per created sale, after seller resolution', async () => {
-    const { db, state } = await create(
-      { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-      TOKEN2.salesManager,
-    );
-    expect(state.status).toBe(201);
-    expect(numberCalls(db)).toHaveLength(1);
-    const saleNumber = (state.body as { saleNumber: string }).saleNumber;
-    expect(saleNumber).toMatch(/^SALE-/);
-    const row = db.rows('card_sales').find((r) => r.sale_number === saleNumber);
-    expect(row?.seller_staff_id).toBeTruthy();
-    expect(row?.commission_rate_snapshot).toBe('0.04');
-  });
-
-  it('rejects an unconfigured scheme before consuming a sale number (BR-RATE-06)', async () => {
-    // The fixture Gold plan carries no installment price, so the installment
-    // track must refuse with 409 - and the refused sale must burn no number.
-    const db = install();
-    const before = db.rows('card_sales').length;
-    const { res, state } = makeRes();
-    await sales(
-      makeReq({
-        method: 'POST',
-        familyPath: '',
-        body: {
-          customerId: CUSTOMER.prospect,
-          productId: PRODUCT.gold,
-          paymentScheme: 'installment_4_month',
-        },
-        token: TOKEN2.salesManager,
-      }) as never,
-      res as never,
-    );
+describe('POST /sales cannot consume a number before the required purchase workflow', () => {
+  it.each([
+    ['valid request', { customerId: CUSTOMER.prospect, productId: PRODUCT.gold }],
+    ['unconfigured scheme', { customerId: CUSTOMER.prospect, productId: PRODUCT.gold, paymentScheme: 'installment_4_month' }],
+    ['inactive product', { customerId: CUSTOMER.prospect, productId: PRODUCT.retired }],
+    ['inactive seller', { customerId: CUSTOMER.prospect, productId: PRODUCT.gold, sellerStaffId: UUID.inactiveStaff }],
+    ['missing fields', {}],
+  ])('refuses %s without number, sale or commission writes', async (_label, body) => {
+    const { db, state } = await create(body, TOKEN2.salesManager);
     expect(state.status).toBe(409);
+    expect(state.body).toMatchObject({ error: { code: 'PURCHASE_WORKFLOW_REQUIRED' } });
     expect(numberCalls(db)).toHaveLength(0);
-    expect(db.rows('card_sales')).toHaveLength(before);
-  });
-
-  it('rejects an unsellable product before consuming a sale number (BR-RATE-06)', async () => {
-    // The fixture Legacy plan is inactive, so sellability fails with 409 -
-    // and the refused sale must burn no number.
-    const db = install();
-    const before = db.rows('card_sales').length;
-    const { res, state } = makeRes();
-    await sales(
-      makeReq({
-        method: 'POST',
-        familyPath: '',
-        body: { customerId: CUSTOMER.prospect, productId: PRODUCT.retired },
-        token: TOKEN2.salesManager,
-      }) as never,
-      res as never,
-    );
-    expect(state.status).toBe(409);
-    expect(numberCalls(db)).toHaveLength(0);
-    expect(db.rows('card_sales')).toHaveLength(before);
+    expect(db.calls.filter((c) => c.table === 'card_sales' || c.table === 'commissions')).toHaveLength(0);
   });
 });

@@ -1,5 +1,8 @@
+import { commissionRoster } from '../_lib/commission-roster.js';
+import { commissionRosterQuerySchema } from '@afhomes/contracts';
 import { toCommission, toRule, commissionListQuerySchema } from '../_lib/commission-model.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
+import { handleCommissionOps } from '../_lib/commission-ops.js';
 /**
  * AFHomes commissions - the 4% single-level sale commission.
  *
@@ -13,12 +16,15 @@ import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
  * automated path can trigger it. Inventing the rule here would fabricate policy.
  *
  * `earned -> paid` is likewise an explicit, permission-gated, audited decision
- * with an optional payout reference. No batching, schedule, method, tax, or
- * clawback rule exists in this codebase and none is invented here.
+ * recording an EXTERNAL payment (reference, method, date, evidence). No batching,
+ * schedule, partial payout, tax, or clawback rule exists in this codebase and
+ * none is invented here.
  */
 import { z } from 'zod';
 import {
   createCommissionRuleSchema,
+  bulkCommissionRuleSchema,
+  bulkCommissionRuleResultSchema,
   markCommissionPaidSchema,
   qualifyCommissionSchema,
   updateCommissionRuleSchema,
@@ -39,7 +45,6 @@ import {
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
-
 
 const SELECT_COMMISSION =
   '*, card_sales!inner(sale_number), beneficiary_staff:staff_users!commissions_beneficiary_staff_id_fkey(full_name), beneficiary_ost:ost_members!commissions_beneficiary_ost_id_fkey(full_name)';
@@ -75,6 +80,11 @@ function commissionInScope(
   return row.beneficiary_staff_id === userId || row.beneficiary_ost_id === userId;
 }
 
+/** Finance's evidence pointer is internal: a seller reading their own commission does not get it. */
+function shapeForScope(scope: { canSeeAll: boolean }, row: Record<string, unknown>) {
+  const shaped = toCommission(row);
+  return scope.canSeeAll ? shaped : { ...shaped, paidEvidenceReference: null };
+}
 
 async function commissionRuleTargetExists(
   db: Db,
@@ -93,6 +103,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!db) return fail(res, 'INTERNAL', 'Supabase server configuration is incomplete', 500);
 
   try {
+    if (await handleCommissionOps(req, res, db)) return;
+    if (subPath(req) === 'rules/roster' && method(req) === 'GET') {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = commissionRosterQuerySchema.safeParse(req.query ?? {});
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid commission roster filters', 400);
+      return res.status(200).json(await commissionRoster(db, parsed.data));
+    }
     if (subPath(req) === 'rules' && method(req) === 'GET') {
       const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
       if ('error' in auth) return deny(res, auth);
@@ -105,6 +124,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         data: (data ?? []).map((row: Record<string, unknown>) => toRule(row)),
         meta: { total: (data ?? []).length },
       });
+    }
+
+    if (subPath(req) === 'rules/bulk' && method(req) === 'POST') {
+      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      if ('error' in auth) return deny(res, auth);
+      const parsed = bulkCommissionRuleSchema.safeParse(jsonBody(req));
+      if (!parsed.success)
+        return fail(res, 'VALIDATION_ERROR', 'Invalid selected-seller rate configuration', 400);
+      const { data, error } = await db.rpc('bulk_set_commission_rate', {
+        p_member_ids: parsed.data.memberIds,
+        p_rate: parsed.data.rate,
+        p_effective_from: parsed.data.effectiveFrom,
+        p_actor_id: auth.userId,
+      });
+      if (error) {
+        if (
+          ['COMMISSION_BULK_INVALID', 'COMMISSION_SELLER_NOT_ELIGIBLE'].includes(
+            String(error.message),
+          )
+        )
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Select active sales-team members and a valid rate/date.',
+            400,
+          );
+        throw error;
+      }
+      return res.status(200).json(bulkCommissionRuleResultSchema.parse(data));
     }
 
     if (subPath(req) === 'rules' && method(req) === 'POST') {
@@ -273,7 +321,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const data = await readSearchRows(
           query.order('created_at', { ascending: false }).order('id', { ascending: false }),
         );
-        const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) => toCommission(row));
+        const shaped = ((data ?? []) as Record<string, unknown>[]).map((row) =>
+          shapeForScope(scope, row),
+        );
         const filtered = shaped.filter((c) =>
           matchesSearch(search, [
             c.commissionNumber,
@@ -294,7 +344,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .range(offset, offset + limit - 1);
       if (error) throw error;
       return res.status(200).json({
-        data: (data ?? []).map((row: Record<string, unknown>) => toCommission(row)),
+        data: (data ?? []).map((row: Record<string, unknown>) => shapeForScope(scope, row)),
         meta: { total: count ?? (data ?? []).length, limit, offset },
       });
     }
@@ -322,7 +372,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (rawError) throw rawError;
       if (!raw || !commissionInScope(scope, raw as unknown as Record<string, unknown>))
         return fail(res, 'NOT_FOUND', 'Commission not found', 404);
-      return res.status(200).json(toCommission(row));
+      return res.status(200).json(shapeForScope(scope, row));
     }
 
     /* ---------------- explicit qualification decision ---------------- */
@@ -374,8 +424,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         patch.cancellation_reason = parsed.data.notes;
       }
 
-      const { error: writeError } = await db.from('commissions').update(patch).eq('id', id);
+      const { data: changed, error: writeError } = await db
+        .from('commissions')
+        .update(patch)
+        .eq('id', id)
+        .eq('status', 'final_qualification_pending')
+        .select('id')
+        .maybeSingle();
       if (writeError) throw writeError;
+      if (!changed)
+        return fail(
+          res,
+          'CONFLICT',
+          'This commission has already received a qualification decision.',
+          409,
+        );
 
       await audit(
         db,
@@ -400,10 +463,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* ---------------- explicit paid decision (earned -> paid only) ---------------- */
     const pay = route(req, 'POST', /^([0-9a-f-]+)\/pay$/);
     if (pay) {
-      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      const auth = await authorizeAfHomes(req, 'finance.commission_payouts', 'update');
       if ('error' in auth) return deny(res, auth);
-      const parsed = markCommissionPaidSchema.safeParse(jsonBody(req) ?? {});
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid paid request', 400);
 
       const id = pay[1]!;
       const { data: before, error: readError } = await db
@@ -445,25 +506,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           409,
         );
 
+      // Validated only when a payment will actually be recorded, so a replay of an
+      // already-paid commission and a wrong-state attempt keep their own answers.
+      const parsed = markCommissionPaidSchema.safeParse(jsonBody(req) ?? {});
+      if (!parsed.success)
+        return fail(
+          res,
+          'VALIDATION_ERROR',
+          'Enter the external payment reference, method, date and evidence reference.',
+          400,
+        );
+      // Asia/Manila (UTC+8, no DST): an external payment cannot be dated in the future.
+      const manilaToday = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+      if (parsed.data.paidOn > manilaToday)
+        return fail(res, 'VALIDATION_ERROR', 'The payment date cannot be in the future.', 400);
+
       const now = new Date().toISOString();
-      const reference = parsed.data.reference?.trim() ? parsed.data.reference.trim() : null;
+      const { reference, method: paidMethod, paidOn, evidenceReference } = parsed.data;
       // Amount, rate snapshot, basis snapshot, and beneficiary are untouched:
-      // payout records WHEN and BY WHOM, never HOW MUCH or TO WHOM.
-      const { error: writeError } = await db
+      // payout records WHEN, HOW and BY WHOM, never HOW MUCH or TO WHOM. The
+      // database trigger writes the payout row; a reference already used by
+      // another payout is refused by its unique index (409).
+      const { data: changed, error: writeError } = await db
         .from('commissions')
-        .update({ status: 'paid', paid_at: now, paid_by: auth.userId, paid_reference: reference })
-        .eq('id', id);
+        .update({
+          status: 'paid',
+          paid_at: now,
+          paid_by: auth.userId,
+          paid_reference: reference,
+          paid_method: paidMethod,
+          paid_on: paidOn,
+          paid_evidence_reference: evidenceReference,
+        })
+        .eq('id', id)
+        .eq('status', 'earned')
+        .select('id')
+        .maybeSingle();
       if (writeError) throw writeError;
 
-      await audit(
-        db,
-        auth.userId,
-        'COMMISSION_PAID',
-        'commission',
-        id,
-        { status: before.status, amount: before.amount },
-        { status: 'paid', amount: before.amount, reference },
-      );
+      if (changed)
+        await audit(
+          db,
+          auth.userId,
+          'COMMISSION_PAID',
+          'commission',
+          id,
+          { status: before.status, amount: before.amount },
+          {
+            status: 'paid',
+            amount: before.amount,
+            reference,
+            method: paidMethod,
+            paidOn,
+            evidenceReference,
+          },
+        );
 
       const { data: after, error: afterError } = await db
         .from('commissions')
@@ -471,6 +568,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('id', id)
         .maybeSingle();
       if (afterError) throw afterError;
+      if (!changed && after?.status !== 'paid')
+        return fail(res, 'CONFLICT', 'This commission is no longer available for payment.', 409);
       return res.status(200).json(toCommission(after as Record<string, unknown>));
     }
 

@@ -124,6 +124,7 @@ const FINANCE_USER: SessionUser = {
   roleName: 'Finance',
   status: 'active',
   afHomesPermissions: [
+    { moduleKey: 'finance.commission_payouts', canView: true, canCreate: false, canUpdate: true, canDelete: false },
     {
       moduleKey: 'dashboard.view',
       canView: true,
@@ -451,13 +452,13 @@ describe('Phase 26 finance queue states', () => {
     });
     render('/admin/finance/payments');
     await screen.findByText('SALE-260098');
-    const filter = screen.getByLabelText('Filter by payment progress');
-    expect(within(filter).getByRole('option', { name: 'Fully Paid' })).toBeInTheDocument();
-    await user.selectOptions(filter, 'full');
+    const filter = screen.getByRole('radiogroup', { name: 'Filter by payment progress' });
+    expect(within(filter).getByRole('radio', { name: 'Fully Paid' })).toBeInTheDocument();
+    await user.click(within(filter).getByRole('radio', { name: 'Fully Paid' }));
     expect(screen.queryByText('SALE-260001')).toBeNull();
     const paid = screen.getByText('SALE-260098').closest('tr')!;
     expect(within(paid).getByText('Fully Paid')).toBeInTheDocument();
-    await user.selectOptions(filter, 'partial');
+    await user.click(within(filter).getByRole('radio', { name: 'Partially Paid' }));
     expect(screen.queryByText('SALE-260098')).toBeNull();
     expect(screen.getByText('SALE-260001')).toBeInTheDocument();
   });
@@ -565,7 +566,7 @@ describe('Phase 26 activation queue', () => {
     expect(within(row).getByText('Sale Not Ready')).toBeInTheDocument();
     expect(within(row).getByText('Fully Paid')).toBeInTheDocument();
     expect(within(row).queryByText('Outstanding Balance')).toBeNull();
-    expect(within(row).getByRole('button', { name: 'Activate' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: 'Activate VIP Membership' })).toBeDisabled();
     expect(screen.getByText('Not eligible: 1')).toBeInTheDocument();
     expect(screen.queryByText(/Short/)).toBeNull();
   });
@@ -624,9 +625,9 @@ describe('Phase 26 activation queue', () => {
     });
     render('/admin/finance/activation');
     const row = (await screen.findByText('SALE-260002')).closest('tr')!;
-    await user.click(within(row).getByRole('button', { name: 'Activate' }));
-    const confirmation = await screen.findByRole('dialog', { name: 'Activate membership' });
-    await user.click(within(confirmation).getByRole('button', { name: 'Activate' }));
+    await user.click(within(row).getByRole('button', { name: 'Activate VIP Membership' }));
+    const confirmation = await screen.findByRole('dialog', { name: 'Activate VIP Membership' });
+    await user.click(within(confirmation).getByRole('button', { name: 'Activate VIP Membership' }));
 
     expect(
       await screen.findByText(/membership activation succeeded, but email delivery failed/i),
@@ -665,13 +666,28 @@ describe('Phase 26 commission management UI', () => {
     });
   });
 
+  it('Apply refreshes unchanged filters and Clear resets the filtered list', async () => {
+    const user = userEvent.setup();
+    render('/admin/finance/commissions', ADMIN_USER);
+    await screen.findByText('SALE-260001');
+    const before = requests.filter(r => r.path === '/commissions').length;
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(requests.filter(r => r.path === '/commissions').length).toBeGreaterThan(before));
+    await user.type(screen.getByLabelText('Search commissions'), 'SALE-260001');
+    await user.selectOptions(screen.getByLabelText('Filter by status'), 'paid');
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByLabelText('Search commissions')).toHaveValue('');
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('');
+    await waitFor(() => expect(requests.filter(r => r.path === '/commissions').at(-1)?.query).not.toContain('status='));
+  });
+
   it('45. a paid commission offers no mutation action', async () => {
     render('/admin/finance/commissions', ADMIN_USER);
     await screen.findByText('SALE-260003');
     const paidRow = screen.getByText('SALE-260003').closest('tr')!;
     expect(paidRow.textContent).toMatch(/Paid/);
     // No Decide and no Mark Paid inside the paid row.
-    expect(paidRow.textContent).not.toMatch(/Mark Paid/);
+    expect(paidRow.textContent).not.toMatch(/Record External Commission Payment/);
     expect(paidRow.textContent).not.toMatch(/Decide/);
   });
 
@@ -679,7 +695,7 @@ describe('Phase 26 commission management UI', () => {
     render('/admin/finance/commissions', ADMIN_USER);
     await screen.findByText('SALE-260002');
     const earnedRow = screen.getByText('SALE-260002').closest('tr')!;
-    expect(earnedRow.textContent).toMatch(/Mark Paid/);
+    expect(earnedRow.textContent).toMatch(/Record External Commission Payment/);
   });
 
   it('46. renders server commission amounts (Gold 2400, Silver 1600)', async () => {
@@ -721,7 +737,7 @@ describe('commission qualification ownership', () => {
     await screen.findByText(ACTIVATION_ITEM.saleNumber);
     expect(screen.queryByText('Commissions awaiting final qualification')).not.toBeInTheDocument();
     expect(screen.queryByText('SALE-QUALIFY')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Decide' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Qualify Commission' })).not.toBeInTheDocument();
   });
 
   it('offers the qualification action on the Commissions page instead', async () => {
@@ -729,7 +745,7 @@ describe('commission qualification ownership', () => {
     render('/admin/finance/commissions', ADMIN_USER);
     const row = (await screen.findByText('SALE-QUALIFY')).closest('tr')!;
     expect(row.textContent).toMatch(/Awaiting final qualification/);
-    expect(within(row).getByRole('button', { name: 'Decide' })).toBeEnabled();
+    expect(within(row).getByRole('button', { name: 'Qualify Commission' })).toBeEnabled();
   });
 
   it('lists recorded progress steps in order and flags only rows needing a decision', async () => {
@@ -860,29 +876,29 @@ describe('payment queue next-step button', () => {
     expect(await screen.findByRole('combobox', { name: 'Payment is for' })).toHaveValue(
       'contractual_down_payment',
     );
-    expect(screen.getByLabelText('Amount')).toHaveValue('30,000.00');
+    expect(screen.getByLabelText('Amount')).toHaveValue('');
   });
 });
 
 describe('record & verify: purposes and prefill', () => {
-  it('offers the reservation payment first and pre-fills each purpose', async () => {
+  it('lets Finance enter the reservation amount without a fixed input', async () => {
     const user = userEvent.setup();
     installSale();
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(await purposeLabels()).toEqual(['Reservation payment', 'Down payment']);
-    expect(screen.getByLabelText('Amount')).toHaveValue('10,000.00');
-    await user.selectOptions(await purposeSelect(), 'contractual_down_payment');
-    expect(screen.getByLabelText('Amount')).toHaveValue('40,000.00');
+    expect(await purposeLabels()).toEqual(['Reservation payment']);
+    expect(screen.getByLabelText('Amount')).toHaveValue('');
+    expect(screen.getByLabelText('Amount')).not.toHaveAttribute('readonly');
+    expect(screen.getByText('Enter the reservation payment amount shown in the agreed terms.')).toBeInTheDocument();
   });
 
-  it('after a verified reservation fee only the remaining down payment is offered', async () => {
+  it('after the reservation fee Finance can choose down, partial or full payment', async () => {
     const user = userEvent.setup();
     installSale([ledgerRow()]);
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(await purposeLabels()).toEqual(['Down payment']);
-    expect(screen.getByLabelText('Amount')).toHaveValue('30,000.00');
+    expect(await purposeLabels()).toEqual(['Down payment', 'Installment / partial payment', 'Full payment (remaining balance)']);
+    expect(screen.getByLabelText('Amount')).toHaveValue('');
   });
 
   it('a pending reservation fee also blocks a second one', async () => {
@@ -890,10 +906,11 @@ describe('record & verify: purposes and prefill', () => {
     installSale([ledgerRow({ status: 'recorded', verifiedAt: null, verifiedBy: null })]);
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(await purposeLabels()).toEqual(['Down payment']);
+    expect(await screen.findByText('Verify the recorded reservation payment before recording another payment.')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Payment is for' })).toBeNull();
   });
 
-  it('after the down payment: monthly installment (editable) and a locked full payment', async () => {
+  it('after the down payment: installment and full payment both allow typed amounts', async () => {
     const user = userEvent.setup();
     installSale([
       ledgerRow(),
@@ -906,12 +923,32 @@ describe('record & verify: purposes and prefill', () => {
     ]);
     render('/admin/finance/payments');
     await openRecordDialog(user);
-    expect(await purposeLabels()).toEqual(['Monthly installment', 'Full payment (remaining balance)']);
-    expect(screen.getByLabelText('Amount')).toHaveValue('5,000.00');
+    expect(await purposeLabels()).toEqual(['Installment / partial payment', 'Full payment (remaining balance)']);
+    expect(screen.getByLabelText('Amount')).toHaveValue('');
     expect(screen.getByLabelText('Amount')).not.toHaveAttribute('readonly');
     await user.selectOptions(await purposeSelect(), 'contractual_full');
-    expect(screen.getByLabelText('Amount')).toHaveValue('60,000.00');
-    expect(screen.getByLabelText('Amount')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Amount')).toHaveValue('');
+    expect(screen.getByLabelText('Amount')).not.toHaveAttribute('readonly');
+  });
+
+  it('accepts a typed partial amount on spot cash and rejects a short full payment', async () => {
+    const user = userEvent.setup();
+    installSale([ledgerRow()], { ...INSTALLMENT_SUMMARY, paymentScheme: 'spot_cash', monthlyAmount: null, installmentMonths: null });
+    render('/admin/finance/payments');
+    await openRecordDialog(user);
+    await user.selectOptions(await purposeSelect(), 'contractual_installment');
+    expect(within(await purposeSelect()).getByRole('option', { name: 'Partial payment' })).toBeInTheDocument();
+    const input = screen.getByLabelText('Amount');
+    expect(input).not.toHaveAttribute('readonly');
+    await user.type(input, '1234.56');
+    expect(nextButton()).toBeEnabled();
+    await user.selectOptions(await purposeSelect(), 'contractual_full');
+    await user.type(input, '1234.56');
+    expect(nextButton()).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, '90000.00');
+    expect(nextButton()).toBeEnabled();
+    expect(writes()).toHaveLength(0);
   });
 
   it('offers nothing when the purchase is fully committed', async () => {
@@ -925,11 +962,11 @@ describe('record & verify: purposes and prefill', () => {
     expect(nextButton()).toBeDisabled();
   });
 
-  it.each(['1e3', '1E3', 'NaN', 'Infinity', 'ABC', '100ABC', '0', '0.00', '10000.01'])(
+  it.each(['1e3', '1E3', 'NaN', 'Infinity', 'ABC', '100ABC', '0', '0.00', '90000.01'])(
     'blocks invalid amount %s before the next step',
     async (amount) => {
       const user = userEvent.setup();
-      installSale();
+      installSale([ledgerRow()]);
       render('/admin/finance/payments');
       await openRecordDialog(user);
       const input = await screen.findByLabelText('Amount');
@@ -948,6 +985,7 @@ describe('record & verify: proof upload', () => {
   async function toProof(user: ReturnType<typeof userEvent.setup>) {
     await openRecordDialog(user);
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
     await user.click(nextButton());
   }
 
@@ -1014,6 +1052,7 @@ describe('record & verify: review, record then verify', () => {
   async function toReview(user: ReturnType<typeof userEvent.setup>, ref = 'QA-REF') {
     await openRecordDialog(user);
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
     await user.type(screen.getByLabelText('Payment reference(Optional)'), ref);
     await user.click(nextButton());
     await attachReceipt(user);
@@ -1042,7 +1081,7 @@ describe('record & verify: review, record then verify', () => {
       'blob:proof',
     );
     expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Verify and record' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ })).toBeEnabled();
     expect(writes()).toHaveLength(0);
   });
 
@@ -1053,7 +1092,7 @@ describe('record & verify: review, record then verify', () => {
     });
     render('/admin/finance/payments');
     await toReview(user);
-    await user.click(screen.getByRole('button', { name: 'Verify and record' }));
+    await user.click(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     expect(await screen.findByText('Payment Recorded and Verified')).toBeInTheDocument();
     const [record, verify, ...rest] = writes();
     expect(rest).toHaveLength(0);
@@ -1084,7 +1123,7 @@ describe('record & verify: review, record then verify', () => {
     });
     render('/admin/finance/payments');
     await toReview(user);
-    await user.click(screen.getByRole('button', { name: 'Verify and record' }));
+    await user.click(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     expect(await screen.findByText('Recorded, not verified')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'OK' }));
     const alert = (await screen.findAllByRole('alert')).map((a) => a.textContent).join(' ');
@@ -1098,7 +1137,7 @@ describe('record & verify: review, record then verify', () => {
 
     // The server recovers: retry verifies the SAME payment, no second record.
     routes.set(VERIFY_PATH, { body: VERIFY_RESULT });
-    await user.click(screen.getByRole('button', { name: 'Retry verification' }));
+    await user.click(screen.getByRole('button', { name: /Verify (Reservation )?Payment/ }));
     expect(await screen.findByText('Payment Recorded and Verified')).toBeInTheDocument();
     expect(writes().map((r) => r.path)).toEqual([
       `/sales/${QUEUE_ITEM.saleId}/payments`,
@@ -1117,7 +1156,7 @@ describe('record & verify: review, record then verify', () => {
     });
     render('/admin/finance/payments');
     await toReview(user);
-    await user.click(screen.getByRole('button', { name: 'Verify and record' }));
+    await user.click(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     await screen.findByText('Unable to Record Payment');
     expect(screen.getByText('That reference already exists.')).toBeInTheDocument();
     expect(writes().map((r) => r.path)).toEqual([`/sales/${QUEUE_ITEM.saleId}/payments`]);
@@ -1205,10 +1244,11 @@ describe('record & verify: reservation origin', () => {
       { route: '/admin/finance/payments', user: FINANCE_USER },
     );
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
     await user.click(nextButton());
     await attachReceipt(user);
     await user.click(nextButton());
-    await user.click(await screen.findByRole('button', { name: 'Verify and record' }));
+    await user.click(await screen.findByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     expect(await screen.findByText('Payment Recorded and Verified')).toBeInTheDocument();
     const [record, verify] = writes();
     expect(record?.path).toBe(`/official-forms/reservations/${RES_ID}/payments`);
@@ -1263,13 +1303,13 @@ describe('activation queue permission and count', () => {
       ),
     });
     const row = (await screen.findByText('SALE-260002')).closest('tr')!;
-    expect(within(row).getByRole('button', { name: 'Activate' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: 'Activate VIP Membership' })).toBeDisabled();
   });
 
   it('enables Activate with the permission and requests an explicit limit', async () => {
     render('/admin/finance/activation');
     const row = (await screen.findByText('SALE-260002')).closest('tr')!;
-    expect(within(row).getByRole('button', { name: 'Activate' })).toBeEnabled();
+    expect(within(row).getByRole('button', { name: 'Activate VIP Membership' })).toBeEnabled();
     const request = requests.find((r) => r.path === '/queues/activation');
     expect(request?.query).toContain('limit=200');
   });
@@ -1292,10 +1332,11 @@ describe('activate now after the final payment', () => {
   async function recordFinalPayment(user: ReturnType<typeof userEvent.setup>) {
     await openRecordDialog(user);
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
     await user.click(nextButton());
     await attachReceipt(user);
     await user.click(nextButton());
-    await user.click(await screen.findByRole('button', { name: 'Verify and record' }));
+    await user.click(await screen.findByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
   }
 
   it('offers Activate now, which opens that sale’s manual activation dialog', async () => {
@@ -1309,9 +1350,9 @@ describe('activate now after the final payment', () => {
     render('/admin/finance/payments');
     await recordFinalPayment(user);
     expect(await screen.findByText(/now fully paid\. Activate the membership now\?/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Activate now' }));
+    await user.click(screen.getByRole('button', { name: 'Activate VIP Membership' }));
     // The activation dialog opens for that sale; nothing is activated until confirmed.
-    expect(await screen.findByRole('dialog', { name: 'Activate membership' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Activate VIP Membership' })).toBeInTheDocument();
     expect(requests.some((r) => r.path.endsWith('/activate'))).toBe(false);
   });
 
@@ -1326,7 +1367,7 @@ describe('activate now after the final payment', () => {
     });
     await recordFinalPayment(user);
     expect(await screen.findByText('Payment Recorded and Verified')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Activate now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Activate VIP Membership' })).toBeNull();
   });
 
   it('a payment that leaves a balance only confirms', async () => {
@@ -1335,7 +1376,7 @@ describe('activate now after the final payment', () => {
     render('/admin/finance/payments');
     await recordFinalPayment(user);
     expect(await screen.findByText('Payment Recorded and Verified')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Activate now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Activate VIP Membership' })).toBeNull();
   });
 });
 
@@ -1356,6 +1397,7 @@ describe('finance phase 2: receipt details', () => {
   async function toDetails(user: ReturnType<typeof userEvent.setup>) {
     await openRecordDialog(user);
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
   }
 
   it('sends OR number, payment date and payer, and shows them on the review step', async () => {
@@ -1374,7 +1416,7 @@ describe('finance phase 2: receipt details', () => {
     expect(review.getByText('OR-1234')).toBeInTheDocument();
     expect(review.getByText('2026-10-01')).toBeInTheDocument();
     expect(review.getByText('Juan dela Cruz')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Verify and record' }));
+    await user.click(screen.getByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
     await screen.findByText('Payment Recorded and Verified');
     expect(writes()[0]?.body).toMatchObject({
       orNumber: 'OR-1234',
@@ -1419,11 +1461,12 @@ describe('finance phase 2: duplicate hold', () => {
     render('/admin/finance/payments');
     await openRecordDialog(user);
     await purposeSelect();
+    await user.type(screen.getByLabelText('Amount'), '10000.00');
     await user.type(screen.getByLabelText('Payment reference(Optional)'), 'QA-REF');
     await user.click(nextButton());
     await attachReceipt(user);
     await user.click(nextButton());
-    await user.click(await screen.findByRole('button', { name: 'Verify and record' }));
+    await user.click(await screen.findByRole('button', { name: /Record & Verify (Reservation )?Payment/ }));
 
     const panel = within(await screen.findByRole('region', { name: 'Duplicate review' }));
     expect(await panel.findByText(/7,500\.00/)).toBeInTheDocument();

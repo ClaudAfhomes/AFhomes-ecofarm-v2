@@ -391,7 +391,7 @@ describe('category-gated selling', () => {
   });
 
   it('hides an active plan under an inactive category from new applications', async () => {
-    // A sale for Gold succeeds while everything is active.
+    // The catalogue is usable; direct sale creation still requires Application & RA.
     install([{ fn: 'next_sale_number', result: [{ sale_number: 'SALE-920001' }] }]);
     const ok = await call('sales', {
       method: 'POST',
@@ -399,7 +399,7 @@ describe('category-gated selling', () => {
       token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
-    expect(ok.status).toBe(201);
+    expect(ok.status).toBe(409);
 
     // Deactivate the shared category in the same world the sale runs against.
     const db = holder.db as FakeSupabase;
@@ -461,7 +461,7 @@ describe('category-gated selling', () => {
       token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
-    expect(sale.status).toBe(201);
+    expect(sale.status).toBe(409);
   });
 
   it('leaves existing sales, memberships and snapshots untouched by deactivation', async () => {

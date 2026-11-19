@@ -44,6 +44,7 @@ vi.mock('../genealogy/services', () => ({
   resolveAaNumber: vi.fn(async () => ({ member: null })),
   getAccreditationNumbers: vi.fn(async () => ({})),
 }));
+const creator = { id: 'u-create', name: 'Admin', email: 'admin@example.test', roleId: 'r-admin', roleSlug: 'super_admin', roleName: 'Super Admin', status: 'active' as const, afHomesPermissions: [] };
 const plan = { id: '00000000-0000-4000-8000-000000000010', name: 'Gold', code: 'GOLD' };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,7 +54,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 it('does not offer or fetch existing customers for ordinary new applications', async () => {
-  renderWithProviders(<CustomerApplicationEditorPage />);
+  renderWithProviders(<CustomerApplicationEditorPage />, { user: creator });
   await screen.findByRole('radio', { name: 'Gold' });
   expect(screen.queryByLabelText('Customer')).not.toBeInTheDocument();
   expect(
@@ -66,12 +67,13 @@ it('does not offer or fetch existing customers for ordinary new applications', a
 
 it('ignores an existing customer ID and a review-step shortcut in the URL', async () => {
   renderWithProviders(<CustomerApplicationEditorPage />, {
+    user: creator,
     route:
       '/admin/customers/applications/new?customerId=00000000-0000-4000-8000-000000000099&step=6',
   });
   await screen.findByRole('radio', { name: 'Gold' });
   expect(screen.queryByLabelText('Customer')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Submit application' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Submit for Approval' })).not.toBeInTheDocument();
   expect(getCustomerById).not.toHaveBeenCalled();
 });
 
@@ -81,14 +83,14 @@ it('never restores an old customer association from a saved new-application draf
     'afhomes.customerApplication.draft',
     JSON.stringify({ customerId: '00000000-0000-4000-8000-000000000099' }),
   );
-  renderWithProviders(<CustomerApplicationEditorPage />);
+  renderWithProviders(<CustomerApplicationEditorPage />, { user: creator });
   await screen.findByRole('radio', { name: 'Gold' });
   expect(getCustomerById).not.toHaveBeenCalled();
   expect(getCustomersPage).not.toHaveBeenCalled();
 });
 
 it('keeps payment card selection mutually exclusive', async () => {
-  renderWithProviders(<CustomerApplicationEditorPage />);
+  renderWithProviders(<CustomerApplicationEditorPage />, { user: creator });
   const spot = screen.getByRole('radio', { name: 'Spot Cash' });
   const move = screen.getByRole('radio', { name: /Move A/ });
   expect(spot).toBeChecked();
@@ -101,7 +103,7 @@ it('explains plan-loading failures and supports retry', async () => {
   vi.mocked(getCardProducts)
     .mockRejectedValueOnce(new Error('Unavailable'))
     .mockResolvedValue([plan] as never);
-  renderWithProviders(<CustomerApplicationEditorPage />);
+  renderWithProviders(<CustomerApplicationEditorPage />, { user: creator });
   await screen.findByText('VIP plans could not be loaded');
   fireEvent.click(screen.getByRole('button', { name: /retry/i }));
   expect(await screen.findByRole('radio', { name: 'Gold' })).toBeVisible();

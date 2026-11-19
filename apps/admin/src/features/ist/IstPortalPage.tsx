@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { OwnSalesParticipation } from './OwnSalesParticipation';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   isIstRole,
+  canCreateVipSale,
+  staffPortalPath,
   istPortalQuerySchema,
   istTeamCommissionQuerySchema,
   commissionStatusSchema,
@@ -114,6 +116,9 @@ function Performance({
 
 export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) {
   const { user } = useSession();
+  const navigate = useNavigate();
+  const customerPermission = user?.afHomesPermissions.find(p => p.moduleKey === 'sales.customers');
+  const mayCreate = canCreateVipSale(user) && customerPermission?.canCreate;
   const [search, setSearch] = useSearchParams();
   const defaultRange = istDateRange('28');
   const from = search.get('from') ?? defaultRange.from;
@@ -184,6 +189,10 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
     <div className={styles.lightPage}>
       <PageHeader
         title={TITLES[view]}
+        actions={view === 'my-sales' && customerPermission?.canView ? <>
+          <Button variant="secondary" onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/applications'))}>Applications</Button>
+          {mayCreate ? <Button onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/new'))}>Create Application &amp; RA</Button> : null}
+        </> : undefined}
         description={
           view === 'dashboard'
             ? 'Your account, personal performance and authorized OST team.'

@@ -174,7 +174,7 @@ describe('Finance queue with an application-origin reservation', () => {
     expect(screen.getByText('₱54,000.00')).toBeInTheDocument();
     const row = screen.getByText('AF-RES-ZZZZZ').closest('tr')!;
     // Reservation lifecycle from its own map; payment progress kept separate.
-    expect(within(row).getByText('Executed')).toBeInTheDocument();
+    expect(within(row).getByText('Awaiting Reservation Payment')).toBeInTheDocument();
     expect(within(row).getByText('No Verified Payments')).toBeInTheDocument();
     expect(screen.queryByText('executed')).toBeNull();
   });

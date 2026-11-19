@@ -10,6 +10,7 @@ import {
   customerSchema,
   identityDocumentSchema,
   purchaseTermsProposalSchema,
+  reservationAgreementListItemSchema,
 } from '@afhomes/contracts';
 import {
   CustomerApplicationEditorPage,
@@ -43,6 +44,8 @@ vi.mock('./reservation-print', async (original) => ({
 vi.mock('../../lib/download', () => ({ downloadFile: vi.fn() }));
 import {
   getCurrentDocument,
+  getDocumentAccessUrl,
+  confirmDocument,
   completeDocumentUpload,
   putUploadBytes,
   requestUploadGrant,
@@ -93,6 +96,7 @@ vi.mock('../documents/services', async (original) => ({
   getCurrentDocument: vi.fn(),
   completeDocumentUpload: vi.fn(),
   confirmDocument: vi.fn(),
+  getDocumentAccessUrl: vi.fn(),
   putUploadBytes: vi.fn(),
   requestUploadGrant: vi.fn(),
   runDocumentOcr: vi.fn(),
@@ -343,7 +347,11 @@ describe('CustomerApplicationsPage list states', () => {
     renderWithProviders(<CustomerApplicationsPage />);
     await screen.findByText('APP-000001');
     vi.mocked(getCustomerApplicationsPage).mockClear();
-    await user.selectOptions(screen.getByLabelText('Queue'), 'all');
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Queue' })).getByRole('radio', {
+        name: 'Include progressed',
+      }),
+    );
     await waitFor(() =>
       expect(getCustomerApplicationsPage).toHaveBeenCalledWith(
         expect.not.objectContaining({ queue: expect.anything() }),
@@ -482,7 +490,11 @@ describe('ReservationAgreementsPage list states', () => {
     renderWithProviders(<ReservationAgreementsPage />);
     await screen.findByText('RES-000001');
     vi.mocked(getReservationAgreementsPage).mockClear();
-    await user.selectOptions(screen.getByLabelText('Queue'), 'reservation_work');
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Queue' })).getByRole('radio', {
+        name: 'Needs reservation work',
+      }),
+    );
     await waitFor(() =>
       expect(getReservationAgreementsPage).toHaveBeenCalledWith(
         expect.objectContaining({ queue: 'reservation_work' }),
@@ -694,8 +706,8 @@ describe('application private ID intake', () => {
     await setup(null, { pickCustomer: false });
     chooseIdTypeAndFile();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    const prefix = await screen.findByLabelText('Prefix');
-    fireEvent.change(prefix, { target: { value: 'Dr.' } });
+    const prefix = await screen.findByRole('group', { name: 'Prefix' });
+    fireEvent.click(within(prefix).getByRole('radio', { name: 'Dr.' }));
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Mara' } });
     fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
     fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
@@ -709,7 +721,9 @@ describe('application private ID intake', () => {
     expect(screen.getByLabelText('Permanent address line 1')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    expect(screen.getByLabelText('Prefix')).toHaveValue('Dr.');
+    expect(
+      within(screen.getByRole('group', { name: 'Prefix' })).getByRole('radio', { name: 'Dr.' }),
+    ).toBeChecked();
     expect(screen.getByLabelText('First name')).toHaveValue('Mara');
     expect(registerCustomerApplication).not.toHaveBeenCalled();
   });
@@ -728,7 +742,11 @@ describe('application private ID intake', () => {
       primary.compareDocumentPosition(secondary) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(within(primary).getByLabelText('First name')).toHaveValue('Mara');
-    expect(within(secondary).getByLabelText('Prefix')).toHaveValue('');
+    expect(
+      within(within(secondary).getByRole('group', { name: 'Prefix' })).getByRole('radio', {
+        name: 'None',
+      }),
+    ).toBeChecked();
     expect(screen.getAllByLabelText('First name')).toHaveLength(2);
     fireEvent.click(within(secondary).getByRole('tab', { name: 'Contact' }));
     expect(within(primary).getByRole('tab', { name: 'Contact' })).toHaveAttribute(
@@ -810,12 +828,12 @@ describe('application private ID intake', () => {
   it('starts ordinary applications as a new customer without querying a directory', async () => {
     vi.mocked(getCustomersPage).mockClear();
     vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
-    renderWithProviders(<CustomerApplicationEditorPage />);
+    renderWithProviders(<CustomerApplicationEditorPage />, { user: { id: 'u-create', name: 'Admin', email: 'admin@example.test', roleId: 'r-admin', roleSlug: 'super_admin', roleName: 'Super Admin', status: 'active', afHomesPermissions: [] } });
     await screen.findByRole('radio', { name: 'Gold' });
     expect(screen.queryByLabelText('Customer')).not.toBeInTheDocument();
     expect(getCustomersPage).not.toHaveBeenCalled();
     expect(
-      screen.getByText('Create and submit a customer application for staff review.'),
+      screen.getByText('Create the linked application and agreement, then submit for approval.'),
     ).toBeVisible();
   });
 
@@ -959,6 +977,29 @@ describe('application private ID intake', () => {
     expect(screen.queryByText(/Current ID:/)).not.toBeInTheDocument();
   });
 
+  it('requires a preview and explicit holder confirmation before reviewing the current ID', async () => {
+    vi.mocked(getDocumentAccessUrl).mockResolvedValue({ url: 'https://safe-test.example/id' } as never);
+    vi.mocked(confirmDocument).mockResolvedValue({
+      ...document('completed'),
+      verificationStatus: 'confirmed',
+      reviewedAt: '2026-11-17T00:00:00Z',
+    });
+    await setup(document('completed'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Review ID' }));
+    await screen.findByRole('img', { name: 'Current identity document' });
+    const confirm = screen.getByRole('button', { name: 'Confirm ID Review' });
+    expect(confirm).toBeDisabled();
+    expect(confirmDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this ID and confirmed/ }));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirmDocument).toHaveBeenCalledWith(documentId, {
+      decision: 'confirmed',
+      fields: { idType: 'passport' },
+      notes: 'ID reviewed against the primary holder.',
+    }));
+    expect(submitCustomerApplication).not.toHaveBeenCalled();
+  });
+
   const chooseAddress = async (box: HTMLElement, option: string | RegExp) => {
     // A real user cannot click a control that has not unlocked yet; waiting
     // here models that instead of racing the province -> city cascade.
@@ -970,7 +1011,7 @@ describe('application private ID intake', () => {
     fireEvent.pointerDown(await screen.findByRole('option', { name: option }));
   };
 
-  it('reviews, edits and submits a new customer without duplicating registration on retry', async () => {
+  it('creates one application and RA and waits for explicit ID review before submission', async () => {
     // Regression: the create contract was parsed before the register branch,
     // so New Register - which carries no customerId by design - was refused
     // with "Select a customer for this application." and never registered.
@@ -989,6 +1030,7 @@ describe('application private ID intake', () => {
     vi.mocked(registerCustomerApplication).mockResolvedValue({
       id: '00000000-0000-4000-8000-0000000000aa',
       customerId: '00000000-0000-4000-8000-0000000000bb',
+      status: 'draft',
     } as never);
     // The service Zod-parses the proposal, so production data always carries
     // terms. After submit the screen refetches and renders the offer, so the
@@ -1087,7 +1129,8 @@ describe('application private ID intake', () => {
     expect(screen.getByText('ana@example.com')).toBeVisible();
     // The picker no longer lives on the review step.
     expect(screen.queryByLabelText('Seller of record')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Application & RA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Application & RA' }));
 
     await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
     const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
@@ -1100,44 +1143,41 @@ describe('application private ID intake', () => {
     expect(vi.mocked(createCustomerApplication)).not.toHaveBeenCalled();
     expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
 
-    await waitFor(() => expect(vi.mocked(submitCustomerApplication)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(submitCustomerApplication).mock.calls[0]![1]).toMatchObject({
-      sellerCandidateId: SELLER_SM_ID,
-    });
-    // Regression: the current-document refresh used to fire with this render's
-    // stale (empty) customerId, which the server refuses with "A valid
-    // subject is required" - the new customer's own id must be used instead.
+    await waitFor(() => expect(completeDocumentUpload).toHaveBeenCalledTimes(1));
+    expect(submitCustomerApplication).not.toHaveBeenCalled();
+    expect(confirmDocument).not.toHaveBeenCalled();
     expect(getCurrentDocument).not.toHaveBeenCalledWith(expect.objectContaining({ subjectId: '' }));
-    // Regression: a brand-new application has no route `id` yet (this page
-    // is about to navigate to one), so the post-submit cache refresh used to
-    // call these with `undefined` and get "Official form endpoint not
-    // found", repeatedly, from the server.
-    expect(getCustomerApplication).not.toHaveBeenCalled();
     expect(getPurchaseTermsProposal).not.toHaveBeenCalledWith(undefined);
-    vi.mocked(getCustomerApplication).mockResolvedValue({
-      id: '00000000-0000-4000-8000-0000000000aa',
-      customerId: '00000000-0000-4000-8000-0000000000bb',
-      status: 'draft',
-    } as never);
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Submit application' })).toBeEnabled(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
-    await waitFor(() => expect(submitCustomerApplication).toHaveBeenCalledTimes(2));
-    expect(registerCustomerApplication).toHaveBeenCalledTimes(1);
-    expect(createCustomerApplication).not.toHaveBeenCalled();
+
   });
 });
 
 it('renders application-origin reservations before a sale exists', async () => {
+  const linked = reservationAgreementListItemSchema.parse({
+    id: '00000000-0000-4000-8000-000000000003',
+    reservation_number: agreement.reservationNumber,
+    origin: 'application',
+    customer_application_id: '00000000-0000-4000-8000-000000000004',
+    sale_id: null,
+    tier_snapshot: agreement.tier,
+    applicant_name: agreement.applicantName,
+    payment_scheme_snapshot: agreement.paymentScheme,
+    total_price_snapshot: agreement.totalPrice,
+    has_secondary_holder: false,
+    status: 'submitted',
+    created_by: null,
+    created_at: agreement.createdAt,
+    submitted_at: agreement.submittedAt,
+  });
   vi.mocked(getReservationAgreementsPage).mockResolvedValue({
-    data: [{ ...agreement, saleId: null }],
+    data: [linked],
     total: 1,
   } as never);
   renderWithProviders(<ReservationAgreementsPage />);
   expect(await screen.findByText('RES-000001')).toBeInTheDocument();
   expect(screen.getByText('QA IST Applicant')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open Application & RA' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review and execute' })).toBeNull();
   expect(screen.queryByText('Agreements could not be loaded')).not.toBeInTheDocument();
 });
 

@@ -1,3 +1,4 @@
+import { CreationSection, MemberIdUpload } from './MemberCreationParts';
 /**
  * The single Member form, shared by Create and Edit.
  *
@@ -41,6 +42,7 @@ import {
   governmentIdTypeSchema,
   manualIstAaNumberSchema,
   type MemberPosition,
+  type MemberIdentityDocument,
 } from '@afhomes/contracts';
 import type { ComboboxOption } from '@afhomes/ui';
 import {
@@ -115,6 +117,7 @@ export interface MemberFormSeed {
 
 /** The form's submit payload: the seed plus everything else it owns. */
 export interface MemberFormValues extends MemberFormSeed {
+  identityDocument?: MemberIdentityDocument;
   profilePhotoBase64: string;
   departmentId: string;
   temporaryPassword: string;
@@ -175,7 +178,14 @@ export function MemberFormDialog({
   );
 
   const [position, setPosition] = useState<MemberPosition>(seed.position);
-  const [fullName, setFullName] = useState(seed.fullName);
+  const [storedFullName, setFullName] = useState(seed.fullName);
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const fullName = editing
+    ? storedFullName
+    : [firstName.trim(), middleName.trim(), lastName.trim()].filter(Boolean).join(' ');
+  const [identityDocument, setIdentityDocument] = useState<MemberIdentityDocument>();
   const [dateOfBirth, setDateOfBirth] = useState(seed.dateOfBirth);
   const [sex, setSex] = useState(seed.sex);
   const [civilStatus, setCivilStatus] = useState(seed.civilStatus);
@@ -261,7 +271,11 @@ export function MemberFormDialog({
     : temporaryPassword.length >= 8 && temporaryPassword === confirmPassword;
 
   const requiredFilled =
-    (editing || profilePhotoBase64 !== '') &&
+    (editing ||
+      (profilePhotoBase64 !== '' &&
+        Boolean(identityDocument) &&
+        firstName.trim() !== '' &&
+        lastName.trim() !== '')) &&
     (editing || salesDepartment !== null) &&
     fullName.trim().length > 1 &&
     dateOfBirth.length === 10 &&
@@ -298,6 +312,9 @@ export function MemberFormDialog({
           ? 'Department access required.'
           : 'Sales team unavailable. Reload.';
     }
+    if (!editing && (!firstName.trim() || !lastName.trim()))
+      return 'Enter the first and last name.';
+    if (!editing && !identityDocument) return 'Upload the government ID in Identification.';
     if (fullName.trim().length <= 1) return 'Enter the full name.';
     if (dateOfBirth.length !== 10 || age === null) return 'Enter a valid birth date.';
     if (sex === '') return 'Pick a sex.';
@@ -341,6 +358,7 @@ export function MemberFormDialog({
   const submit = () => {
     onSubmit({
       profilePhotoBase64,
+      ...(identityDocument ? { identityDocument } : {}),
       position,
       fullName,
       dateOfBirth,
@@ -425,68 +443,51 @@ export function MemberFormDialog({
             }}
           />
         ) : null}
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Assignment</legend>
-          <div className={styles.formFields}>
-            <div className={styles.inlinePair}>
-              <label className={styles.fieldLabel}>
-                Department
-                <Select
-                  aria-label="Department"
-                  value={salesDepartment?.id ?? ''}
-                  onChange={() => {}}
-                  disabled
-                  options={
-                    salesDepartment
-                      ? [{ value: salesDepartment.id, label: salesDepartment.name }]
-                      : [
-                          {
-                            value: '',
-                            label: departments.isPending
-                              ? 'Loading sales team…'
-                              : 'Sales unavailable',
-                          },
-                        ]
-                  }
-                />
-              </label>
-              <label className={styles.fieldLabel}>
-                Position
-                <Select
-                  aria-label="Position"
-                  value={position}
-                  onChange={(e) => {
-                    setPosition(e.target.value as MemberPosition);
-                    setHeadStaffId('');
-                    setOstReferrerStaffId('');
-                  }}
-                  options={positionOptions}
-                />
-              </label>
-            </div>
-            {!editing && salesDepartment === null && !departments.isPending ? (
-              <Alert variant="danger" title="Sales team unavailable">
-                {departments.error instanceof ApiError && departments.error.status === 403
-                  ? 'You need department access.'
-                  : 'Reload the page.'}
-              </Alert>
-            ) : null}
-          </div>
-        </fieldset>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Identity</legend>
+        <CreationSection title="Personal information">
           <div className={styles.formFields}>
-            <TextField
-              id="member-name"
-              name="member-name"
-              label="Full Name"
-              value={fullName}
-              suggestName
-              normalize={filterHolderNameInput}
-              onChange={setFullName}
-              autoComplete="name"
-            />
+            {editing ? (
+              <TextField
+                id="member-name"
+                name="member-name"
+                label="Full Name"
+                value={fullName}
+                normalize={filterHolderNameInput}
+                onChange={setFullName}
+                autoComplete="name"
+              />
+            ) : (
+              <div className={styles.inlinePair}>
+                <TextField
+                  id="member-first-name"
+                  name="member-first-name"
+                  label="First Name"
+                  value={firstName}
+                  onChange={setFirstName}
+                  normalize={filterHolderNameInput}
+                  autoComplete="given-name"
+                />
+                <TextField
+                  id="member-middle-name"
+                  name="member-middle-name"
+                  label="Middle Name"
+                  optional
+                  value={middleName}
+                  onChange={setMiddleName}
+                  normalize={filterHolderNameInput}
+                  autoComplete="additional-name"
+                />
+                <TextField
+                  id="member-last-name"
+                  name="member-last-name"
+                  label="Last Name"
+                  value={lastName}
+                  onChange={setLastName}
+                  normalize={filterHolderNameInput}
+                  autoComplete="family-name"
+                />
+              </div>
+            )}
             <div className={styles.inlinePair}>
               <DateField
                 id="member-dob"
@@ -537,10 +538,9 @@ export function MemberFormDialog({
               </label>
             </div>
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Home Address</legend>
+        <CreationSection title="Home address">
           <div className={styles.formFields}>
             <TextField
               id="member-street"
@@ -588,10 +588,9 @@ export function MemberFormDialog({
               autoComplete="postal-code"
             />
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Contact</legend>
+        <CreationSection title="Contact">
           <div className={styles.formFields}>
             <div className={styles.inlinePair}>
               <TextField
@@ -621,10 +620,9 @@ export function MemberFormDialog({
               optional
             />
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Work</legend>
+        <CreationSection title="Work">
           <div className={styles.formFields}>
             <TextField
               id="member-employer"
@@ -650,10 +648,9 @@ export function MemberFormDialog({
               autoComplete="organization-title"
             />
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Government IDs</legend>
+        <CreationSection title="Identification">
           <div className={styles.formFields}>
             <div className={styles.inlinePair}>
               <label className={styles.fieldLabel}>
@@ -688,10 +685,64 @@ export function MemberFormDialog({
               optional
             />
           </div>
-        </fieldset>
+          {!editing ? (
+            <MemberIdUpload
+              value={identityDocument}
+              onChange={setIdentityDocument}
+              disabled={isSubmitting}
+            />
+          ) : null}
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Account</legend>
+        <CreationSection title="Assignment">
+          <div className={styles.formFields}>
+            <div className={styles.inlinePair}>
+              <label className={styles.fieldLabel}>
+                Department
+                <Select
+                  aria-label="Department"
+                  value={salesDepartment?.id ?? ''}
+                  onChange={() => {}}
+                  disabled
+                  options={
+                    salesDepartment
+                      ? [{ value: salesDepartment.id, label: salesDepartment.name }]
+                      : [
+                          {
+                            value: '',
+                            label: departments.isPending
+                              ? 'Loading sales team…'
+                              : 'Sales unavailable',
+                          },
+                        ]
+                  }
+                />
+              </label>
+              <label className={styles.fieldLabel}>
+                Position
+                <Select
+                  aria-label="Position"
+                  value={position}
+                  onChange={(e) => {
+                    setPosition(e.target.value as MemberPosition);
+                    setHeadStaffId('');
+                    setOstReferrerStaffId('');
+                  }}
+                  options={positionOptions}
+                />
+              </label>
+            </div>
+            {!editing && salesDepartment === null && !departments.isPending ? (
+              <Alert variant="danger" title="Sales team unavailable">
+                {departments.error instanceof ApiError && departments.error.status === 403
+                  ? 'You need department access.'
+                  : 'Reload the page.'}
+              </Alert>
+            ) : null}
+          </div>
+        </CreationSection>
+
+        <CreationSection title="Account">
           <div className={styles.formFields}>
             <TextField
               id="member-email"
@@ -719,11 +770,10 @@ export function MemberFormDialog({
               />
             </div>
           </div>
-        </fieldset>
+        </CreationSection>
 
         {uplineRole !== null ? (
-          <fieldset className={styles.formSection}>
-            <legend className={styles.sectionTitle}>Head</legend>
+          <CreationSection title="Head">
             <div className={styles.formFields}>
               <label className={styles.fieldLabel}>
                 {MEMBER_POSITION_LABELS[uplineRole]}
@@ -769,7 +819,7 @@ export function MemberFormDialog({
                 />
               ) : null}
             </div>
-          </fieldset>
+          </CreationSection>
         ) : (
           <Alert variant="info" title="No head">
             SVDs have no head.
@@ -777,8 +827,7 @@ export function MemberFormDialog({
         )}
 
         {position === 'sales_manager' ? (
-          <fieldset className={styles.formSection}>
-            <legend className={styles.sectionTitle}>Referrer Details</legend>
+          <CreationSection title="Referrer Details">
             <div className={styles.formFields}>
               <label className={styles.fieldLabel}>
                 OST Referrer (Optional)
@@ -819,11 +868,10 @@ export function MemberFormDialog({
                 </Alert>
               ) : null}
             </div>
-          </fieldset>
+          </CreationSection>
         ) : null}
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>AA Number</legend>
+        <CreationSection title="Accreditation">
           <div className={styles.formFields}>
             {editing && aaNumber ? (
               <TextField
@@ -901,7 +949,7 @@ export function MemberFormDialog({
               ) : null}
             </Alert>
           ) : null}
-        </fieldset>
+        </CreationSection>
 
         {!editing || passwordFilled ? (
           <Alert variant="info" title="First login">

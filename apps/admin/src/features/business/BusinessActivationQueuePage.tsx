@@ -361,7 +361,7 @@ export function BusinessActivationQueuePage() {
                             disabled={!item.activatable || !canActivate}
                             onClick={() => openActivate(item)}
                           >
-                            Activate
+                            Activate VIP Membership
                           </Button>
                         </td>
                       </tr>
@@ -439,7 +439,7 @@ function ActivateDialog({
     <Dialog
       open
       onClose={onClose}
-      title="Activate membership"
+      title="Activate VIP Membership"
       describedBy="activation-summary"
       footer={
         <>
@@ -451,7 +451,7 @@ function ActivateDialog({
             loading={activate.isPending}
             onClick={() => activate.mutate()}
           >
-            Activate
+            Activate VIP Membership
           </Button>
         </>
       }

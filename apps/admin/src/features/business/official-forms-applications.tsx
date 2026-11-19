@@ -1,6 +1,10 @@
 import { downloadFile } from '../../lib/download';
-import { draftReservationPaper, reservationPdf, printReservation } from './reservation-print';
-import { type ApplicationRaDraft, applicationRaDraftSchema } from '@afhomes/contracts';
+import { draftReservationPaper, savedReservationPaper, reservationPdf, printReservation } from './reservation-print';
+import {
+  type ApplicationRaDraft,
+  applicationRaDraftSchema,
+  mustNameSellerOfRecord,
+} from '@afhomes/contracts';
 import { ApplicationRaReview, suggestedRaTerms } from './ApplicationRaReview';
 /**
 
@@ -31,6 +35,8 @@ import {
   GOVERNMENT_ID_TYPE_LABELS,
   type GovernmentIdType,
   optionalLandlineSchema,
+  canCreateVipSale,
+  staffPortalPath,
 } from '@afhomes/contracts';
 import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
 import { useSession } from '../../lib/session';
@@ -59,6 +65,7 @@ import {
   DetailFieldGrid,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   Icon,
   type IconName,
@@ -82,6 +89,8 @@ import {
   completeDocumentUpload,
   putUploadBytes,
   requestUploadGrant,
+  confirmDocument,
+  getDocumentAccessUrl,
 } from '../documents/services';
 import {
   createCustomerApplication,
@@ -95,8 +104,8 @@ import {
   getCustomersPage,
   getPurchaseTermsProposal,
   getReservationAgreements,
+  getReservationAgreement,
   reopenCustomerApplication,
-  reviewApplicationPurchaseTerms,
   submitCustomerApplication,
   updateCustomerApplication,
 } from './services';
@@ -122,7 +131,6 @@ import { sellerOfRecordBlocker } from './SellerOfRecordPicker';
 import { applicationNextStep } from './next-step';
 import {
   SignedDocumentPanel,
-  signedDocumentBlocker,
   useSignedDocument,
 } from './SignedDocumentPanel';
 
@@ -142,6 +150,8 @@ export function CustomerApplicationsPage() {
   const navigate = useNavigate();
   const [urlParams] = useSearchParams();
   const { user } = useSession();
+  const canCreate = canCreateVipSale(user) && (user?.roleSlug === 'super_admin' ||
+    user?.afHomesPermissions.some((p) => p.moduleKey === 'sales.customers' && p.canCreate));
   // Bulk membership import/export lives here now (membership work), gated on
   // its own module like the direct URL guard in navigation.ts. The server
   // re-checks regardless.
@@ -221,7 +231,7 @@ export function CustomerApplicationsPage() {
                 Import/Export Data
               </Button>
             ) : null}
-            <Button onClick={() => navigate('/admin/customers/new')}>New application</Button>
+            {canCreate ? <Button onClick={() => navigate('/admin/customers/new')}>Create Application &amp; RA</Button> : null}
           </>
         }
       />
@@ -282,13 +292,13 @@ export function CustomerApplicationsPage() {
             }
             filters={
               <>
-                <label className={styles.filterLabel}>
-                  Queue
-                  <Select
-                    aria-label="Queue"
+                <div className={styles.filterLabel}>
+                  <span aria-hidden="true">Queue</span>
+                  <ChoiceChips
+                    label="Queue"
                     value={applicationWorkOnly ? 'application_work' : 'all'}
-                    onChange={(e) => {
-                      setApplicationWorkOnly(e.target.value === 'application_work');
+                    onChange={(next) => {
+                      setApplicationWorkOnly(next === 'application_work');
                       setPage(0);
                     }}
                     options={[
@@ -296,7 +306,7 @@ export function CustomerApplicationsPage() {
                       { value: 'all', label: 'Include progressed' },
                     ]}
                   />
-                </label>
+                </div>
                 <label className={styles.filterLabel}>
                   Status
                   <Select
@@ -315,21 +325,23 @@ export function CustomerApplicationsPage() {
                     ]}
                   />
                 </label>
-                <label className={styles.filterLabel}>
-                  Tier
-                  <Select
-                    aria-label="Tier"
+                <div className={styles.filterLabel}>
+                  <span aria-hidden="true">Tier</span>
+                  <ChoiceChips
+                    label="Tier"
                     value={tier}
-                    onChange={(e) => {
-                      setTier(e.target.value);
+                    onChange={(next) => {
+                      setTier(next);
                       setPage(0);
                     }}
                     options={[
                       { value: '', label: 'All' },
-                      ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                      { value: 'BRONZE', label: 'Bronze' },
+                      { value: 'SILVER', label: 'Silver' },
+                      { value: 'GOLD', label: 'Gold' },
                     ]}
                   />
-                </label>
+                </div>
               </>
             }
           />
@@ -500,22 +512,15 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
   // it is not progress.
   const reservation = reservations.data?.find((r) => r.status !== 'cancelled') ?? null;
   const status = application.status;
-  const approved = status === 'approved' || Boolean(reservation);
+  const approved = status === 'approved';
   const hasReservation = Boolean(reservation);
   const executed = reservation?.status === 'executed';
   const finalized = Boolean(reservation?.saleId);
 
   const steps = [
-    { label: 'Application Submitted', done: status !== 'draft', current: status === 'draft' },
-    { label: 'Application Approved', done: approved, current: status === 'submitted' },
-    {
-      label: 'Reservation Created',
-      done: hasReservation,
-      current: status === 'approved' && !hasReservation,
-    },
-    { label: 'Payment Processing', done: finalized, current: hasReservation && !finalized },
-    { label: 'Activation', done: false, current: finalized },
-    { label: 'Commission', done: false, current: false },
+    { label: 'Application Submitted', done: status !== 'draft' && (Boolean(application.submittedAt) || status === 'submitted' || approved), current: status === 'draft' },
+    { label: 'Application & RA Approved', done: approved && executed, current: status === 'submitted' || (approved && !executed) },
+    { label: 'Payment Processing', done: finalized, current: approved && executed && !finalized },
   ];
 
   const next = !hasReservation
@@ -527,31 +532,31 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
         }
       : status === 'approved'
         ? {
-            label: 'Create Reservation',
-            detail: 'Create the agreement for this approved application.',
-            to: `/admin/sales/reservations/new?application=${encodeURIComponent(application.id)}`,
+            label: 'Linked RA requires review',
+            detail: 'The linked agreement could not be loaded. Retry before continuing.',
+            to: null,
           }
         : {
             label: 'Continue draft',
             detail: 'Complete the draft and submit.',
             to: null,
           }
-    : finalized
+    : approved && executed && finalized
       ? {
-          label: 'Continue Activation',
-          detail: `Sale ${reservation!.saleId} is finalized.`,
+          label: 'View activation',
+          detail: 'Review membership activation in Finance.',
           to: '/admin/finance/activation',
         }
-      : executed
+      : approved && executed
         ? {
-            label: 'Continue Payment',
+            label: 'Continue in Finance',
             detail: 'Collect payment in Finance.',
             to: '/admin/finance/payments',
           }
         : {
-            label: 'Open Reservation',
-            detail: 'Agreement needs execution.',
-            to: `/admin/sales/reservations/${reservation!.id}`,
+            label: status === 'draft' ? 'Submit for Approval' : 'Review Signed Documents',
+            detail: 'Accept both signed documents before Admin or Super Admin approves the application and RA.',
+            to: null,
           };
 
   const doneCount = steps.filter((s) => s.done).length;
@@ -571,7 +576,7 @@ function PurchaseWorkflowPanel({ application }: { application: CustomerApplicati
             data-state={step.done ? 'Done' : step.current ? 'Current' : 'Pending'}
           >
             <span className={styles.workflowNode} aria-hidden="true">
-              {step.done ? '✓' : String(index + 1)}
+              {step.done ? <Icon name="check" size={16} /> : String(index + 1)}
             </span>
             <div className={styles.workflowTimelineBody}>
               <span className={styles.workflowTimelineLabel}>{step.label}</span>
@@ -614,10 +619,31 @@ function shortInstant(value: string | null | undefined): string | null {
 export function CustomerApplicationEditorPage() {
   const formScrollRef = useRef<HTMLDivElement>(null);
   const { user: applicationUser } = useSession();
+  const mayCreate = canCreateVipSale(applicationUser) && (applicationUser?.roleSlug === 'super_admin' ||
+    applicationUser?.afHomesPermissions.some((p) => p.moduleKey === 'sales.customers' && p.canCreate));
+  const mayApprove = (applicationUser?.roleSlug === 'admin' || applicationUser?.roleSlug === 'super_admin') &&
+    (applicationUser.roleSlug === 'super_admin' || applicationUser.afHomesPermissions.some(
+      (p) => p.moduleKey === 'sales.application_approval' && p.canUpdate,
+    ));
+  const mayReviewDocuments = applicationUser?.roleSlug === 'super_admin' || applicationUser?.afHomesPermissions.some(
+    (p) => p.moduleKey === 'sales.customers' && p.canUpdate,
+  );
   // Non-SM creators must name the active SM seller of record; an SM sends nothing.
   const [sellerCandidateId, setSellerCandidateId] = useState('');
+  const applicationUserRef = useRef(applicationUser);
+  useEffect(() => {
+    applicationUserRef.current = applicationUser;
+  }, [applicationUser]);
   const routeId = useParams().id;
   const signedApplication = useSignedDocument('applications', routeId);
+  const linkedReservations = useQuery({
+    queryKey: applicationKeys.reservations(routeId!),
+    queryFn: () => getReservationAgreements({ application: routeId! }),
+    enabled: Boolean(routeId),
+    retry: false,
+  });
+  const linkedReservation = linkedReservations.data?.find((r) => r.status !== 'cancelled');
+  const signedReservation = useSignedDocument('reservations', linkedReservation?.id);
   const sellerBlocker = sellerOfRecordBlocker(applicationUser, sellerCandidateId);
   const sellerParam = sellerCandidateId || undefined;
   const mayLoadImport =
@@ -1019,6 +1045,40 @@ export function CustomerApplicationEditorPage() {
     currentDocument.data.verificationStatus !== 'rejected'
       ? currentDocument.data
       : null;
+  const [reviewIdOpen, setReviewIdOpen] = useState(false);
+  const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const mayReviewIdentity =
+    applicationUser?.roleSlug === 'super_admin' ||
+    applicationUser?.afHomesPermissions.some(
+      (permission) => permission.moduleKey === 'sales.id_documents' && permission.canView,
+    );
+  const identityPreview = useQuery({
+    queryKey: ['identity-review-preview', serverCurrentDocument?.id],
+    queryFn: () => getDocumentAccessUrl(serverCurrentDocument!.id),
+    enabled: reviewIdOpen && Boolean(serverCurrentDocument),
+    staleTime: 0,
+    retry: false,
+  });
+  const reviewIdentity = useBusinessMutation({
+    mutationFn: () => {
+      if (!serverCurrentDocument || !identityConfirmed || !mayReviewIdentity)
+        throw new Error('Review the current ID and confirm the holder before continuing.');
+      return confirmDocument(serverCurrentDocument.id, {
+        decision: 'confirmed',
+        fields: { idType: governmentIdTypeSchema.parse(serverCurrentDocument.reviewedFields?.idType) },
+        notes: 'ID reviewed against the primary holder.',
+      });
+    },
+    onSuccess: document => {
+      client.setQueryData(sharedScopes.documentsCurrentCustomer(customerId), document);
+      setReviewIdOpen(false);
+      setIdentityConfirmed(false);
+      notifySuccess({
+        title: 'ID reviewed',
+        message: 'The application can now be submitted for approval.',
+      });
+    },
+  });
   const network = useQuery({
     queryKey: ['genealogy', 'referral-chain'],
     queryFn: getGenealogy,
@@ -1046,6 +1106,7 @@ export function CustomerApplicationEditorPage() {
   // are deliberately NOT blockers - they are not something to fix.
   const primaryComplete = applicationHolderSchema.safeParse(primary).success;
   const blockers: string[] = [];
+  if (!mayCreate) blockers.push('Only an active Sales Manager, Admin or Super Admin with application creation access may create or submit.');
   if (!primaryComplete) blockers.push('Complete primary holder fields.');
   if (secondary && !applicationHolderSchema.safeParse(secondary).success)
     blockers.push('Complete secondary holder fields.');
@@ -1069,6 +1130,8 @@ export function CustomerApplicationEditorPage() {
   // A picked file uploads on Save, so it satisfies the gate.
   if (!serverCurrentDocument?.reviewedFields?.idType && !idFile)
     blockers.push('Upload a valid ID and choose its ID type.');
+  if (!isNew && !idFile && serverCurrentDocument && serverCurrentDocument.verificationStatus !== 'confirmed')
+    blockers.push('Review the current ID before submitting.');
   if (idFile && !idType) blockers.push('Choose ID type first.');
   if (idFile && !customerId && id) blockers.push('Select a customer first.');
   if (!optionalPhonesValid) blockers.push('Correct the recommender contact or landline number.');
@@ -1101,6 +1164,10 @@ export function CustomerApplicationEditorPage() {
         recommenderStaffId: '',
       });
       setChannels(app.acquisitionChannels);
+      // A saved draft already names its seller of record; without this a
+      // non-SM creator reopening it saw an empty picker and could not submit.
+      if (app.smStaffId && mustNameSellerOfRecord(applicationUserRef.current))
+        setSellerCandidateId((current) => current || app.smStaffId!);
       setConsent(app.consentAcknowledged);
       setValidId(app.validIdReceived);
       setPaymentProof(app.reservationPaymentProofReceived);
@@ -1111,13 +1178,28 @@ export function CustomerApplicationEditorPage() {
   const raDefaults = suggestedRaTerms(plans.data?.find(p => p.id === planId), paymentScheme);
   const effectiveRaDraft = raTermsSource === currentRaSource ? raDraft : { ...raDraft, ...raDefaults };
   const changeRaDraft = (value: ApplicationRaDraft) => { setRaTermsSource(currentRaSource); setRaDraft(value); };
+  const prepareRaPaper = async () => {
+    if (existing.data && existing.data.status !== 'draft') {
+      const agreement = linkedReservation ??
+        (linkedReservations.data?.length === 1 ? linkedReservations.data[0] : undefined);
+      if (!agreement) throw new Error('Load the linked Reservation Agreement before exporting.');
+      return savedReservationPaper(await getReservationAgreement(agreement.id));
+    }
+    return draftReservationPaper(
+      primary,
+      secondary,
+      tier,
+      paymentScheme,
+      plans.data?.find((plan) => plan.id === planId),
+      applicationRaDraftSchema.parse(effectiveRaDraft),
+      linkedReservation?.reservationNumber,
+    );
+  };
   const printRaDraft = async () => {
-    const checked = applicationRaDraftSchema.parse(effectiveRaDraft);
-    await printReservation(draftReservationPaper(primary, secondary, tier, paymentScheme, plans.data?.find(p => p.id === planId), checked));
+    await printReservation(await prepareRaPaper());
   };
   const downloadRaDraft = async () => {
-    const checked = applicationRaDraftSchema.parse(effectiveRaDraft);
-    downloadFile(await reservationPdf(draftReservationPaper(primary, secondary, tier, paymentScheme, plans.data?.find(p => p.id === planId), checked)));
+    downloadFile(await reservationPdf(await prepareRaPaper()));
   };
   const payload = () => ({
     raDraft: effectiveRaDraft,
@@ -1136,6 +1218,7 @@ export function CustomerApplicationEditorPage() {
     secondary: secondary ? { ...secondary, holderType: 'SECONDARY' as const } : undefined,
     governmentIdNumber: idNumber.trim() || undefined,
     ...meta,
+    ...(sellerParam ? { smStaffId: sellerParam } : {}),
     acquisitionChannels: channels as (
       'CMP' | 'DRP' | 'GDP Corporate' | 'Walk-In' | 'GDP Public Servant' | 'Referral' | 'FB Ads'
     )[],
@@ -1145,13 +1228,11 @@ export function CustomerApplicationEditorPage() {
     validIdReceived: validId,
     reservationPaymentProofReceived: paymentProof,
   });
-  // ONE action: save and submit. There is no draft-only save - a new
-  // application is created (or an existing draft updated) and then immediately
-  // submitted with the server's own purchase-terms hash, so a lost response
-  // retries the transition instead of editing a submitted record.
+  // New applications persist their RA and pending ID before human review.
   const saveAndSubmit = useBusinessMutation({
     mutationFn: () =>
       runSave(async () => {
+        if (!mayCreate) throw new Error('Your account cannot create or submit sales.');
         if (!planId) throw new Error('Select a VIP plan before saving the application.');
 
         let appId: string;
@@ -1177,7 +1258,6 @@ export function CustomerApplicationEditorPage() {
               requestId: applicationRequest.forPayload(registration.data),
             }));
           registeredApplication.current = created;
-          appId = created.id;
           if (alreadyRegistered) {
             const latest = await getCustomerApplication(created.id);
             if (latest.status === 'submitted') {
@@ -1216,6 +1296,7 @@ export function CustomerApplicationEditorPage() {
             // set) fetches the right one on its own, so there is nothing to
             // wait for here.
           }
+          return created;
         } else {
           if (importRowId && (!importIntake.data || importIntake.isError))
             throw new Error('Load the imported purchase review before saving.');
@@ -1289,6 +1370,7 @@ export function CustomerApplicationEditorPage() {
           }
         }
 
+        if (idFile) return getCustomerApplication(appId);
         // The hash is fetched fresh so it is always the offer the server holds
         // at this instant. A stale offer is refused server-side.
         const offer = await getPurchaseTermsProposal(appId, sellerParam);
@@ -1303,16 +1385,19 @@ export function CustomerApplicationEditorPage() {
         });
       }),
     onSuccess: (app) => {
-      notifySuccess({ title: 'Success', message: 'Customer application submitted successfully.' });
+      const submitted = app.status === 'submitted';
+      notifySuccess({ title: 'Success', message: submitted
+        ? 'Customer application submitted successfully.'
+        : 'Application & RA saved. Review the current ID before submitting.' });
       applicationRequest.complete();
-      setSubmissionSuccess(true);
+      setSubmissionSuccess(submitted);
       try {
         sessionStorage.removeItem(DRAFT_KEY);
       } catch {
         /* ignore */
       }
-      if (!id) navigate(`/admin/customers/applications/${app.id}`, { replace: true });
-      if (isEditRoute) navigate(`/admin/customers/applications/${id}`, { replace: true });
+      if (!id) navigate(staffPortalPath(applicationUser?.roleSlug, `/admin/customers/applications/${app.id}`), { replace: true });
+      if (isEditRoute) navigate(staffPortalPath(applicationUser?.roleSlug, `/admin/customers/applications/${id}`), { replace: true });
       // Cache refresh is bookkeeping, not part of "did this succeed" - it runs
       // in the background so the success state and redirect above never wait
       // on it. A brand-new application has no route `id` yet (this page is
@@ -1340,6 +1425,7 @@ export function CustomerApplicationEditorPage() {
   const decisionRequest = useMutationRequest();
   const decide = useBusinessMutation({
     mutationFn: (decision: 'approved' | 'rejected' | 'cancelled') => {
+      if (!mayApprove) throw new Error('Admin or Super Admin application approval access is required.');
       setDecidingDecision(decision);
       if (decision === 'approved' && !existing.data?.purchaseTermsId) {
         throw new Error(
@@ -1373,50 +1459,18 @@ export function CustomerApplicationEditorPage() {
       setMessage(e instanceof Error ? e.message : 'Decision failed.');
     },
   });
-  // Old approved applications have no stored commercial evidence. Reviewing is an
-  // explicit confirmation of the offer currently shown, never an override price.
   const [decidingDecision, setDecidingDecision] = useState<
     'approved' | 'rejected' | 'cancelled' | null
   >(null);
-  const reviewRequest = useMutationRequest();
-  const review = useBusinessMutation({
-    mutationFn: async () => {
-      // Always fetch fresh: proposal.data may be a stale snapshot from the
-      // current render (React Query cache updates before component re-renders).
-      const offer = await getPurchaseTermsProposal(id!);
-      if (!offer) throw new Error('Load the purchase terms offer before confirming.');
-      const reason = 'Auto-confirmed on approval';
-      return reviewApplicationPurchaseTerms(id!, {
-        requestId: reviewRequest.forPayload({
-          applicationId: id,
-          expectedProposalHash: offer.expectedProposalHash,
-          reason,
-        }),
-        expectedProposalHash: offer.expectedProposalHash,
-        reason,
-      });
-    },
-    onSuccess: () => {
-      notifySuccess({
-        title: 'Success',
-        message: 'Purchase terms confirmed and frozen for this application.',
-      });
-      reviewRequest.complete();
-      void existing.refetch();
-      void proposal.refetch();
-      void client.invalidateQueries({ queryKey: applicationKeys.scope });
-      void client.invalidateQueries({ queryKey: reservationKeys.scope });
-      void client.invalidateQueries({ queryKey: membershipKeys.customerLookupScope });
-    },
-    onError: (e) => setMessage(e instanceof Error ? e.message : 'Review failed.'),
-  });
   const reopenRequest = useMutationRequest();
   const reopen = useBusinessMutation({
-    mutationFn: () =>
-      reopenCustomerApplication(
+    mutationFn: () => {
+      if (!mayApprove) throw new Error('Admin or Super Admin application approval access is required.');
+      return reopenCustomerApplication(
         id!,
         reopenRequest.forPayload({ applicationId: id, decision: 'draft' }),
-      ),
+      );
+    },
     onSuccess: () => {
       notifySuccess({ title: 'Success', message: 'Application reopened as draft.' });
       reopenRequest.complete();
@@ -1438,7 +1492,33 @@ export function CustomerApplicationEditorPage() {
     id &&
     !isEditRoute &&
     existing.data &&
-    (existing.data.status === 'submitted' || existing.data.status === 'rejected');
+    (mayApprove || existing.data.status === 'submitted') &&
+    (existing.data.status === 'submitted' || existing.data.status === 'rejected' || existing.data.status === 'approved' || existing.data.status === 'draft');
+  const awaitingJointApproval = existing.data?.status === 'submitted' ||
+    (existing.data?.status === 'approved' && !!linkedReservation &&
+      ['draft', 'submitted'].includes(linkedReservation.status));
+  const approvalBlocker = !mayApprove
+    ? 'Only Admin or Super Admin with application approval access may decide.'
+    : !awaitingJointApproval
+      ? 'Submit the application for approval first.'
+      : linkedReservations.isPending
+        ? 'Wait for the linked RA and signed document status to load.'
+        : linkedReservations.isError
+          ? 'The linked RA or signed document status could not be loaded. Retry before approval.'
+          : !linkedReservation || !['draft', 'submitted'].includes(linkedReservation.status)
+            ? 'A submitted linked RA is required before approval.'
+            : signedApplication.docs.isPending || signedReservation.docs.isPending
+              ? 'Wait for the linked RA and signed document status to load.'
+              : signedApplication.docs.isError || signedReservation.docs.isError
+                ? 'The linked RA or signed document status could not be loaded. Retry before approval.'
+                : !existing.data?.purchaseTermsId
+                  ? 'Return for Corrections to review and freeze the purchase terms before approval.'
+                  : !signedApplication.accepted || !signedReservation.accepted
+                    ? 'Both the Signed Application Form and Signed Reservation Agreement must be accepted before approval.'
+                    : null;
+  const cancelBlocker = linkedReservation?.saleId
+    ? 'A finalized purchase requires the authorized financial cancellation process.'
+    : null;
   const selectedPlan = plans.data?.find((p) => p.id === planId);
   const planPreview = selectedPlan ? (
     <DetailCard className={`${styles.planBenefits} ${styles[`plan${selectedPlan.code}`] ?? ''}`}>
@@ -1534,6 +1614,9 @@ export function CustomerApplicationEditorPage() {
       </section>
     );
   }
+  if (isNew && !mayCreate) {
+    return <section><PageHeader title="Create Application & RA" /><Alert variant="warning">Only an active Sales Manager, Admin or Super Admin with application creation access may create an application and RA.</Alert></section>;
+  }
   // The ONE primary action lives in the header and the sticky footer alike, so
   // a long form never buries it. One element, rendered twice. Blocking stays
   // visible: disabled with an inline list of what to fix, never silent.
@@ -1559,7 +1642,7 @@ export function CustomerApplicationEditorPage() {
       loading={saveAndSubmit.isPending}
       loadingLabel="Saving…"
     >
-      {isNew ? 'Submit application' : 'Submit'}
+      {isNew && !importRowId ? 'Create Application & RA' : idFile ? 'Save ID for Review' : 'Submit for Approval'}
     </Button>
     {submitReason ? (
       <span role="note" className={styles.hint}>
@@ -1686,8 +1769,8 @@ export function CustomerApplicationEditorPage() {
         {isNew ? (
           <div className={v4.pageTop}>
             <div>
-              <h1>New Customer Application</h1>
-              <p>Create and submit a customer application for staff review.</p>
+              <h1>Create Application &amp; RA</h1>
+              <p>Create the linked application and agreement, then submit for approval.</p>
             </div>
             <button
               type="button"
@@ -1828,24 +1911,11 @@ export function CustomerApplicationEditorPage() {
                 maxReached={maxReached}
                 onNavigate={goStep}
               />
-            ) : (
-              <nav aria-label="Application steps" className={styles.stepper}>
-                <ol className={styles.stepperList}>
-                  {steps.map((step, index) => (
-                    <li key={step.id} className={styles.stepperItem} data-done={step.done}>
-                      <a href={`#${step.id}`} className={styles.stepperLink}>
-                        <span className={styles.stepperIndex} aria-hidden="true">
-                          {step.done ? '✓' : index + 1}
-                        </span>
-                        <span className={styles.stepperLabel}>{step.label}</span>
-                      </a>
-                    </li>
-                  ))}
-                </ol>
-              </nav>
-            )}
+            ) : null}
             {existing.data && !isEditRoute ? (
               <section aria-label="Application record status" className={styles.panel}>
+                <details>
+                  <summary>Application history ? {existing.data.status}</summary>
                 <ol className={styles.statusTimeline} aria-label="Application lifecycle">
                   <li
                     className={styles.statusMilestone}
@@ -1894,6 +1964,7 @@ export function CustomerApplicationEditorPage() {
                     </div>
                   </li>
                 </ol>
+                </details>
                 {relatedCustomer ? (
                   <div className={styles.linkedCustomerRow}>
                     <div className={styles.linkedCustomerBody}>
@@ -1928,15 +1999,110 @@ export function CustomerApplicationEditorPage() {
               </section>
             ) : null}
             {existing.data ? <PurchaseWorkflowPanel application={existing.data} /> : null}
-            {!isNew && existing.data ? <ApplicationRaReview onPrint={printRaDraft} onDownload={downloadRaDraft} value={effectiveRaDraft} onChange={changeRaDraft} defaults={raDefaults} disabled={!editable} /> : null}
+            {!isNew && editable ? (
+              <section className={`${styles.panel} ${styles.nextAction}`} aria-label="Next application action">
+                <div className={styles.actions}>{saveAction}</div>
+                <span className={styles.hint}>Open Application details &amp; ID review below to complete any missing information.</span>
+              </section>
+            ) : null}
+            {hasRecordActions ? (
+              <section aria-label="Record actions" className={styles.panel}>
+                {mayApprove ? (
+                  <div className={styles.recordGroups}>
+                    <div className={styles.actions}>
+                      {awaitingJointApproval ? (
+                        <>
+                          <Button
+                            onClick={() => decide.mutate('approved')}
+                            disabled={decide.isPending || reopen.isPending || approvalBlocker !== null}
+                            loading={decide.isPending && decidingDecision === 'approved'}
+                            loadingLabel="Approving…"
+                          >
+                            Approve Application &amp; RA
+                          </Button>
+                          {approvalBlocker ? <span role="note">{approvalBlocker}</span> : null}
+                          {existing.data?.status === 'submitted' ? <Button
+                            variant="danger"
+                            onClick={() => decide.mutate('rejected')}
+                            disabled={decide.isPending || reopen.isPending}
+                            loading={decide.isPending && decidingDecision === 'rejected'}
+                            loadingLabel="Rejecting…"
+                          >
+                            Reject
+                          </Button> : null}
+                        </>
+                      ) : null}
+                      {existing.data?.status === 'submitted' || existing.data?.status === 'rejected' ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => reopen.mutate()}
+                          disabled={reopen.isPending || decide.isPending}
+                          loading={reopen.isPending}
+                          loadingLabel="Returning…"
+                        >
+                          Return for Corrections
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="danger"
+                        onClick={() => decide.mutate('cancelled')}
+                        disabled={decide.isPending || reopen.isPending || cancelBlocker !== null}
+                        loading={decide.isPending && decidingDecision === 'cancelled'}
+                        loadingLabel="Cancelling…"
+                      >
+                        Cancel Application &amp; RA
+                      </Button>
+                      {cancelBlocker ? <span role="note">{cancelBlocker}</span> : null}
+                    </div>
+                  </div>
+                ) : existing.data?.status === 'submitted' ? (
+                  <p role="note">Only Admin or Super Admin with application approval access may approve, return, reject or cancel.</p>
+                ) : null}
+                {existing.data?.status === 'submitted' ? (
+                  <section aria-label="Required Signed Documents">
+                    <h2 className={styles.panelTitle}>Required Signed Documents</h2>
+                    <SignedDocumentPanel
+                      controller={signedApplication}
+                      disabled={decide.isPending || reopen.isPending}
+                      readOnly={!mayReviewDocuments}
+                    />
+                    {linkedReservation ? (
+                      <SignedDocumentPanel
+                        controller={signedReservation}
+                        disabled={decide.isPending || reopen.isPending}
+                        readOnly={!mayReviewDocuments}
+                      />
+                    ) : <p role="alert">The linked Reservation Agreement could not be loaded. Retry before approval.</p>}
+                  </section>
+                ) : null}
+              </section>
+            ) : null}
+            {!isNew && existing.data ? (
+              <details className={styles.panel}>
+                <summary>Reservation Agreement details</summary>
+                <ApplicationRaReview reservationNumber={linkedReservation?.reservationNumber} onPrint={printRaDraft} onDownload={downloadRaDraft} value={effectiveRaDraft} onChange={changeRaDraft} defaults={raDefaults} disabled={!editable} />
+              </details>
+            ) : null}
 
-            {proposal.data && !isEditRoute ? (
-              <section aria-label="Purchase terms offer" className={styles.panel}>
-                <h2 className={styles.panelTitle}>
+            {!editable && existing.data?.purchaseTermsId && linkedReservation ? (
+              <section aria-label="Frozen purchase terms" className={styles.panel}>
+                <h2>Frozen purchase terms</h2>
+                <p>
+                  {linkedReservation.tier} · {paymentSchemeLabel(linkedReservation.paymentScheme)} ·{' '}
+                  {formatMoneyOrDash(linkedReservation.totalPrice)}
+                </p>
+                <Link to={staffPortalPath(applicationUser?.roleSlug, `/admin/sales/reservations/${linkedReservation.id}`)}>
+                  View Reservation Agreement
+                </Link>
+              </section>
+            ) : null}
+            {editable && proposal.data && !isEditRoute ? (
+              <details aria-label="Purchase terms offer" className={styles.panel}>
+                <summary className={styles.panelTitle}>
                   {proposal.data.offerKind === 'newly_confirmed_offer'
                     ? 'Newly confirmed offer'
                     : 'Purchase terms offer'}
-                </h2>
+                </summary>
                 {/* Read-only by construction: there is no price input on this screen. */}
                 <dl className={styles.snapshotGrid}>
                   <div className={styles.snapshotField}>
@@ -1995,7 +2161,7 @@ export function CustomerApplicationEditorPage() {
                     reason. Figures are not historical terms.
                   </p>
                 ) : null}
-              </section>
+              </details>
             ) : null}
             <div
               className={isNew ? v4.panel : styles.recordWorkspace}
@@ -2037,6 +2203,8 @@ export function CustomerApplicationEditorPage() {
               ) : null}
               <div className={isNew ? v4.panelBody : undefined}>
                 {showForm ? (
+                  <details open={isNew} className={styles.applicationDetails}>
+                    <summary hidden={isNew}>Application details &amp; ID review</summary>
                   <fieldset
                     disabled={!editable}
                     className={isNew ? v4.formFields : styles.formRoot}
@@ -2335,6 +2503,10 @@ export function CustomerApplicationEditorPage() {
                                         ] ?? serverCurrentDocument.reviewedFields.idType)
                                       : 'Missing: choose the type and upload again'}
                                   </p>
+                                  <p>ID review: {serverCurrentDocument.verificationStatus === 'confirmed' ? 'Confirmed' : 'Pending review'}</p>
+                                  {serverCurrentDocument.verificationStatus !== 'confirmed' && mayReviewIdentity ? (
+                                    <Button variant="secondary" onClick={() => { setIdentityConfirmed(false); setReviewIdOpen(true); }}>Review ID</Button>
+                                  ) : null}
                                 </>
                               ) : null}
                               {idFile ? (
@@ -2701,8 +2873,9 @@ export function CustomerApplicationEditorPage() {
                       </>
                     ) : null}
                   </fieldset>
+                  </details>
                 ) : null}
-                {blockers.length > 0 &&
+                {editable && blockers.length > 0 &&
                 (!isNew ||
                   activeStep === 6 ||
                   !optionalPhonesValid ||
@@ -2716,13 +2889,25 @@ export function CustomerApplicationEditorPage() {
                   </Alert>
                 ) : null}
               </div>
-              {showForm ? (
-                <div className={isNew ? v4.panelFoot : styles.stickyFooter}>
+              {showForm && isNew ? (
+                <div className={v4.panelFoot}>
                   <div className={isNew ? v4.footerContents : styles.stickyFooterInner}>
                     {isNew ? (
-                      <p className={v4.footnote}>
-                        {stepBlockers[activeStep] ??
-                          (activeStep === 6
+                      // One blocker message, not two: the footnote names the step
+                      // and the reason, so the button row stays uncluttered.
+                      <p
+                        className={v4.footnote}
+                        role={
+                          stepBlockers[activeStep] && activeStep < steps.length - 1
+                            ? 'note'
+                            : undefined
+                        }
+                      >
+                        {stepBlockers[activeStep]
+                          ? activeStep < steps.length - 1
+                            ? `Cannot continue (${submitBlockerStep(stepBlockers[activeStep]!)}): ${stepBlockers[activeStep]}`
+                            : stepBlockers[activeStep]
+                          : (activeStep === 6
                             ? 'Submission creates a submitted application, not an approved sale.'
                             : activeStep === 2 && nextHolderSection
                               ? `Next: ${nextHolderSectionLabel}`
@@ -2757,109 +2942,52 @@ export function CustomerApplicationEditorPage() {
                           Continue <span aria-hidden="true">→</span>
                         </Button>
                       ) : null}
-                      {isNew && activeStep < steps.length - 1 && stepBlockers[activeStep] ? (
-                        <span role="note" className={styles.hint}>
-                          Cannot continue ({submitBlockerStep(stepBlockers[activeStep]!)}):{' '}
-                          {stepBlockers[activeStep]}
-                        </span>
-                      ) : null}
                       {!(isNew && activeStep < steps.length - 1) ? saveAction : null}
                     </div>
                   </div>
                 </div>
               ) : null}
             </div>
-            {hasRecordActions ? (
-              <section aria-label="Record actions" className={styles.panel}>
-                {existing.data?.status === 'submitted' ? (
-                  <SignedDocumentPanel
-                    controller={signedApplication}
-                    disabled={decide.isPending || review.isPending}
-                  />
-                ) : null}
-                <div className={styles.recordGroups}>
-                  <div className={styles.actions}>
-                    <Button
-                      onClick={async () => {
-                        try {
-                          // Accept the signed document first (upload + register when a
-                          // new file was picked); each step is idempotent on retry.
-                          await signedApplication.ensureAccepted();
-                        } catch (error) {
-                          setMessage(
-                            error instanceof Error ? error.message : 'The signed document step failed.',
-                          );
-                          return;
-                        }
-                        try {
-                          await decide.mutateAsync('approved');
-                          const reservations = await getReservationAgreements({
-                            application: id!,
-                          }).catch((error: unknown) => {
-                            setMessage(
-                              error instanceof Error
-                                ? error.message
-                                : 'Reservation status could not be loaded.',
-                            );
-                            throw error;
-                          });
-                          if (
-                            !reservations.some((reservation) => reservation.status !== 'cancelled')
-                          ) {
-                            await proposal.refetch();
-                            await review.mutateAsync();
-                          }
-                        } catch {
-                          // Each mutation reports its own failure; the reservation lookup reports above.
-                        }
-                      }}
-                      disabled={
-                        decide.isPending ||
-                        review.isPending ||
-                        existing.data?.status !== 'submitted' ||
-                        signedDocumentBlocker(signedApplication) !== null
-                      }
-                      loading={
-                        (decide.isPending && decidingDecision === 'approved') || review.isPending
-                      }
-                      loadingLabel="Approving…"
-                    >
-                      Review and approve
-                    </Button>
-                    {existing.data?.status === 'submitted' && signedDocumentBlocker(signedApplication) ? (
-                      <span role="note">{signedDocumentBlocker(signedApplication)}</span>
-                    ) : null}
-                    <Button
-                      variant="danger"
-                      onClick={() => decide.mutate('rejected')}
-                      disabled={decide.isPending || existing.data?.status !== 'submitted'}
-                      loading={decide.isPending && decidingDecision === 'rejected'}
-                      loadingLabel="Rejecting…"
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => reopen.mutate()}
-                      disabled={
-                        reopen.isPending ||
-                        !(
-                          existing.data?.status === 'submitted' ||
-                          existing.data?.status === 'rejected'
-                        )
-                      }
-                      loading={reopen.isPending}
-                      loadingLabel="Reopening…"
-                    >
-                      Reopen
-                    </Button>
-                  </div>
-                </div>
-              </section>
-            ) : null}
+
+
           </div>
         </div>
       </section>
+      <Dialog
+        open={reviewIdOpen}
+        title="Review ID"
+        onClose={() => setReviewIdOpen(false)}
+        footer={
+          <Button
+            onClick={() => reviewIdentity.mutate()}
+            disabled={!identityConfirmed || !identityPreview.data || reviewIdentity.isPending}
+          >
+            Confirm ID Review
+          </Button>
+        }
+      >
+        <p>{primary.firstName} {primary.lastName} · {primary.birthDate}</p>
+        {identityPreview.isPending ? <p role="status">Loading ID preview…</p> : null}
+        {identityPreview.isError ? (
+          <p role="alert">The ID preview could not be loaded. Reopen the review to retry.</p>
+        ) : null}
+        {identityPreview.data ? (
+          serverCurrentDocument?.mime === 'application/pdf' ? (
+            <iframe title="Current identity document" src={identityPreview.data.url} className={styles.previewImage} />
+          ) : (
+            <img alt="Current identity document" src={identityPreview.data.url} className={styles.previewImage} />
+          )
+        ) : null}
+        <label>
+          <input
+            type="checkbox"
+            checked={identityConfirmed}
+            onChange={(event) => setIdentityConfirmed(event.target.checked)}
+          />{' '}
+          I reviewed this ID and confirmed it belongs to the primary holder.
+        </label>
+        {reviewIdentity.error ? <p role="alert">{reviewIdentity.error.message}</p> : null}
+      </Dialog>
     </HumanInputValidity.Provider>
   );
 }

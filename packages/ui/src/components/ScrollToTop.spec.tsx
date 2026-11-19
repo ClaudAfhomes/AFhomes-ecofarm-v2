@@ -52,4 +52,35 @@ describe('ScrollToTop', () => {
     expect(scrollTo).not.toHaveBeenCalled();
     target.remove();
   });
+  it.each(['#access_token=synthetic.token&refresh_token=synthetic', '#123:section', '#%E0%A4%A'])(
+    'does not crash on non-selector fragment %s',
+    (hash) => {
+      expect(() =>
+        render(
+          <MemoryRouter initialEntries={['/callback' + hash]}>
+            <ScrollToTop />
+          </MemoryRouter>,
+        ),
+      ).not.toThrow();
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'instant' });
+    },
+  );
+
+  it('finds percent-encoded IDs without interpreting CSS selectors', () => {
+    const target = document.createElement('div');
+    target.id = '123:details with space';
+    target.scrollIntoView = vi.fn();
+    document.body.append(target);
+    try {
+      render(
+        <MemoryRouter initialEntries={['/a#123%3Adetails%20with%20space']}>
+          <ScrollToTop />
+        </MemoryRouter>,
+      );
+      expect(target.scrollIntoView).toHaveBeenCalled();
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      target.remove();
+    }
+  });
 });

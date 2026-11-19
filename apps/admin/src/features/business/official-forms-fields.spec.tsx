@@ -3,9 +3,15 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ApplicationHolder, GenealogyNode } from '@afhomes/contracts';
+import { applicationHolderSchema } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { HolderFields, RecommenderFields, emptyHolder } from './official-forms-fields';
-import { getGenealogy, getOstMemberContacts, resolveAaNumber, getAccreditationNumbers } from '../genealogy/services';
+import {
+  getGenealogy,
+  getOstMemberContacts,
+  resolveAaNumber,
+  getAccreditationNumbers,
+} from '../genealogy/services';
 
 vi.mock('../genealogy/services', () => ({
   getGenealogy: vi.fn(),
@@ -28,12 +34,26 @@ vi.mock('../genealogy/services', () => ({
  * is worse than one that never offers it.
  */
 
-function Holder({ initial, tabbed = false }: { initial?: Partial<ApplicationHolder>; tabbed?: boolean }) {
+function Holder({
+  initial,
+  tabbed = false,
+}: {
+  initial?: Partial<ApplicationHolder>;
+  tabbed?: boolean;
+}) {
   const [value, setValue] = useState<ApplicationHolder>({
     ...emptyHolder('PRIMARY'),
     ...initial,
   });
-  return <HolderFields title="3. Primary holder" value={value} onChange={setValue} sectioned={tabbed} tabbed={tabbed} />;
+  return (
+    <HolderFields
+      title="3. Primary holder"
+      value={value}
+      onChange={setValue}
+      sectioned={tabbed}
+      tabbed={tabbed}
+    />
+  );
 }
 
 const render = (initial?: Partial<ApplicationHolder>) =>
@@ -48,11 +68,23 @@ const optionLabels = (label: string): string[] =>
 const yearsAgo = (years: number): string => `${new Date().getFullYear() - years}-01-01`;
 
 describe('holder pick-lists', () => {
-  it('keeps suffix as optional free text, including values outside the workbook vocabulary', () => {
+  it('offers suffix and prefix as fixed pick-lists only', () => {
     render();
-    expect(screen.getByRole('textbox', { name: 'Suffix' })).toHaveValue('');
-    fireEvent.change(screen.getByLabelText('Suffix'), { target: { value: 'V' } });
-    expect(screen.getByLabelText('Suffix')).toHaveValue('V');
+    expect(screen.queryByRole('textbox', { name: 'Suffix' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Prefix' })).toBeNull();
+    expect(optionLabels('Suffix')).toEqual(['None', 'Jr.', 'Sr.', 'II', 'III', 'IV']);
+    expect(optionLabels('Prefix')).toEqual(['None', 'Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Atty.', 'Engr.']);
+    fireEvent.change(screen.getByLabelText('Suffix'), { target: { value: 'III' } });
+    expect(screen.getByLabelText('Suffix')).toHaveValue('III');
+  });
+
+  it('normalizes typed suffix/prefix spellings and refuses values off the list', () => {
+    const base = applicationHolderSchema.shape;
+    expect(base.suffix.parse('jr')).toBe('Jr.');
+    expect(base.suffix.parse('N/A')).toBeUndefined();
+    expect(base.prefix.parse('atty')).toBe('Atty.');
+    expect(base.suffix.safeParse('V').success).toBe(false);
+    expect(base.prefix.safeParse('Sir').success).toBe(false);
   });
 
   it('keeps the other pick-lists on their shared "Not specified" empty choice', () => {
@@ -106,6 +138,28 @@ describe('holder typed fields', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Contact' }));
     expect(screen.getByLabelText('Email')).toHaveValue('maria@example.test');
   });
+  it('offers prefix and suffix as one-click chips in the wizard, with an undoable None', () => {
+    renderWithProviders(<Holder tabbed />);
+    expect(screen.queryByRole('combobox', { name: 'Prefix' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Suffix' })).toBeNull();
+    const suffix = screen.getByRole('group', { name: 'Suffix' });
+    expect(within(suffix).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual([
+      'None',
+      'Jr.',
+      'Sr.',
+      'II',
+      'III',
+      'IV',
+    ]);
+    expect(within(suffix).getByRole('radio', { name: 'None' })).toBeChecked();
+    fireEvent.click(within(suffix).getByRole('radio', { name: 'Jr.' }));
+    expect(within(suffix).getByRole('radio', { name: 'Jr.' })).toBeChecked();
+    fireEvent.click(within(suffix).getByRole('radio', { name: 'None' }));
+    expect(within(suffix).getByRole('radio', { name: 'None' })).toBeChecked();
+    const prefix = screen.getByRole('group', { name: 'Prefix' });
+    fireEvent.click(within(prefix).getByRole('radio', { name: 'Atty.' }));
+    expect(within(prefix).getByRole('radio', { name: 'Atty.' })).toBeChecked();
+  });
   it('takes citizenship as typed text, not a closed dropdown', () => {
     render();
     const citizenship = screen.getByLabelText('Citizenship');
@@ -137,7 +191,7 @@ describe('holder typed fields', () => {
     // An address is not a name: house numbers and unit designators ARE the
     // address, and a name-only filter would reject "123 Mabini St.".
     const field = screen.getByLabelText('Permanent address line 1');
-    fireEvent.change(field, { target: { value: "123 Mabini St. (Unit 4-B), Brgy. San Felipe" } });
+    fireEvent.change(field, { target: { value: '123 Mabini St. (Unit 4-B), Brgy. San Felipe' } });
     expect(field).toHaveValue('123 Mabini St. (Unit 4-B), Brgy. San Felipe');
   });
 
@@ -344,8 +398,12 @@ describe('recommender contact/email loading states', () => {
     expect(emailSelect).toBeDisabled();
     expect(contactSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
     expect(emailSelect.parentElement?.querySelector('[class*="ring"]')).not.toBeNull();
-    expect(within(contactSelect).queryByRole('option', { name: 'No contact available' })).not.toBeInTheDocument();
-    expect(within(emailSelect).queryByRole('option', { name: 'No email available' })).not.toBeInTheDocument();
+    expect(
+      within(contactSelect).queryByRole('option', { name: 'No contact available' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(emailSelect).queryByRole('option', { name: 'No email available' }),
+    ).not.toBeInTheDocument();
   });
 
   it('enables both dropdowns and populates real options once the fetch resolves', async () => {
@@ -355,10 +413,14 @@ describe('recommender contact/email loading states', () => {
     });
     renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
     expect(
-      await within(screen.getByLabelText('Recommender Contact')).findByRole('option', { name: /09171234567/ }),
+      await within(screen.getByLabelText('Recommender Contact')).findByRole('option', {
+        name: /09171234567/,
+      }),
     ).toBeInTheDocument();
     expect(
-      await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' }),
+      await within(screen.getByLabelText('Recommender Email')).findByRole('option', {
+        name: 'ana@example.com',
+      }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
     expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
@@ -369,9 +431,17 @@ describe('recommender contact/email loading states', () => {
     vi.mocked(getOstMemberContacts).mockResolvedValue({ 'ost-1': { phone: null, email: '' } });
     renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
     await waitFor(() =>
-      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'No contact available' })).toBeInTheDocument(),
+      expect(
+        within(screen.getByLabelText('Recommender Contact')).getByRole('option', {
+          name: 'No contact available',
+        }),
+      ).toBeInTheDocument(),
     );
-    expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'No email available' })).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Email')).getByRole('option', {
+        name: 'No email available',
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
     expect(screen.getByLabelText('Recommender Email')).not.toBeDisabled();
   });
@@ -382,8 +452,16 @@ describe('recommender contact/email loading states', () => {
     renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
     const retry = await screen.findByRole('button', { name: 'Retry contact lookup' });
     await waitFor(() => {
-      expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: 'Unable to load contact numbers' })).toBeInTheDocument();
-      expect(within(screen.getByLabelText('Recommender Email')).getByRole('option', { name: 'Unable to load email' })).toBeInTheDocument();
+      expect(
+        within(screen.getByLabelText('Recommender Contact')).getByRole('option', {
+          name: 'Unable to load contact numbers',
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(screen.getByLabelText('Recommender Email')).getByRole('option', {
+          name: 'Unable to load email',
+        }),
+      ).toBeInTheDocument();
     });
     // Settled on error, not stuck spinning - and still interactive.
     expect(screen.getByLabelText('Recommender Contact')).not.toBeDisabled();
@@ -394,9 +472,15 @@ describe('recommender contact/email loading states', () => {
     });
     fireEvent.click(retry);
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Retry contact lookup' })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole('button', { name: 'Retry contact lookup' }),
+      ).not.toBeInTheDocument(),
     );
-    expect(within(screen.getByLabelText('Recommender Contact')).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Contact')).getByRole('option', {
+        name: /09171234567/,
+      }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -456,13 +540,19 @@ describe('recommender typed fields', () => {
       'ost-1': { phone, email: 'ana@example.com' },
     });
     renderRecommender({ referrerStaffId: '', vipRecommenderName: 'ANA SANTOS' });
-    expect(await within(screen.getByLabelText('Recommender Email')).findByRole('option', { name: 'ana@example.com' })).toBeInTheDocument();
-    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: new RegExp(phone) })).not.toBeInTheDocument();
+    expect(
+      await within(screen.getByLabelText('Recommender Email')).findByRole('option', {
+        name: 'ana@example.com',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Contact')).queryByRole('option', {
+        name: new RegExp(phone),
+      }),
+    ).not.toBeInTheDocument();
   });
   it('refuses a contact number carrying letters by not offering invalid options', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([
-      node('ost-1', 'ANA SANTOS', 'ost'),
-    ]);
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
     vi.mocked(getOstMemberContacts).mockResolvedValue({
       'ost-1': { phone: '09171234567', email: 'ana@example.com' },
     });
@@ -474,17 +564,25 @@ describe('recommender typed fields', () => {
     // Wait for contact options to load
     await waitFor(() => {
       const contactSelect = screen.getByLabelText('Recommender Contact');
-      expect(within(contactSelect).getByRole('option', { name: /09171234567/ })).toBeInTheDocument();
+      expect(
+        within(contactSelect).getByRole('option', { name: /09171234567/ }),
+      ).toBeInTheDocument();
     });
-    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /ana@example\.com/ })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Contact')).queryByRole('option', {
+        name: /ana@example\.com/,
+      }),
+    ).not.toBeInTheDocument();
     // Invalid contact numbers with letters are never offered as options
-    expect(within(screen.getByLabelText('Recommender Contact')).queryByRole('option', { name: /0917abc/ })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Contact')).queryByRole('option', {
+        name: /0917abc/,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps the email lowercase in dropdown options', async () => {
-    vi.mocked(getGenealogy).mockResolvedValue([
-      node('ost-1', 'ANA SANTOS', 'ost'),
-    ]);
+    vi.mocked(getGenealogy).mockResolvedValue([node('ost-1', 'ANA SANTOS', 'ost')]);
     vi.mocked(getOstMemberContacts).mockResolvedValue({
       'ost-1': { phone: '09171234567', email: 'Ana@Example.COM' },
     });
@@ -496,9 +594,15 @@ describe('recommender typed fields', () => {
     // Wait for email options to load
     await waitFor(() => {
       const emailSelect = screen.getByLabelText('Recommender Email');
-      expect(within(emailSelect).getByRole('option', { name: /ana@example\.com/ })).toBeInTheDocument();
+      expect(
+        within(emailSelect).getByRole('option', { name: /ana@example\.com/ }),
+      ).toBeInTheDocument();
     });
-    expect(within(screen.getByLabelText('Recommender Email')).queryByRole('option', { name: /Ana@Example/ })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText('Recommender Email')).queryByRole('option', {
+        name: /Ana@Example/,
+      }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -511,11 +615,17 @@ describe('recommender typed fields', () => {
 describe('VIP recommender AA-number resolution (New Customer Application)', () => {
   it('suggests only active visible OST AAO numbers in the input', async () => {
     vi.mocked(getGenealogy).mockResolvedValue([
-      node(OST_A, 'ANA SANTOS', 'ost'), node(SM_A, 'BEN CRUZ', 'sales_manager'),
+      node(OST_A, 'ANA SANTOS', 'ost'),
+      node(SM_A, 'BEN CRUZ', 'sales_manager'),
     ]);
-    vi.mocked(getAccreditationNumbers).mockResolvedValue({ [OST_A]: 'AAO26100001', [SM_A]: 'AAI26050002' });
+    vi.mocked(getAccreditationNumbers).mockResolvedValue({
+      [OST_A]: 'AAO26100001',
+      [SM_A]: 'AAI26050002',
+    });
     const { container } = renderNewRecommender();
-    await waitFor(() => expect(container.querySelector('datalist option[value="AAO26100001"]')).not.toBeNull());
+    await waitFor(() =>
+      expect(container.querySelector('datalist option[value="AAO26100001"]')).not.toBeNull(),
+    );
     expect(container.querySelector('datalist option[value="AAI26050002"]')).toBeNull();
     expect(screen.getByLabelText('OST Referrer AA number')).toHaveAttribute('list');
   });
@@ -576,9 +686,7 @@ describe('VIP recommender AA-number resolution (New Customer Application)', () =
         status: 'accredited',
       },
     });
-    renderWithProviders(
-      <Recommender initial={{ referrerStaffId: OST_A }} networkSelection />,
-    );
+    renderWithProviders(<Recommender initial={{ referrerStaffId: OST_A }} networkSelection />);
     fireEvent.change(screen.getByLabelText('OST VIP recommender AA number'), {
       target: { value: 'AAO26100001' },
     });

@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 import {
   Button,
+  ChoiceChips,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -71,6 +72,12 @@ export function GenealogyPage() {
     },
     [dateFrom, dateTo, today, todayStr]
   );
+  // Typed dates that match no preset show a "Custom range" chip, so the
+  // active filter is always visible.
+  const presetValue =
+    !dateFrom && !dateTo
+      ? 'all'
+      : String(presets.find((p) => isPresetActive(p.days))?.days ?? 'custom');
 
   const query = useQuery({
     queryKey: genealogyKeys.tree,
@@ -253,18 +260,23 @@ export function GenealogyPage() {
             <h2 className={styles.sectionTitle}>Team Sales Activity</h2>
 
             {/* Quick preset buttons */}
-            <div className={styles.presetButtons} role="group" aria-label="Quick date presets">
-              {presets.map((p) => (
-                <Button
-                  key={p.label}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => applyPreset(p.days)}
-                  className={isPresetActive(p.days) ? styles.presetActive : ''}
-                >
-                  {p.label}
-                </Button>
-              ))}
+            <div className={styles.presetButtons}>
+              <ChoiceChips
+                label="Quick date presets"
+                value={presetValue}
+                onChange={(next) => {
+                  if (next === 'custom') return;
+                  if (next === 'all') {
+                    setDateFrom('');
+                    setDateTo('');
+                  } else applyPreset(Number(next));
+                }}
+                options={[
+                  { value: 'all', label: 'All time' },
+                  ...presets.map((p) => ({ value: String(p.days), label: p.label })),
+                  ...(presetValue === 'custom' ? [{ value: 'custom', label: 'Custom range' }] : []),
+                ]}
+              />
             </div>
 
             {/* Custom date range pickers */}
@@ -276,7 +288,7 @@ export function GenealogyPage() {
                 value={dateFrom}
                 onChange={setDateFrom}
                 max={dateTo || todayStr}
-                hint="Optional — defaults to period start"
+                hint="Defaults to period start"
                 optional
               />
               <DateField
@@ -287,7 +299,7 @@ export function GenealogyPage() {
                 onChange={setDateTo}
                 min={dateFrom || undefined}
                 max={todayStr}
-                hint="Optional — defaults to today"
+                hint="Defaults to today"
                 optional
               />
             </div>

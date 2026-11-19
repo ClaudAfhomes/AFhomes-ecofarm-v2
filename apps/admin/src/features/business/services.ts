@@ -49,6 +49,10 @@ import {
   paymentAdjustmentSchema,
   paymentReferenceMatchSchema,
   type PaymentAdjustment,
+  paymentAdjustmentResolutionGateSchema,
+  type PaymentAdjustmentResolutionGate,
+  resolvePaymentAdjustmentResultSchema,
+  type ResolvePaymentAdjustmentRequest,
   type PaymentReferenceMatch,
   type ProposePaymentAdjustmentRequest,
   paymentReceiptUploadGrantSchema,
@@ -595,6 +599,22 @@ export const proposePaymentAdjustment = (
   input: ProposePaymentAdjustmentRequest,
 ) => post(`/sales/payments/${paymentId}/adjustments`, z.unknown(), input);
 
+/** Read-only: lets the UI disable the resolve buttons with a reason. */
+export const getAdjustmentResolutionGate = (): Promise<PaymentAdjustmentResolutionGate> =>
+  request('/sales/payments/adjustment-resolution-gate', paymentAdjustmentResolutionGateSchema);
+
+/** Records a decision only; the server moves no money and is the authority (Q13). */
+export const resolvePaymentAdjustment = (
+  paymentId: string,
+  adjustmentId: string,
+  input: ResolvePaymentAdjustmentRequest,
+) =>
+  post(
+    `/sales/payments/${paymentId}/adjustments/${adjustmentId}/resolve`,
+    resolvePaymentAdjustmentResultSchema,
+    input,
+  );
+
 export const verifyPayment = (
   paymentId: string,
   input: VerifyPaymentRequest,
@@ -772,7 +792,7 @@ export const qualifyCommission = (
 
 export const markCommissionPaid = (
   id: string,
-  input: MarkCommissionPaidRequest = {},
+  input: MarkCommissionPaidRequest,
 ): Promise<Commission> => post(`/commissions/${id}/pay`, commissionSchema, input);
 
 export const getCommissionRules = (): Promise<CommissionRule[]> =>

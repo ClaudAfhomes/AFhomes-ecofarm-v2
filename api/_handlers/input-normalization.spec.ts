@@ -126,6 +126,7 @@ describe('other writers normalize through the same contracts', () => {
         body: {
           requestId: UUID.viewerStaff,
           customerId: UUID.viewerStaff,
+          smStaffId: UUID.viewerStaff,
           planId: UUID.viewerStaff,
           tier: 'GOLD',
           paymentScheme: 'spot_cash',

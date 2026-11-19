@@ -287,7 +287,11 @@ describe('Phase 29 role dashboard', () => {
     const user = userEvent.setup();
     render();
     await screen.findByText('Sales Overview');
-    await user.selectOptions(screen.getByLabelText('Analytics period'), 'week');
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Analytics period' })).getByRole('radio', {
+        name: 'Week',
+      }),
+    );
     await waitFor(() => {
       expect(requests.some((r) => r.path === '/analytics' && r.query.includes('period=week'))).toBe(
         true,
@@ -451,7 +455,8 @@ describe('Phase 29 role dashboard', () => {
     const scope = within(screen.getByRole('group', { name: 'Data scope' }));
     expect(scope.getByText('Finance')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Scope:\s*finance/);
-    expect(scope.getByText(/to\s*Oct 1, 2026/)).toBeInTheDocument();
+    // The exclusive window end (Oct 1) is shown as the last included day.
+    expect(scope.getByText(/Sep 1, 2026 to Sep 30, 2026/)).toBeInTheDocument();
     expect(scope.getByText('As of today')).toBeInTheDocument();
   });
 

@@ -7,6 +7,7 @@
  * advancement, and a replay proves it.
  */
 import { Client } from 'pg';
+import { randomUUID } from 'node:crypto';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -107,26 +108,31 @@ export async function runActivationIntegrationChecks(world: World) {
   // whatever the queue or a client believes. Built directly rather than by
   // reversing a verified payment: payment decisions are immutable history, and a
   // test that had to rewrite one to make its point would be testing a fiction.
+  const shortPaidCustomer = randomUUID();
+  await db.query(`insert into public.customers(id,customer_number,first_name,last_name,birth_date,email,phone,status)
+    select $1,customer_number,'ELENA','RIVERA','1990-01-01',$2,'+639170000003','prospect' from public.next_customer_number()`,
+    [shortPaidCustomer, `${shortPaidCustomer}@example.invalid`]);
+  world.createdCustomers.push(shortPaidCustomer);
   const shortPaid = (
     await db.query<{ id: string }>(
       `insert into public.card_sales(
          sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,
          minimum_down_payment_snapshot,yearly_points_snapshot,validity_months_snapshot,
          commission_rate_snapshot,commission_base_snapshot,expected_commission_snapshot,
-         status,submitted_at,payment_verified_at,balance_due_at,created_by)
+         status,submitted_at,payment_verified_at,balance_due_at,created_by,origin)
        select sale_number, $1, (select id from public.card_plans where code='BRONZE'),
               'staff',$2,'60000.00','60000.00','10000.00',60000,12,
-              '0','60000.00','0.00','payment_verified',now(),now(),now(),$2
+              '0','60000.00','0.00','payment_verified',now(),now(),now(),$2,'legacy_import'
          from public.next_sale_number()
        returning id`,
-      [world.createdCustomers[0]!, world.seller],
+      [shortPaidCustomer, world.seller],
     )
   ).rows[0]!.id;
   ownedSales.push(shortPaid);
   await db.query(
     `insert into public.payments(sale_id,customer_id,amount,payment_type,method,status,recorded_by,verified_by,recorded_at,verified_at)
      values ($1,$2,'10000.00','down_payment','cash','verified',$3,$3,now(),now())`,
-    [shortPaid, world.createdCustomers[0]!, world.finance],
+    [shortPaid, shortPaidCustomer, world.finance],
   );
   await fails(
     'the SQL financial recheck refuses a sale whose verified money is short',

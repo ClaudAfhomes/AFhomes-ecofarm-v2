@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
-import { paymentReceipt } from './purchase-evidence-fixtures.js';
+import { paymentReceipt, verifiedReservationFee } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -52,6 +52,11 @@ export async function runPurchaseConcurrencyChecks(world: World) {
   const { db, url, check, finance, seller } = world;
   const ownedSales: string[] = [];
   const ownedReservations: string[] = [];
+  const collectedReservation = async () => {
+    const target = await world.executed();
+    const balance = await verifiedReservationFee(db, target.reservationId, finance);
+    return { ...target, balance };
+  };
 
   const second = async () => {
     const client = new Client({ connectionString: url });
@@ -75,8 +80,8 @@ export async function runPurchaseConcurrencyChecks(world: World) {
   await world.record(documented.reservationId, documented.fee, {
     reference: 'DOC-READ',
     method: 'cash',
-    paymentType: 'down_payment',
-    paymentPurpose: 'contractual_down_payment',
+    paymentType: 'installment',
+    paymentPurpose: 'reservation_fee',
   });
   const documentOf = async (kind: string, source: string, actor: string, revision: number | null = null) =>
     db.query<{ purchase_document: Record<string, unknown> }>(
@@ -201,7 +206,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 2. Duplicate payment creation (same request id replayed concurrently).
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
     const other = await second();
     try {
@@ -245,7 +250,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 3. Simultaneous payment verification.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
     const payment = await world.record(target.reservationId, '1000.00', { reference: 'RACE-3' });
     const other = await second();
@@ -281,7 +286,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 4. Verification racing reservation cancellation.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
     const payment = await world.record(target.reservationId, '1000.00', { reference: 'RACE-4' });
     const other = await second();
@@ -319,9 +324,9 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 5. Two simultaneous finalizers -> exactly one AF-CSALE.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
-    await world.record(target.reservationId, target.total, {
+    await world.record(target.reservationId, target.balance, {
       reference: 'RACE-5',
       method: 'cash',
       paymentType: 'full',
@@ -329,7 +334,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
     });
     for (const id of (
       await db.query<{ id: string }>(
-        'select id from public.payments where reservation_id=$1',
+        "select id from public.payments where reservation_id=$1 and status='recorded'",
         [target.reservationId],
       )
     ).rows)
@@ -379,16 +384,16 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 6. Finalization racing a LATE payment record.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
-    await world.record(target.reservationId, target.total, {
+    await world.record(target.reservationId, target.balance, {
       reference: 'RACE-6',
       method: 'cash',
       paymentType: 'full',
       paymentPurpose: 'contractual_full',
     });
     for (const id of (
-      await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
+      await db.query<{ id: string }>("select id from public.payments where reservation_id=$1 and status='recorded'", [
         target.reservationId,
       ])
     ).rows)
@@ -447,16 +452,16 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 7. Finalization racing a payment DECISION (rejecting a verified payment).
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
-    await world.record(target.reservationId, target.total, {
+    await world.record(target.reservationId, target.balance, {
       reference: 'RACE-7',
       method: 'cash',
       paymentType: 'full',
       paymentPurpose: 'contractual_full',
     });
     const payments = (
-      await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
+      await db.query<{ id: string }>("select id from public.payments where reservation_id=$1 and status='recorded'", [
         target.reservationId,
       ])
     ).rows;
@@ -501,16 +506,16 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 8. Activation replay under concurrency.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
-    await world.record(target.reservationId, target.total, {
+    await world.record(target.reservationId, target.balance, {
       reference: 'RACE-8',
       method: 'cash',
       paymentType: 'full',
       paymentPurpose: 'contractual_full',
     });
     for (const id of (
-      await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
+      await db.query<{ id: string }>("select id from public.payments where reservation_id=$1 and status='recorded'", [
         target.reservationId,
       ])
     ).rows)
@@ -652,16 +657,16 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 11. Same business object, different request ids.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
-    await world.record(target.reservationId, target.total, {
+    await world.record(target.reservationId, target.balance, {
       reference: 'RACE-11',
       method: 'cash',
       paymentType: 'full',
       paymentPurpose: 'contractual_full',
     });
     for (const id of (
-      await db.query<{ id: string }>('select id from public.payments where reservation_id=$1', [
+      await db.query<{ id: string }>("select id from public.payments where reservation_id=$1 and status='recorded'", [
         target.reservationId,
       ])
     ).rows)
@@ -712,7 +717,7 @@ export async function runPurchaseConcurrencyChecks(world: World) {
 
   // 12. Document evidence revision concurrency.
   {
-    const target = await world.executed();
+    const target = await collectedReservation();
     ownedReservations.push(target.reservationId);
     const other = await second();
     try {

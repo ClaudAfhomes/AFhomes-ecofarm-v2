@@ -76,6 +76,12 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         alsoModules: ['finance.payroll_close'],
       },
       {
+        to: '/admin/finance/payroll',
+        label: 'IST Payroll',
+        module: 'finance.payroll',
+        alsoModules: ['finance.payroll_approval'],
+      },
+      {
         to: '/admin/finance/activation',
         label: 'Activation List',
         module: 'finance.card_activation',
@@ -84,6 +90,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
         to: '/admin/finance/commissions',
         label: 'Commissions',
         module: 'network.commissions',
+        alsoModules: ['finance.commission_payouts'],
       },
       {
         to: '/admin/commissions/settings',

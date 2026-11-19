@@ -1,8 +1,11 @@
+import { Link } from 'react-router';
 import { useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import {
   Button,
+  ChoiceChips,
+  DateField,
   DetailField,
   DetailFieldGrid,
   Dialog,
@@ -25,9 +28,16 @@ import { useSession } from '../../lib/session';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { canViewModule } from '../../app/navigation';
 import { formatRate } from './format';
-import { formatCount, formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
+import { addMoney, formatCount, formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import { getCommissions, markCommissionPaid, qualifyCommission } from './services';
 import { businessKeys } from './queryKeys';
+import { CommissionOpsDialog } from './CommissionOpsDialog';
+import { CommissionDetailDialog } from './CommissionDetailDialog';
+import { manilaToday } from './payroll-utils';
+
+const PAYOUT_METHODS = ['Bank transfer', 'Cheque', 'Cash', 'E-wallet'] as const;
+/** markCommissionPaidSchema's sanity floor against typos (e.g. year 0026). */
+const EARLIEST_PAYMENT_DATE = '2000-01-01';
 import styles from './BusinessCommissionsPage.module.css';
 
 const STATUSES = [
@@ -112,6 +122,10 @@ export function BusinessCommissionsPage() {
     applyFilters({ status, search: search.trim(), seller: term }),
   );
   const mayMutate = canDecideCommissions(user?.afHomesPermissions);
+  const mayPay =
+    user?.afHomesPermissions.some(
+      (p) => p.moduleKey === 'finance.commission_payouts' && p.canUpdate,
+    ) === true;
   // Sellers are scoped server-side to their own commissions; the seller filter
   // is only useful for Finance/Admin who see every row.
   const mayFilterBySeller =
@@ -131,14 +145,45 @@ export function BusinessCommissionsPage() {
 
   const [qualifying, setQualifying] = useState<Commission | null>(null);
   const [paying, setPaying] = useState<Commission | null>(null);
+  const [managing, setManaging] = useState<Commission | null>(null);
+  const [viewingSnapshot, setViewing] = useState<Commission | null>(null);
+  // The commission contract carries no hold field, so holds placed or released in
+  // this session are tracked here (id -> reason). The server still enforces them.
+  const [held, setHeld] = useState<Record<string, string | null>>({});
+  /** Server state, overridden by a hold placed or released in this session until refetch. */
+  const heldReasonOf = (c: Commission) =>
+    c.id in held ? (held[c.id] ?? null) : (c.withheldReason ?? null);
 
   const rows = useMemo(() => query.data ?? [], [query.data]);
+  // An open detail follows the refreshed row (polling, decisions from other sessions), so
+  // it never offers an action on a stale status. The snapshot covers a row a filter dropped.
+  const viewing = viewingSnapshot
+    ? (rows.find((c) => c.id === viewingSnapshot.id) ?? viewingSnapshot)
+    : null;
   // Headline counts from the loaded rows.
   const summary = useMemo(() => {
     const awaiting = rows.filter((c) => c.status === 'final_qualification_pending').length;
     const earned = rows.filter((c) => c.status === 'earned').length;
     const paid = rows.filter((c) => c.status === 'paid').length;
-    return { total: rows.length, awaiting, earned, paid };
+    const amountFor = (statuses: Commission['status'][]) =>
+      rows
+        .filter((c) => statuses.includes(c.status))
+        .reduce((sum, c) => addMoney(sum, c.amount), '0.00');
+    return {
+      total: rows.length,
+      awaiting,
+      earned,
+      paid,
+      eligibleAmount: amountFor([
+        'payment_verified',
+        'final_qualification_pending',
+        'earned',
+        'paid',
+      ]),
+      awaitingAmount: amountFor(['final_qualification_pending']),
+      earnedAmount: amountFor(['earned']),
+      paidAmount: amountFor(['paid']),
+    };
   }, [rows]);
 
   const refresh = async () => {
@@ -208,6 +253,13 @@ export function BusinessCommissionsPage() {
                 />
               </li>
             </ul>
+            <p className={styles.summaryNote}>
+              Displayed records: eligible {formatMoneyOrDash(summary.eligibleAmount)} / awaiting
+              decision {formatMoneyOrDash(summary.awaitingAmount)} / approved unpaid{' '}
+              {formatMoneyOrDash(summary.earnedAmount)} / paid{' '}
+              {formatMoneyOrDash(summary.paidAmount)}. Eligible includes later approved and paid
+              stages; these figures are not additive.
+            </p>
             {filtered ? <p className={styles.summaryNote}>Counts follow your filters.</p> : null}
           </section>
 
@@ -258,9 +310,10 @@ export function BusinessCommissionsPage() {
               <>
                 <Button
                   variant="secondary"
-                  onClick={() =>
-                    applyFilters({ status, search: search.trim(), seller: seller.trim() })
-                  }
+                  onClick={() => {
+                    applyFilters({ status, search: search.trim(), seller: seller.trim() });
+                    void client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
+                  }}
                 >
                   Apply
                 </Button>
@@ -271,6 +324,7 @@ export function BusinessCommissionsPage() {
                     setStatus('');
                     setSeller('');
                     setApplied({});
+                    void client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
                   }}
                 >
                   Clear
@@ -317,19 +371,39 @@ export function BusinessCommissionsPage() {
                 </thead>
                 <tbody>
                   {rows.map((commission) => {
-                    const action =
-                      !mayMutate ? null : commission.status === 'final_qualification_pending' ? (
-                        <Button size="sm" onClick={() => setQualifying(commission)}>
-                          Decide
+                    const heldReason = heldReasonOf(commission);
+                    const manage =
+                      (mayMutate || mayPay) &&
+                      (commission.status === 'earned' || commission.status === 'paid') ? (
+                        <Button size="sm" variant="ghost" onClick={() => setManaging(commission)}>
+                          {mayMutate ? 'Hold, payouts & recovery' : 'Commission Payouts'}
                         </Button>
-                      ) : commission.status === 'earned' ? (
+                      ) : null;
+                    const primary =
+                      mayMutate && commission.status === 'final_qualification_pending' ? (
+                        <Button size="sm" onClick={() => setQualifying(commission)}>
+                          Qualify Commission
+                        </Button>
+                      ) : mayPay && commission.status === 'earned' ? (
                         <Button
                           size="sm"
                           variant="secondary"
+                          disabled={heldReason !== null}
+                          title={heldReason !== null ? `On hold: ${heldReason}` : undefined}
                           onClick={() => setPaying(commission)}
                         >
-                          Mark Paid
+                          Record External Commission Payment
                         </Button>
+                      ) : null;
+                    const action =
+                      primary || manage ? (
+                        <>
+                          {primary}
+                          {manage}
+                          {heldReason !== null ? (
+                            <span className={styles.secondary}>On hold: {heldReason}</span>
+                          ) : null}
+                        </>
                       ) : null;
                     return (
                       <tr
@@ -339,10 +413,15 @@ export function BusinessCommissionsPage() {
                         }
                       >
                         <td data-label="Commission" className={styles.refCell}>
-                          <span className={styles.recordRef}>
+                          <button
+                            type="button"
+                            className={`${styles.recordRef} ${styles.recordRefButton}`}
+                            aria-label={`View details for commission ${commission.commissionNumber ?? commission.saleNumber}`}
+                            onClick={() => setViewing(commission)}
+                          >
                             <span className={styles.recordRefDot} aria-hidden="true" />
                             {commission.commissionNumber ?? '—'}
-                          </span>
+                          </button>
                           <span className={styles.secondary}>{commission.saleNumber}</span>
                         </td>
                         <td data-label="Beneficiary" className={styles.beneficiaryCell}>
@@ -351,7 +430,10 @@ export function BusinessCommissionsPage() {
                             {commission.beneficiaryType === 'ost' ? 'OST' : 'Staff'}
                           </span>
                         </td>
-                        <td data-label="Amount" className={`${styles.numeric} ${styles.amountCell}`}>
+                        <td
+                          data-label="Amount"
+                          className={`${styles.numeric} ${styles.amountCell}`}
+                        >
                           <span className={styles.amount}>
                             {formatMoneyOrDash(commission.amount)}
                           </span>
@@ -384,8 +466,28 @@ export function BusinessCommissionsPage() {
                         <td data-label="Action" className={styles.actionCell}>
                           {action ?? (
                             <span className={styles.secondary}>
-                              <span aria-hidden="true">—</span>
-                              <span className="sr-only">No action needed</span>
+                              {commission.status === 'payment_verified' ? (
+                                <>
+                                  Activation is required before qualification.
+                                  {canViewModule(
+                                    user?.afHomesPermissions,
+                                    'finance.card_activation',
+                                  ) ? (
+                                    <>
+                                      {' '}
+                                      <Link to="/admin/finance/activation">View activation</Link>
+                                    </>
+                                  ) : null}
+                                </>
+                              ) : commission.status === 'pending' ? (
+                                'Waiting for verified payment.'
+                              ) : commission.status === 'cancelled' ? (
+                                'Cancelled.'
+                              ) : commission.status === 'paid' ? (
+                                'Payment recorded.'
+                              ) : (
+                                'Your role cannot perform the next action.'
+                              )}
                             </span>
                           )}
                         </td>
@@ -399,6 +501,35 @@ export function BusinessCommissionsPage() {
         </>
       )}
 
+      {viewing ? (
+        <CommissionDetailDialog
+          commission={viewing}
+          recordsPayouts={mayPay}
+          heldReason={heldReasonOf(viewing)}
+          onClose={() => setViewing(null)}
+          action={
+            mayMutate && viewing.status === 'final_qualification_pending' ? (
+              <Button
+                onClick={() => {
+                  setQualifying(viewing);
+                  setViewing(null);
+                }}
+              >
+                Qualify Commission
+              </Button>
+            ) : mayPay && viewing.status === 'earned' && heldReasonOf(viewing) === null ? (
+              <Button
+                onClick={() => {
+                  setPaying(viewing);
+                  setViewing(null);
+                }}
+              >
+                Record External Commission Payment
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : null}
       {qualifying ? (
         <QualifyDialog
           commission={qualifying}
@@ -407,6 +538,14 @@ export function BusinessCommissionsPage() {
             setQualifying(null);
             await refresh();
           }}
+        />
+      ) : null}
+      {managing ? (
+        <CommissionOpsDialog
+          commission={managing}
+          heldReason={heldReasonOf(managing)}
+          onHeldChange={(reason) => setHeld((current) => ({ ...current, [managing.id]: reason }))}
+          onClose={() => setManaging(null)}
         />
       ) : null}
       {paying ? (
@@ -443,7 +582,7 @@ function QualifyDialog({
     <Dialog
       open
       onClose={onClose}
-      title="Final qualification decision"
+      title="Qualify Commission"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -463,18 +602,18 @@ function QualifyDialog({
         <p className={styles.formNote}>
           This decision is final. Your notes and name are recorded. The amount stays unchanged.
         </p>
-        <label className={styles.filterLabel}>
-          Decision
-          <Select
-            aria-label="Decision"
+        <div className={styles.filterLabel}>
+          <span aria-hidden="true">Decision</span>
+          <ChoiceChips
+            label="Decision"
             value={decision}
-            onChange={(e) => setDecision(e.target.value as 'earned' | 'cancelled')}
+            onChange={(next) => setDecision(next as 'earned' | 'cancelled')}
             options={[
               { value: 'earned', label: 'Qualify: commission earned' },
               { value: 'cancelled', label: 'Cancel: commission cancelled' },
             ]}
           />
-        </label>
+        </div>
         <div className={styles.fullRow}>
           <TextAreaField
             id="commission-decision-notes"
@@ -505,24 +644,49 @@ function MarkPaidDialog({
   onDone: () => Promise<void>;
 }) {
   const [reference, setReference] = useState('');
+  const [method, setMethod] = useState<string>(PAYOUT_METHODS[0]);
+  const [paidOn, setPaidOn] = useState(manilaToday());
+  const [evidence, setEvidence] = useState('');
   const pay = useBusinessMutation({
     mutationFn: () =>
-      markCommissionPaid(commission.id, reference.trim() ? { reference: reference.trim() } : {}),
+      markCommissionPaid(commission.id, {
+        reference: reference.trim(),
+        method,
+        paidOn,
+        evidenceReference: evidence.trim(),
+      }),
     onSuccess: onDone,
   });
+  // Same limits as markCommissionPaidSchema; the server re-checks every one of them.
+  const today = manilaToday();
+  const dateProblem = !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)
+    ? null // empty or incomplete: the required field speaks for itself
+    : paidOn > today
+      ? 'The payment date cannot be in the future.'
+      : paidOn < EARLIEST_PAYMENT_DATE
+        ? 'Enter a real payment date.'
+        : null;
+  const valid =
+    reference.trim().length >= 3 &&
+    reference.trim().length <= 100 &&
+    /[A-Za-z0-9]/.test(reference) &&
+    evidence.trim().length >= 10 &&
+    evidence.trim().length <= 500 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(paidOn) &&
+    dateProblem === null;
 
   return (
     <Dialog
       open
       onClose={onClose}
-      title="Mark commission paid"
+      title="Record External Commission Payment"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={pay.isPending} onClick={() => pay.mutate()}>
-            Mark Paid
+          <Button disabled={!valid || pay.isPending} onClick={() => pay.mutate()}>
+            Record External Commission Payment
           </Button>
         </>
       }
@@ -530,15 +694,50 @@ function MarkPaidDialog({
       <div className={styles.formGrid}>
         <CommissionFacts commission={commission} />
         <p className={styles.formNote}>
-          This records who paid, and when. The amount stays unchanged.
+          Record a payment already made outside AF Homes. The approved amount and recipient are
+          fixed; only the payment details are entered here.
         </p>
+        <label className={styles.filterLabel}>
+          Payment method
+          <Select
+            aria-label="Payment method"
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+            options={PAYOUT_METHODS.map((m) => ({ value: m, label: m }))}
+          />
+        </label>
+        <DateField
+          id="commission-payment-date"
+          name="paidOn"
+          label="Payment date"
+          hint="The day the money was paid outside AF Homes: today or earlier."
+          min={EARLIEST_PAYMENT_DATE}
+          max={today}
+          value={paidOn}
+          onChange={setPaidOn}
+        />
+        {dateProblem ? (
+          <p role="alert" className={styles.formAlert}>
+            {dateProblem}
+          </p>
+        ) : null}
         <TextField
           id="commission-payment-reference"
           name="paymentReference"
-          label="Payment reference"
-          optional
+          label="External payment reference"
+          hint="Bank or transfer reference: 3 to 100 characters, including a letter or number. Each reference can back only one payout."
+          maxLength={100}
           value={reference}
           onChange={setReference}
+        />
+        <TextField
+          id="commission-payment-evidence"
+          name="paymentEvidence"
+          label="Payment evidence reference"
+          hint="Supporting document or external payment evidence reference, 10 to 500 characters."
+          maxLength={500}
+          value={evidence}
+          onChange={setEvidence}
         />
         {pay.error ? (
           <p role="alert" className={styles.formAlert}>

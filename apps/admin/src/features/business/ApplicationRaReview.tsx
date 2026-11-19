@@ -78,6 +78,7 @@ export function ApplicationRaReview({
   onDownload,
   onPrint,
   disabled = false,
+  reservationNumber,
 }: {
   onDownload?: () => Promise<void>;
   onPrint?: () => Promise<void>;
@@ -85,6 +86,7 @@ export function ApplicationRaReview({
   onChange: (value: ApplicationRaDraft) => void;
   defaults: ApplicationRaDraft;
   disabled?: boolean;
+  reservationNumber?: string;
 }) {
   const [error, setError] = useState('');
   const [preparing, setPreparing] = useState(false);
@@ -104,8 +106,9 @@ export function ApplicationRaReview({
     <section className={v4.reviewbox} aria-label="Reservation Agreement review">
       <h2>Reservation Agreement review</h2>
       <p>
-        Preliminary document details. These entries do not verify payments or issue an agreement
-        number. Final terms remain subject to approval.
+        {disabled
+          ? 'Recorded document details. Payment status comes from verified payments.'
+          : 'Proposed document details. Terms are frozen at submission and remain subject to approval.'}
       </p>
       <Button
         variant="secondary"
@@ -119,7 +122,7 @@ export function ApplicationRaReview({
           Choose a configured plan to suggest payment terms, or enter proposed terms below.
         </p>
       ) : null}
-      <Field label="Official Reservation Agreement Number" value="Pending authorized reservation issuance" readOnly onChange={() => {}} />
+      <Field label="Official Reservation Agreement Number" value={reservationNumber ?? "Pending authorized reservation issuance"} readOnly onChange={() => {}} />
       {value.reservationNumber ? <p>Legacy proposed reference: {value.reservationNumber}. This is not an issued RA number.</p> : null}
       <div className={v4.grid2}>
         {fields.map(([key, label, type]) => (

@@ -28,6 +28,7 @@
     "test:db:application-prefix": "pnpm --filter @afhomes/db-testing exec node scripts/test-application-prefix.mjs",
     "test:db:local": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-local.mjs && pnpm test:db:external-import",
     "test:db:external-import": "tsx packages/db-testing/scripts/test-external-customer-import.mjs",
+    "test:db:workflow": "tsx packages/db-testing/scripts/test-workflow-alignment.mjs",
     "test:db:reconciliation": "tsx packages/db-testing/scripts/test-supabase-catalog-reconciliation.mjs",
     "test:db:harness": "pnpm --filter @afhomes/db-testing install && pnpm --filter @afhomes/db-testing exec node scripts/test-db-harness.mjs",
     "test:security:db": "node packages/db-testing/scripts/test-security-remediation.mjs --full",

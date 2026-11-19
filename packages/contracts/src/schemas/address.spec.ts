@@ -13,6 +13,7 @@ import {
   CIVIL_STATUS_OPTIONS,
   OLDEST_HOLDER_AGE,
   SEX_OPTIONS,
+  storedApplicationHolderSchema,
 } from './official-forms.js';
 
 describe('geographicCodeSchema', () => {
@@ -157,9 +158,10 @@ describe('applicationHolderSchema geographic fields', () => {
   it('rejects a half-verified hierarchy', () => {
     // Two codes and no barangay would store a parent/child pair the authority
     // never confirmed. All three or none.
-    expect(application({ ...holderBase, provinceCode: '0403400000', cityMunicipalityCode: '0403406000' }).success).toBe(
-      false,
-    );
+    expect(
+      application({ ...holderBase, provinceCode: '0403400000', cityMunicipalityCode: '0403406000' })
+        .success,
+    ).toBe(false);
   });
 
   it('rejects a half-verified hierarchy on the SECONDARY holder alone', () => {
@@ -171,7 +173,13 @@ describe('applicationHolderSchema geographic fields', () => {
         planId: '11111111-1111-4111-8111-111111111111',
         tier: 'GOLD',
         paymentScheme: 'spot_cash',
-        primary: { ...holderBase, barangay: 'Dayap', provinceCode: '0403400000', cityMunicipalityCode: '0403406000', barangayCode: '0403406003' },
+        primary: {
+          ...holderBase,
+          barangay: 'Dayap',
+          provinceCode: '0403400000',
+          cityMunicipalityCode: '0403406000',
+          barangayCode: '0403406003',
+        },
         secondary: {
           ...holderBase,
           holderType: 'SECONDARY',
@@ -285,14 +293,14 @@ describe('applicationHolderSchema geographic fields', () => {
     ).toBe(false);
   });
 
-  it('takes suffix as free text, not a pick-list', () => {
-    // `customer_application_holders.suffix` is a plain `text` column with no
-    // database-level enum, and the read side already accepts any string here
-    // (`storedApplicationHolderSchema`) - the write side matches it, same as
-    // citizenship below: a real applicant's suffix is not limited to the five
-    // historical examples (Jr./Sr./II/III/IV).
-    expect(applicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success).toBe(true);
-    expect(applicationHolderSchema.parse({ ...holderBase, suffix: 'V' }).suffix).toBe('V');
+  it('takes suffix only from the fixed pick-list (user-confirmed 2026-11-13)', () => {
+    // Write side only: stored legacy values still read through
+    // `storedApplicationHolderSchema`, so no historical record is rewritten.
+    expect(applicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success).toBe(false);
+    expect(applicationHolderSchema.parse({ ...holderBase, suffix: 'jr' }).suffix).toBe('Jr.');
+    expect(storedApplicationHolderSchema.safeParse({ ...holderBase, suffix: 'V' }).success).toBe(
+      true,
+    );
   });
 
   it('refuses a sex and a civil status outside the recordable pick-lists', () => {
@@ -311,9 +319,9 @@ describe('applicationHolderSchema geographic fields', () => {
   it('takes citizenship as typed text rather than the workbook pick-list', () => {
     // The workbook vocabulary covers three cases; a real applicant can hold any
     // nationality, so the form must accept one the template never named.
-    expect(applicationHolderSchema.parse({ ...holderBase, citizenship: 'Filipino' }).citizenship).toBe(
-      'Filipino',
-    );
+    expect(
+      applicationHolderSchema.parse({ ...holderBase, citizenship: 'Filipino' }).citizenship,
+    ).toBe('Filipino');
     expect(
       applicationHolderSchema.parse({ ...holderBase, citizenship: 'American' }).citizenship,
     ).toBe('American');
@@ -321,35 +329,40 @@ describe('applicationHolderSchema geographic fields', () => {
       applicationHolderSchema.parse({ ...holderBase, citizenship: "Cote d'Ivoire" }).citizenship,
     ).toBe("Cote d'Ivoire");
     // Blank stays "not provided" rather than becoming an empty citizenship.
-    expect(applicationHolderSchema.parse({ ...holderBase, citizenship: '' }).citizenship).toBeUndefined();
+    expect(
+      applicationHolderSchema.parse({ ...holderBase, citizenship: '' }).citizenship,
+    ).toBeUndefined();
     // Still a nationality, not free text: no digits, markup or angle brackets.
-    expect(applicationHolderSchema.safeParse({ ...holderBase, citizenship: 'A1' }).success).toBe(false);
-    expect(applicationHolderSchema.safeParse({ ...holderBase, citizenship: '<b>x</b>' }).success).toBe(
+    expect(applicationHolderSchema.safeParse({ ...holderBase, citizenship: 'A1' }).success).toBe(
       false,
     );
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, citizenship: '<b>x</b>' }).success,
+    ).toBe(false);
   });
 
   it('refuses a holder born past working age', () => {
     const year = new Date().getUTCFullYear();
     // Scoped to the holder on purpose: members, OST applicants and the import
     // keep the shared lifetime rule, and no stored record is rewritten.
-    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 30}-01-01` }).success).toBe(
-      true,
-    );
-    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 76}-01-01` }).success).toBe(
-      false,
-    );
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 30}-01-01` }).success,
+    ).toBe(true);
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 76}-01-01` }).success,
+    ).toBe(false);
     // A birth date the lifetime rule already refuses stays refused.
-    expect(applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 130}-01-01` }).success).toBe(
-      false,
-    );
+    expect(
+      applicationHolderSchema.safeParse({ ...holderBase, birthDate: `${year - 130}-01-01` })
+        .success,
+    ).toBe(false);
     expect(OLDEST_HOLDER_AGE).toBe(75);
   });
 
   it('accepts only a real TIN shape', () => {
-    expect(applicationHolderSchema.parse({ ...holderBase, tinNumber: '123-456-789' }).tinNumber).toBe(
-      '123-456-789',
-    );
+    expect(
+      applicationHolderSchema.parse({ ...holderBase, tinNumber: '123-456-789' }).tinNumber,
+    ).toBe('123-456-789');
     expect(applicationHolderSchema.parse({ ...holderBase, tinNumber: '123456789' }).tinNumber).toBe(
       '123456789',
     );

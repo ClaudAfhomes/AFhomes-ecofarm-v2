@@ -13,11 +13,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { reservationNextStep } from './next-step';
-import {
-  SignedDocumentPanel,
-  signedDocumentBlocker,
-  useSignedDocument,
-} from './SignedDocumentPanel';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type {
 
@@ -45,6 +40,7 @@ import {
 
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   PageHeader,
   Pagination,
@@ -227,13 +223,13 @@ export function ReservationAgreementsPage() {
         }
         filters={
           <>
-            <label className={styles.filterLabel}>
-              Queue
-              <Select
-                aria-label="Queue"
+            <div className={styles.filterLabel}>
+              <span aria-hidden="true">Queue</span>
+              <ChoiceChips
+                label="Queue"
                 value={reservationWorkOnly ? 'reservation_work' : 'all'}
-                onChange={(e) => {
-                  setReservationWorkOnly(e.target.value === 'reservation_work');
+                onChange={(next) => {
+                  setReservationWorkOnly(next === 'reservation_work');
                   setPage(0);
                 }}
                 options={[
@@ -241,22 +237,24 @@ export function ReservationAgreementsPage() {
                   { value: 'all', label: 'Include progressed' },
                 ]}
               />
-            </label>
-            <label className={styles.filterLabel}>
-              Tier
-              <Select
-                aria-label="Tier"
+            </div>
+            <div className={styles.filterLabel}>
+              <span aria-hidden="true">Tier</span>
+              <ChoiceChips
+                label="Tier"
                 value={tier}
-                onChange={(e) => {
-                  setTier(e.target.value);
+                onChange={(next) => {
+                  setTier(next);
                   setPage(0);
                 }}
                 options={[
                   { value: '', label: 'All' },
-                  ...['BRONZE', 'SILVER', 'GOLD'].map((t) => ({ value: t, label: t })),
+                  { value: 'BRONZE', label: 'Bronze' },
+                  { value: 'SILVER', label: 'Silver' },
+                  { value: 'GOLD', label: 'Gold' },
                 ]}
               />
-            </label>
+            </div>
           </>
         }
       />
@@ -349,7 +347,7 @@ export function ReservationAgreementsPage() {
       ) : (
         <EmptyState
           title="No reservation agreements"
-          description="Create an agreement from an approved application."
+          description="Agreements are created together with customer applications."
         />
       )}
 
@@ -423,9 +421,6 @@ export function ReservationAgreementEditorPage() {
    */
   const applicationOrigin =
     existing.data?.origin === 'application' || (!id && Boolean(customerApplicationId));
-  // Only application-origin agreements need an accepted signed RA before execution.
-  const needsSignedRa = existing.data?.origin === 'application';
-  const signedReservation = useSignedDocument('reservations', id, needsSignedRa);
   // The frozen offer is the ONLY source of the economics shown here. It is
   // server-derived, and a stale copy is refreshed rather than reused.
   const proposal = useQuery({
@@ -1121,8 +1116,11 @@ export function ReservationAgreementEditorPage() {
           </div>
         </section>
       </fieldset>
-      {id && existing.data?.status === 'submitted' && needsSignedRa ? (
-        <SignedDocumentPanel controller={signedReservation} disabled={decide.isPending} />
+      {applicationOrigin && existing.data?.customerApplicationId ? (
+        <Alert variant="info">
+          Signed documents and approval are managed together on the customer application.{' '}
+          <Link to={`/admin/customers/applications/${existing.data.customerApplicationId}`}>Open application and RA approval</Link>
+        </Alert>
       ) : null}
       <div className={styles.stickyFooter}>
         <div className={styles.buttonRow}>
@@ -1139,7 +1137,7 @@ export function ReservationAgreementEditorPage() {
               This agreement is already {existing.data?.status} and can no longer be edited.
             </span>
           ) : null}
-          {id && existing.data?.status === 'draft' ? (
+          {id && !applicationOrigin && existing.data?.status === 'draft' ? (
             <Button
               variant="secondary"
               onClick={() => submit.mutate()}
@@ -1149,32 +1147,18 @@ export function ReservationAgreementEditorPage() {
               Submit
             </Button>
           ) : null}
-          {id && existing.data?.status === 'submitted' ? (
+          {id && !applicationOrigin && existing.data?.status === 'submitted' ? (
             <>
               <Button
-                onClick={async () => {
-                  try {
-                    if (needsSignedRa) await signedReservation.ensureAccepted();
-                  } catch (error) {
-                    setMessage(
-                      error instanceof Error ? error.message : 'The signed document step failed.',
-                    );
-                    return;
-                  }
-                  decide.mutate('executed');
-                }}
-                disabled={needsSignedRa && signedDocumentBlocker(signedReservation) !== null}
+                onClick={() => decide.mutate('executed')}
                 loading={decide.isPending}
                 loadingLabel="Executing…"
               >
                 Review and execute
               </Button>
-              {needsSignedRa && signedDocumentBlocker(signedReservation) ? (
-                <span role="note">{signedDocumentBlocker(signedReservation)}</span>
-              ) : null}
             </>
           ) : null}
-          {id && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
+          {id && !applicationOrigin && (existing.data?.status === 'draft' || existing.data?.status === 'submitted') ? (
             <Button
               variant="danger"
               onClick={() => decide.mutate('cancelled')}
@@ -1184,7 +1168,7 @@ export function ReservationAgreementEditorPage() {
               Cancel
             </Button>
           ) : null}
-          {id && existing.data?.status === 'submitted' ? (
+          {id && !applicationOrigin && existing.data?.status === 'submitted' ? (
             <Button
               variant="secondary"
               onClick={() => reopen.mutate()}
@@ -1326,6 +1310,16 @@ function ApplicationOriginAgreementPanel({
               'Not created'}
           </dd>
         </div>
+        <div className={styles.snapshotField}>
+          <dt>VIP Card ID</dt>
+          <dd>{money?.vipCardNumber ?? agreement.vipCardNumber ?? 'Awaiting a verified qualifying non-reservation payment'}</dd>
+        </div>
+        {money?.commissionEligibleAt ? (
+          <div className={styles.snapshotField}>
+            <dt>Commission Eligible</dt>
+            <dd>{formatDateTime(money.commissionEligibleAt)}</dd>
+          </div>
+        ) : null}
         <div className={styles.snapshotField}>
           <dt>Total purchase</dt>
           <dd>{formatMoneyOrDash(money?.totalPrice ?? agreement.totalPrice)}</dd>

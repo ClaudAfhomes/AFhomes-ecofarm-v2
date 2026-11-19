@@ -30,6 +30,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   Icon,
   OverflowMenu,
@@ -137,7 +138,7 @@ function formatMoneyInput(raw: string): string {
  * on exactly the milestone the Payment column shows, never on lifecycle.
  */
 const PROGRESS_OPTIONS = [
-  { value: 'all', label: 'All payment progress' },
+  { value: 'all', label: 'All' },
   { value: 'none', label: 'No Verified Payments' },
   { value: 'partial', label: 'Partially Paid' },
   { value: 'full', label: 'Fully Paid' },
@@ -158,9 +159,11 @@ const itemProgress = (item: FinanceCollectionQueueItem): PaymentProgress =>
  * agreement's status for an application-origin row. Never mixed with money.
  */
 const lifecycleBadge = (item: FinanceCollectionQueueItem): StatusBadge =>
-  item.origin === 'sale'
-    ? saleStatusBadge(item.status)
-    : reservationAgreementStatusBadge(item.status);
+  nextPaymentStep(item).key === 'reservation'
+    ? { label: 'Awaiting Reservation Payment', tone: 'warning' }
+    : item.origin === 'sale'
+      ? saleStatusBadge(item.status)
+      : reservationAgreementStatusBadge(item.status);
 
 /**
  * Loading placeholder: hero chips, summary badges and table rows shaped like
@@ -412,6 +415,8 @@ export function BusinessFinanceQueuePage() {
     await client.invalidateQueries({ queryKey: businessKeys.saleSummaryScope });
     await client.invalidateQueries({ queryKey: businessKeys.salePaymentsScope });
     await client.invalidateQueries({ queryKey: businessKeys.sales });
+    await client.invalidateQueries({ queryKey: businessKeys.commissionsScope });
+    await client.invalidateQueries({ queryKey: ['payroll'] });
   };
 
   // First load skeletonizes the whole page: header, summary, filters and
@@ -508,15 +513,15 @@ export function BusinessFinanceQueuePage() {
               />
             }
             filters={
-              <label className={styles.filterLabel}>
-                Payment progress
-                <Select
-                  aria-label="Filter by payment progress"
+              <div className={styles.filterLabel}>
+                <span aria-hidden="true">Payment progress</span>
+                <ChoiceChips
+                  label="Filter by payment progress"
                   value={progressFilter}
-                  onChange={(event) => setProgressFilter(event.target.value as ProgressFilter)}
+                  onChange={(next) => setProgressFilter(next as ProgressFilter)}
                   options={[...PROGRESS_OPTIONS]}
                 />
-              </label>
+              </div>
             }
           />
 
@@ -981,7 +986,7 @@ export function RecordPaymentDialog({
     (options.find((option) => option.purpose === purposeChoice) ?? options[0])?.purpose ??
     '';
   const chosen = options.find((option) => option.purpose === purpose);
-  const amount = frozen?.amount ?? amountEdit ?? chosen?.amount ?? '';
+  const amount = frozen?.amount ?? amountEdit ?? '';
   const amountDirty = amountEdit !== null;
   const choosePurpose = (next: PaymentPurpose) => {
     setPurposeChoice(next);
@@ -1058,6 +1063,7 @@ export function RecordPaymentDialog({
         setFrozen({ purpose, amount });
       }
       let fullyPaid: boolean;
+      let vipCardNumber: string | null = null;
       try {
         if (input.note) await saveDuplicateReview(paymentId, input.note);
         if (origin === 'reservation') {
@@ -1066,6 +1072,7 @@ export function RecordPaymentDialog({
             decision: 'verified',
           });
           fullyPaid = outcome.fullyPaid;
+          vipCardNumber = outcome.vipCardNumber ?? null;
         } else {
           const outcome = await verifyPayment(paymentId, { decision: 'verified' });
           fullyPaid = outcome.fullyPaid;
@@ -1078,10 +1085,10 @@ export function RecordPaymentDialog({
           isDuplicateHold(error) || Boolean(input.note),
         );
       }
-      return { paymentId, fullyPaid };
+      return { paymentId, fullyPaid, vipCardNumber };
     },
     // The alert reports the SERVER's stored row, never the browser's optimism.
-    onSuccess: async ({ paymentId, fullyPaid }) => {
+    onSuccess: async ({ paymentId, fullyPaid, vipCardNumber }) => {
       await onDone();
       paymentRequest.complete();
       verifyRequest.complete();
@@ -1101,17 +1108,16 @@ export function RecordPaymentDialog({
         // The payment IS recorded and verified; the alert falls back to the form.
       }
       const detail = [
-          `Amount: ${formatMoneyOrDash(stored?.amount ?? amount)}`,
-          purpose ? `Purpose: ${PAYMENT_PURPOSE_LABEL[purpose]}` : null,
-          `Reference: ${stored?.reference ?? (reference || '—')}`,
-          stored?.orNumber ? `OR number: ${stored.orNumber}` : null,
-          `Payment ID: ${stored?.paymentNumber ?? '—'}`,
-          customerName ? `Customer: ${customerName}` : null,
-          recordLabel
-            ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}`
-            : null,
-          `Current payment status: ${stored?.status ?? 'verified'}`,
-        ]
+        `Amount: ${formatMoneyOrDash(stored?.amount ?? amount)}`,
+        purpose ? `Purpose: ${PAYMENT_PURPOSE_LABEL[purpose]}` : null,
+        `Reference: ${stored?.reference ?? (reference || '—')}`,
+        stored?.orNumber ? `OR number: ${stored.orNumber}` : null,
+        `Payment ID: ${stored?.paymentNumber ?? '—'}`,
+        customerName ? `Customer: ${customerName}` : null,
+        recordLabel ? `${origin === 'reservation' ? 'Reservation' : 'Sale'}: ${recordLabel}` : null,
+        `Current payment status: ${stored?.status ?? 'verified'}`,
+        vipCardNumber ? `VIP Card ID: ${vipCardNumber}` : null,
+      ]
         .filter((line): line is string => line !== null)
         .join('\n');
       // The final payment made the purchase fully paid: offer the (still manual)
@@ -1120,7 +1126,7 @@ export function RecordPaymentDialog({
         const activateNow = await notifyConfirm({
           title: 'Payment Recorded and Verified',
           message: `${detail}\n\nThis purchase is now fully paid. Activate the membership now?`,
-          confirmButtonText: 'Activate now',
+          confirmButtonText: 'Activate VIP Membership',
         });
         if (activateNow) navigate(`/admin/finance/activation?sale=${encodeURIComponent(saleId)}`);
         return;
@@ -1176,7 +1182,13 @@ export function RecordPaymentDialog({
           loadingLabel={recordedId ? 'Verifying…' : 'Recording and verifying…'}
           onClick={() => save.mutate({})}
         >
-          {recordedUnverified ? 'Retry verification' : 'Verify and record'}
+          {recordedUnverified
+            ? purpose === 'reservation_fee'
+              ? 'Verify Reservation Payment'
+              : 'Verify Payment'
+            : purpose === 'reservation_fee'
+              ? 'Record & Verify Reservation Payment'
+              : 'Record & Verify Payment'}
         </Button>
       ) : (
         <Button
@@ -1218,8 +1230,8 @@ export function RecordPaymentDialog({
                   <strong>Recorded and verified in one action.</strong> Server recalculates balance.
                 </p>
                 {summary.data ? (
-                  <section className={styles.detailSection} aria-label="Sale figures">
-                    <h2 className={styles.detailTitle}>Sale figures</h2>
+                  <details className={styles.detailSection} aria-label="Sale figures">
+                    <summary className={styles.detailTitle}>Sale figures</summary>
                     <dl className={styles.facts}>
                       <div>
                         <dt>Scheme</dt>
@@ -1254,15 +1266,18 @@ export function RecordPaymentDialog({
                         <dd>{formatMoney(summary.data.remainingBalance)}</dd>
                       </div>
                     </dl>
-                  </section>
+                  </details>
                 ) : null}
                 <section className={styles.detailSection} aria-label="Payment details">
                   <h2 className={styles.detailTitle}>Payment details</h2>
                   <div className={styles.formGrid}>
                     {options.length === 0 ? (
                       <p role="alert" className={styles.formAlert}>
-                        No payment can be recorded: the purchase is fully paid or every remaining
-                        amount is already awaiting verification.
+                        {ledger.data?.some(
+                          (p) => p.paymentPurpose === 'reservation_fee' && p.status === 'recorded',
+                        )
+                          ? 'Verify the recorded reservation payment before recording another payment.'
+                          : 'No payment can be recorded: the purchase is fully paid, remaining money is awaiting verification, or a required reservation payment needs review.'}
                       </p>
                     ) : (
                       <label className={styles.field}>
@@ -1285,12 +1300,13 @@ export function RecordPaymentDialog({
                       type="text"
                       inputMode="decimal"
                       value={formatMoneyInput(amount)}
-                      readOnly={chosen?.locked ?? false}
                       hint={
                         chosen?.locked
-                          ? 'Full payment must equal the exact remaining balance.'
+                          ? purpose === 'reservation_fee'
+                            ? 'Enter the reservation payment amount shown in the agreed terms.'
+                            : 'Full payment must equal the exact remaining balance.'
                           : chosen
-                            ? `Next amount due is pre-filled; at most ${formatMoney(chosen.max)}.`
+                            ? `Enter the amount received, up to ${formatMoney(chosen.max)}.`
                             : undefined
                       }
                       onChange={(value) => {
@@ -1300,7 +1316,9 @@ export function RecordPaymentDialog({
                         amountDirty && !amountValid
                           ? 'Enter a valid amount greater than zero without letters or scientific notation.'
                           : amountDirty && chosen && !amountWithinLimit
-                            ? `Amount cannot exceed ${formatMoney(chosen.max)} for this payment.`
+                            ? chosen.locked
+                              ? `For this payment type, enter ${formatMoney(chosen.amount)}. Choose partial payment for a smaller amount.`
+                              : `Amount cannot exceed ${formatMoney(chosen.max)} for this payment.`
                             : undefined
                       }
                     />
@@ -1468,7 +1486,13 @@ export function RecordPaymentDialog({
                   <p className={styles.formNote}>{receiptName}</p>
                   {previewUrl && receiptFile?.type === 'application/pdf' ? (
                     <>
-                      <object data={previewUrl} type="application/pdf" aria-label="Proof PDF preview" width="100%" height="320" />
+                      <object
+                        data={previewUrl}
+                        type="application/pdf"
+                        aria-label="Proof PDF preview"
+                        width="100%"
+                        height="320"
+                      />
                       <a href={previewUrl} target="_blank" rel="noreferrer">
                         Open proof PDF
                       </a>
@@ -1556,13 +1580,16 @@ export function VerifyDialog({
             ...(input.reason ? { reason: input.reason } : {}),
           });
     },
-    onSuccess: async (_result, input) => {
+    onSuccess: async (result, input) => {
       verificationRequest.complete();
       setHoldId(null);
       if (input?.decision === 'verified') {
         notifySuccess({
           title: 'Payment verified',
           message: 'The payment now counts toward the price.',
+          ...('vipCardNumber' in result && result.vipCardNumber
+            ? { detail: `VIP Card ID: ${result.vipCardNumber}` }
+            : {}),
         });
       }
       setRefreshing(true);
@@ -1650,7 +1677,9 @@ export function VerifyDialog({
                         loadingLabel="Verifying…"
                         disabled={decide.isPending}
                       >
-                        Verify
+                        {payment.paymentPurpose === 'reservation_fee'
+                          ? 'Verify Reservation Payment'
+                          : 'Verify Payment'}
                       </Button>
                       <Button
                         variant="danger"
@@ -1794,6 +1823,18 @@ function ReservationDetails({
             <dt>Application</dt>
             <dd>{item.applicationNumber}</dd>
           </div>
+          <div>
+            <dt>VIP Card ID</dt>
+            <dd>
+              {item.vipCardNumber ?? 'Awaiting a verified qualifying non-reservation payment'}
+            </dd>
+          </div>
+          {item.commissionEligibleAt ? (
+            <div>
+              <dt>Commission Eligible</dt>
+              <dd>{formatDateTime(item.commissionEligibleAt)}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>Seller</dt>
             <dd>{item.sellerName}</dd>

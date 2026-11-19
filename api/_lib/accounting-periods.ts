@@ -20,7 +20,8 @@ import type { VercelRequest, VercelResponse } from './http.js';
  *
  *   GET  finance-summary?period=YYYY-MM   -> figures for the dashboard cards / pre-close checklist
  *   GET  periods                          -> periods on file, newest first
- *   POST periods/:period/submit           -> Finance submits the month for closing
+ *   GET  periods/:period/readiness        -> { period, ready, blockers[], warnings[] } (pre-close)
+ *   POST periods/:period/submit         -> Finance submits the month for closing
  *   POST periods/:period/return           -> the closing authority returns it (reason required)
  *   POST periods/:period/close            -> the closing authority closes it
  *
@@ -95,6 +96,20 @@ export async function handleAccountingPeriods(
         snapshot: r.snapshot ?? null,
       })),
     );
+    return true;
+  }
+
+  const readiness = route(req, 'GET', /^periods\/([0-9]{4}-[0-9]{2})\/readiness$/);
+  if (readiness) {
+    const auth = await viewer(req);
+    if ('error' in auth) return (deny(res, auth), true);
+    if (!PERIOD.test(readiness[1]!)) return (fail(res, 'VALIDATION_ERROR', 'Invalid period', 400), true);
+    const { data, error } = await db.rpc('accounting_period_readiness', {
+      p_period: readiness[1]!,
+      p_actor_id: auth.userId,
+    });
+    if (error) return (mapRpcError(res, error), true);
+    res.status(200).json(data);
     return true;
   }
 

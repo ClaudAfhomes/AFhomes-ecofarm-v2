@@ -7,6 +7,8 @@ assert.equal(new Set(selected.map(f => f.split('_')[0])).size, selected.length);
 assert.equal(files.length - selected.length, 3);
 assert(selected.includes('20261130000003_afhomes_reconcile_membership_sale_team.sql'));
 assert(selected.includes('20261206000006_afhomes_reconcile_workbook_network_version.sql'));
+assert(selected.includes('2026123000014_afhomes_mutation_receipt_vip_fields.sql'));
+assert.throws(() => localMigrationManifest(['invalid_afhomes_migration.sql']), /regular expression/);
 assert.throws(() => localMigrationManifest([...files, '20261223000001_afhomes_unknown.sql']), /Unreconciled duplicate/);
 assert.throws(() => localMigrationManifest(files.filter(f => !f.startsWith('20261130000003_'))), /Missing forward repair/);
 console.log('PASS: unique-version CLI manifest retains both forward repairs and refuses unknown collisions or missing repairs');

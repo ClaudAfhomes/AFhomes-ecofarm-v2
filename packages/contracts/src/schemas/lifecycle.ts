@@ -262,7 +262,7 @@ const RESERVATION_AGREEMENT_TRANSITIONS: Record<
 > = {
   draft: ['submitted', 'cancelled'],
   submitted: ['executed', 'cancelled', 'draft'],
-  executed: [],
+  executed: ['cancelled'],
   cancelled: [],
 };
 

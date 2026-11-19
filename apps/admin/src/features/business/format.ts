@@ -32,9 +32,11 @@ export function formatMoney(exactDecimal: string | null | undefined): string {
  */
 export function formatRate(exactRate: string | null | undefined): string {
   if (!exactRate) return '—';
-  const frac = exactRate.split('.')[1] ?? '';
+  const [whole = '0', frac = ''] = exactRate.split('.');
   // 4 fraction digits: /10000 of the unit, so /100 gives the percent.
-  const hundredths = frac.padEnd(4, '0').replace(/^0+/, '').padStart(3, '0');
+  const hundredths = (BigInt(whole) * 10000n + BigInt(frac.padEnd(4, '0')))
+    .toString()
+    .padStart(3, '0');
   return `${hundredths.slice(0, -2)}.${hundredths.slice(-2)}%`;
 }
 

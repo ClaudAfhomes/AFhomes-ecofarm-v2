@@ -787,6 +787,11 @@ describe('customer import/export handler', () => {
     expect(body.job.validRows).toBe(1);
     expect(body.rows[0]!.action).toBe('CREATE');
     expect((holder.db as FakeSupabase).tables['customers']).toHaveLength(0);
+    expect(
+      (holder.db as FakeSupabase).calls.some(
+        (c) => c.op === 'rpc' && c.table === 'preview_import_sellers',
+      ),
+    ).toBe(false);
   });
 
   it('flags a row with no resolvable Sales Manager seller and keeps the other rows valid', async () => {
@@ -806,13 +811,21 @@ describe('customer import/export handler', () => {
         ],
       },
     );
+    const saleRow = pendingRow({
+      source_status: 'Partial',
+      payment_amount: '10000.00',
+      payment_date: '2025-01-01',
+      payment_method: 'cash',
+      payment_scheme: 'spot_cash',
+      historical_sale_total: '312000.00',
+    });
     const second = { ...pendingRow(), email: 'second-import-row@example.invalid' };
     const res = await call({
       path: 'parse',
       method: 'POST',
       body: {
         source: 'excel',
-        contentBase64: xlsxOf([pendingRow(), second]),
+        contentBase64: xlsxOf([saleRow, second]),
         sourceName: 'members.xlsx',
       },
     });
@@ -831,6 +844,11 @@ describe('customer import/export handler', () => {
       }),
     ]);
     expect(body.rows[1]!.errors).toHaveLength(0);
+    const preview = (holder.db as FakeSupabase).calls.filter(
+      (c) => c.op === 'rpc' && c.table === 'preview_import_sellers',
+    );
+    expect(preview).toHaveLength(1);
+    expect((preview[0]!.arg as { p_row_ids: string[] }).p_row_ids).toHaveLength(1);
     // The flag is saved on the stored row, so the review workbook shows it.
     const stored = (holder.db as FakeSupabase).rows('customer_import_rows');
     expect(

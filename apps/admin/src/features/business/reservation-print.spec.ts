@@ -119,3 +119,9 @@ it('never labels a legacy draft proposal as an official RA number', () => {
  expect(rows.flatMap(r=>r.cells??[]).find(c=>c.label==='Official Reservation Agreement Number')?.value).toBe('____________________');
  expect(rows.flatMap(r=>r.cells??[]).find(c=>c.label==='Legacy proposed reference (not official)')?.value).toBe('LEGACY-PROPOSAL');
 });
+
+it('prints the linked agreement number independently of legacy proposed references', () => {
+  const rows = reservationPaperRows(draftReservationPaper(primary, null, 'SILVER', 'spot_cash', plan,
+    { reservationNumber: 'LEGACY-PROPOSAL' }, '2026-0002'));
+  expect(rows.flatMap(row => row.cells ?? []).find(cell => cell.label === 'Official Reservation Agreement Number')?.value).toBe('2026-0002');
+});

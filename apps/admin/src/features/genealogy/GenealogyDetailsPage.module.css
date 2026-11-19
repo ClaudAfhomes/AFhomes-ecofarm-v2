@@ -260,16 +260,6 @@
   gap: var(--space-2);
 }
 
-.presetActive {
-  background: var(--color-brand-primary);
-  color: #fff;
-  border-color: var(--color-brand-primary);
-}
-
-.presetActive:hover {
-  background: var(--color-brand-secondary);
-  border-color: var(--color-brand-secondary);
-}
 
 .dateRangeInputs {
   display: grid;

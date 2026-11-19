@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Payment as ContractPayment } from '@afhomes/contracts';
-import { Button, Dialog, ErrorState, Select, StatusChip, notifyError } from '@afhomes/ui';
+import { Button, ChoiceChips, Dialog, ErrorState, StatusChip, notifyError } from '@afhomes/ui';
 import { compareMoney } from '@afhomes/shared';
 import styles from './BusinessFinanceQueuePage.module.css';
 import { formatDateTime } from '../../lib/format';
@@ -9,9 +9,11 @@ import { useSession } from '../../lib/session';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
 import { formatMoney, paymentStatusBadge } from './format';
 import {
+  getAdjustmentResolutionGate,
   getPaymentAdjustments,
   getPaymentReferenceMatches,
   proposePaymentAdjustment,
+  resolvePaymentAdjustment,
 } from './services';
 
 /** Sale and reservation payments differ only in their owner ids, which are not used here. */
@@ -128,24 +130,183 @@ const ADJUSTMENT_STATUS: Record<string, string> = {
   withdrawn: 'Withdrawn',
 };
 
-/** Existing proposals for one payment. Read-only: nothing here can approve. */
+const DECISION_LABEL = {
+  approved: 'Approve',
+  rejected: 'Reject',
+  withdrawn: 'Withdraw',
+} as const;
+type Decision = keyof typeof DECISION_LABEL;
+const DECISION_ORDER: Decision[] = ['approved', 'rejected', 'withdrawn'];
+const RESOLVED_TONE = { approved: 'success', rejected: 'danger', withdrawn: 'neutral' } as const;
+const RESOLVED_LABEL = { approved: 'Approved', rejected: 'Rejected', withdrawn: 'Withdrawn' };
+
+export const RESOLVE_STATEMENT =
+  'This records a decision only. No money moves; the original payment is never changed. Approved adjustments are reported in the month’s figures but do not change verified collections, commission eligibility or activation (open policy Q13).';
+export const GATE_PENDING_REASON = 'Resolution authority awaits Presidential approval (Q13)';
+export const GATE_PERMISSION_REASON = 'Requires Payment Adjustment Decisions permission';
+
+/** Why the resolve buttons are disabled, or null when the server says the caller may decide. */
+function gateReason(gate: ReturnType<typeof useGate>): string | null {
+  if (gate.isPending) return 'Checking resolution authority…';
+  if (gate.isError) return 'Resolution authority could not be checked. Try again shortly.';
+  if (gate.data.authorized) return null;
+  return gate.data.q13Status === 'pending' ? GATE_PENDING_REASON : GATE_PERMISSION_REASON;
+}
+
+function useGate(enabled: boolean) {
+  return useQuery({
+    queryKey: ['business', 'payment-adjustment-gate'],
+    queryFn: getAdjustmentResolutionGate,
+    enabled,
+  });
+}
+
+/** Resolve dialog: one required note and the plain statement of what a decision does. */
+export function ResolveAdjustmentDialog({
+  paymentId,
+  adjustmentId,
+  decision,
+  onClose,
+}: {
+  paymentId: string;
+  adjustmentId: string;
+  decision: Decision;
+  onClose: () => void;
+}) {
+  const client = useQueryClient();
+  const [note, setNote] = useState('');
+  const valid = note.trim().length >= REVIEW_NOTE_MIN;
+  const resolve = useBusinessMutation({
+    mutationFn: () =>
+      resolvePaymentAdjustment(paymentId, adjustmentId, { decision, note: note.trim() }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['business', 'payment-adjustments', paymentId] }),
+        // Month-end readiness and finance summary live under `queue`.
+        client.invalidateQueries({ queryKey: ['business', 'queue'] }),
+        client.invalidateQueries({ queryKey: ['business', 'sale-payments'] }),
+        client.invalidateQueries({ queryKey: ['business', 'reservation-payments'] }),
+      ]);
+      onClose();
+    },
+    onError: (error) =>
+      notifyError({
+        title: 'Decision not recorded',
+        message: error instanceof Error ? error.message : 'The decision was not recorded.',
+      }),
+  });
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`${DECISION_LABEL[decision]} adjustment`}
+      footer={
+        <div className={styles.dialogFooter}>
+          <span className={styles.dialogFooterSpacer} aria-hidden="true" />
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!valid}
+            loading={resolve.isPending}
+            loadingLabel="Saving…"
+            onClick={() => resolve.mutate()}
+          >
+            {`Confirm ${DECISION_LABEL[decision].toLowerCase()}`}
+          </Button>
+        </div>
+      }
+    >
+      <div className={styles.formGrid}>
+        <p className={styles.formNote}>{RESOLVE_STATEMENT}</p>
+        <label className={styles.field}>
+          Decision note
+          <textarea
+            value={note}
+            maxLength={500}
+            rows={3}
+            aria-invalid={note.length > 0 && !valid}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </label>
+        {note.length > 0 && !valid ? (
+          <span role="alert" className={styles.formAlert}>
+            Enter at least {REVIEW_NOTE_MIN} characters.
+          </span>
+        ) : null}
+        {resolve.error ? (
+          <p role="alert" className={styles.formAlert}>
+            {resolve.error.message}
+          </p>
+        ) : null}
+      </div>
+    </Dialog>
+  );
+}
+
+/** Proposals for one payment, with resolve actions (server-authorized) and full history. */
 export function PaymentAdjustmentsList({ paymentId }: { paymentId: string }) {
   const list = useQuery({
     queryKey: ['business', 'payment-adjustments', paymentId],
     queryFn: () => getPaymentAdjustments(paymentId),
   });
+  const hasProposed = list.data?.some((a) => a.status === 'proposed') ?? false;
+  const gate = useGate(hasProposed);
+  const [resolving, setResolving] = useState<{ id: string; decision: Decision } | null>(null);
   if (!list.data?.length) return null;
+  const reason = hasProposed ? gateReason(gate) : null;
   return (
-    <ul className={styles.timeline} aria-label="Adjustment proposals">
-      {list.data.map((adjustment) => (
-        <li key={adjustment.id} className={styles.timelineMeta}>
-          {KIND_LABEL[adjustment.kind] ?? adjustment.kind} · {formatMoney(adjustment.amount)} ·{' '}
-          {adjustment.effectiveDate} · {ADJUSTMENT_STATUS[adjustment.status] ?? adjustment.status}
-          {' — '}
-          {adjustment.reason}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className={styles.timeline} aria-label="Adjustment proposals">
+        {list.data.map((adjustment) => (
+          <li key={adjustment.id} className={styles.timelineMeta}>
+            {KIND_LABEL[adjustment.kind] ?? adjustment.kind} · {formatMoney(adjustment.amount)} ·{' '}
+            {adjustment.effectiveDate} ·{' '}
+            {adjustment.status === 'proposed' ? (
+              ADJUSTMENT_STATUS.proposed
+            ) : (
+              <StatusChip
+                tone={RESOLVED_TONE[adjustment.status]}
+                label={RESOLVED_LABEL[adjustment.status]}
+              />
+            )}
+            {' — '}
+            {adjustment.reason}
+            {adjustment.status !== 'proposed' ? (
+              <span>
+                {' '}
+                · Decided by {adjustment.decidedByName ?? 'unknown'}
+                {adjustment.decidedAt ? ` on ${formatDateTime(adjustment.decidedAt)}` : ''}
+                {adjustment.postingPeriod ? ` · Period ${adjustment.postingPeriod}` : ''}
+                {adjustment.decisionNote ? ` · Note: ${adjustment.decisionNote}` : ''}
+              </span>
+            ) : (
+              <span className={styles.timelineActions}>
+                {DECISION_ORDER.map((decision) => (
+                  <Button
+                    key={decision}
+                    variant="secondary"
+                    disabled={reason !== null}
+                    onClick={() => setResolving({ id: adjustment.id, decision })}
+                  >
+                    {DECISION_LABEL[decision]}
+                  </Button>
+                ))}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {reason ? <p className={styles.formNote}>{reason}</p> : null}
+      {resolving ? (
+        <ResolveAdjustmentDialog
+          paymentId={paymentId}
+          adjustmentId={resolving.id}
+          decision={resolving.decision}
+          onClose={() => setResolving(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -218,15 +379,10 @@ export function ProposeAdjustmentDialog({
           </p>
         ) : (
           <>
-            <label className={styles.field}>
-              Kind
-              <Select
-                aria-label="Kind"
-                value={kind}
-                onChange={(event) => setKind(event.target.value)}
-                options={KIND_OPTIONS}
-              />
-            </label>
+            <div className={styles.field}>
+              <span aria-hidden="true">Kind</span>
+              <ChoiceChips label="Kind" value={kind} onChange={setKind} options={KIND_OPTIONS} />
+            </div>
             <label className={styles.field}>
               Amount
               <input

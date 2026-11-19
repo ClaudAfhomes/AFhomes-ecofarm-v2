@@ -54,7 +54,7 @@ export const qualifyCommission = (
 
 export const markCommissionPaid = (
   id: string,
-  input: MarkCommissionPaidRequest = {},
+  input: MarkCommissionPaidRequest,
 ): Promise<Commission> => post(`/commissions/${id}/pay`, commissionSchema, input);
 
 export const getCommissionRules = (): Promise<CommissionRule[]> =>

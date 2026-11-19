@@ -62,6 +62,7 @@ export function CreateMemberDialog({
       // and duplicates, which only it can judge).
       const payload = {
         profilePhotoBase64: values.profilePhotoBase64,
+        identityDocument: values.identityDocument,
         fullName: values.fullName.trim(),
         email: values.email.trim(),
         temporaryPassword: values.temporaryPassword,
@@ -145,7 +146,7 @@ export function CreateMemberDialog({
     <MemberFormDialog
       open
       mode="create"
-      title="Create Member"
+      title="Create IST"
       seed={EMPTY_MEMBER_SEED}
       onSubmit={(values) => save.mutate(values)}
       isSubmitting={save.isPending}

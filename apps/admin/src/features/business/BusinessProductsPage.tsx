@@ -11,6 +11,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   PageHeader,
   SearchField,
@@ -659,10 +660,10 @@ export function BusinessProductsPage() {
                   />
                 }
                 filters={
-                  <Select
-                    aria-label="Filter by status"
+                  <ChoiceChips
+                    label="Filter by status"
                     value={visibility}
-                    onChange={(e) => setVisibility(e.target.value as CardPlanVisibility)}
+                    onChange={(next) => setVisibility(next as CardPlanVisibility)}
                     options={[
                       { value: 'active', label: 'Active' },
                       { value: 'inactive', label: 'Inactive' },

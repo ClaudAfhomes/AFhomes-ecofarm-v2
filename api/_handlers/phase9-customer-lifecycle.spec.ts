@@ -254,30 +254,11 @@ describe('seller scope on sales', () => {
 /* ================================================================== */
 
 describe('card plan selection and frozen snapshots', () => {
-  it('4. sells only an active plan and freezes its economics', async () => {
+  it('4. preserves existing frozen sale economics after catalogue edits', async () => {
     const db = install();
-    const state = await call(sales, {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({
-      cashPrice: '60000.00',
-      minimumDownPayment: '20000.00',
-      yearlyPoints: 60000,
-      commissionRate: '0.04',
-      expectedCommission: '2400.00',
-      status: 'submitted',
-    });
-    // Later product edits cannot move the frozen sale.
-    const product = db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!;
+    const product = db.rows('card_plans').find(r => r.id === PRODUCT.gold)!;
     product.cash_price = '99999.99';
-    const reread = await call(sales, {
-      path: `${(state.body as { id: string }).id}`,
-      token: TOKEN2.finance,
-    });
+    const reread = await call(sales, { path: SALE.submitted, token: TOKEN2.finance });
     expect(reread.body).toMatchObject({ cashPrice: '60000.00', expectedCommission: '2400.00' });
   });
 

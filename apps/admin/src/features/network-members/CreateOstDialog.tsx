@@ -1,3 +1,4 @@
+import { CreationSection, MemberIdUpload } from './MemberCreationParts';
 import { getOstSponsors } from '../ost/services';
 import { OstAddressFields, emptyOstAddress } from '@afhomes/ui';
 import { useOstAddress } from '../address/useOstAddress';
@@ -21,6 +22,7 @@ import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   createOstMemberSchema,
+  type MemberIdentityDocument,
   officialOstFormDefaults,
   ostAnnualExpiry,
   ostToday as today,
@@ -61,6 +63,7 @@ export function CreateOstDialog({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const [identityDocument, setIdentityDocument] = useState<MemberIdentityDocument>();
   const [mode, setMode] = useState<'complete' | 'pending'>('complete');
   const [profilePhotoBase64, setProfilePhotoBase64] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -100,6 +103,10 @@ export function CreateOstDialog({
   };
 
   const submit = () => {
+    if (!identityDocument) {
+      setError('Upload the government ID in Identification & details.');
+      return;
+    }
     if (mode === 'complete' && !profilePhotoBase64) {
       setError('Choose a profile photo.');
       return;
@@ -115,6 +122,7 @@ export function CreateOstDialog({
     }
     const parsed = createOstMemberSchema.safeParse({
       mode,
+      identityDocument,
       ...(mode === 'complete'
         ? {
             temporaryPassword,
@@ -168,17 +176,24 @@ export function CreateOstDialog({
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={() => {
+        if (!create.isPending) onClose();
+      }}
       title="Create OST"
       footer={
         <>
+          {!identityDocument ? (
+            <p className={styles.footerHint} role="status">
+              Upload the government ID in Identification &amp; details.
+            </p>
+          ) : null}
           <Button variant="secondary" onClick={onClose} disabled={create.isPending}>
             Cancel
           </Button>
           <Button
             type="submit"
             form="create-ost-form"
-            disabled={mode === 'complete' && !profilePhotoBase64}
+            disabled={!identityDocument || (mode === 'complete' && !profilePhotoBase64)}
             loading={create.isPending}
             loadingLabel="Creating…"
           >
@@ -188,6 +203,7 @@ export function CreateOstDialog({
       }
     >
       <form
+        noValidate
         id="create-ost-form"
         className={styles.dialogBody}
         onSubmit={(event) => {
@@ -219,8 +235,7 @@ export function CreateOstDialog({
             </Alert>
           </div>
         ) : null}
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Personal information</legend>
+        <CreationSection title="Personal information">
           <div className={styles.formFields}>
             <div className={styles.inlinePair}>
               {IDENTITY_FIELDS.map(({ name, label, ...rest }) => (
@@ -244,10 +259,9 @@ export function CreateOstDialog({
               onChange={onChange('birthDate')}
             />
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Home address</legend>
+        <CreationSection title="Home address">
           <div className={styles.formFields}>
             <TextField
               id="create-ost-line1"
@@ -265,10 +279,23 @@ export function CreateOstDialog({
               />
             </div>
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Assignment</legend>
+        <CreationSection title="Identification & details">
+          <MemberIdUpload
+            value={identityDocument}
+            onChange={setIdentityDocument}
+            disabled={create.isPending}
+          />
+          <OstOfficialFields
+            grouped
+            className={`${styles.formSection} ${styles.officialFields}`}
+            values={official}
+            onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
+          />
+        </CreationSection>
+
+        <CreationSection title="Assignment">
           <div className={styles.formFields}>
             <TextField
               id="create-ost-role"
@@ -302,10 +329,9 @@ export function CreateOstDialog({
               </Button>
             </p>
           ) : null}
-        </fieldset>
+        </CreationSection>
 
-        <fieldset className={styles.formSection}>
-          <legend className={styles.sectionTitle}>Account</legend>
+        <CreationSection title="Account">
           <div className={styles.formFields}>
             <TextField
               id="create-ost-email"
@@ -336,34 +362,26 @@ export function CreateOstDialog({
               </>
             ) : null}
           </div>
-        </fieldset>
+        </CreationSection>
 
-        <OstOfficialFields
-          grouped
-          className={`${styles.formSection} ${styles.officialFields}`}
-          values={official}
-          onChange={(name, value) => setOfficial((current) => ({ ...current, [name]: value }))}
-        />
-
-        <section className={styles.formSection} aria-labelledby="create-ost-finish">
-          <h2 id="create-ost-finish" className={styles.sectionTitle}>
-            Accreditation and completion
-          </h2>
+        <CreationSection title="Accreditation">
           <div className={styles.formFields}>
-            {!isMongoAuth && <label className={styles.fieldLabel}>
-              Outcome
-              <Select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as 'complete' | 'pending')}
-                options={[
-                  { value: 'complete', label: 'Complete now' },
-                  {
-                    value: 'pending',
-                    label: 'Save as pending',
-                  },
-                ]}
-              />
-            </label>}
+            {!isMongoAuth && (
+              <label className={styles.fieldLabel}>
+                Outcome
+                <Select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as 'complete' | 'pending')}
+                  options={[
+                    { value: 'complete', label: 'Complete now' },
+                    {
+                      value: 'pending',
+                      label: 'Save as pending',
+                    },
+                  ]}
+                />
+              </label>
+            )}
             {mode === 'complete' ? (
               <>
                 <label className={styles.fieldLabel}>
@@ -408,7 +426,7 @@ export function CreateOstDialog({
               </>
             ) : null}
           </div>
-        </section>
+        </CreationSection>
       </form>
     </Dialog>
   );

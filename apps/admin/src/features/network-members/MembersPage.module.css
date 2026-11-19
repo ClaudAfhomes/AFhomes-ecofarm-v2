@@ -497,3 +497,7 @@
     overflow-wrap: anywhere;
   }
 }
+
+.idUpload { display: grid; gap: .5rem; padding: 1rem 0; }
+.idUpload input { width: 100%; min-width: 0; }
+.idUpload p { margin: 0; font-size: .875rem; color: var(--color-text-secondary); }

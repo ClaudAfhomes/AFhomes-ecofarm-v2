@@ -20,7 +20,7 @@
  *   full access by slug (`private.has_permission()` and the server resolver);
  *   the customer portal is ownership-based, never permission-based.
  * - Four modules are granted to NOBODY because no workflow exists for them
- *   yet: `finance.final_qualification`, `finance.commission_payouts`,
+ *   yet: `finance.final_qualification`,
  *   `network.withdrawals`, `governance.config`. Granting them would be a
  *   guess. They are listed in `BASELINE_EXCLUDED_MODULES` so the omission is
  *   explicit and reportable, not an accident.
@@ -90,12 +90,15 @@ export type BaselineRole = (typeof BASELINE_ROLES)[number];
  */
 export const BASELINE_EXCLUDED_MODULES: readonly AfHomesModuleKey[] = [
   'finance.final_qualification',
-  'finance.commission_payouts',
   // Payroll approval, period closing and compensation policy are held only by
   // Super Admin (every module, by slug) until explicitly delegated (12 Nov 2026).
   'finance.payroll_approval',
   'finance.payroll_close',
   'finance.payroll_policy',
+  'finance.payroll_policy_approval',
+  // Payment adjustment resolution: Super Admin only by slug, and additionally
+  // blocked by governing decision Q13 (pending).
+  'finance.payment_adjustment_decision',
   'network.withdrawals',
   'governance.config',
   // Phase 6 CMS is invitation/assignment only. Existing operational roles do
@@ -117,6 +120,8 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   moduleKey: AfHomesModuleKey;
   roles: readonly string[];
 }[] = [
+  { moduleKey: 'sales.application_approval', roles: ['admin'] },
+  { moduleKey: 'finance.commission_payouts', roles: ['admin', 'finance'] },
   { moduleKey: 'governance.customer_import', roles: ['admin'] },
   // IST Payroll, seeded by 20270105000001: Finance reviews, submits batches and
   // records disbursements. No sales role (SM/SSM/SVD) and not Admin.

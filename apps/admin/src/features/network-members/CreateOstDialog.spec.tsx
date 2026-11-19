@@ -104,6 +104,7 @@ it('submits a password-based manual AA creation with verified geography and an S
     status: 'approved',
   });
   renderWithProviders(<CreateOstDialog open onClose={vi.fn()} onCreated={onCreated} />);
+  await user.upload(screen.getByLabelText('Government ID upload *'), new File(['%PDF-1.7 synthetic ID'], 'id.pdf', { type: 'application/pdf' }));
   await user.upload(screen.getByLabelText('Choose profile photo'), new File(['photo'], 'profile.jpg', { type: 'image/jpeg' }));
   for (const [label, value] of [
     ['First Name', 'Test'],

@@ -55,6 +55,8 @@ describe('percentToRate', () => {
   });
 
   it('round-trips with the stored rate', () => {
+    expect(rateToPercent('1.0000')).toBe('100.00');
+    expect(percentToRate(rateToPercent('1.0000'))).toBe('1.0000');
     expect(rateToPercent('0.0400')).toBe('4.00');
     expect(percentToRate(rateToPercent('0.1225'))).toBe('0.1225');
   });

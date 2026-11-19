@@ -665,7 +665,8 @@ export const ROLE2_MODULES: Record<string, { key: string; crud: [boolean, boolea
     { key: 'finance.points', crud: [true, true, true, false] },
     { key: 'sales.customers', crud: [true, false, false, false] },
     { key: 'operations.redemption', crud: [true, false, false, false] },
-    { key: 'network.commissions', crud: [true, false, true, false] },
+    { key: 'network.commissions', crud: [true, false, false, false] },
+    { key: 'finance.commission_payouts', crud: [true, false, true, false] },
   ],
   [ROLE2.admin]: [
     { key: 'dashboard.view', crud: [true, false, false, false] },
@@ -676,6 +677,8 @@ export const ROLE2_MODULES: Record<string, { key: string; crud: [boolean, boolea
     { key: 'sales.card_sales', crud: [true, true, true, false] },
     { key: 'sales.card_plans', crud: [true, true, true, false] },
     { key: 'sales.customers', crud: [true, true, true, false] },
+    { key: 'sales.application_approval', crud: [true, false, true, false] },
+    { key: 'finance.commission_payouts', crud: [true, false, true, false] },
     { key: 'sales.uplines', crud: [true, true, true, false] },
     { key: 'network.referrals', crud: [true, true, false, false] },
     { key: 'finance.payment_verification', crud: [true, true, true, false] },

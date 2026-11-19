@@ -55,4 +55,22 @@ describe('shared role portal routes', () => {
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
     expect(screen.queryByText('Admin login')).not.toBeInTheDocument();
   });
+  it('lets the canonical page win over a redirect twin that maps to the same Finance path', () => {
+    // For Finance, /admin/finance/commissions/settings (old-bookmark twin) and
+    // /admin/commissions/settings both become /finance/commissions/settings, and
+    // the first declaration wins. The twin declared first made Finance loop forever.
+    render(
+      <MemoryRouter initialEntries={['/finance/commissions/settings']}>
+        <Routes>
+          {roleRoutes(
+            <>
+              <Route path="/admin/commissions/settings" element={<p>Commission settings page</p>} />
+              <Route path="/admin/finance/commissions/settings" element={<p>Redirect twin</p>} />
+            </>,
+          )}
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Commission settings page')).toBeInTheDocument();
+  });
 });

@@ -46,9 +46,13 @@ const migration = (prefix: string): string => {
 };
 const BUSINESS_IDS_SQL = migration('20261025');
 
-/** Same construction as private.af_candidate: 25 bits sliced from 4 secure bytes. */
-function mirrorCandidate(prefix: AfIdPrefix): string {
-  const raw = randomBytes(4);
+/**
+ * Same construction as private.af_candidate: 25 bits sliced from 4 bytes. The property
+ * tests feed deterministic bytes (sha-256 of the index): 1,000 random draws from a 2^25
+ * space collide ~1.5% of the time (birthday bound), which made the uniqueness check flaky.
+ * The SQL generator retries on collision; that path is covered by the DB suite.
+ */
+function mirrorCandidate(prefix: AfIdPrefix, raw: Uint8Array = randomBytes(4)): string {
   const v = (raw[0]! << 24) | (raw[1]! << 16) | (raw[2]! << 8) | raw[3]!;
   let out = '';
   for (let i = 0; i < 5; i += 1) out += AF_ID_ALPHABET[(v >>> (i * 5)) & 31]!;
@@ -88,7 +92,9 @@ describe('business-ids migration linkage', () => {
 });
 
 describe('AF suffix properties (1,000 mirrored IDs)', () => {
-  const ids = Array.from({ length: 1000 }, () => mirrorCandidate('AF-CUS'));
+  const ids = Array.from({ length: 1000 }, (_, i) =>
+    mirrorCandidate('AF-CUS', createHash('sha256').update(`af-id-${i}`).digest().subarray(0, 4)),
+  );
   it('generates unique, well-formed IDs with no ambiguous characters', () => {
     expect(new Set(ids).size).toBe(1000);
     for (const id of ids) {

@@ -139,7 +139,7 @@ export async function runReservationFinanceChecks(world: World) {
   /* ---------------------------------------------------------------- */
   /* Collection before any verification                               */
   /* ---------------------------------------------------------------- */
-  const firstPayment = await world.record(purchase.reservationId, purchase.fee);
+  const firstPayment = await world.record(purchase.reservationId, purchase.fee, { paymentPurpose: 'reservation_fee' });
   const paymentRow = (
     await db.query<{
       id: string;
@@ -263,6 +263,7 @@ export async function runReservationFinanceChecks(world: World) {
       [requestId, reservationId, input, who],
     );
   const recordRequest = randomUUID();
+  const verifyResult = await verify(firstPayment, 'verified');
   const firstInstallment = {
     amount: '25000.00',
     method: 'bank',
@@ -352,8 +353,7 @@ export async function runReservationFinanceChecks(world: World) {
 // verified earlier in this section, so the before figure is that money and the
 // after figure is the running total. Asserted relatively and exactly in cents:
 // a hard-coded zero here would only be right for the first payment ever made.
-const verifiedBefore = '25000.00';
-const verifyResult = await verify(firstPayment, 'verified');
+const verifiedBefore = '0.00';
 check(
   'verification returns the exact before/after figures',
   verifyResult.verifiedBefore === verifiedBefore &&
@@ -514,6 +514,7 @@ check(
   /* ---------------------------------------------------------------- */
   const fresh = await world.executed();
   await world.record(fresh.reservationId, '10000.00', {
+    paymentPurpose: 'reservation_fee',
     reference: 'REF-C1',
     method: 'cash',
   });
@@ -676,9 +677,9 @@ async function legacySaleFor(db: Client, world: World): Promise<string> {
   await db.query(
     `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
        cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
-       commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at)
+       commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at,origin)
      select $1, sale_number, $2, $3, 'staff', $4, '60000.00', '60000.00', '10000.00', 60000,
-            '0', '0.00', 'submitted', now(), now()
+            '0', '0.00', 'submitted', now(), now(),'legacy_import'
      from public.next_sale_number()`,
     [id, world.createdCustomers[0]!, planId, world.actor],
   );

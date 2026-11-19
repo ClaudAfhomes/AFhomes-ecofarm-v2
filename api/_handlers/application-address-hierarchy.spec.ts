@@ -38,7 +38,8 @@ vi.mock('../_lib/psgc-cloud-provider.js', () => ({
 vi.mock('../_lib/afhomes-access.js', () => ({
   authorizeAfHomes: async () => ({
     userId: '11111111-1111-4111-8111-111111111111',
-    roleSlug: 'super_admin',
+    roleSlug: 'sales_manager',
+    status: 'active',
   }),
 }));
 

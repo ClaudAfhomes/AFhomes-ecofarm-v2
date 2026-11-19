@@ -158,46 +158,6 @@
   }
 }
 
-/* Scope strip */
-.scopeBar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  background-color: var(--color-bg-surface-raised);
-  box-shadow: var(--shadow-sm);
-}
-
-.scopeChip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 3px var(--space-3);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-pill);
-  background-color: var(--color-bg-surface);
-  font-size: var(--text-caption);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.scopeChipStrong {
-  color: var(--color-brand-primary);
-  border-color: color-mix(in srgb, var(--color-brand-primary) 30%, white);
-  background-color: var(--color-brand-soft);
-  font-weight: 700;
-  text-transform: capitalize;
-}
-
-.scopeDivider {
-  width: 1px;
-  align-self: stretch;
-  background-color: var(--color-border-default);
-}
-
 /* Panel */
 .panel {
   display: grid;
@@ -481,12 +441,14 @@
     padding: var(--space-4);
   }
 
-  .scopeDivider {
-    display: none;
-  }
-
   .hero {
     padding: var(--space-5) var(--space-4);
+  }
+
+  /* Two headline cards per row on phones: half the scrolling. */
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
   }
 }
 

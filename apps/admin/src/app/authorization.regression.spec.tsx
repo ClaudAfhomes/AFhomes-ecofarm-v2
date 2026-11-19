@@ -25,6 +25,7 @@ import {
   Route,
   Routes,
   createRoutesFromChildren,
+  matchRoutes,
   type RouteObject,
 } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
@@ -158,6 +159,7 @@ function flattenRoutes(routes: RouteObject[]): RouterEntry[] {
 }
 
 let inventoryCache: RouterEntry[] | undefined;
+let rawRoutesCache: RouteObject[] | undefined;
 /**
  * Every `<Route>` App declares, including the role-portal clones `roleRoutes`
  * adds. `App()` is invoked as a plain function inside a probe's render so its
@@ -181,6 +183,7 @@ function routerInventory(): RouterEntry[] {
   );
   unmount();
   if (!sink.routes) throw new Error('route capture did not run');
+  rawRoutesCache = sink.routes;
   inventoryCache = flattenRoutes(sink.routes);
   return inventoryCache;
 }
@@ -256,6 +259,25 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
     for (const known of ['/admin', '/admin/roles', '/admin/staff/:id', '/admin/ost/applications/:id'])
       expect(paths, known).toContain(known);
   });
+
+  it.each(['/finance/commissions/settings', '/admin/commissions/settings'])(
+    'resolves %s in the real App routes to the settings page, not the redirect twin',
+    (pathname) => {
+      // Finance maps /admin/commissions/settings and the old-bookmark twin
+      // /admin/finance/commissions/settings to the same /finance path and the
+      // first declaration wins; declaring the redirect first looped forever.
+      routerInventory();
+      const matches = matchRoutes(rawRoutesCache!, pathname);
+      const leaf = matches?.[matches.length - 1]?.route;
+      expect(leaf, `${pathname} must match an App route`).toBeDefined();
+      const page = isValidElement<{ children?: ReactNode }>(leaf!.element)
+        ? leaf!.element.props.children
+        : undefined;
+      // The page is lazy(), so pin "a real page, not a <Navigate>".
+      expect(isValidElement(page)).toBe(true);
+      expect(isValidElement(page) && page.type === Navigate).toBe(false);
+    },
+  );
 
   it('puts every routable admin screen behind RequireRole', () => {
     const unguarded = routerInventory().filter((entry) => !entry.guarded);

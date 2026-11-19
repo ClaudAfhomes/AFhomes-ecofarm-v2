@@ -1,7 +1,9 @@
+import { runBulkCommissionRuleChecks } from './bulk-commission-rules-integration.js';
 import { runPurchaseTierMatrixChecks } from './purchase-tier-matrix-integration.js';
 import { runIdempotencyChecks } from './idempotency-integration.js';
 import { runOstAccreditationChecks } from './ost-accreditation-integration.js';
 import { runPurchaseTermsChecks } from './purchase-terms-integration.js';
+import { runWorkflowAlignmentChecks } from './workflow-alignment-integration.js';
 import {
   runReservationPurchaseChecks,
   makePurchaseFixtures,
@@ -13,6 +15,8 @@ import { runPurchaseConcurrencyChecks } from './purchase-concurrency-integration
 import {
   paymentReceipt,
   syntheticStorageObjects,
+  historicalSaleSnapshot,
+  verifiedReservationFee,
 } from './purchase-evidence-fixtures.js';
 import { memberLookupFromDirectory } from '../api/_lib/member-lookup.js';
 // The installed role_permissions rows are asserted against the CONTRACT, not
@@ -886,10 +890,10 @@ async function main(): Promise<void> {
         .sale_number;
       await db.query(
         `insert into public.card_sales
-         (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+         (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
           cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
           commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at)
-       values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
+       values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
         [
           sId,
           sn,
@@ -929,20 +933,20 @@ async function main(): Promise<void> {
       await denyOrig('SM naming another SM', sm, staff['sm-alt']!, 'SELLER_OF_RECORD_MUST_BE_CREATOR');
       eq('admin naming an active SM', await resolveOrig(staff['admin']!, sm), sm);
       eq('super_admin naming an active SM', await resolveOrig(staff['super-admin']!, sm), sm);
-      eq('finance naming an active SM outside any downline', await resolveOrig(staff['finance']!, staff['sm-out']!), staff['sm-out']!);
+      await denyOrig('Finance cannot originate for an SM', staff['finance']!, staff['sm-out']!, 'SALE_ORIGINATION_FORBIDDEN');
       await denyOrig('admin naming nobody', staff['admin']!, null, 'SELLER_OF_RECORD_REQUIRED');
-      await denyOrig('admin naming self', staff['admin']!, staff['admin']!, 'SELLER_OF_RECORD_REQUIRED');
+      await denyOrig('admin naming self', staff['admin']!, staff['admin']!, 'SELLER_ROLE_NOT_A_SELLER');
       await denyOrig('admin naming an OST', staff['admin']!, staff['ost']!, 'SELLER_ROLE_NOT_A_SELLER');
       await denyOrig('admin naming another admin', staff['admin']!, staff['super-admin']!, 'SELLER_ROLE_NOT_A_SELLER');
       await denyOrig('admin naming an inactive SM', staff['admin']!, staff['sm-inactive']!, 'SELLER_INACTIVE');
       await denyOrig('OST actor', staff['ost']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
       await denyOrig('OST actor naming nobody', staff['ost']!, null, 'SALE_ORIGINATION_FORBIDDEN');
       await denyOrig('inactive actor', staff['inactive']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
-      eq('SSM naming a direct-downline SM', await resolveOrig(staff['ssm']!, sm), sm);
-      await denyOrig('SSM naming a non-downline SM', staff['ssm']!, staff['sm-out']!, 'SELLER_NOT_IN_YOUR_DOWNLINE');
-      eq('VD naming a 2-level-downline SM', await resolveOrig(staff['vice-director']!, sm), sm);
-      await denyOrig('VD naming a non-downline SM', staff['vice-director']!, staff['sm-out']!, 'SELLER_NOT_IN_YOUR_DOWNLINE');
-      await denyOrig('SSM naming an OST in its downline', staff['ssm']!, staff['ost']!, 'SELLER_ROLE_NOT_A_SELLER');
+      await denyOrig('SSM cannot originate for a direct-downline SM', staff['ssm']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('SSM naming a non-downline SM', staff['ssm']!, staff['sm-out']!, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('SVD cannot originate for a downline SM', staff['vice-director']!, sm, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('VD naming a non-downline SM', staff['vice-director']!, staff['sm-out']!, 'SALE_ORIGINATION_FORBIDDEN');
+      await denyOrig('SSM naming an OST in its downline', staff['ssm']!, staff['ost']!, 'SALE_ORIGINATION_FORBIDDEN');
 
       // application_seller_of_record + purchase_terms_proposal on real rows.
       const planId = (await one<{ id: string }>(`select id from public.card_plans where code = 'BRONZE'`)).id;
@@ -1095,11 +1099,11 @@ async function main(): Promise<void> {
     );
     await db.query(
       `insert into public.card_sales
-       (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+       (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
         cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
         commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at,
         referral_relationship_id, created_by)
-     values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted', now(), now() + interval '365 days', $11, $12)`,
+     values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted', now(), now() + interval '365 days', $11, $12)`,
       [
         saleId,
         saleNumber,
@@ -1127,6 +1131,7 @@ async function main(): Promise<void> {
       [saleId, staff['sm'], commissionAmount.v, gold.commission_rate, gold.cash_price],
     );
     check('synthetic sale created with a full commercial snapshot', true);
+    await historicalSaleSnapshot(db, saleId, [staff['sm']!, staff['ssm']!, staff['vice-director']!]);
 
     const hierarchySnapshot = (
       await db.query<{ ancestor_staff_id: string; ancestor_role: string }>(
@@ -1137,7 +1142,7 @@ async function main(): Promise<void> {
       )
     ).rows;
     check(
-      'Phase 14 snapshots SM -> SSM -> VD at sale creation',
+      'historical fixture preserves SM -> SSM -> VD attribution',
       hierarchySnapshot.length === 3 &&
         hierarchySnapshot[0]?.ancestor_staff_id === staff['sm'] &&
         hierarchySnapshot[1]?.ancestor_staff_id === staff['ssm'] &&
@@ -1164,10 +1169,10 @@ async function main(): Promise<void> {
     ).sale_number;
     await db.query(
       `insert into public.card_sales
-       (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,
+       (origin, id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,
         cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
         commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at,created_by)
-       values($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted',now(),now()+interval '1 year',$5)`,
+       values('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted',now(),now()+interval '1 year',$5)`,
       [
         adminSale,
         adminSaleNumber,
@@ -1239,10 +1244,11 @@ async function main(): Promise<void> {
       await one<{ sale_number: string }>('select * from public.next_sale_number()')
     ).sale_number;
     await db.query(
-      `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,status,balance_due_at)
-       values($1,$2,$3,$4,'staff',$5,$6,$6,'submitted',now()+interval '1 year')`,
+      `insert into public.card_sales(origin, id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,status,balance_due_at)
+       values('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,'submitted',now()+interval '1 year')`,
       [alternateSale, alternateSaleNumber, alternateCustomer, goldId, staff['sm'], gold.cash_price],
     );
+    await historicalSaleSnapshot(db, alternateSale, [staff['sm']!, alternateSsm, staff['vice-director']!]);
     const newSsm = await one<{ n: number }>(
       `select count(*)::int n from public.card_sale_hierarchy_snapshots
         where sale_id=$1 and ancestor_staff_id=$2`,
@@ -1890,7 +1896,15 @@ async function main(): Promise<void> {
         const current = (
           await one<{ m: string }>(`select to_char(now() at time zone 'Asia/Manila','YYYY-MM') as m`)
         ).m;
-        await submit(current);
+        // Since migration 0006 the current month cannot be SUBMITTED while earlier sections'
+        // payments are still unverified (PERIOD_HAS_BLOCKERS, section 86). What is under test
+        // here is the close-side PERIOD_NOT_ENDED rule, so the submitted state is a fixture.
+        await db.query(
+          `insert into public.accounting_periods (period, status, submitted_by, submitted_at)
+           values ($1, 'ready_for_approval', $2, now())
+           on conflict (period) do update set status='ready_for_approval', submitted_by=$2, submitted_at=now()`,
+          [current, finance],
+        );
         await refusal('a month cannot close before it has ended', 'PERIOD_NOT_ENDED', () => close(current));
 
         const snapshot = (await close('2020-01')).s;
@@ -2008,6 +2022,4242 @@ async function main(): Promise<void> {
         await db.query(own82 ? 'rollback' : 'rollback to savepoint finops82');
       }
     }
+    {
+      section('83. Finance Phase 4: commission payouts, holds, proposed recoveries, DRI refused');
+      // Migration 20270105000004. Rolled back: payout and recovery history is immutable.
+      let own83 = false;
+      try {
+        await db.query('savepoint finops83');
+      } catch {
+        await db.query('begin');
+        own83 = true;
+      }
+      try {
+        const boss = staff['super-admin']!;
+        const finance = staff['finance']!; // network.commissions is view-only for Finance
+        const gold = byCode.get('GOLD')!;
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        let seq83 = 0;
+        const mkComm = async (amount: string, status = 'earned', extraSql = '') => {
+          const tag = `c${seq83++}`;
+          const saleId = await mkSale(
+            `fin83-${tag}`,
+            await mkCustomer(`fin83-${tag}`, 'f83'),
+            gold,
+            'f83',
+          );
+          return (
+            await one<{ id: string }>(
+              `insert into public.commissions
+                 (sale_id, beneficiary_type, beneficiary_staff_id, amount, rate_snapshot,
+                  basis_amount_snapshot, status, earned_at ${extraSql ? ', ' + extraSql.split('=')[0] : ''})
+               values ($1,'staff',$2,$3,$4,$5,$6,now() ${extraSql ? ', ' + extraSql.split('=')[1] : ''})
+               returning id`,
+              [saleId, staff['ost']!, amount, gold.commission_rate, gold.cash_price, status],
+            )
+          ).id;
+        };
+        const pay = (id: string, ref: string | null) =>
+          db.query(
+            `update public.commissions set status='paid', paid_at=now(), paid_by=$2, paid_reference=$3 where id=$1`,
+            [id, boss, ref],
+          );
+        const payoutsOf = async (id: string) =>
+          (
+            await one<{ n: number }>(
+              'select count(*)::int n from public.commission_payouts where commission_id=$1',
+              [id],
+            )
+          ).n;
+        const hold = (id: string, on: boolean, reason: string | null, actor = boss) =>
+          db.query('select public.set_commission_hold($1,$2,$3,$4)', [id, actor, on, reason]);
+
+        // Completed commission decisions keep their original actor, time and notes for every writer.
+        // The local shim omits managed Supabase's service-role table grants; this test-only
+        // delegation is rolled back with section 83 and lets the trigger itself be exercised.
+        await db.query('grant select,update on public.commissions to service_role');
+        const decided = await mkComm('100.00', 'final_qualification_pending');
+        await db.query(`update public.commissions set status='earned',qualified_by=$2,qualified_at=now(),
+          qualification_notes='Original reviewed qualification' where id=$1`, [decided,boss]);
+        await refusal('service_role cannot replace the original qualification actor or notes', 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', async () => {
+          await db.query('set local role service_role');
+          await db.query(`update public.commissions set qualified_by=$2,qualification_notes='Replacement decision' where id=$1`, [decided,finance]);
+        });
+        await pay(decided,`REF-${RUN}-83-ORIGINAL`);
+        for (const [name, assignment] of [
+          ['qualification time', "qualified_at=qualified_at+interval '1 second'"],
+          ['qualification notes', "qualification_notes='Replacement qualification'"],
+          ['earned time', "earned_at=earned_at+interval '1 second'"],
+          ['paid time', "paid_at=paid_at+interval '1 second'"],
+          ['paid actor', 'paid_by=$2'],
+          ['paid reference', "paid_reference='REPLACEMENT-REFERENCE'"],
+          ['paid status', "status='earned'"],
+        ] as const) {
+          await refusal(`service_role cannot rewrite finalized commission ${name}`, 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', async () => {
+            await db.query('set local role service_role');
+            await db.query(`update public.commissions set ${assignment} where id=$1`, assignment.includes('$2') ? [decided,finance] : [decided]);
+          });
+        }
+        eq('refused commission rewrites preserve the original payout reference',
+          (await one<{ ref: string }>('select paid_reference ref from public.commissions where id=$1', [decided])).ref,
+          `REF-${RUN}-83-ORIGINAL`);
+
+        // --- DRI and commission_type -------------------------------------------------
+        const driSale = await mkSale('fin83-dri', await mkCustomer('fin83-dri', 'f83'), gold, 'f83');
+        await refusal('a DRI commission cannot be created', 'DRI_NOT_AUTHORIZED', () =>
+          db.query(
+            `insert into public.commissions (sale_id, beneficiary_type, beneficiary_staff_id, amount, status, commission_type)
+             values ($1,'staff',$2,'100.00','pending','DRI')`,
+            [driSale, staff['ost']!],
+          ),
+        );
+        const c1 = await mkComm('2400.00');
+        eq(
+          'a new commission defaults to DSC',
+          (await one<{ t: string }>('select commission_type t from public.commissions where id=$1', [c1])).t,
+          'DSC',
+        );
+        await refusal('a commission cannot be changed to DRI', 'DRI_NOT_AUTHORIZED', () =>
+          db.query(`update public.commissions set commission_type='DRI' where id=$1`, [c1]),
+        );
+
+        // --- holds -------------------------------------------------------------------
+        const c2 = await mkComm('1800.00');
+        await refusal('a hold needs a reason', 'COMMISSION_HOLD_REASON_REQUIRED', () => hold(c2, true, 'no'));
+        await refusal('a user without commission update cannot hold', 'MUTATION_FORBIDDEN', () =>
+          hold(c2, true, 'Pending bank check', finance),
+        );
+        await hold(c2, true, 'Pending bank check');
+        const held = await one<{ w: boolean; r: string; b: string }>(
+          'select withheld_at is not null w, withheld_reason r, withheld_by::text b from public.commissions where id=$1',
+          [c2],
+        );
+        check('a hold records time, actor and reason', held.w && held.r === 'Pending bank check' && held.b === boss);
+        await hold(c2, true, 'Pending bank check');
+        eq(
+          'holding twice is an idempotent replay (one audit event)',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action='COMMISSION_WITHHELD' and entity_id=$1`,
+              [c2],
+            )
+          ).n,
+          1,
+        );
+        await refusal('a withheld commission cannot be paid', 'COMMISSION_WITHHELD', () => pay(c2, 'REF-83-HELD'));
+        await refusal('the hold cannot be lifted inside the paying statement', 'COMMISSION_WITHHELD', () =>
+          db.query(
+            `update public.commissions set status='paid', paid_at=now(), paid_by=$2, paid_reference='REF-83-SNEAK',
+               withheld_at=null, withheld_by=null, withheld_reason=null where id=$1`,
+            [c2, boss],
+          ),
+        );
+        await refusal('the hold cannot be cleared by a bare update', 'COMMISSION_WITHHELD', () =>
+          db.query(`update public.commissions set withheld_at=null, withheld_by=null, withheld_reason=null where id=$1`, [c2]),
+        );
+        await refusal('a failure cannot be recorded against a held commission', 'COMMISSION_WITHHELD', () =>
+          db.query('select public.record_commission_payout_failure($1,$2,$3,$4)', [c2, boss, 'Bank rejected it', 'REF-83-HELDFAIL']),
+        );
+        eq('  the hold survived those attempts', (await one<{ w: boolean }>('select withheld_at is not null w from public.commissions where id=$1', [c2])).w, true);
+        eq('  and no payout row was written', await payoutsOf(c2), 0);
+        await hold(c2, false, 'Bank check cleared');
+        eq(
+          'release clears the hold columns',
+          (
+            await one<{ w: boolean }>(
+              'select (withheld_at is null and withheld_by is null and withheld_reason is null) w from public.commissions where id=$1',
+              [c2],
+            )
+          ).w,
+          true,
+        );
+        eq(
+          '  and audits the release',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action='COMMISSION_HOLD_RELEASED' and entity_id=$1`,
+              [c2],
+            )
+          ).n,
+          1,
+        );
+        await refusal('a bare commissions update cannot half-set a hold', 'commissions_withheld_consistent', () =>
+          db.query(`update public.commissions set withheld_at=now() where id=$1`, [c2]),
+        );
+
+        // --- payout failure ----------------------------------------------------------
+        await refusal('a failed payout needs a reason', 'COMMISSION_PAYOUT_FAILURE_REASON_REQUIRED', () =>
+          db.query('select public.record_commission_payout_failure($1,$2,$3)', [c1, boss, 'no']),
+        );
+        await refusal('a user without payout update cannot record a failure', 'MUTATION_FORBIDDEN', () =>
+          db.query('select public.record_commission_payout_failure($1,$2,$3)', [c1, staff['sm'], 'Bank rejected it']),
+        );
+        const failedId = (
+          await one<{ id: string }>('select public.record_commission_payout_failure($1,$2,$3,$4) as id', [
+            c1,
+            boss,
+            'Bank rejected the transfer',
+            `REF-${RUN}-83-FAIL`,
+          ])
+        ).id;
+        const failedRow = await one<{ status: string; c: string }>(
+          'select p.status, c.status c from public.commission_payouts p join public.commissions c on c.id=p.commission_id where p.id=$1',
+          [failedId],
+        );
+        check('a failed payout leaves the commission earned', failedRow.status === 'failed' && failedRow.c === 'earned');
+        await refusal('a failure without a reference is refused', 'PAYOUT_REFERENCE_REQUIRED', () =>
+          db.query('select public.record_commission_payout_failure($1,$2,$3)', [c1, boss, 'Bank rejected it']),
+        );
+        await refusal('a punctuation-only failure reference is refused','PAYOUT_REFERENCE_REQUIRED', () =>
+          db.query('select public.record_commission_payout_failure($1,$2,$3,$4)', [c1, boss, 'Bank rejected it', '---']),
+        );
+        const replayId = (
+          await one<{ id: string }>('select public.record_commission_payout_failure($1,$2,$3,$4) as id', [
+            c1,
+            boss,
+            'Bank rejected the transfer',
+            `ref-${RUN}-83-fail`,
+          ])
+        ).id;
+        eq('replaying the same failure returns the existing row', replayId, failedId);
+        eq(
+          '  with no second row and no second audit event',
+          (
+            await one<{ n: number }>(
+              `select (select count(*) from public.commission_payouts where commission_id=$1 and status='failed')::int
+                    + (select count(*) from public.audit_events where action='COMMISSION_PAYOUT_FAILED' and entity_id=$2)::int n`,
+              [c1, failedId],
+            )
+          ).n,
+          2,
+        );
+        await refusal('a failed payout can never be edited','COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_payouts set status='paid' where id=$1`, [failedId]),
+        );
+
+        // --- paying creates exactly one payout --------------------------------------
+        const ref1 = `REF-${RUN}-83-PAY1`;
+        await pay(c1, ref1);
+        eq('paying creates exactly one live payout (the failed attempt is history)', await payoutsOf(c1), 2);
+        const live = await one<{ n: number; amt: string; ref: string; by: string }>(
+          `select count(*)::int n, max(amount) amt, max(bank_reference) ref, max(recorded_by::text) by
+             from public.commission_payouts where commission_id=$1 and status='paid'`,
+          [c1],
+        );
+        check(
+          'the payout carries the frozen amount, reference and payer',
+          live.n === 1 && live.amt === '2400.00' && live.ref === ref1 && live.by === boss,
+          JSON.stringify(live),
+        );
+        await refusal('a second live payout for one commission is impossible', 'commission_payouts_one_live', () =>
+          db.query(
+            `insert into public.commission_payouts (commission_id, amount, status, recorded_by) values ($1,'2400.00','paid',$2)`,
+            [c1, boss],
+          ),
+        );
+        await refusal('a paid commission cannot be held', 'COMMISSION_NOT_HOLDABLE', () =>
+          hold(c1, true, 'Too late to hold'),
+        );
+        const cNone = await mkComm('0.00');
+        await pay(cNone, null);
+        eq('a zero commission pays without a payout row', await payoutsOf(cNone), 0);
+        // A commission settled before the system is born paid and is frozen by the import
+        // cutover guard, so it can never reach the payout trigger.
+        const cLegacy = await mkComm('500.00', 'paid', 'settled_before_system=true');
+        eq('a commission settled before the system has no payout row', await payoutsOf(cLegacy), 0);
+        await refusal('  and it cannot be updated or re-paid', 'IMPORT_COMMISSION_ALREADY_SETTLED', () =>
+          pay(cLegacy, `REF-${RUN}-83-LEGACY`),
+        );
+
+        // --- duplicate bank reference ------------------------------------------------
+        await refusal('one bank reference cannot back two payouts', 'commission_payouts_reference_unique', () =>
+          pay(c2, ref1.toLowerCase()),
+        );
+        eq('  and the commission stayed unpaid', (await one<{ s: string }>('select status s from public.commissions where id=$1', [c2])).s, 'earned');
+
+        // --- 20270105000017: external payment facts (method, actual date, evidence) --
+        const cFacts = await mkComm('1800.00');
+        await refusal('an external payment cannot be dated in the future', 'PAYMENT_DATE_INVALID', () =>
+          db.query(
+            `update public.commissions set status='paid', paid_at=now(), paid_by=$2, paid_reference=$3,
+               paid_method='Cheque', paid_on=((now() at time zone 'Asia/Manila')::date + 1) where id=$1`,
+            [cFacts, boss, `REF-${RUN}-83-FUTURE`],
+          ),
+        );
+        eq('  and nothing was paid', await payoutsOf(cFacts), 0);
+        await refusal('payment facts exist only on a paid commission', 'commissions_paid_details_only_when_paid', () =>
+          db.query(`update public.commissions set paid_method='Cash' where id=$1`, [cFacts]),
+        );
+        await refusal('  evidence too', 'commissions_paid_details_only_when_paid', () =>
+          db.query(
+            `update public.commissions set paid_evidence_reference='Deposit slip before payment' where id=$1`,
+            [cFacts],
+          ),
+        );
+        await refusal('an evidence reference shorter than 10 characters is refused', 'commissions_paid_evidence_reference_check', () =>
+          db.query(
+            `update public.commissions set status='paid', paid_at=now(), paid_by=$2, paid_reference=$3,
+               paid_method='Cheque', paid_on='2026-11-02', paid_evidence_reference='  short   ' where id=$1`,
+            [cFacts, boss, `REF-${RUN}-83-SHORT`],
+          ),
+        );
+        eq('  and nothing was paid', await payoutsOf(cFacts), 0);
+        const factsRef = `REF-${RUN}-83-FACTS`;
+        await db.query(
+          `update public.commissions set status='paid', paid_at=now(), paid_by=$2, paid_reference=$3,
+             paid_method='Cheque', paid_on='2026-11-02', paid_evidence_reference='Cheque voucher 83 on file'
+           where id=$1`,
+          [cFacts, boss, factsRef],
+        );
+        eq(
+          'the commission keeps the recorded evidence reference',
+          (await one<{ e: string }>('select paid_evidence_reference e from public.commissions where id=$1', [cFacts])).e,
+          'Cheque voucher 83 on file',
+        );
+        const factsPayout = await one<{ method: string; paid_on: string; ref: string; amt: string }>(
+          `select method, paid_on::text paid_on, bank_reference ref, amount amt
+             from public.commission_payouts where commission_id=$1 and status='paid'`,
+          [cFacts],
+        );
+        check(
+          'the payout carries the recorded method, actual payment date and frozen amount',
+          factsPayout.method === 'Cheque' && factsPayout.paid_on === '2026-11-02' &&
+            factsPayout.ref === factsRef && factsPayout.amt === '1800.00',
+          JSON.stringify(factsPayout),
+        );
+        await refusal('a recorded payment date cannot be rewritten', 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.commissions set paid_on='2026-10-01' where id=$1`, [cFacts]),
+        );
+        await refusal('a recorded payment method cannot be rewritten', 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.commissions set paid_method='Cash' where id=$1`, [cFacts]),
+        );
+        await refusal('a recorded evidence reference cannot be rewritten', 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', () =>
+          db.query(
+            `update public.commissions set paid_evidence_reference='Replacement slip 12345' where id=$1`,
+            [cFacts],
+          ),
+        );
+        await refusal('  or cleared', 'COMMISSION_FINANCIAL_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.commissions set paid_evidence_reference=null where id=$1`, [cFacts]),
+        );
+        // 20270105000017 step 5: RLS picks the row, column grants pick the columns. The
+        // beneficiary reads their own payment facts through the browser role but never
+        // Finance's evidence reference (the API masks it for seller scope as well).
+        const grants83 = await one<{ hidden: string[]; tableWide: boolean; anonCols: number }>(
+          `select array(select a.attname::text from pg_attribute a
+                         where a.attrelid = 'public.commissions'::regclass and a.attnum > 0
+                           and not a.attisdropped
+                           and not has_column_privilege('authenticated', a.attrelid, a.attnum, 'SELECT')
+                         order by a.attnum) as "hidden",
+                  has_table_privilege('authenticated', 'public.commissions', 'SELECT') as "tableWide",
+                  (select count(*)::int from pg_attribute a
+                    where a.attrelid = 'public.commissions'::regclass and a.attnum > 0
+                      and not a.attisdropped
+                      and has_column_privilege('anon', a.attrelid, a.attnum, 'SELECT')) as "anonCols"`,
+        );
+        check(
+          'the browser role reads every commission column except the payout evidence',
+          grants83.hidden.join(',') === 'paid_evidence_reference' &&
+            !grants83.tableWide &&
+            grants83.anonCols === 0,
+          JSON.stringify(grants83),
+        );
+        // In this section's own transaction (the rows are uncommitted), as PostgREST would:
+        // the role and identity are transaction-local and undone by the savepoint rollback.
+        const session83 = `select current_user::text u, coalesce(current_setting('request.jwt.claim.sub', true), '') sub`;
+        const before83 = await one<{ u: string; sub: string }>(session83);
+        const asBeneficiary83 = async <T>(fn: () => Promise<T>): Promise<T> => {
+          await db.query('savepoint finops83_browser');
+          try {
+            await db.query('set local role authenticated');
+            await db.query(`select set_config('request.jwt.claim.sub', $1, true)`, [staff['ost']!]);
+            return await fn();
+          } finally {
+            await db.query('rollback to savepoint finops83_browser');
+            await db.query('release savepoint finops83_browser');
+          }
+        };
+        // `who` proves the read ran as the browser role: as the suite's superuser it would pass
+        // whatever the grants or RLS said.
+        const seen83 = await asBeneficiary83(() =>
+          one<
+            | { who: string; status: string; paid_method: string; paid_on: string; paid_reference: string }
+            | undefined
+          >(
+            `select current_user::text who, status, paid_method, paid_on::text paid_on, paid_reference
+               from public.commissions where id=$1`,
+            [cFacts],
+          ),
+        );
+        check(
+          'the beneficiary reads their own payment facts through the browser role',
+          seen83?.who === 'authenticated' &&
+            seen83.status === 'paid' &&
+            seen83.paid_method === 'Cheque' &&
+            seen83.paid_on === '2026-11-02' &&
+            seen83.paid_reference === factsRef,
+          JSON.stringify(seen83 ?? null),
+        );
+        // The exact privilege refusal: a bare "permission denied" would also accept a failed
+        // `set role`, which would prove nothing about the column.
+        await refusal(
+          '  but not the payout evidence reference',
+          'permission denied for table commissions',
+          () =>
+            asBeneficiary83(() =>
+              db.query('select paid_evidence_reference from public.commissions where id=$1', [cFacts]),
+            ),
+        );
+        eq(
+          '  and the suite is back on its own role and identity afterwards',
+          JSON.stringify(await one<{ u: string; sub: string }>(session83)),
+          JSON.stringify(before83),
+        );
+        const legacyDate = await one<{ ok: boolean }>(
+          `select paid_on = (now() at time zone 'Asia/Manila')::date ok
+             from public.commission_payouts where commission_id=$1 and status='paid'`,
+          [c1],
+        );
+        check('a payment recorded without a date keeps the existing "today" default', legacyDate.ok === true);
+
+        // --- payout history is immutable outside the functions -----------------------
+        const livePayout = (
+          await one<{ id: string }>(
+            `select id from public.commission_payouts where commission_id=$1 and status='paid'`,
+            [c1],
+          )
+        ).id;
+        await refusal('a payout cannot be deleted', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query('delete from public.commission_payouts where id=$1', [livePayout]),
+        );
+        await refusal('a failed payout cannot be deleted', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query('delete from public.commission_payouts where id=$1', [failedId]),
+        );
+        await refusal('a payout amount cannot be edited', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_payouts set amount='1.00' where id=$1`, [livePayout]),
+        );
+        await refusal('a paid payout cannot be rewritten as failed', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(
+            `update public.commission_payouts set status='failed', failure_reason='Edited later' where id=$1`,
+            [livePayout],
+          ),
+        );
+
+        await refusal('a paid payout is frozen: method cannot change', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_payouts set method='cash' where id=$1`, [livePayout]),
+        );
+        await refusal('a paid payout is frozen: date cannot change while paid', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_payouts set paid_on='2020-01-01' where id=$1`, [livePayout]),
+        );
+        await refusal('reconciling cannot swap the bank reference', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(
+            `update public.commission_payouts set status='reconciled', bank_reference='OTHER-REF',
+               reconciled_by=$2, reconciled_at=now() where id=$1`,
+            [livePayout, boss],
+          ),
+        );
+        await refusal('a punctuation-only bank reference is refused by the table', 'bank_reference', () =>
+          db.query(
+            `insert into public.commission_payouts (commission_id, amount, status, bank_reference, recorded_by)
+             values ($1,'1.00','paid','---',$2)`,
+            [c2, boss],
+          ),
+        );
+        // A payout with no usable reference (punctuation-only paid_reference) and a sub-1 amount.
+        const cDash = await mkComm('0.50');
+        await pay(cDash, '---');
+        const dash = await one<{ id: string; r: string | null; a: string }>(
+          'select id, bank_reference r, amount a from public.commission_payouts where commission_id=$1',
+          [cDash],
+        );
+        check('a 0.50 commission pays a 0.50 payout with no reference stored', dash.a === '0.50' && dash.r === null, JSON.stringify(dash));
+        await refusal('reconcile refuses a punctuation-only reference', 'PAYOUT_REFERENCE_REQUIRED', () =>
+          db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [dash.id, boss, '---', '2020-01-10']),
+        );
+        await refusal('reconcile refuses a reference that differs from the recorded one', 'PAYOUT_REFERENCE_MISMATCH', () =>
+          db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [livePayout, boss, 'SOMETHING-ELSE', '2020-01-10']),
+        );
+
+        // --- reconciliation ----------------------------------------------------------
+        const reconcile = (id: string, ref: string | null, on: string | null, actor = boss) =>
+          db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [id, actor, ref, on]);
+        await refusal('a user without payout update cannot reconcile', 'MUTATION_FORBIDDEN', () =>
+          reconcile(livePayout, null, '2020-01-10', staff['sm']),
+        );
+        await refusal('a failed payout cannot be reconciled', 'COMMISSION_PAYOUT_NOT_PAID', () =>
+          reconcile(failedId, 'REF-X-FAILED', '2020-01-10'),
+        );
+        await refusal('a future payment date is refused', 'PAYMENT_DATE_INVALID', () =>
+          reconcile(livePayout, null, '2999-01-01'),
+        );
+        await reconcile(livePayout, null, '2020-01-10');
+        const rec = await one<{ s: string; d: string; by: string }>(
+          'select status s, paid_on::text d, reconciled_by::text by from public.commission_payouts where id=$1',
+          [livePayout],
+        );
+        check('reconcile confirms the date and actor', rec.s === 'reconciled' && rec.d === '2020-01-10' && rec.by === boss);
+        await reconcile(livePayout, null, '2020-01-10');
+        eq(
+          'reconciling again is an idempotent replay (one audit event)',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action='COMMISSION_PAYOUT_RECONCILED' and entity_id=$1`,
+              [livePayout],
+            )
+          ).n,
+          1,
+        );
+        await refusal('a reconciled payout is immutable', 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_payouts set bank_reference='OTHER-REF' where id=$1`, [livePayout]),
+        );
+
+        // --- proposed recoveries -----------------------------------------------------
+        const propose = (id: string, trig: string, amount: string, reason: string, actor = boss) =>
+          one<{ id: string }>('select public.propose_commission_recovery($1,$2,$3,$4,$5) as id', [
+            id,
+            actor,
+            trig,
+            amount,
+            reason,
+          ]);
+        await refusal('a recovery cannot be proposed on an unpaid commission', 'COMMISSION_NOT_PAID', () =>
+          propose(c2, 'rescission', '100.00', 'Customer rescinded'),
+        );
+        await refusal('an unknown trigger is refused', 'COMMISSION_RECOVERY_TRIGGER_INVALID', () =>
+          propose(c1, 'because', '100.00', 'Customer rescinded'),
+        );
+        await refusal('a recovery needs a reason', 'COMMISSION_RECOVERY_REASON_REQUIRED', () =>
+          propose(c1, 'rescission', '100.00', 'no'),
+        );
+        await refusal('a recovery amount must be positive', 'AMOUNT_MUST_BE_POSITIVE', () =>
+          propose(c1, 'rescission', '0.00', 'Customer rescinded'),
+        );
+        await refusal('a recovery cannot exceed the commission', 'COMMISSION_RECOVERY_EXCEEDS_COMMISSION', () =>
+          propose(c1, 'rescission', '2400.01', 'Customer rescinded'),
+        );
+        await refusal('a user without commission update cannot propose', 'MUTATION_FORBIDDEN', () =>
+          propose(c1, 'rescission', '100.00', 'Customer rescinded', finance),
+        );
+        const caseId = (await propose(c1, 'rescission', '2400.00', 'Customer rescinded')).id;
+        const caseRow = await one<{ s: string; r: string; c: string }>(
+          `select status s, recovered_amount r, (select status from public.commissions where id=$1) c
+             from public.commission_recovery_cases where id=$2`,
+          [c1, caseId],
+        );
+        check(
+          'a proposal is only proposed: nothing recovered, commission stays paid',
+          caseRow.s === 'proposed' && caseRow.r === '0.00' && caseRow.c === 'paid',
+          JSON.stringify(caseRow),
+        );
+        await refusal('the same open proposal cannot be raised twice', 'COMMISSION_RECOVERY_ALREADY_PROPOSED', () =>
+          propose(c1, 'rescission', '100.00', 'Raised again'),
+        );
+        await refusal('recovered_amount can never be non-zero', 'recovered_amount', () =>
+          db.query(`update public.commission_recovery_cases set recovered_amount='5.00' where id=$1`, [caseId]),
+        );
+        await refusal('a proposal amount cannot be edited', 'COMMISSION_RECOVERY_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_recovery_cases set proposed_amount='1.00' where id=$1`, [caseId]),
+        );
+        await refusal('a proposal cannot be deleted', 'COMMISSION_RECOVERY_HISTORY_IMMUTABLE', () =>
+          db.query('delete from public.commission_recovery_cases where id=$1', [caseId]),
+        );
+        await refusal('dismissal needs a note', 'COMMISSION_RECOVERY_REASON_REQUIRED', () =>
+          db.query('select public.dismiss_commission_recovery($1,$2,$3)', [caseId, boss, 'no']),
+        );
+        await refusal('a user without commission update cannot dismiss', 'MUTATION_FORBIDDEN', () =>
+          db.query('select public.dismiss_commission_recovery($1,$2,$3)', [caseId, finance, 'Raised in error']),
+        );
+        await db.query('select public.dismiss_commission_recovery($1,$2,$3)', [caseId, boss, 'Raised in error']);
+        await db.query('select public.dismiss_commission_recovery($1,$2,$3)', [caseId, boss, 'Raised in error']);
+        eq(
+          'dismissal works and replays idempotently (one audit event)',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.audit_events where action='COMMISSION_RECOVERY_DISMISSED' and entity_id=$1`,
+              [caseId],
+            )
+          ).n,
+          1,
+        );
+        await refusal('a dismissed case is immutable', 'COMMISSION_RECOVERY_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.commission_recovery_cases set status='proposed' where id=$1`, [caseId]),
+        );
+        check('a sub-1 recovery amount is accepted', !!(await propose(c1, 'downgrade', '0.50', 'Downgrade review')).id);
+        const again83 =(await propose(c1, 'rescission', '100.00', 'Raised again properly')).id;
+        check('after dismissal a fresh proposal may be raised', again83 !== caseId);
+        eq(
+          'a proposal never changed the payout or the commission amount',
+          (
+            await one<{ a: string; p: string }>(
+              `select c.amount a, (select p.status from public.commission_payouts p where p.id=$2) p
+                 from public.commissions c where c.id=$1`,
+              [c1, livePayout],
+            )
+          ).a + '/reconciled',
+          '2400.00/reconciled',
+        );
+
+        // --- browser roles -----------------------------------------------------------
+        const priv = await one<{ bad: number }>(
+          `select (
+             select count(*)::int from unnest(array['public.commission_payouts','public.commission_recovery_cases']) t,
+               unnest(array['anon','authenticated']) r,
+               unnest(array['SELECT','INSERT','UPDATE','DELETE']) p
+              where has_table_privilege(r, t, p)
+           ) + (
+             select count(*)::int from unnest(array[
+               'public.set_commission_hold(uuid,uuid,boolean,text)',
+               'public.record_commission_payout_failure(uuid,uuid,text,text)',
+               'public.reconcile_commission_payout(uuid,uuid,text,date)',
+               'public.propose_commission_recovery(uuid,uuid,text,text,text,uuid)',
+               'public.dismiss_commission_recovery(uuid,uuid,text)']) f,
+               unnest(array['anon','authenticated']) r
+              where has_function_privilege(r, f, 'EXECUTE')
+           ) as bad`,
+        );
+        eq('anon and authenticated hold no privilege on the new tables or functions', priv.bad, 0);
+        const svc = await one<{ ok: boolean }>(
+          `select has_function_privilege('service_role','public.set_commission_hold(uuid,uuid,boolean,text)','EXECUTE')
+              and has_function_privilege('service_role','public.dismiss_commission_recovery(uuid,uuid,text)','EXECUTE') as ok`,
+        );
+        check('service_role can execute the commission functions', svc.ok);
+        const payrollProofAcl = await one<{ legacy: boolean; proved: boolean; writes: boolean }>(
+          `select has_function_privilege('service_role','public.record_payroll_disbursement(uuid,text,text,text,date,uuid)','EXECUTE') legacy,
+            has_function_privilege('service_role','public.record_payroll_disbursement(uuid,text,text,text,date,uuid,text)','EXECUTE') proved,
+            exists(select 1 from unnest(array['INSERT','UPDATE','DELETE','TRUNCATE']) p
+              where has_table_privilege('service_role','public.payroll_disbursements',p)) writes`,
+        );
+        check('service_role reaches live disbursement only through the proof-bearing RPC',
+          !payrollProofAcl.legacy && payrollProofAcl.proved && !payrollProofAcl.writes, JSON.stringify(payrollProofAcl));
+      } catch (error) {
+        check('section 83 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own83 ? 'rollback' : 'rollback to savepoint finops83');
+      }
+    }
+    // TEST FIXTURE ONLY: an approved compensation policy, built through the governed RPCs of
+    // migration 0008 (direct writes are refused). Finance is delegated finance.payroll_policy
+    // through dynamic RBAC inside the caller's rolled-back savepoint, drafts and submits; the
+    // Super Admin approves (never the drafter). No approved policy exists in a real database.
+    const fixturePolicyViaRpcs = async (rank: string, effectiveFrom: string, over: Record<string, unknown> = {}) => {
+      await db.query(
+        `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+         select a.role_id, m.id, true, true, true, false
+           from public.staff_role_assignments a, public.modules m
+          where a.staff_id=$1 and m.key='finance.payroll_policy'
+         on conflict (role_id, module_id) do update set can_view=true, can_create=true, can_update=true`,
+        [staff['finance']!],
+      );
+      const id = (
+        await one<{ id: string }>('select public.save_ist_compensation_policy_draft(null,$1::jsonb,$2) as id', [
+          JSON.stringify({
+            rank,
+            monthlyBa: '1000.00',
+            baTarget: '1.00',
+            monthlyPa: '500.00',
+            paTarget: '1.00',
+            pbTarget: '1.00',
+            pbRate: '0.0100',
+            collectionGate: '0.4000',
+            effectiveFrom,
+            basisNote: 'TEST FIXTURE ONLY - not approved policy',
+            ...over,
+          }),
+          staff['finance']!,
+        ])
+      ).id;
+      await db.query('select public.submit_ist_compensation_policy($1,$2)', [id, staff['finance']!]);
+      await db.query('select public.approve_ist_compensation_policy($1,$2,$3,$4)', [
+        id,
+        'TEST-FIXTURE-EVIDENCE',
+        'TEST FIXTURE ONLY - not approved policy',
+        staff['super-admin']!,
+      ]);
+      return id;
+    };
+    // TEST FIXTURES ONLY, rolled back with each caller: genuine governed evidence for live batch tests.
+    const fixturePerformanceViaRpcs = async () => {
+      const finance = staff['finance']!;
+      const boss = staff['super-admin']!;
+      const rule = (await one<{ id: string }>('select public.save_ist_performance_rule_draft(null,$1::jsonb,$2) id', [
+        JSON.stringify({ effectiveFrom: '2000-01-01', attributionBasis: 'seller_only', closedDealThresholdPct: '25',
+          countDateBasis: 'verified_posting_period', adjustmentTreatment: 'report_only', sourceReference: 'TEST FIXTURE ONLY - synthetic performance rule' }), finance,
+      ])).id;
+      await db.query('select public.submit_ist_performance_rule($1,$2)', [rule, finance]);
+      await db.query('select public.approve_ist_performance_rule($1,$2,$3,$4)', [rule, 'TEST-FIXTURE-EVIDENCE', 'TEST FIXTURE approval only', boss]);
+      for (const [who, rank] of [['sm', 'SM'], ['sm-alt', 'SM'], ['ssm', 'SSM'], ['vice-director', 'SVD']]) {
+        const id = (await one<{ id: string }>('select public.save_ist_engagement_draft(null,$1::jsonb,$2) id', [
+          JSON.stringify({ staffId: staff[who!]!, rank, contractStart: '2000-01-01', evidenceReference: 'TEST FIXTURE ONLY - synthetic engagement' }), finance,
+        ])).id;
+        await db.query('select public.submit_ist_engagement($1,$2)', [id, finance]);
+        await db.query('select public.approve_ist_engagement($1,$2,$3,$4)', [id, 'TEST-FIXTURE-EVIDENCE', 'TEST FIXTURE approval only', boss]);
+      }
+    };
+    const fixtureLinesWithEvidence = async (batchId: string, lines: unknown[]) => {
+      const batch = await one<{ mode: string; period: string }>('select mode, period from public.payroll_batches where id=$1', [batchId]);
+      if (batch.mode !== 'live') return lines;
+      return Promise.all(lines.map(async (value) => {
+        const line = value as { staffId: string; inputs?: Record<string, unknown> };
+        if (line.inputs?.fixture !== true) return line;
+        const evidence = await one<{ hash: string }>(`select private.ist_period_performance_rows($1,$2)->0->>'evidenceHash' hash`, [batch.period, line.staffId]);
+        return { ...line, inputs: { ...line.inputs, evidenceHash: evidence.hash } };
+      }));
+    };
+    {
+      section('84. Finance Phase 5: IST payroll batches, Super Admin approval, disbursement records');
+      // Migration 20270105000005. Rolled back: approved payroll and disbursements are immutable.
+      // The compensation policy below is a TEST FIXTURE only; no approved policy exists in a real database.
+      let own84 = false;
+      try {
+        await db.query('savepoint finops84');
+      } catch {
+        await db.query('begin');
+        own84 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        const rows84 = async (sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows;
+        const mkBatch = async (period: string, actor = finance) =>
+          (
+            await one<{ id: string }>('select public.create_payroll_batch($1,$2) as id', [period, actor])
+          ).id;
+        const replace = async (batch: string, lines: unknown[], actor = finance) =>
+          (
+            await one<{ t: Record<string, unknown> }>(
+              'select public.replace_payroll_batch_lines($1,$2::jsonb,$3) as t',
+              [batch, JSON.stringify(await fixtureLinesWithEvidence(batch, lines)), actor],
+            )
+          ).t;
+        const submit = (batch: string, actor = finance) =>
+          one<{ s: string }>('select public.submit_payroll_batch($1,$2) as s', [batch, actor]);
+        const approve = (batch: string, actor = boss) =>
+          one<{ s: string }>('select public.approve_payroll_batch($1,$2) as s', [batch, actor]);
+        const giveBack = (batch: string, reason: string, actor = boss) =>
+          one<{ s: string }>('select public.return_payroll_batch($1,$2,$3) as s', [batch, reason, actor]);
+        const statusOf = async (batch: string) =>
+          (await one<{ s: string }>('select status s from public.payroll_batches where id=$1', [batch])).s;
+        const pay = (lineId: string, amount: string, ref: string, paidOn: string, actor = finance, method = 'bank') =>
+          one<{ id: string }>('select public.record_payroll_disbursement($1,$2,$3,$4,$5,$6) as id', [
+            lineId,
+            amount,
+            method,
+            ref,
+            paidOn,
+            actor,
+          ]);
+        const auditCount = async (action: string, entity: string) =>
+          (
+            await one<{ n: number }>(
+              'select count(*)::int n from public.audit_events where action=$1 and entity_id=$2',
+              [action, entity],
+            )
+          ).n;
+
+        // Test-only approved policies (historical figures are NOT approved policy).
+        const policy: Record<string, string> = {};
+        // monthlyBa 2000.00: no fixture line below exceeds its policy amount, so none is flagged
+        // BA_ABOVE_POLICY_AMOUNT (migration 0008; section 88 covers the flag itself).
+        for (const rank of ['SM', 'SSM']) policy[rank] = await fixturePolicyViaRpcs(rank, '2020-01-01', { monthlyBa: '2000.00' });
+        await fixturePerformanceViaRpcs();
+        const mk = (staffId: string, rank: string, over: Record<string, unknown> = {}) => ({
+          staffId,
+          rank,
+          status: 'computed',
+          policyId: policy[rank],
+          ba: '1000.00',
+          pa: '500.00',
+          pb: '250.50',
+          adjustments: '0.00',
+          withheld: '0.00',
+          net: '1750.50',
+          inputs: { fixture: true },
+          result: { fixture: true },
+          ...over,
+        });
+        const smLine = mk(staff['sm']!, 'SM');
+        const zeroLine = mk(staff['ssm']!, 'SSM', {
+          ba: '2000.00',
+          pa: '0.00',
+          pb: '0.00',
+          withheld: '2000.00',
+          net: '0.00',
+        });
+        const smallLine = mk(staff['vice-director']!, 'SM', {
+          ba: '100.00',
+          pa: '0.00',
+          pb: '0.00',
+          net: '100.00',
+        });
+        const goodLines = [smLine, zeroLine, smallLine];
+
+        // --- governing gate: Q1 recorded APPROVED (owner-reported) by migration 0008 --------
+        const Q1 = 'Q1_GOVERNING_COMPENSATION_MODEL';
+        const setQ1 = async (approved: boolean) => {
+          // TEST FIXTURE ONLY, inside this rolled-back savepoint: flips the recorded decision to
+          // exercise the gate. 'approved' restores the migration's owner-reported state
+          // (no staff decider); no function can do this.
+          await db.query(`select set_config('afhomes.governing_policy_write','on',true)`);
+          await db.query(
+            `update public.governing_policy_decisions
+                set status=$2, decided_by=null, decided_at=case when $2='approved' then now() end
+              where key=$1`,
+            [Q1, approved ? 'approved' : 'pending'],
+          );
+          await db.query(`select set_config('afhomes.governing_policy_write','off',true)`);
+        };
+        eq(
+          'the Q1 governing decision is recorded approved (owner-reported) by migration 0008',
+          (await one<{ s: string }>('select status || \'/\' || source s from public.governing_policy_decisions where key=$1', [Q1])).s,
+          'approved/owner_reported',
+        );
+        eq(
+          '  so live payroll is authorized',
+          (await one<{ a: boolean }>('select private.ist_payroll_live_authorized() a')).a,
+          true,
+        );
+        await refusal('the governing decision cannot be changed outside an authorized migration', 'GOVERNING_POLICY_LOCKED', () =>
+          db.query(`update public.governing_policy_decisions set status='pending', decided_at=null where key=$1`, [Q1]),
+        );
+        await refusal('  nor deleted', 'GOVERNING_POLICY_LOCKED', () =>
+          db.query('delete from public.governing_policy_decisions where key=$1', [Q1]),
+        );
+        // TEST FIXTURE: Q1 set back to pending to prove the gate still refuses everything live.
+        await setQ1(false);
+        eq(
+          '(test fixture) with Q1 set back to pending, live payroll is not authorized',
+          (await one<{ a: boolean }>('select private.ist_payroll_live_authorized() a')).a,
+          false,
+        );
+        await refusal('a live batch cannot be created while Q1 is pending', 'IST_PAYROLL_NOT_AUTHORIZED', () =>
+          mkBatch('2020-06'),
+        );
+        const simBasis = 'Simulation from historical reference fixtures, not approved policy';
+        const mkSim = async (period: string, basis: string | null = simBasis, actor = finance) =>
+          (
+            await one<{ id: string }>(`select public.create_payroll_batch($1,$2,'simulation',$3) as id`, [
+              period,
+              actor,
+              basis,
+            ])
+          ).id;
+        await refusal('a simulation needs a stated basis', 'PAYROLL_SIMULATION_BASIS_REQUIRED', () =>
+          mkSim('2020-05', null),
+        );
+        await refusal('a Sales Manager cannot create a simulation', 'MUTATION_FORBIDDEN', () =>
+          mkSim('2020-05', simBasis, staff['sm']!),
+        );
+        const sim = await mkSim('2020-05');
+        eq('a simulation batch is created and replays idempotently', await mkSim('2020-05'), sim);
+        const newBasis = 'Second run from the same historical reference fixtures';
+        eq('a simulation re-run returns the same batch', await mkSim('2020-05', newBasis), sim);
+        eq(
+          '  and restates its basis, with one audit event',
+          (await one<{ b: string }>('select simulation_basis b from public.payroll_batches where id=$1', [sim])).b +
+            '/' +
+            (await auditCount('PAYROLL_SIMULATION_BASIS_UPDATED', sim)),
+          `${newBasis}/1`,
+        );
+        await refusal('a restated basis must still be at least 10 characters', 'PAYROLL_SIMULATION_BASIS_REQUIRED', () =>
+          mkSim('2020-05', 'short'),
+        );
+        for (const t of ['payroll_batches', 'payroll_lines', 'payroll_disbursements']) {
+          await refusal(`${t} cannot be truncated`, 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+            db.query(`truncate public.${t} cascade`),
+          );
+        }
+        await refusal('the governing decision cannot be truncated', 'GOVERNING_POLICY_LOCKED', () =>
+          db.query('truncate public.governing_policy_decisions cascade'),
+        );
+        const simLine = (staffId: string, rank: string) =>
+          mk(staffId, rank, { policyId: null, inputs: { policySnapshot: { source: 'historical fixture' } } });
+        await refusal('a simulation line must record the policy snapshot it used', 'PAYROLL_LINE_INVALID', () =>
+          replace(sim, [mk(staff['sm']!, 'SM', { policyId: null })]),
+        );
+        const simTotals = await replace(sim, [simLine(staff['sm']!, 'SM'), simLine(staff['ssm']!, 'SVD')]);
+        check(
+          'a simulation carries figures with no approved policy, labelled, with zero payable totals',
+          simTotals.mode === 'simulation' &&
+            simTotals.simulationTotalNet === '3501.00' &&
+            simTotals.totalNet === '0.00' &&
+            simTotals.totalBa === '0.00',
+          JSON.stringify(simTotals),
+        );
+        // Migration 0006 gives simulations the full submit/approve/return/close lifecycle
+        // (section 85). A draft simulation still cannot skip submission.
+        await refusal('a draft simulation cannot be approved before submission', 'PAYROLL_BATCH_NOT_SUBMITTED', () =>
+          approve(sim),
+        );
+        await refusal('  nor returned', 'PAYROLL_BATCH_NOT_SUBMITTED', () => giveBack(sim, 'Not a real batch'));
+        const simLineId = (
+          await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1 limit 1', [sim])
+        ).id;
+        await refusal('a simulation can never be disbursed through the live path', 'PAYROLL_SIMULATION_ONLY', () =>
+          pay(simLineId, '1750.50', `PR-${RUN}-SIM`, '2020-01-01'),
+        );
+        await refusal('a simulation cannot be forced to submitted directly', 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+          db.query(`update public.payroll_batches set status='submitted' where id=$1`, [sim]),
+        );
+        check(
+          'a simulation never appears in pending approvals',
+          (await rows84('select * from public.pending_payroll_approvals($1)', [boss])).every((r) => r.pending_batch_id !== sim),
+        );
+
+        // Restore the migration's recorded approval (TEST FIXTURE).
+        await setQ1(true);
+        eq('live payroll is authorized once Q1 is approved', (await one<{ a: boolean }>('select private.ist_payroll_live_authorized() a')).a, true);
+
+        // --- creation -------------------------------------------------------------
+        await refusal('an invalid period is refused', 'PERIOD_INVALID', () => mkBatch('2020-13'));
+        await refusal('a Sales Manager cannot create a payroll batch', 'MUTATION_FORBIDDEN', () =>
+          mkBatch('2020-06', staff['sm']!),
+        );
+        await refusal('an OST cannot create a payroll batch', 'MUTATION_FORBIDDEN', () =>
+          mkBatch('2020-06', staff['ost']!),
+        );
+        const batch = await mkBatch('2020-06');
+        eq('Finance creates a draft batch', await statusOf(batch), 'draft');
+        eq('creating the same period again returns the same batch', await mkBatch('2020-06'), batch);
+        eq(
+          '  and left exactly one row',
+          (await one<{ n: number }>(`select count(*)::int n from public.payroll_batches where period='2020-06'`)).n,
+          1,
+        );
+
+        // --- the policy rule on every line -----------------------------------------
+        await refusal('a blocked line carrying money is refused', 'PAYROLL_LINE_INVALID', () =>
+          replace(batch, [mk(staff['sm']!, 'SM', { status: 'blocked', blockedReason: 'CONFIGURATION_REQUIRED' })]),
+        );
+        await refusal('a computed line for a rank with no approved policy is refused', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          replace(batch, [mk(staff['sm']!, 'SVD', { policyId: policy['SM'] })]),
+        );
+        await refusal('a computed line citing a policy of another rank is refused', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          replace(batch, [mk(staff['sm']!, 'SM', { policyId: policy['SSM'] })]),
+        );
+        await refusal('a computed line with no policy reference is refused', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          replace(batch, [mk(staff['sm']!, 'SM', { policyId: null })]),
+        );
+        await refusal('a month before the policy takes effect has no approved policy', 'PAYROLL_CONFIGURATION_REQUIRED', async () => {
+          const early = await mkBatch('2019-12');
+          await replace(early, [smLine]);
+        });
+        await refusal('a line whose net does not equal its parts is refused', 'PAYROLL_LINE_INVALID', () =>
+          replace(batch, [mk(staff['sm']!, 'SM', { net: '9999.00' })]),
+        );
+        await refusal('a malformed amount is refused', 'PAYROLL_LINE_INVALID', () =>
+          replace(batch, [mk(staff['sm']!, 'SM', { ba: '1e3' })]),
+        );
+        await refusal('the same staff member twice in one batch is refused', 'PAYROLL_LINE_DUPLICATE', () =>
+          replace(batch, [smLine, smLine]),
+        );
+        await refusal('a Sales Manager cannot replace lines', 'MUTATION_FORBIDDEN', () =>
+          replace(batch, [smLine], staff['sm']!),
+        );
+        eq(
+          'every refused replacement left the batch without lines',
+          (await one<{ n: number }>('select count(*)::int n from public.payroll_lines where batch_id=$1', [batch])).n,
+          0,
+        );
+
+        // --- blocked lines stop the submit -----------------------------------------
+        const blockedTotals = await replace(batch, [
+          smLine,
+          { staffId: staff['ssm']!, rank: 'SSM', status: 'blocked', blockedReason: 'CONFIGURATION_REQUIRED', inputs: {}, result: {} },
+        ]);
+        check(
+          'a blocked line stores no money and is counted',
+          blockedTotals.blockedLineCount === 1 &&
+            blockedTotals.computedLineCount === 1 &&
+            blockedTotals.totalNet === '1750.50',
+          JSON.stringify(blockedTotals),
+        );
+        eq(
+          '  and its money columns are null',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.payroll_lines
+                where batch_id=$1 and status='blocked' and ba is null and net is null and pa is null
+                  and pb is null and adjustments is null and withheld is null`,
+              [batch],
+            )
+          ).n,
+          1,
+        );
+        await refusal('a batch with a blocked line cannot be submitted', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          submit(batch),
+        );
+        const emptyBatch = await mkBatch('2020-07');
+        await refusal('a batch with no lines cannot be submitted', 'PAYROLL_BATCH_EMPTY', () => submit(emptyBatch));
+
+        // --- submit / approve ------------------------------------------------------
+        const totals = await replace(batch, goodLines);
+        check(
+          'batch totals are recomputed in SQL from the lines',
+          totals.totalBa === '3100.00' &&
+            totals.totalPa === '500.00' &&
+            totals.totalPb === '250.50' &&
+            totals.totalWithheld === '2000.00' &&
+            totals.totalNet === '1850.50' &&
+            totals.lineCount === 3,
+          JSON.stringify(totals),
+        );
+        await refusal('Finance cannot approve payroll', 'MUTATION_FORBIDDEN', async () => {
+          await submit(batch);
+          await approve(batch, finance);
+        });
+        eq('Finance submits the batch', (await submit(batch)).s, 'submitted');
+        eq('submitting again is an idempotent replay', (await submit(batch)).s, 'submitted');
+        eq('  with one submit event', await auditCount('PAYROLL_BATCH_SUBMITTED', batch), 1);
+        await refusal('Finance cannot approve payroll (submitted batch)', 'MUTATION_FORBIDDEN', () =>
+          approve(batch, finance),
+        );
+        await refusal('a submitted batch cannot be edited', 'PAYROLL_BATCH_NOT_EDITABLE', () =>
+          replace(batch, goodLines),
+        );
+        await refusal('a submitted batch cannot be edited directly either', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(
+            `insert into public.payroll_lines (batch_id, staff_id, rank, status, blocked_reason)
+             values ($1,$2,'SM','blocked','CONFIGURATION_REQUIRED')`,
+            [batch, staff['sm-alt']!],
+          ),
+        );
+
+        const pending = await rows84('select * from public.pending_payroll_approvals($1)', [boss]);
+        check(
+          'the approver sees the submitted batch',
+          pending.some((r) => r.pending_batch_id === batch && r.pending_total_net === '1850.50'),
+          JSON.stringify(pending.map((r) => r.pending_period)),
+        );
+        await refusal('pending approvals are refused without the approval permission', 'MUTATION_FORBIDDEN', () =>
+          db.query('select * from public.pending_payroll_approvals($1)', [finance]),
+        );
+        await refusal('a Sales Manager cannot see pending approvals', 'MUTATION_FORBIDDEN', () =>
+          db.query('select * from public.pending_payroll_approvals($1)', [staff['sm']!]),
+        );
+        await refusal('an OST cannot see pending approvals', 'MUTATION_FORBIDDEN', () =>
+          db.query('select * from public.pending_payroll_approvals($1)', [staff['ost']!]),
+        );
+
+        await refusal('a return needs a reason', 'PAYROLL_RETURN_REASON_REQUIRED', () => giveBack(batch, 'no'));
+        await refusal('Finance cannot return a batch', 'MUTATION_FORBIDDEN', () =>
+          giveBack(batch, 'Totals look wrong', finance),
+        );
+        eq('the approver returns the batch', (await giveBack(batch, 'Recheck the SM line')).s, 'returned');
+        eq('  and replays idempotently', (await giveBack(batch, 'Recheck the SM line')).s, 'returned');
+        eq('  with one return event', await auditCount('PAYROLL_BATCH_RETURNED', batch), 1);
+        await refusal('a returned batch cannot be approved', 'PAYROLL_BATCH_NOT_SUBMITTED', () => approve(batch));
+        eq(
+          'a returned batch is no longer pending',
+          (await rows84('select * from public.pending_payroll_approvals($1)', [boss])).filter(
+            (r) => r.pending_batch_id === batch,
+          ).length,
+          0,
+        );
+        await refusal('a returned batch cannot be submitted without editing', 'PAYROLL_BATCH_NOT_EDITABLE', () =>
+          submit(batch),
+        );
+        await replace(batch, goodLines);
+        eq('editing a returned batch reopens it to draft', await statusOf(batch), 'draft');
+
+        // Separation of duties: the submitter can never approve their own batch.
+        eq('the super admin may also submit', (await submit(batch, boss)).s, 'submitted');
+        await refusal('the submitter cannot approve their own batch', 'PAYROLL_SELF_APPROVAL', () => approve(batch, boss));
+        eq('  and the batch is still submitted', await statusOf(batch), 'submitted');
+        await giveBack(batch, 'Resubmit through Finance');
+        await replace(batch, goodLines);
+        await submit(batch);
+        await refusal('an OST cannot approve payroll', 'MUTATION_FORBIDDEN', () => approve(batch, staff['ost']!));
+        await refusal('a Sales Manager cannot approve payroll', 'MUTATION_FORBIDDEN', () => approve(batch, staff['sm']!));
+        eq('the super admin approves a batch Finance submitted', (await approve(batch)).s, 'approved');
+        eq('approving again is an idempotent replay', (await approve(batch)).s, 'approved');
+        eq('  with one approval event', await auditCount('PAYROLL_BATCH_APPROVED', batch), 1);
+
+        // --- immutability of an approved batch ---------------------------------------
+        await refusal('an approved batch cannot change status', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_batches set status='draft' where id=$1`, [batch]),
+        );
+        await refusal('  nor its totals', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_batches set total_net='1.00' where id=$1`, [batch]),
+        );
+        await refusal('  nor be deleted', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query('delete from public.payroll_batches where id=$1', [batch]),
+        );
+        await refusal('an approved line cannot be edited', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_lines set net='999.00' where batch_id=$1`, [batch]),
+        );
+        await refusal('  nor deleted', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query('delete from public.payroll_lines where batch_id=$1', [batch]),
+        );
+        await refusal('an approved batch cannot be replaced', 'PAYROLL_BATCH_NOT_EDITABLE', () =>
+          replace(batch, goodLines),
+        );
+        await refusal('an approved batch cannot be returned', 'PAYROLL_BATCH_NOT_SUBMITTED', () =>
+          giveBack(batch, 'Too late to return'),
+        );
+        await refusal('a batch cannot be written outside the RPCs', 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+          db.query(`insert into public.payroll_batches (period, created_by) values ('2020-09',$1)`, [finance]),
+        );
+
+        // --- disbursements -----------------------------------------------------------
+        const draftBatch = await mkBatch('2020-08');
+        await replace(draftBatch, [smLine]);
+        const draftLine = (
+          await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1', [draftBatch])
+        ).id;
+        const today = (await one<{ d: string }>(`select (now() at time zone 'Asia/Manila')::date::text d`)).d;
+        await refusal('a disbursement needs an approved batch', 'PAYROLL_BATCH_NOT_APPROVED', () =>
+          pay(draftLine, '1750.50', `PR-${RUN}-D`, today),
+        );
+
+        const lineId = async (staffId: string) =>
+          (
+            await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1 and staff_id=$2', [
+              batch,
+              staffId,
+            ])
+          ).id;
+        const smLineId = await lineId(staff['sm']!);
+        const zeroLineId = await lineId(staff['ssm']!);
+        const smallLineId = await lineId(staff['vice-director']!);
+        const ref = `PR-${RUN}-1`;
+        await refusal('a Sales Manager cannot record a disbursement', 'MUTATION_FORBIDDEN', () =>
+          pay(smLineId, '1750.50', ref, today, staff['sm']!),
+        );
+        await refusal('an OST cannot record a disbursement', 'MUTATION_FORBIDDEN', () =>
+          pay(smLineId, '1750.50', ref, today, staff['ost']!),
+        );
+        await refusal('the amount must equal the line net exactly', 'PAYROLL_AMOUNT_MISMATCH', () =>
+          pay(smLineId, '1750.00', ref, today),
+        );
+        await refusal('a zero-net line has nothing to disburse', 'PAYROLL_LINE_NOT_PAYABLE', () =>
+          pay(zeroLineId, '10.00', ref, today),
+        );
+        await refusal('a non-positive amount is refused', 'AMOUNT_MUST_BE_POSITIVE', () =>
+          pay(smLineId, '0.00', ref, today),
+        );
+        await refusal('a reference is required', 'PAYOUT_REFERENCE_REQUIRED', () => pay(smLineId, '1750.50', ' - ', today));
+        await refusal('a future payment date is refused', 'PAYMENT_DATE_INVALID', () =>
+          pay(smLineId, '1750.50', ref, '2999-01-01'),
+        );
+        await refusal('a payment method is required', 'PAYROLL_METHOD_REQUIRED', () =>
+          pay(smLineId, '1750.50', ref, today, finance, ' '),
+        );
+        const first = await pay(smLineId, '1750.50', ref, today);
+        check('Finance records the disbursement', !!first.id);
+        eq('recording the same reference again replays the same row', (await pay(smLineId, '1750.50', ref.toLowerCase(), today)).id, first.id);
+        eq(
+          '  with one row and one audit event',
+          (await one<{ n: number }>('select count(*)::int n from public.payroll_disbursements where line_id=$1', [smLineId])).n +
+            (await auditCount('PAYROLL_DISBURSEMENT_RECORDED', first.id)),
+          2,
+        );
+        await refusal('a different reference cannot pay the same line twice', 'PAYROLL_LINE_ALREADY_DISBURSED', () =>
+          pay(smLineId, '1750.50', `PR-${RUN}-2`, today),
+        );
+        await refusal('a bank reference backs only one payout', 'DUPLICATE_PAYOUT_REFERENCE', () =>
+          pay(smallLineId, '100.00', `pr ${RUN} 1`, today),
+        );
+        check('a second line can be disbursed with its own reference', !!(await pay(smallLineId, '100.00', `PR-${RUN}-3`, today)).id);
+        await refusal('a disbursement cannot be edited', 'PAYROLL_DISBURSEMENT_IMMUTABLE', () =>
+          db.query(`update public.payroll_disbursements set amount='1.00' where id=$1`, [first.id]),
+        );
+        await refusal('  nor deleted', 'PAYROLL_DISBURSEMENT_IMMUTABLE', () =>
+          db.query('delete from public.payroll_disbursements where id=$1', [first.id]),
+        );
+        await refusal('a disbursement cannot be inserted outside the RPC', 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+          db.query(
+            `insert into public.payroll_disbursements (line_id, amount, method, bank_reference, paid_on, recorded_by)
+             values ($1,'1750.50','bank','PR-DIRECT',current_date,$2)`,
+            [smLineId, finance],
+          ),
+        );
+
+        // --- the gate is re-checked at call time ---------------------------------------
+        const batchB = await mkBatch('2020-10');
+        await replace(batchB, [smLine]);
+        await submit(batchB);
+        const batchC = await mkBatch('2020-11');
+        await replace(batchC, [smLine]);
+        await submit(batchC);
+        await approve(batchC);
+        const lineC = (await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1', [batchC])).id;
+        const batchD = await mkBatch('2020-12');
+        await replace(batchD, [smLine]);
+        await setQ1(false);
+        await refusal('with Q1 pending, a submitted live batch cannot be approved even with an approved policy', 'IST_PAYROLL_NOT_AUTHORIZED', () =>
+          approve(batchB),
+        );
+        await refusal('  a draft live batch cannot be submitted', 'IST_PAYROLL_NOT_AUTHORIZED', () => submit(batchD));
+        await refusal('  an approved live batch cannot be disbursed', 'IST_PAYROLL_NOT_AUTHORIZED', () =>
+          pay(lineC, '1750.50', `PR-${RUN}-C`, today),
+        );
+        await refusal('  and no new live batch can be created', 'IST_PAYROLL_NOT_AUTHORIZED', () => mkBatch('2021-01'));
+        eq('  the unapproved batch stayed submitted', await statusOf(batchB), 'submitted');
+        await setQ1(true);
+
+        // --- browser roles -----------------------------------------------------------
+        const priv = await one<{ bad: number; rls: number; svc: boolean }>(
+          `select (
+             select count(*)::int from unnest(array['public.payroll_batches','public.payroll_lines','public.payroll_disbursements','public.governing_policy_decisions']) t,
+               unnest(array['anon','authenticated']) r,
+               unnest(array['SELECT','INSERT','UPDATE','DELETE']) p
+              where has_table_privilege(r, t, p)
+           ) + (
+             select count(*)::int from unnest(array[
+               'public.create_payroll_batch(text,uuid,text,text)',
+               'public.replace_payroll_batch_lines(uuid,jsonb,uuid)',
+               'public.submit_payroll_batch(uuid,uuid)',
+               'public.approve_payroll_batch(uuid,uuid)',
+               'public.return_payroll_batch(uuid,text,uuid)',
+               'public.record_payroll_disbursement(uuid,text,text,text,date,uuid,text)',
+               'public.pending_payroll_approvals(uuid)']) f,
+               unnest(array['anon','authenticated']) r
+              where has_function_privilege(r, f, 'EXECUTE')
+           ) as bad,
+           (select count(*)::int from pg_class c where c.relrowsecurity
+              and c.oid in ('public.payroll_batches'::regclass,'public.payroll_lines'::regclass,
+                            'public.payroll_disbursements'::regclass)) as rls,
+           has_function_privilege('service_role','public.approve_payroll_batch(uuid,uuid)','EXECUTE')
+             and has_function_privilege('service_role','public.record_payroll_disbursement(uuid,text,text,text,date,uuid,text)','EXECUTE') as svc`,
+        );
+        eq('anon and authenticated hold no privilege on the payroll tables or functions', priv.bad, 0);
+        eq('row level security is enabled on all three payroll tables', priv.rls, 3);
+        check('service_role can execute the payroll functions', priv.svc);
+      } catch (error) {
+        check('section 84 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own84 ? 'rollback' : 'rollback to savepoint finops84');
+      }
+    }
+    {
+      section('85. Finance Phase 6: simulation workflow, isolated simulated disbursements, payroll close');
+      // Migration 20270105000006. Rolled back: closed batches and disbursements are immutable.
+      // Q1 is recorded approved by migration 0008; the simulation steps flip it to pending as a
+      // TEST FIXTURE (rolled back) to prove simulations never depend on the gate.
+      let own85 = false;
+      try {
+        await db.query('savepoint finops85');
+      } catch {
+        await db.query('begin');
+        own85 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        const simBasis = 'Simulation from historical reference fixtures, not approved policy';
+        const mkSim = async (period: string, actor = finance) =>
+          (
+            await one<{ id: string }>(`select public.create_payroll_batch($1,$2,'simulation',$3) as id`, [
+              period,
+              actor,
+              simBasis,
+            ])
+          ).id;
+        const mkLive = async (period: string) =>
+          (await one<{ id: string }>('select public.create_payroll_batch($1,$2) as id', [period, finance])).id;
+        const replace = async (batch: string, lines: unknown[], actor = finance) =>
+          db.query('select public.replace_payroll_batch_lines($1,$2::jsonb,$3)', [batch, JSON.stringify(await fixtureLinesWithEvidence(batch, lines)), actor]);
+        const submit = async (batch: string, actor = finance) =>
+          (await one<{ s: string }>('select public.submit_payroll_batch($1,$2) as s', [batch, actor])).s;
+        const approve = async (batch: string, actor = boss) =>
+          (await one<{ s: string }>('select public.approve_payroll_batch($1,$2) as s', [batch, actor])).s;
+        const giveBack = async (batch: string, reason: string, actor = boss) =>
+          (await one<{ s: string }>('select public.return_payroll_batch($1,$2,$3) as s', [batch, reason, actor])).s;
+        const close = async (batch: string, actor = boss) =>
+          (await one<{ s: string }>('select public.close_payroll_batch($1,$2) as s', [batch, actor])).s;
+        const statusOf = async (batch: string) =>
+          (await one<{ s: string }>('select status s from public.payroll_batches where id=$1', [batch])).s;
+        const simPay = async (lineId: string, amount: string, ref: string, paidOn: string, actor = finance, method = 'bank') =>
+          (
+            await one<{ id: string }>(
+              'select public.record_payroll_simulation_disbursement($1,$2,$3,$4,$5,$6) as id',
+              [lineId, amount, method, ref, paidOn, actor],
+            )
+          ).id;
+        const livePay = async (lineId: string, amount: string, ref: string, paidOn: string) =>
+          (
+            await one<{ id: string }>('select public.record_payroll_disbursement($1,$2,$3,$4,$5,$6) as id', [
+              lineId,
+              amount,
+              'bank',
+              ref,
+              paidOn,
+              finance,
+            ])
+          ).id;
+        const auditCount = async (action: string, entity: string) =>
+          (
+            await one<{ n: number }>('select count(*)::int n from public.audit_events where action=$1 and entity_id=$2', [
+              action,
+              entity,
+            ])
+          ).n;
+        const lineOf = async (batch: string, staffId: string) =>
+          (
+            await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1 and staff_id=$2', [
+              batch,
+              staffId,
+            ])
+          ).id;
+        const setQ1 = async (approved: boolean) => {
+          // TEST FIXTURE ONLY (rolled back): no function can do this. Q1 is recorded approved
+          // (owner-reported) by migration 0008; 'approved' restores exactly that state.
+          await db.query(`select set_config('afhomes.governing_policy_write','on',true)`);
+          await db.query(
+            `update public.governing_policy_decisions
+                set status=$2, decided_by=null, decided_at=case when $2='approved' then now() end
+              where key=$1`,
+            ['Q1_GOVERNING_COMPENSATION_MODEL', approved ? 'approved' : 'pending'],
+          );
+          await db.query(`select set_config('afhomes.governing_policy_write','off',true)`);
+        };
+        const liveAuthorized = async () =>
+          (await one<{ a: boolean }>('select private.ist_payroll_live_authorized() a')).a;
+        const today = (await one<{ d: string }>(`select (now() at time zone 'Asia/Manila')::date::text d`)).d;
+        const mk = (staffId: string, rank: string, over: Record<string, unknown> = {}) => ({
+          staffId,
+          rank,
+          status: 'computed',
+          policyId: null,
+          ba: '1000.00',
+          pa: '500.00',
+          pb: '250.50',
+          adjustments: '0.00',
+          withheld: '0.00',
+          net: '1750.50',
+          inputs: { policySnapshot: { source: 'historical fixture' } },
+          result: { fixture: true },
+          ...over,
+        });
+        const simLines = [
+          mk(staff['sm']!, 'SM'),
+          mk(staff['ssm']!, 'SSM', { ba: '2000.00', pa: '0.00', pb: '0.00', withheld: '2000.00', net: '0.00' }),
+          { staffId: staff['vice-director']!, rank: 'SVD', status: 'blocked', blockedReason: 'CONFIGURATION_REQUIRED', inputs: {}, result: {} },
+        ];
+        // Every real record the simulation must never touch.
+        const realState = async () =>
+          JSON.stringify(
+            await one(
+              `select
+                 (select count(*)::int from public.payroll_disbursements) as live_disbursements,
+                 (select md5(coalesce(string_agg(p.id::text || p.status || p.amount || coalesce(p.posting_period,''), ',' order by p.id), ''))
+                    from public.payments p) as payments,
+                 (select md5(coalesce(string_agg(c.id::text || c.status || c.amount, ',' order by c.id), ''))
+                    from public.commissions c) as commissions,
+                 (select count(*)::int from public.commission_payouts) as payouts,
+                 (select md5(coalesce(string_agg(a.period || a.status, ',' order by a.period), ''))
+                    from public.accounting_periods a) as periods,
+                 (select coalesce(sum(b.total_net::numeric), 0)::text from public.payroll_batches b) as payable_total,
+                 public.finance_period_summary('2019-05', $1) as sim_month,
+                 public.finance_period_summary(to_char(now() at time zone 'Asia/Manila','YYYY-MM'), $1) as this_month`,
+              [finance],
+            ),
+          );
+
+        eq('Q1 is recorded approved by migration 0008 at the start of section 85', await liveAuthorized(), true);
+        // TEST FIXTURE: simulations must keep working while Q1 is pending.
+        await setQ1(false);
+        eq('(test fixture) Q1 set back to pending for the simulation steps', await liveAuthorized(), false);
+
+        // --- simulation lifecycle (Q1 pending throughout) ------------------------------------
+        const sim = await mkSim('2019-05');
+        await replace(sim, simLines);
+        const before = await realState();
+        await refusal('a Sales Manager cannot submit a simulation', 'MUTATION_FORBIDDEN', () => submit(sim, staff['sm']!));
+        await refusal('a draft simulation cannot be closed', 'PAYROLL_BATCH_NOT_APPROVED', () => close(sim));
+        eq('Finance submits a simulation while Q1 is pending (blocked lines carry no money)', await submit(sim), 'submitted');
+        eq('  submitting again is an idempotent replay', await submit(sim), 'submitted');
+        eq(
+          '  with one PAYROLL_SIMULATION_SUBMITTED event and no live submit event',
+          `${await auditCount('PAYROLL_SIMULATION_SUBMITTED', sim)}/${await auditCount('PAYROLL_BATCH_SUBMITTED', sim)}`,
+          '1/0',
+        );
+        await refusal('Finance cannot approve a simulation', 'MUTATION_FORBIDDEN', () => approve(sim, finance));
+        await refusal('a Sales Manager cannot approve a simulation', 'MUTATION_FORBIDDEN', () => approve(sim, staff['sm']!));
+        check(
+          'a submitted simulation never appears in the live pending approvals',
+          (await db.query('select * from public.pending_payroll_approvals($1)', [boss])).rows.every(
+            (r) => r.pending_batch_id !== sim,
+          ),
+        );
+        eq('the approver returns a simulation', await giveBack(sim, 'Recheck simulated figures'), 'returned');
+        eq('  with one PAYROLL_SIMULATION_RETURNED event', await auditCount('PAYROLL_SIMULATION_RETURNED', sim), 1);
+        await replace(sim, simLines);
+        eq('editing a returned simulation reopens it to draft', await statusOf(sim), 'draft');
+        eq('the super admin may submit a simulation', await submit(sim, boss), 'submitted');
+        await refusal('the submitter cannot approve their own simulation', 'PAYROLL_SELF_APPROVAL', () => approve(sim, boss));
+        eq('  and it is still submitted', await statusOf(sim), 'submitted');
+        await giveBack(sim, 'Resubmit through Finance');
+        await replace(sim, simLines);
+        await submit(sim);
+        // Line ids are read only now: replacing lines re-inserts them with new ids.
+        const simA = await lineOf(sim, staff['sm']!);
+        const simZero = await lineOf(sim, staff['ssm']!);
+        const simBlocked = await lineOf(sim, staff['vice-director']!);
+        await refusal('a simulated disbursement needs an approved simulation', 'PAYROLL_BATCH_NOT_APPROVED', () =>
+          simPay(simA, '1750.50', `SIM-${RUN}-0`, today),
+        );
+        eq('the super admin approves a simulation Finance submitted (Q1 pending)', await approve(sim), 'approved');
+        eq('  approving again is an idempotent replay', await approve(sim), 'approved');
+        eq(
+          '  with one PAYROLL_SIMULATION_APPROVED event and no live approval event',
+          `${await auditCount('PAYROLL_SIMULATION_APPROVED', sim)}/${await auditCount('PAYROLL_BATCH_APPROVED', sim)}`,
+          '1/0',
+        );
+        const simRow = await one<{ mode: string; total_net: string; simulation_total_net: string }>(
+          'select mode, total_net, simulation_total_net from public.payroll_batches where id=$1',
+          [sim],
+        );
+        check(
+          'an approved simulation is still labelled and carries no payable total',
+          simRow.mode === 'simulation' && simRow.total_net === '0.00' && simRow.simulation_total_net === '1750.50',
+          JSON.stringify(simRow),
+        );
+        await refusal('an approved simulation cannot be closed before every payable line is disbursed', 'PAYROLL_BATCH_NOT_FULLY_DISBURSED', () =>
+          close(sim),
+        );
+
+        // --- simulated disbursements ------------------------------------------------------
+        const simRef = `PR-${RUN}-85-SHARED`;
+        await refusal('a Sales Manager cannot record a simulated disbursement', 'MUTATION_FORBIDDEN', () =>
+          simPay(simA, '1750.50', simRef, today, staff['sm']!),
+        );
+        await refusal('the simulated amount must equal the line net', 'PAYROLL_AMOUNT_MISMATCH', () =>
+          simPay(simA, '1750.00', simRef, today),
+        );
+        await refusal('a zero-net simulated line has nothing to disburse', 'PAYROLL_LINE_NOT_PAYABLE', () =>
+          simPay(simZero, '10.00', simRef, today),
+        );
+        await refusal('a blocked simulated line has nothing to disburse', 'PAYROLL_LINE_NOT_PAYABLE', () =>
+          simPay(simBlocked, '10.00', simRef, today),
+        );
+        await refusal('a simulated disbursement needs a reference', 'PAYOUT_REFERENCE_REQUIRED', () =>
+          simPay(simA, '1750.50', ' - ', today),
+        );
+        await refusal('a simulated disbursement needs a method', 'PAYROLL_METHOD_REQUIRED', () =>
+          simPay(simA, '1750.50', simRef, today, finance, ' '),
+        );
+        await refusal('a simulated disbursement cannot be dated in the future', 'PAYMENT_DATE_INVALID', () =>
+          simPay(simA, '1750.50', simRef, '2999-01-01'),
+        );
+        const simPaid = await simPay(simA, '1750.50', simRef, today);
+        eq('Finance records a simulated disbursement; the same reference replays it', await simPay(simA, '1750.50', simRef.toLowerCase(), today), simPaid);
+        eq(
+          '  one simulation row, labelled, one PAYROLL_SIMULATION_DISBURSEMENT_RECORDED event',
+          `${(await one<{ n: number }>('select count(*)::int n from public.payroll_simulation_disbursements where line_id=$1 and simulation', [simA])).n}/${await auditCount('PAYROLL_SIMULATION_DISBURSEMENT_RECORDED', simPaid)}`,
+          '1/1',
+        );
+        eq(
+          '  and nothing was written to the live disbursement table',
+          (await one<{ n: number }>('select count(*)::int n from public.payroll_disbursements where line_id=$1', [simA])).n,
+          0,
+        );
+        await refusal('a different reference cannot pay the same simulated line twice', 'PAYROLL_LINE_ALREADY_DISBURSED', () =>
+          simPay(simA, '1750.50', `PR-${RUN}-85-OTHER`, today),
+        );
+        await refusal('an unknown line is refused by the simulation path', 'PAYROLL_LINE_NOT_FOUND', () =>
+          simPay('00000000-0000-4000-8000-000000000000', '1.00', simRef, today),
+        );
+        await refusal('a simulated disbursement cannot be inserted outside the RPC', 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+          db.query(
+            `insert into public.payroll_simulation_disbursements (line_id, amount, method, bank_reference, paid_on, recorded_by)
+             values ($1,'1750.50','bank','SIM-DIRECT',current_date,$2)`,
+            [simA, finance],
+          ),
+        );
+        await refusal('a simulated disbursement cannot be edited', 'PAYROLL_DISBURSEMENT_IMMUTABLE', () =>
+          db.query(`update public.payroll_simulation_disbursements set amount='1.00' where id=$1`, [simPaid]),
+        );
+        await refusal('  nor deleted', 'PAYROLL_DISBURSEMENT_IMMUTABLE', () =>
+          db.query('delete from public.payroll_simulation_disbursements where id=$1', [simPaid]),
+        );
+        await refusal('  nor truncated', 'PAYROLL_DIRECT_WRITE_REFUSED', () =>
+          db.query('truncate public.payroll_simulation_disbursements'),
+        );
+
+        // --- closing a simulation ---------------------------------------------------------
+        await refusal('Finance cannot close a payroll batch', 'MUTATION_FORBIDDEN', () => close(sim, finance));
+        await refusal('a Sales Manager cannot close a payroll batch', 'MUTATION_FORBIDDEN', () => close(sim, staff['sm']!));
+        eq('the closing authority closes a fully disbursed simulation while Q1 is pending', await close(sim), 'closed');
+        eq('  closing again is idempotent', await close(sim), 'closed');
+        eq(
+          '  with one PAYROLL_SIMULATION_CLOSED event and no live close event',
+          `${await auditCount('PAYROLL_SIMULATION_CLOSED', sim)}/${await auditCount('PAYROLL_BATCH_CLOSED', sim)}`,
+          '1/0',
+        );
+        await refusal('a closed batch cannot change status', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_batches set status='approved' where id=$1`, [sim]),
+        );
+        await refusal('  even with the RPC write flag on', 'PAYROLL_BATCH_LOCKED', async () => {
+          await db.query(`select set_config('afhomes.payroll_write','on',true)`);
+          await db.query(`update public.payroll_batches set simulation_total_net='1.00' where id=$1`, [sim]);
+        });
+        await db.query(`select set_config('afhomes.payroll_write','off',true)`);
+        await refusal('  nor be deleted', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query('delete from public.payroll_batches where id=$1', [sim]),
+        );
+        await refusal('  nor have its lines replaced', 'PAYROLL_BATCH_NOT_EDITABLE', () => replace(sim, simLines));
+        await refusal('  nor be returned', 'PAYROLL_BATCH_NOT_SUBMITTED', () => giveBack(sim, 'Too late to return'));
+        await refusal('  nor take a new simulated disbursement', 'PAYROLL_BATCH_NOT_APPROVED', () =>
+          simPay(simA, '1750.50', `PR-${RUN}-85-LATE`, today),
+        );
+        eq('nothing simulated changed any real payment, commission, period, payout or payable total', await realState(), before);
+
+        // --- a closed simulation is re-runnable ------------------------------------------------
+        eq('approving a closed simulation again is an idempotent replay', await approve(sim), 'approved');
+        eq('  with still one approval event', await auditCount('PAYROLL_SIMULATION_APPROVED', sim), 1);
+        const rerun = await mkSim('2019-05');
+        check('a closed simulation never blocks a new simulation for the same period', rerun !== sim, rerun);
+        eq('  the new rehearsal starts as a draft', await statusOf(rerun), 'draft');
+        eq('  creating again returns the open rehearsal, not the closed one', await mkSim('2019-05'), rerun);
+        eq('  and the closed simulation is untouched', await statusOf(sim), 'closed');
+        await replace(rerun, [...simLines, mk(staff['sm-alt']!, 'SM')]);
+        await submit(rerun);
+        await approve(rerun);
+        const rerunA = await lineOf(rerun, staff['sm']!);
+        const rerunB = await lineOf(rerun, staff['sm-alt']!);
+        const rerunPaid = await simPay(rerunA, '1750.50', simRef, today);
+        check("a re-run may reuse the closed rehearsal's demo reference", !!rerunPaid && rerunPaid !== simPaid);
+        await refusal('  but a reference backs only one payout within one rehearsal', 'DUPLICATE_PAYOUT_REFERENCE', () =>
+          simPay(rerunB, '1750.50', simRef.toLowerCase(), today),
+        );
+        check('  another reference pays the second line', !!(await simPay(rerunB, '1750.50', `PR-${RUN}-85-B`, today)));
+        eq('the re-run closes', await close(rerun), 'closed');
+        eq('nothing in the re-run changed any real record either', await realState(), before);
+
+        // --- separation of duties on close (simulation; approval delegated TEST-ONLY to admin) ----
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, false, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_approval'
+           on conflict (role_id, module_id) do update set can_view=true, can_update=true`,
+          [staff['admin']!],
+        );
+        const sim2 = await mkSim('2019-04');
+        await replace(sim2, [simLines[1]]);
+        await submit(sim2, boss);
+        eq('a delegated approver approves the super admin\'s simulation', await approve(sim2, staff['admin']!), 'approved');
+        await refusal('the submitter can never close their own batch', 'PAYROLL_SELF_CLOSE', () => close(sim2, boss));
+        eq('  and it stays approved', await statusOf(sim2), 'approved');
+
+        // --- live close: Q1 gate, full disbursement, frozen -------------------------------------
+        await setQ1(true);
+        // TEST FIXTURE ONLY: no approved compensation policy exists in a real database.
+        const fixturePolicy = await fixturePolicyViaRpcs('SM', '2020-01-01');
+        await fixturePerformanceViaRpcs();
+        const live = await mkLive('2021-03');
+        await replace(live, [mk(staff['sm']!, 'SM', { policyId: fixturePolicy, inputs: { fixture: true } })]);
+        await submit(live);
+        await setQ1(false);
+        await refusal('with Q1 pending, a submitted live batch cannot be returned either', 'IST_PAYROLL_NOT_AUTHORIZED', () =>
+          giveBack(live, 'Recheck the live figures'),
+        );
+        eq('  it stays submitted', await statusOf(live), 'submitted');
+        await setQ1(true);
+        await approve(live);
+        const liveLine = await lineOf(live, staff['sm']!);
+        await setQ1(false);
+        await refusal('with Q1 pending, an approved live batch cannot be closed', 'IST_PAYROLL_NOT_AUTHORIZED', () => close(live));
+        eq('  it stays approved', await statusOf(live), 'approved');
+        await setQ1(true);
+        await refusal('a live batch cannot be closed before its payable lines are disbursed', 'PAYROLL_BATCH_NOT_FULLY_DISBURSED', () =>
+          close(live),
+        );
+        check(
+          'a simulated bank reference never blocks a live disbursement with the same reference',
+          !!(await livePay(liveLine, '1750.50', simRef, today)),
+        );
+        eq(
+          '  and the simulated row is untouched',
+          (await one<{ n: number }>('select count(*)::int n from public.payroll_simulation_disbursements where id=$1', [simPaid])).n,
+          1,
+        );
+        await refusal('a live line cannot be disbursed through the simulation path', 'PAYROLL_NOT_SIMULATION', () =>
+          simPay(liveLine, '1750.50', `PR-${RUN}-85-X`, today),
+        );
+        eq('the closing authority closes a fully disbursed live batch once Q1 is approved', await close(live), 'closed');
+        eq('  with one PAYROLL_BATCH_CLOSED event', await auditCount('PAYROLL_BATCH_CLOSED', live), 1);
+        await refusal('a closed live batch is frozen', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_batches set total_net='0.00' where id=$1`, [live]),
+        );
+        await refusal('  and its lines too', 'PAYROLL_BATCH_LOCKED', () =>
+          db.query(`update public.payroll_lines set net='1.00' where batch_id=$1`, [live]),
+        );
+        eq('Q1 ends section 85 in its recorded (approved) state', await liveAuthorized(), true);
+
+        const priv85 = await one<{ bad: number; rls: boolean; svc: boolean }>(
+          `select (
+             select count(*)::int from unnest(array['anon','authenticated']) r,
+               unnest(array['SELECT','INSERT','UPDATE','DELETE']) p
+              where has_table_privilege(r, 'public.payroll_simulation_disbursements', p)
+           ) + (
+             select count(*)::int from unnest(array[
+               'public.close_payroll_batch(uuid,uuid)',
+               'public.record_payroll_simulation_disbursement(uuid,text,text,text,date,uuid)',
+               'public.accounting_period_readiness(text,uuid)']) f,
+               unnest(array['anon','authenticated']) r
+              where has_function_privilege(r, f, 'EXECUTE')
+           ) as bad,
+           (select c.relrowsecurity from pg_class c where c.oid = 'public.payroll_simulation_disbursements'::regclass) as rls,
+           has_function_privilege('service_role','public.close_payroll_batch(uuid,uuid)','EXECUTE')
+             and has_function_privilege('service_role','public.record_payroll_simulation_disbursement(uuid,text,text,text,date,uuid)','EXECUTE')
+             and has_function_privilege('service_role','public.accounting_period_readiness(text,uuid)','EXECUTE') as svc`,
+        );
+        eq('anon and authenticated hold no privilege on the Phase 6 table or functions', priv85.bad, 0);
+        check('row level security is enabled on payroll_simulation_disbursements', priv85.rls);
+        check('service_role can execute the Phase 6 functions', priv85.svc);
+      } catch (error) {
+        check('section 85 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own85 ? 'rollback' : 'rollback to savepoint finops85');
+      }
+    }
+    {
+      section('86. Finance Phase 6: month-end readiness blockers and warnings gate period submission');
+      // Migration 20270105000006. Rolled back: adjustment and payout history is immutable.
+      let own86 = false;
+      try {
+        await db.query('savepoint finops86');
+      } catch {
+        await db.query('begin');
+        own86 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const gold = byCode.get('GOLD')!;
+        const P = '2019-03';
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        type Item = { code: string; count: number; message: string };
+        type Readiness = { period: string; ready: boolean; blockers: Item[]; warnings: Item[] };
+        const readiness = async (period = P, actor = finance) =>
+          (await one<{ r: Readiness }>('select public.accounting_period_readiness($1,$2) as r', [period, actor])).r;
+        const codes = (items: Item[]) =>
+          items
+            .map((i) => `${i.code}:${i.count}`)
+            .sort()
+            .join(',');
+        const record = async (sale: string, amount: string, reference: string) =>
+          (
+            await one<{ id: string }>(
+              `select public.record_card_payment($1,$2,'installment','cash',$3,null,$4,$5) as id`,
+              [sale, amount, reference, await receiptObject('card'), finance],
+            )
+          ).id;
+        const details = (id: string, body: Record<string, unknown>) =>
+          db.query('select public.set_payment_receipt_details($1,$2,$3::jsonb)', [id, finance, JSON.stringify(body)]);
+        const verify = (id: string) => db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [id, finance]);
+        const submit = async (period = P) =>
+          (await one<{ s: string }>('select public.submit_accounting_period($1,$2) as s', [period, finance])).s;
+
+        await refusal('a user with no Finance permission cannot read readiness', 'MUTATION_FORBIDDEN', () =>
+          readiness(P, staff['hr']!),
+        );
+        await refusal('an invalid period is refused', 'PERIOD_INVALID', () => readiness('2019-13'));
+        const r0 = await readiness();
+        check('an empty month is ready with no blockers', r0.ready && r0.blockers.length === 0, JSON.stringify(r0));
+        const neighbour = async () => {
+          const r = await readiness('2019-02');
+          return `${codes(r.blockers)}|${codes(r.warnings)}`;
+        };
+        const neighbour0 = await neighbour();
+
+        // Blocker 1 + duplicate-reference warning: two unverified payments dated in P sharing a reference.
+        const saleA = await mkSale('fin86a', await mkCustomer('fin86a', 'f86a'), gold, 'f86a');
+        const saleB = await mkSale('fin86b', await mkCustomer('fin86b', 'f86b'), gold, 'f86b');
+        const shared = `BANK-${RUN}-86`;
+        const p1 = await record(saleA, '1000.00', shared);
+        await details(p1, { paidOn: '2019-03-05' });
+        const p2 = await record(saleB, '700.00', shared.toLowerCase());
+        await details(p2, { paidOn: '2019-03-06' });
+        // Warning: verified money posted to P with no OR number.
+        const p3 = await record(saleA, '500.00', `REF-${RUN}-86-OWN`);
+        await details(p3, { paidOn: '2019-03-07' });
+        await db.query(`update public.payments set posting_period=$2 where id=$1`, [p3, P]);
+        await verify(p3);
+        eq('  (fixture) the verified payment posts to the open test month', (await one<{ p: string }>('select posting_period p from public.payments where id=$1', [p3])).p, P);
+        // Blocker 2: a proposed adjustment effective in P.
+        const adj = (
+          await one<{ id: string }>(
+            `select public.propose_payment_adjustment($1,$2,'reversal','100.00','Reversal under review',$3::date,null) as id`,
+            [p3, finance, '2019-03-20'],
+          )
+        ).id;
+        // Blocker 3: a commission payout paid in P, not reconciled.
+        const comm = (
+          await one<{ id: string }>(
+            `insert into public.commissions
+               (sale_id, beneficiary_type, beneficiary_staff_id, amount, rate_snapshot, basis_amount_snapshot, status, earned_at)
+             values ($1,'staff',$2,'300.00',$3,$4,'earned',now()) returning id`,
+            [saleB, staff['ost']!, gold.commission_rate, gold.cash_price],
+          )
+        ).id;
+        await db.query(
+          `update public.commissions set status='paid', paid_at='2019-03-25T02:00:00Z', paid_by=$2, paid_reference=$3 where id=$1`,
+          [comm, boss, `REF-${RUN}-86-PAYOUT`],
+        );
+        const payout = (await one<{ id: string }>('select id from public.commission_payouts where commission_id=$1', [comm])).id;
+        // Live payroll for P is a WARNING only; a simulation for P is ignored entirely. (Q1 is
+        // recorded approved by migration 0008; with no approved policy the batch pays nothing.)
+        await db.query('select public.create_payroll_batch($1,$2)', [P, finance]);
+        await db.query(`select public.create_payroll_batch($1,$2,'simulation',$3)`, [
+          P,
+          finance,
+          'Simulation from historical reference fixtures, not approved policy',
+        ]);
+
+        const r1 = await readiness();
+        check('readiness is not ready while blockers exist', !r1.ready, JSON.stringify(r1));
+        eq(
+          'blockers: unverified payments, proposed adjustment, unreconciled payout (exact counts)',
+          codes(r1.blockers),
+          'COMMISSION_PAYOUTS_UNRECONCILED:1,PAYMENTS_PENDING_VERIFICATION:2,PAYMENT_ADJUSTMENTS_PENDING:1',
+        );
+        eq(
+          'warnings: missing evidence, unreviewed reference matches, one live payroll batch (simulation ignored)',
+          codes(r1.warnings),
+          'LIVE_PAYROLL_NOT_CLOSED:1,PAYMENT_REFERENCE_MATCHES:2,VERIFIED_PAYMENTS_MISSING_EVIDENCE:1',
+        );
+        check(
+          'every item carries a human-readable message',
+          [...r1.blockers, ...r1.warnings].every((i) => typeof i.message === 'string' && i.message.length > 10),
+        );
+        eq('a neighbouring month sees none of these items', await neighbour(), neighbour0);
+        await refusal('a month with blockers cannot be submitted for closing', 'PERIOD_HAS_BLOCKERS', () => submit());
+        eq(
+          '  and the period was not moved to ready_for_approval',
+          (await one<{ n: number }>(`select count(*)::int n from public.accounting_periods where period=$1 and status<>'open'`, [P])).n,
+          0,
+        );
+
+        // Clear the blockers one kind at a time; each remaining kind still blocks.
+        await details(p1, { duplicateReviewNote: 'One bank transfer split across two contracts' });
+        await verify(p1);
+        await db.query(`select public.verify_card_payment($1,'rejected','duplicate of another contract payment',$2)`, [p2, finance]);
+        eq('verifying / rejecting clears the unverified-payment blocker', codes((await readiness()).blockers), 'COMMISSION_PAYOUTS_UNRECONCILED:1,PAYMENT_ADJUSTMENTS_PENDING:1');
+        await refusal('  the remaining blockers still refuse submission', 'PERIOD_HAS_BLOCKERS', () => submit());
+        // Resolution is gated by Q13 (pending) since migration 0007; TEST-ONLY direct withdrawal
+        // through the guard's transaction-local flag (section 87 covers the governed RPC).
+        await db.query(`select set_config('afhomes.payment_adjustment_write','on',true)`);
+        await db.query(
+          `update public.payment_adjustments set status='withdrawn', decided_by=$2, decided_at=now(),
+                  decision_note='Withdrawn for the readiness test' where id=$1`,
+          [adj, boss],
+        );
+        await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
+        await refusal('  an unreconciled payout alone still refuses submission', 'PERIOD_HAS_BLOCKERS', () => submit());
+        await db.query('select public.reconcile_commission_payout($1,$2,$3,$4)', [payout, boss, null, '2019-03-25']);
+        const r2 = await readiness();
+        check('with every blocker cleared the month is ready', r2.ready && r2.blockers.length === 0, JSON.stringify(r2));
+        check(
+          '  while the warnings remain (live payroll unclosed, missing OR)',
+          codes(r2.warnings).includes('LIVE_PAYROLL_NOT_CLOSED:1') &&
+            codes(r2.warnings).includes('VERIFIED_PAYMENTS_MISSING_EVIDENCE:1'),
+          codes(r2.warnings),
+        );
+        eq('warnings never block: Finance submits the month (live payroll unclosed)', await submit(), 'ready_for_approval');
+        eq('  submitting again is an idempotent replay', await submit(), 'ready_for_approval');
+      } catch (error) {
+        check('section 86 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own86 ? 'rollback' : 'rollback to savepoint finops86');
+      }
+    }
+    {
+      section('87. Finance Phase 7: governed payment adjustment resolution (Q13 gate + RBAC)');
+      // Migration 20270105000007. Rolled back: resolved adjustments are append-only history,
+      // so a committed fixture could never be cleaned up. For the same reason no cross-
+      // connection race runs here (a second client cannot see uncommitted rows); the RPC's
+      // FOR UPDATE on payment then adjustment is what serializes two parallel resolutions.
+      let own87 = false;
+      try {
+        await db.query('savepoint finops87');
+      } catch {
+        await db.query('begin');
+        own87 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const gold = byCode.get('GOLD')!;
+        const EFF = '2019-05-10';
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        const record = async (sale: string, amount: string, reference: string) =>
+          (
+            await one<{ id: string }>(
+              `select public.record_card_payment($1,$2,'installment','cash',$3,null,$4,$5) as id`,
+              [sale, amount, reference, await receiptObject('card'), finance],
+            )
+          ).id;
+        const verify = (id: string) => db.query(`select public.verify_card_payment($1,'verified',null,$2)`, [id, finance]);
+        const propose = async (payment: string, kind: string, amount: string, actor = finance) =>
+          (
+            await one<{ id: string }>(
+              `select public.propose_payment_adjustment($1,$2,$3,$4,'Adjustment under review',$5::date,null) as id`,
+              [payment, actor, kind, amount, EFF],
+            )
+          ).id;
+        const resolve = async (id: string, decision: string, note = 'Reviewed against the bank statement', actor = boss) =>
+          (
+            await one<{ s: string }>('select public.resolve_payment_adjustment($1,$2,$3,$4) as s', [
+              id,
+              decision,
+              note,
+              actor,
+            ])
+          ).s;
+        const adjRow = (id: string) =>
+          one<{ status: string; decided_by: string | null; posting_period: string | null; decision_note: string | null }>(
+            'select status, decided_by, posting_period, decision_note from public.payment_adjustments where id=$1',
+            [id],
+          );
+        const payRow = async (id: string) =>
+          (await one<{ r: string }>('select to_jsonb(p)::text as r from public.payments p where p.id=$1', [id])).r;
+        const audits = async (id: string) =>
+          (
+            await db.query<{ action: string }>(
+              `select action from public.audit_events
+                where entity_type='payment_adjustment' and entity_id=$1 order by action`,
+              [id],
+            )
+          ).rows
+            .map((r) => r.action)
+            .join(',');
+        const q13 = async () =>
+          (
+            await one<{ s: string }>(
+              `select status s from public.governing_policy_decisions where key='Q13_PAYMENT_ADJUSTMENT_AUTHORITY'`,
+            )
+          ).s;
+        const setQ13 = async (status: 'approved' | 'pending') => {
+          // TEST FIXTURE ONLY, never production: the decision row is changed here only inside
+          // this rolled-back savepoint on the disposable database, through the guard's flag.
+          await db.query(`select set_config('afhomes.governing_policy_write','on',true)`);
+          await db.query(
+            status === 'approved'
+              ? `update public.governing_policy_decisions set status='approved', decided_by=$1, decided_at=now()
+                  where key='Q13_PAYMENT_ADJUSTMENT_AUTHORITY'`
+              : `update public.governing_policy_decisions set status='pending', decided_by=null, decided_at=null
+                  where key='Q13_PAYMENT_ADJUSTMENT_AUTHORITY' and $1::uuid is not null`,
+            [boss],
+          );
+          await db.query(`select set_config('afhomes.governing_policy_write','off',true)`);
+        };
+        type Item = { code: string; count: number };
+        const pendingBlocker = async () =>
+          (
+            await one<{ r: { blockers: Item[] } }>('select public.accounting_period_readiness($1,$2) as r', [
+              '2019-05',
+              finance,
+            ])
+          ).r.blockers.find((b) => b.code === 'PAYMENT_ADJUSTMENTS_PENDING')?.count ?? 0;
+        const thisMonth = (await one<{ m: string }>(`select to_char(now() at time zone 'Asia/Manila','YYYY-MM') m`)).m;
+        const figures = async () =>
+          (
+            await one<{ f: { verifiedTotal: string; approvedAdjustmentsCount: number; approvedAdjustmentsTotal: string } }>(
+              'select public.finance_period_summary($1,$2) as f',
+              [thisMonth, finance],
+            )
+          ).f;
+
+        // --- authority structure ------------------------------------------------
+        eq('Q13 is seeded pending', await q13(), 'pending');
+        eq(
+          'no role row grants finance.payment_adjustment_decision',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.role_permissions rp join public.modules m on m.id=rp.module_id
+                where m.key='finance.payment_adjustment_decision'`,
+            )
+          ).n,
+          0,
+        );
+        const can = async (who: string, action: string) =>
+          (
+            await one<{ ok: boolean }>('select private.has_permission_for_user($1,$2,$3) as ok', [
+              staff[who]!,
+              'finance.payment_adjustment_decision',
+              action,
+            ])
+          ).ok;
+        check('Super Admin holds the decision permission by slug', await can('super-admin', 'update'));
+        check('Finance does not hold the decision permission', !(await can('finance', 'update')));
+
+        // --- fixtures -----------------------------------------------------------
+        const sale = await mkSale('fin87a', await mkCustomer('fin87a', 'f87a'), gold, 'f87a');
+        const pay = await record(sale, '1000.00', `REF-${RUN}-87-A`);
+        await verify(pay);
+        const pay2 = await record(sale, '600.00', `REF-${RUN}-87-B`);
+        await verify(pay2);
+        const adjA = await propose(pay, 'reversal', '300.00');
+        const adjB = await propose(pay, 'refund', '200.00');
+        const adjC = await propose(pay2, 'returned_check', '600.00');
+        const adjS = await propose(pay2, 'reversal', '100.00', boss); // requested by the Super Admin
+        eq('four proposals block the effective month', await pendingBlocker(), 4);
+
+        // --- Q13 pending: nothing resolves, by any path -------------------------
+        for (const decision of ['approved', 'rejected', 'withdrawn']) {
+          await refusal(`while Q13 is pending the Super Admin cannot record '${decision}'`, 'PAYMENT_ADJUSTMENT_AUTHORITY_PENDING', () =>
+            resolve(adjA, decision),
+          );
+        }
+        await refusal('a user with no decision permission is refused first', 'MUTATION_FORBIDDEN', () =>
+          resolve(adjA, 'rejected', 'No permission to decide', staff['hr']!),
+        );
+        await refusal('a direct UPDATE to approved is refused', 'PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED', () =>
+          db.query(`update public.payment_adjustments set status='approved', decided_by=$2, decided_at=now(),
+                      posting_period=$3 where id=$1`, [adjA, boss, thisMonth]),
+        );
+        await refusal('a direct UPDATE to rejected is refused', 'PAYMENT_ADJUSTMENT_DIRECT_WRITE_REFUSED', () =>
+          db.query(`update public.payment_adjustments set status='rejected', decided_by=$2, decided_at=now() where id=$1`, [
+            adjA,
+            boss,
+          ]),
+        );
+        await refusal('even with the write flag, approved needs Q13 approved (trigger re-checks)', 'PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED', async () => {
+          await db.query(`select set_config('afhomes.payment_adjustment_write','on',true)`);
+          await db.query(`update public.payment_adjustments set status='approved', decided_by=$2, decided_at=now(),
+                            posting_period=$3 where id=$1`, [adjA, boss, thisMonth]);
+        });
+        await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
+        await refusal('an INSERT born approved is refused', 'PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED', () =>
+          db.query(
+            `insert into public.payment_adjustments
+               (payment_id, kind, amount, reason, effective_date, status, requested_by, decided_by, decided_at, posting_period)
+             values ($1,'reversal','1.00','Born approved',current_date,'approved',$2,$3,now(),$4)`,
+            [pay2, finance, boss, thisMonth],
+          ),
+        );
+        eq('  adjustment A is still proposed', (await adjRow(adjA)).status, 'proposed');
+        eq('  and no resolution audit exists', await audits(adjA), 'PAYMENT_ADJUSTMENT_PROPOSED');
+
+        // --- Q13 approved (TEST FIXTURE ONLY) -----------------------------------
+        await setQ13('approved');
+        await refusal('with Q13 approved, Finance still lacks the RBAC permission', 'MUTATION_FORBIDDEN', () =>
+          resolve(adjA, 'approved', 'Finance cannot decide this', finance),
+        );
+        await refusal('an unknown decision is refused', 'PAYMENT_ADJUSTMENT_DECISION_INVALID', () => resolve(adjA, 'proposed'));
+        await refusal('a too-short note is refused', 'PAYMENT_ADJUSTMENT_NOTE_REQUIRED', () => resolve(adjA, 'approved', ' ok '));
+        await refusal('an unknown adjustment is refused', 'PAYMENT_ADJUSTMENT_NOT_FOUND', () => resolve(randomUUID(), 'rejected'));
+        await refusal('the requester cannot approve their own proposal', 'PAYMENT_ADJUSTMENT_SELF_DECISION', () =>
+          resolve(adjS, 'approved'),
+        );
+        await refusal('  nor reject it', 'PAYMENT_ADJUSTMENT_SELF_DECISION', () => resolve(adjS, 'rejected'));
+        await refusal('approval into a closed decision month is refused', 'PERIOD_NOT_OPEN', async () => {
+          await db.query(
+            `insert into public.accounting_periods (period, status, submitted_by, submitted_at, closed_by, closed_at, snapshot)
+             values ($1,'closed',$2,now(),$3,now(),'{}'::jsonb)
+             on conflict (period) do update set status='closed', submitted_by=excluded.submitted_by,
+               submitted_at=now(), closed_by=excluded.closed_by, closed_at=now(), snapshot='{}'::jsonb`,
+            [thisMonth, finance, boss],
+          );
+          await resolve(adjA, 'approved');
+        });
+        await refusal('approval into a submitted (ready_for_approval) month is refused', 'PERIOD_NOT_OPEN', async () => {
+          await db.query(
+            `insert into public.accounting_periods (period, status, submitted_by, submitted_at)
+             values ($1,'ready_for_approval',$2,now())
+             on conflict (period) do update set status='ready_for_approval', submitted_by=excluded.submitted_by, submitted_at=now()`,
+            [thisMonth, finance],
+          );
+          await resolve(adjA, 'approved');
+        });
+        eq('  adjustment A is still proposed after the refusals', (await adjRow(adjA)).status, 'proposed');
+
+        const payBefore = await payRow(pay);
+        const pay2Before = await payRow(pay2);
+        const fig0 = await figures();
+        eq('approve succeeds once authority and permission both hold', await resolve(adjA, 'approved'), 'approved');
+        const a1 = await adjRow(adjA);
+        check(
+          '  decided by the Super Admin, posted to the Manila decision month, note kept',
+          a1.status === 'approved' && a1.decided_by === boss && a1.posting_period === thisMonth &&
+            a1.decision_note === 'Reviewed against the bank statement',
+          JSON.stringify(a1),
+        );
+        eq('  the original payment row is byte-for-byte unchanged', await payRow(pay), payBefore);
+        eq('the same decision by the same actor is an idempotent replay', await resolve(adjA, 'approved'), 'approved');
+        eq('  and writes exactly one resolution audit', await audits(adjA), 'PAYMENT_ADJUSTMENT_APPROVED,PAYMENT_ADJUSTMENT_PROPOSED');
+        await refusal('a different decision on a resolved row is refused', 'PAYMENT_ADJUSTMENT_ALREADY_RESOLVED', () =>
+          resolve(adjA, 'rejected'),
+        );
+        await refusal('  withdrawing an approved row is refused', 'PAYMENT_ADJUSTMENT_ALREADY_RESOLVED', () =>
+          resolve(adjA, 'withdrawn'),
+        );
+        const fig1 = await figures();
+        eq('period figures disclose the approved adjustment count', fig1.approvedAdjustmentsCount, fig0.approvedAdjustmentsCount + 1);
+        eq(
+          '  and its total (exact decimal)',
+          (await one<{ t: string }>('select ($1::numeric - $2::numeric)::text t', [fig1.approvedAdjustmentsTotal, fig0.approvedAdjustmentsTotal])).t,
+          '300.00',
+        );
+        eq('  while verifiedTotal is not netted (open policy)', fig1.verifiedTotal, fig0.verifiedTotal);
+
+        eq('a second kind on the same payment approves within the payment amount', await resolve(adjB, 'approved'), 'approved');
+        const adjE = await propose(pay, 'returned_check', '600.00');
+        await refusal('cumulative approvals can never exceed the payment', 'PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT', () =>
+          resolve(adjE, 'approved'),
+        );
+        eq('  it can still be rejected', await resolve(adjE, 'rejected', 'Exceeds what was collected'), 'rejected');
+
+        eq('reject succeeds', await resolve(adjC, 'rejected'), 'rejected');
+        const c1 = await adjRow(adjC);
+        check('  a rejection posts to no period', c1.posting_period === null, JSON.stringify(c1));
+        eq('  and the rejected payment row is byte-for-byte unchanged', await payRow(pay2), pay2Before);
+        eq('  one REJECTED audit', await audits(adjC), 'PAYMENT_ADJUSTMENT_PROPOSED,PAYMENT_ADJUSTMENT_REJECTED');
+        eq('the requester may withdraw their own proposal (narrow CHECK relaxation)', await resolve(adjS, 'withdrawn'), 'withdrawn');
+        eq('  withdraw replay', await resolve(adjS, 'withdrawn'), 'withdrawn');
+        eq('  one WITHDRAWN audit', await audits(adjS), 'PAYMENT_ADJUSTMENT_PROPOSED,PAYMENT_ADJUSTMENT_WITHDRAWN');
+        eq('  the payment is still unchanged after reject and withdraw', await payRow(pay2), pay2Before);
+        eq(
+          'payments stay verified and their sum unchanged',
+          (
+            await one<{ t: string }>(
+              `select coalesce(sum(amount::numeric),0)::text t from public.payments where sale_id=$1 and status='verified'`,
+              [sale],
+            )
+          ).t,
+          '1600.00',
+        );
+
+        await refusal('a resolved row cannot be edited directly', 'PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE', () =>
+          db.query(`update public.payment_adjustments set decision_note='Rewritten note' where id=$1`, [adjC]),
+        );
+        await refusal('  even with the write flag', 'PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE', async () => {
+          await db.query(`select set_config('afhomes.payment_adjustment_write','on',true)`);
+          await db.query(`update public.payment_adjustments set status='approved', decided_by=$2, decided_at=now(),
+                            posting_period=$3 where id=$1`, [adjC, boss, thisMonth]);
+        });
+        await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
+        const adjF = await propose(pay2, 'refund', '50.00');
+        await refusal('with Q13 approved a direct UPDATE still cannot bypass the RPC', 'PAYMENT_ADJUSTMENT_APPROVAL_NOT_AUTHORIZED', () =>
+          db.query(`update public.payment_adjustments set status='approved', decided_by=$2, decided_at=now(),
+                      posting_period=$3 where id=$1`, [adjF, boss, thisMonth]),
+        );
+        await refusal('resolved history cannot be deleted', 'PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE', () =>
+          db.query('delete from public.payment_adjustments where id=$1', [adjA]),
+        );
+        await refusal('adjustment history cannot be truncated', 'PAYMENT_ADJUSTMENT_HISTORY_IMMUTABLE', () =>
+          db.query('truncate public.payment_adjustments cascade'),
+        );
+        const svcPriv87 = await one<{ del: boolean; trunc: boolean }>(
+          `select has_table_privilege('service_role','public.payment_adjustments','DELETE') del,
+                  has_table_privilege('service_role','public.payment_adjustments','TRUNCATE') trunc`,
+        );
+        check('service_role holds neither DELETE nor TRUNCATE on the ledger', !svcPriv87.del && !svcPriv87.trunc, JSON.stringify(svcPriv87));
+
+        // The write flag is a GUC any direct connection can set: with flag ON and Q13 approved
+        // (test fixture), the guard itself must still enforce every approval invariant.
+        const flaggedApprove = async (id: string, decidedBy: string) => {
+          await db.query(`select set_config('afhomes.payment_adjustment_write','on',true)`);
+          await db.query(
+            `update public.payment_adjustments set status='approved', decided_by=$2, decided_at=now(),
+                    decision_note='Direct flagged write', posting_period=$3 where id=$1`,
+            [id, decidedBy, thisMonth],
+          );
+        };
+        await refusal('flagged direct approve into a closed month is refused', 'PERIOD_NOT_OPEN', async () => {
+          await db.query(
+            `insert into public.accounting_periods (period, status, submitted_by, submitted_at, closed_by, closed_at, snapshot)
+             values ($1,'closed',$2,now(),$3,now(),'{}'::jsonb)
+             on conflict (period) do update set status='closed', submitted_by=excluded.submitted_by,
+               submitted_at=now(), closed_by=excluded.closed_by, closed_at=now(), snapshot='{}'::jsonb`,
+            [thisMonth, finance, boss],
+          );
+          await flaggedApprove(adjF, boss);
+        });
+        await refusal('flagged direct self-approve is refused', 'PAYMENT_ADJUSTMENT_SELF_DECISION', () =>
+          flaggedApprove(adjF, finance),
+        );
+        const adjH = await propose(pay, 'returned_check', '600.00'); // 500.00 of 1000.00 already approved
+        await refusal('flagged direct approve over the cumulative cap is refused', 'PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT', () =>
+          flaggedApprove(adjH, boss),
+        );
+        await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
+        // Positive control: the same flagged write with every invariant satisfied is accepted,
+        // so the refusals above are specific to their invariant (then rolled back).
+        await db.query('savepoint finops87_control');
+        let controlOk = true;
+        try {
+          await flaggedApprove(adjF, boss);
+        } catch (error) {
+          controlOk = false;
+          check('  control: flagged approve with every invariant met', false, safeErrorMessage(error));
+        }
+        await db.query('rollback to savepoint finops87_control');
+        await db.query(`select set_config('afhomes.payment_adjustment_write','off',true)`);
+        check('  control: a flagged approve meeting every invariant is accepted', controlOk);
+        eq('  adjustment F is still proposed after the control rollback', (await adjRow(adjF)).status, 'proposed');
+        await resolve(adjH, 'rejected', 'Exceeds what remains of the payment');
+
+        eq('only the one still-proposed row blocks readiness', await pendingBlocker(), 1);
+        await resolve(adjF, 'rejected');
+        eq('resolved rows never block: the blocker clears', await pendingBlocker(), 0);
+
+        const priv87 = await one<{ anon: boolean; auth: boolean; svc: boolean; helper: boolean }>(
+          `select has_function_privilege('anon','public.resolve_payment_adjustment(uuid,text,text,uuid)','execute') anon,
+                  has_function_privilege('authenticated','public.resolve_payment_adjustment(uuid,text,text,uuid)','execute') auth,
+                  has_function_privilege('service_role','public.resolve_payment_adjustment(uuid,text,text,uuid)','execute') svc,
+                  has_function_privilege('service_role','private.payment_adjustment_authority_approved()','execute') helper`,
+        );
+        check('browser roles cannot execute the resolution RPC', !priv87.anon && !priv87.auth, JSON.stringify(priv87));
+        check('service_role can execute it; the gate helper stays private', priv87.svc && !priv87.helper, JSON.stringify(priv87));
+
+        // Restore Q13 and prove the gate is re-read on every call.
+        await setQ13('pending');
+        eq('Q13 restored to pending', await q13(), 'pending');
+        const adjG = await propose(pay2, 'refund', '10.00');
+        await refusal('after restoring pending, a new proposal cannot be resolved', 'PAYMENT_ADJUSTMENT_AUTHORITY_PENDING', () =>
+          resolve(adjG, 'rejected'),
+        );
+      } catch (error) {
+        check('section 87 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own87 ? 'rollback' : 'rollback to savepoint finops87');
+      }
+    }
+    {
+      section('88. Finance Phase 8: Q1 recorded, compensation policy lifecycle, review limits, transitions');
+      // Migration 20270105000008. Rolled back: approved policies, approved payroll and audit
+      // history are immutable. Every policy here is a TEST FIXTURE, never approved policy.
+      let own88 = false;
+      try {
+        await db.query('savepoint finops88');
+      } catch {
+        await db.query('begin');
+        own88 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const admin = staff['admin']!;
+        const sm = staff['sm']!;
+        const Q1 = 'Q1_GOVERNING_COMPENSATION_MODEL';
+        const RULE = 'COMPENSATION_POLICY_TRANSITION_RULE';
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        const flagOn = (flag: string) => db.query(`select set_config($1,'on',true)`, [flag]);
+        const auditCount = async (action: string, entity: string) =>
+          (
+            await one<{ n: number }>('select count(*)::int n from public.audit_events where action=$1 and entity_id=$2', [
+              action,
+              entity,
+            ])
+          ).n;
+        const decision = async (key: string) =>
+          one<{ status: string; source: string | null; opt: string | null; ev: string | null; eff: string | null; by: string | null; has_at: boolean; note: string }>(
+            `select status, source, decision_option opt, evidence_status ev, effective_date::text eff,
+                    decided_by::text "by", decided_at is not null has_at, note
+               from public.governing_policy_decisions where key=$1`,
+            [key],
+          );
+        const setDecision = async (key: string, approved: boolean) => {
+          // TEST FIXTURE ONLY (rolled back): no function can do this.
+          await flagOn('afhomes.governing_policy_write');
+          await db.query(
+            `update public.governing_policy_decisions
+                set status=$2, decided_by=case when $2='approved' and source is null then $3::uuid end,
+                    decided_at=case when $2='approved' then now() end
+              where key=$1`,
+            [key, approved ? 'approved' : 'pending', boss],
+          );
+          await db.query(`select set_config('afhomes.governing_policy_write','off',true)`);
+        };
+        const liveAuthorized = async () =>
+          (await one<{ a: boolean }>('select private.ist_payroll_live_authorized() a')).a;
+
+        // --- Q1 exactly as recorded, nothing invented ------------------------------------
+        const q1 = await decision(Q1);
+        eq(
+          'Q1 is recorded approved, owner-reported, Option C, awaiting evidence',
+          `${q1.status}/${q1.source}/${q1.opt}/${q1.ev}`,
+          'approved/owner_reported/C_BOTH_MODELS/awaiting_evidence',
+        );
+        check(
+          '  with no invented effective date or staff decider; decided_at is labelled a recording time',
+          q1.eff === null && q1.by === null && q1.has_at && /RECORDED/.test(q1.note) && /No approval document/.test(q1.note),
+          JSON.stringify(q1),
+        );
+        eq('  with one GOVERNING_POLICY_DECISION_RECORDED audit event', await auditCount('GOVERNING_POLICY_DECISION_RECORDED', Q1), 1);
+        eq('Q13 is untouched (pending)', (await decision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY')).status, 'pending');
+        eq('the policy transition rule is seeded pending', (await decision(RULE)).status, 'pending');
+        eq('  and its seed is audited (GOVERNING_POLICY_KEY_SEEDED)', await auditCount('GOVERNING_POLICY_KEY_SEEDED', RULE), 1);
+        eq('live payroll is authorized by the recorded Q1 approval', await liveAuthorized(), true);
+        await refusal('an approval always carries its recorded time (even with the flag)', 'governing_policy_decisions_v8_decided_check', async () => {
+          await flagOn('afhomes.governing_policy_write');
+          await db.query('update public.governing_policy_decisions set decided_at=null where key=$1', [Q1]);
+        });
+        await refusal('an approval that is not owner-reported needs a staff decider', 'governing_policy_decisions_v8_basis_check', async () => {
+          await flagOn('afhomes.governing_policy_write');
+          await db.query(`update public.governing_policy_decisions set status='approved', decided_at=now() where key=$1`, [RULE]);
+        });
+        await refusal('a decision key cannot be inserted outside a migration', 'GOVERNING_POLICY_LOCKED', () =>
+          db.query(`insert into public.governing_policy_decisions (key, status) values ('SYNTHETIC_${RUN}', 'pending')`),
+        );
+
+        // --- the new reality: Q1 approved, NO approved policy -> nothing is payable --------
+        eq('no compensation policy exists', (await one<{ n: number }>('select count(*)::int n from public.ist_compensation_policies')).n, 0);
+        const mkBatch = async (period: string) =>
+          (await one<{ id: string }>('select public.create_payroll_batch($1,$2) as id', [period, finance])).id;
+        const replace = async (batch: string, lines: unknown[]) =>
+          db.query('select public.replace_payroll_batch_lines($1,$2::jsonb,$3)', [batch, JSON.stringify(await fixtureLinesWithEvidence(batch, lines)), finance]);
+        const submit = async (batch: string) =>
+          (await one<{ s: string }>('select public.submit_payroll_batch($1,$2) as s', [batch, finance])).s;
+        const approveBatch = async (batch: string, actor = boss) =>
+          (await one<{ s: string }>('select public.approve_payroll_batch($1,$2) as s', [batch, actor])).s;
+        const mk = (staffId: string, rank: string, policyId: string | null, over: Record<string, unknown> = {}) => ({
+          staffId,
+          rank,
+          status: 'computed',
+          policyId,
+          ba: '100.00',
+          pa: '0.00',
+          pb: '0.00',
+          adjustments: '0.00',
+          withheld: '0.00',
+          net: '100.00',
+          inputs: { fixture: true },
+          result: { fixture: true },
+          ...over,
+        });
+        const blocked = (staffId: string, reason: string) => ({
+          staffId,
+          rank: 'SM',
+          status: 'blocked',
+          blockedReason: reason,
+          inputs: {},
+          result: {},
+        });
+        const today = (await one<{ d: string }>(`select (now() at time zone 'Asia/Manila')::date::text d`)).d;
+        const empty = await mkBatch('2018-05');
+        check('a live batch can now be created (Q1 recorded approved)', !!empty);
+        await refusal('a computed live line without an approved policy is refused', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          replace(empty, [mk(sm, 'SM', null)]),
+        );
+        await replace(empty, [blocked(sm, 'CONFIGURATION_REQUIRED: no approved compensation policy')]);
+        await refusal('a batch of blocked lines cannot be submitted', 'PAYROLL_CONFIGURATION_REQUIRED', () => submit(empty));
+        await refusal('  so it cannot be approved', 'PAYROLL_BATCH_NOT_SUBMITTED', () => approveBatch(empty));
+        const emptyLine = (await one<{ id: string }>('select id from public.payroll_lines where batch_id=$1', [empty])).id;
+        await refusal('  nor disbursed', 'PAYROLL_BATCH_NOT_APPROVED', () =>
+          db.query('select public.record_payroll_disbursement($1,$2,$3,$4,$5,$6)', [emptyLine, '1.00', 'bank', `PR-${RUN}-88-E`, today, finance]),
+        );
+
+        // --- RBAC: two modules, no role rows, Super Admin by slug --------------------------
+        const can = async (who: string, module: string, action: string) =>
+          (await one<{ ok: boolean }>('select private.has_permission_for_user($1,$2,$3) as ok', [staff[who]!, module, action])).ok;
+        eq(
+          'no role row grants finance.payroll_policy or finance.payroll_policy_approval',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from public.role_permissions rp join public.modules m on m.id=rp.module_id
+                where m.key in ('finance.payroll_policy','finance.payroll_policy_approval')`,
+            )
+          ).n,
+          0,
+        );
+        check(
+          'the Super Admin holds both policy modules by slug',
+          (await can('super-admin', 'finance.payroll_policy', 'create')) &&
+            (await can('super-admin', 'finance.payroll_policy_approval', 'update')),
+        );
+        check(
+          'Finance holds neither until delegated',
+          !(await can('finance', 'finance.payroll_policy', 'create')) &&
+            !(await can('finance', 'finance.payroll_policy_approval', 'update')),
+        );
+        const fields = (over: Record<string, unknown> = {}) => ({
+          rank: 'SM',
+          monthlyBa: '1000',
+          baTarget: '10',
+          monthlyPa: '500.5',
+          paTarget: '5',
+          pbTarget: '20000',
+          pbRate: '0.05',
+          collectionGate: '0.4',
+          effectiveFrom: '2021-01-01',
+          basisNote: 'TEST FIXTURE ONLY - synthetic policy',
+          ...over,
+        });
+        const save = async (id: string | null, f: Record<string, unknown>, actor = finance, key: string | null = null) =>
+          (
+            await one<{ id: string }>('select public.save_ist_compensation_policy_draft($1,$2::jsonb,$3,$4) as id', [
+              id,
+              JSON.stringify(f),
+              actor,
+              key,
+            ])
+          ).id;
+        const submitP = async (id: string, actor = finance) =>
+          (await one<{ s: string }>('select public.submit_ist_compensation_policy($1,$2) as s', [id, actor])).s;
+        const returnP = async (id: string, reason: string, actor = boss) =>
+          (await one<{ s: string }>('select public.return_ist_compensation_policy($1,$2,$3) as s', [id, reason, actor])).s;
+        const approveP = async (id: string, ref = 'TEST-EVIDENCE-001', note = 'TEST FIXTURE approval note', actor = boss) =>
+          (await one<{ s: string }>('select public.approve_ist_compensation_policy($1,$2,$3,$4) as s', [id, ref, note, actor])).s;
+        const endP = async (id: string, until: string, note = 'Closed to make room for the next policy', actor = boss) =>
+          (await one<{ s: string }>('select public.end_ist_compensation_policy($1,$2::date,$3,$4) as s', [id, until, note, actor])).s;
+        const pol = (id: string) =>
+          one<{ status: string; monthly_ba: string; policy_version: number; updated_by: string | null; effective_until: string | null }>(
+            `select status, monthly_ba, policy_version, updated_by::text updated_by, effective_until::text effective_until
+               from public.ist_compensation_policies where id=$1`,
+            [id],
+          );
+        const policyFor = async (rank: string, on: string) =>
+          (await one<{ id: string | null }>('select (private.ist_compensation_policy_for($1,$2::date)).id as id', [rank, on])).id;
+
+        await refusal('Finance cannot draft a policy without a delegated permission', 'MUTATION_FORBIDDEN', () => save(null, fields()));
+        await refusal('a Sales Manager cannot draft a policy', 'MUTATION_FORBIDDEN', () => save(null, fields(), sm));
+        // TEST FIXTURE: dynamic-RBAC delegation of drafting to Finance (rolled back).
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, true, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_policy'
+           on conflict (role_id, module_id) do update set can_view=true, can_create=true, can_update=true`,
+          [finance],
+        );
+
+        // --- drafting: validation, idempotency, no direct write -----------------------------
+        for (const [name, over] of [
+          ['an unknown field', { approvedBy: boss }],
+          ['a non-exact amount', { monthlyBa: '1e3' }],
+          ['a numeric (non-text) amount', { monthlyBa: 1000 }],
+          ['a PB rate above 1', { pbRate: '1.5' }],
+          ['a zero collection gate', { collectionGate: '0' }],
+          ['a zero collection gate written 0.00', { collectionGate: '0.00' }],
+          ['a zero collection gate written 0.0000', { collectionGate: '0.0000' }],
+          ['an overflowing digit string', { monthlyBa: '9'.repeat(40) }],
+          ['an overflowing review limit', { netReviewLimit: '9'.repeat(400) }],
+          ['a non-ISO date', { effectiveFrom: 'today' }],
+          ['an impossible date', { effectiveFrom: '2021-02-30' }],
+          ['an end before the start', { effectiveUntil: '2020-12-31' }],
+          ['a short basis note', { basisNote: 'abc' }],
+          ['a negative review limit', { netReviewLimit: '-1' }],
+          ['an OST rank', { rank: 'OST' }],
+        ] as const) {
+          await refusal(`a draft with ${name} is refused`, 'COMPENSATION_POLICY_INVALID', () => save(null, fields(over)));
+        }
+        const p1 = await save(null, fields({ netReviewLimit: '1500.00' }), finance, `K-${RUN}-88`);
+        eq(
+          'a create replays by idempotency key and the same payload',
+          await save(null, fields({ netReviewLimit: '1500.00' }), finance, `K-${RUN}-88`),
+          p1,
+        );
+        await refusal('the same key with a different payload is not a replay', 'COMPENSATION_POLICY_IDEMPOTENCY_CONFLICT', () =>
+          save(null, fields({ netReviewLimit: '1500.00', monthlyBa: '2000' }), finance, `K-${RUN}-88`),
+        );
+        eq(
+          '  and it created nothing',
+          (await one<{ n: number }>('select count(*)::int n from public.ist_compensation_policies')).n,
+          1,
+        );
+        await refusal('even with the write flag the table refuses a 0.00 collection gate', 'ist_compensation_policies_v8_gate_check', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `insert into public.ist_compensation_policies
+               (rank, policy_version, monthly_ba, ba_target, monthly_pa, pa_target, pb_target, pb_rate, collection_gate,
+                effective_from, basis_note, created_by)
+             values ('SVD',98,'1.00','1.00','1.00','1.00','1.00','0.01','0.00','2021-01-01','zero gate fixture',$1)`,
+            [finance],
+          );
+        });
+        const p1row = await pol(p1);
+        eq('a new policy is a draft, version 1, money normalized', `${p1row.status}/${p1row.policy_version}/${p1row.monthly_ba}`, 'draft/1/1000.00');
+        eq('  with one COMPENSATION_POLICY_DRAFT_CREATED event', await auditCount('COMPENSATION_POLICY_DRAFT_CREATED', p1), 1);
+        eq('a draft is not payable', await policyFor('SM', '2021-02-01'), null);
+        await refusal('a policy cannot be updated directly', 'COMPENSATION_POLICY_DIRECT_WRITE_REFUSED', () =>
+          db.query(`update public.ist_compensation_policies set monthly_ba='2.00' where id=$1`, [p1]),
+        );
+        await refusal('even with the write flag a row is born a draft', 'COMPENSATION_POLICY_TRANSITION_INVALID', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `insert into public.ist_compensation_policies
+               (rank, policy_version, monthly_ba, ba_target, monthly_pa, pa_target, pb_target, pb_rate, collection_gate,
+                effective_from, basis_note, created_by, status, submitted_by, submitted_at, approved_by, approved_at,
+                approval_evidence_reference, approval_note)
+             values ('SVD',99,'1.00','1.00','1.00','1.00','1.00','0.01','0.40','2021-01-01','forged approved row',$1,
+                     'approved',$1,now(),$2,now(),'FORGED-REF','forged approval')`,
+            [finance, boss],
+          );
+        });
+        await refusal('even with the write flag a draft cannot jump to approved', 'COMPENSATION_POLICY_TRANSITION_INVALID', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(`update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now() where id=$1`, [p1, boss]);
+        });
+        await refusal('a policy is never deleted', 'COMPENSATION_POLICY_IMMUTABLE', () =>
+          db.query('delete from public.ist_compensation_policies where id=$1', [p1]),
+        );
+        await save(p1, fields({ netReviewLimit: '1500.00', paReviewLimit: '400.00' }));
+        eq('an edit records the editor and one DRAFT_UPDATED event', `${(await pol(p1)).updated_by}/${await auditCount('COMPENSATION_POLICY_DRAFT_UPDATED', p1)}`, `${finance}/1`);
+        await save(p1, fields({ netReviewLimit: '1500.00', paReviewLimit: '400.00' }));
+        eq('  an unchanged edit writes nothing', await auditCount('COMPENSATION_POLICY_DRAFT_UPDATED', p1), 1);
+        await refusal('the rank cannot change on an edit', 'COMPENSATION_POLICY_INVALID', () => save(p1, fields({ rank: 'SSM' })));
+        await refusal('a Sales Manager cannot edit a draft', 'MUTATION_FORBIDDEN', () => save(p1, fields(), sm));
+        const limits = fields({ netReviewLimit: '1500.00', paReviewLimit: '400.00' });
+
+        // --- submit / return -------------------------------------------------------------
+        eq('Finance submits the draft for approval', await submitP(p1), 'pending_approval');
+        eq('  submitting again is an idempotent replay', await submitP(p1), 'pending_approval');
+        eq('  with one COMPENSATION_POLICY_SUBMITTED event', await auditCount('COMPENSATION_POLICY_SUBMITTED', p1), 1);
+        await refusal('a pending policy cannot be edited', 'COMPENSATION_POLICY_NOT_EDITABLE', () => save(p1, limits));
+        await refusal('  nor its figures changed with the write flag', 'COMPENSATION_POLICY_TRANSITION_INVALID', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(`update public.ist_compensation_policies set monthly_ba='2.00' where id=$1`, [p1]);
+        });
+        await refusal('Finance cannot return a policy', 'MUTATION_FORBIDDEN', () => returnP(p1, 'Targets need the memo', finance));
+        await refusal('a return needs a reason', 'COMPENSATION_POLICY_RETURN_REASON_REQUIRED', () => returnP(p1, 'no'));
+        eq('the approver returns it to draft', await returnP(p1, 'Targets need the signed memo'), 'draft');
+        eq('  returning again is an idempotent replay', await returnP(p1, 'Targets need the signed memo'), 'draft');
+        eq('  with one COMPENSATION_POLICY_RETURNED event', await auditCount('COMPENSATION_POLICY_RETURNED', p1), 1);
+        await refusal('a returned (draft) policy cannot be approved', 'COMPENSATION_POLICY_NOT_PENDING', () => approveP(p1));
+        await submitP(p1);
+
+        // --- approval: permission, evidence, separation of duties, Q1 ----------------------
+        await refusal('Finance cannot approve a policy', 'MUTATION_FORBIDDEN', () => approveP(p1, 'REF-1', 'Approved by finance', finance));
+        await refusal('an approval needs an evidence reference', 'COMPENSATION_POLICY_EVIDENCE_REQUIRED', () => approveP(p1, '  '));
+        await refusal('an evidence reference needs at least 10 characters', 'COMPENSATION_POLICY_EVIDENCE_REQUIRED', () =>
+          approveP(p1, 'REF-SSM-1'),
+        );
+        for (const ref of ['n/a', ' N/A ', 'none', 'TBD', 'test', 'abc', '---', '- - - - - -', 'TEST TEST TEST', 'N/A N/A N/A N/A', 'xxxxxxxxxxxx']) {
+          await refusal(`a placeholder evidence reference (${ref.trim()}) is refused`, 'COMPENSATION_POLICY_EVIDENCE_REQUIRED', () =>
+            approveP(p1, ref),
+          );
+        }
+        await refusal('an approval needs a note of at least 5 characters', 'COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED', () =>
+          approveP(p1, 'BOARD-RES-TEST-001', 'ok'),
+        );
+        for (const note of ['-----', 'T.B.D.', 'n / a', 'test.', 'none none']) {
+          await refusal(`a placeholder approval note (${note}) is refused`, 'COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED', () =>
+            approveP(p1, 'BOARD-RES-TEST-001', note),
+          );
+        }
+        await refusal('even with the write flag the guard refuses a placeholder evidence reference', 'COMPENSATION_POLICY_EVIDENCE_REQUIRED', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='--- N/A ---', approval_note='direct attempt' where id=$1`,
+            [p1, boss],
+          );
+        });
+        await refusal('  and a placeholder approval note', 'COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='REF-DIRECT-ATTEMPT', approval_note='-----' where id=$1`,
+            [p1, boss],
+          );
+        });
+        await refusal('even with the write flag the guard refuses an approval without evidence', 'COMPENSATION_POLICY_EVIDENCE_REQUIRED', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(`update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now() where id=$1`, [p1, boss]);
+        });
+        const pSelf = await save(null, fields({ rank: 'SVD' }), boss);
+        await submitP(pSelf, boss);
+        await refusal('the drafter/submitter can never approve their own policy', 'COMPENSATION_POLICY_SELF_APPROVAL', () => approveP(pSelf));
+        await refusal('  not even through the write flag', 'COMPENSATION_POLICY_SELF_APPROVAL', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='REF-DIRECT-ATTEMPT', approval_note='direct attempt' where id=$1`,
+            [pSelf, boss],
+          );
+        });
+        const p2 = await save(null, fields({ rank: 'SSM' }));
+        await save(p2, fields({ rank: 'SSM', monthlyBa: '900.00' }), boss); // the Super Admin edits it
+        await submitP(p2);
+        await refusal('the last editor cannot approve either', 'COMPENSATION_POLICY_SELF_APPROVAL', () => approveP(p2));
+        // TEST FIXTURE: dynamic-RBAC delegation of policy approval to the Admin (rolled back).
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, false, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_policy_approval'
+           on conflict (role_id, module_id) do update set can_view=true, can_update=true`,
+          [admin],
+        );
+        eq('a delegated approver approves a policy it neither drafted, edited nor submitted', await approveP(p2, 'REF-SSM-TEST-1', 'Delegated approval', admin), 'approved');
+
+        // --- durable separation of duties: anyone who EVER drafted, edited or submitted -------
+        const priorActors = async (id: string) =>
+          (await one<{ a: string[] }>('select prior_actor_ids::text[] a from public.ist_compensation_policies where id=$1', [id])).a;
+        const pEdit = await save(null, fields({ rank: 'SVD', effectiveFrom: '2022-01-01' }));
+        await save(pEdit, fields({ rank: 'SVD', effectiveFrom: '2022-01-01', monthlyBa: '900.00' }), boss); // Super Admin edits
+        await save(pEdit, fields({ rank: 'SVD', effectiveFrom: '2022-01-01', monthlyBa: '950.00' })); // Finance edits last
+        await submitP(pEdit);
+        await refusal('an EARLIER editor (no longer the last editor) cannot approve', 'COMPENSATION_POLICY_SELF_APPROVAL', () => approveP(pEdit));
+        const pEver = await save(null, fields({ rank: 'SVD', effectiveFrom: '2023-01-01' }));
+        await submitP(pEver, boss); // the Super Admin submits it...
+        await returnP(pEver, 'Returned to clear the submitter', admin); // ...a return clears submitted_by...
+        await submitP(pEver); // ...and Finance re-submits.
+        eq(
+          'the durable actor list survives the return (drafter + first submitter)',
+          JSON.stringify(await priorActors(pEver)),
+          JSON.stringify([finance, boss].sort()),
+        );
+        await refusal('a person who EVER submitted cannot approve, even after a return cleared submitted_by', 'COMPENSATION_POLICY_SELF_APPROVAL', () =>
+          approveP(pEver),
+        );
+        await refusal('  not through the write flag', 'COMPENSATION_POLICY_SELF_APPROVAL', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='REF-DIRECT-ATTEMPT', approval_note='direct attempt' where id=$1`,
+            [pEver, boss],
+          );
+        });
+        await refusal('  not even by forging the actor list (the guard derives it)', 'COMPENSATION_POLICY_SELF_APPROVAL', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set prior_actor_ids='{}', status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='REF-DIRECT-ATTEMPT', approval_note='direct attempt' where id=$1`,
+            [pEver, boss],
+          );
+        });
+        eq('  someone who only returned it may approve', await approveP(pEver, 'BOARD-RES-TEST-003', 'Delegated approval', admin), 'approved');
+        await refusal('(test fixture) with Q1 pending no policy can be approved', 'IST_PAYROLL_NOT_AUTHORIZED', async () => {
+          await setDecision(Q1, false);
+          await approveP(p1);
+        });
+        eq('the Super Admin approves the policy Finance drafted', await approveP(p1, 'BOARD-RES-TEST-001'), 'approved');
+        eq('  approving again is an idempotent replay', await approveP(p1, 'BOARD-RES-TEST-001'), 'approved');
+        eq('  with one COMPENSATION_POLICY_APPROVED event', await auditCount('COMPENSATION_POLICY_APPROVED', p1), 1);
+        eq('an approved policy is payable for its rank and date', await policyFor('SM', '2021-02-01'), p1);
+
+        // --- immutability and overlap ----------------------------------------------------
+        await refusal('an approved policy cannot be edited through the RPC', 'COMPENSATION_POLICY_NOT_EDITABLE', () => save(p1, limits));
+        await refusal('  nor directly, even with the write flag', 'COMPENSATION_POLICY_IMMUTABLE', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(`update public.ist_compensation_policies set monthly_ba='2.00' where id=$1`, [p1]);
+        });
+        await refusal('  nor set back to draft', 'COMPENSATION_POLICY_IMMUTABLE', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(`update public.ist_compensation_policies set status='draft' where id=$1`, [p1]);
+        });
+        await refusal('  nor returned', 'COMPENSATION_POLICY_NOT_PENDING', () => returnP(p1, 'Too late to return'));
+        const p3 = await save(null, fields({ effectiveFrom: '2021-06-16', monthlyBa: '1200.00' }));
+        await submitP(p3);
+        await refusal('an overlapping approval is refused; nothing is superseded silently', 'COMPENSATION_POLICY_OVERLAP', () => approveP(p3));
+        eq('  the earlier policy keeps its open window', (await pol(p1)).effective_until, null);
+
+        // --- review limits (6.9): flagged, never truncated, blocks submission until reviewed -----
+        await fixturePerformanceViaRpcs();
+        const b = await mkBatch('2021-02');
+        // A figure above the policy's own monthly BA / PA (1000.00 / 500.50): flagged, kept whole.
+        await replace(b, [mk(sm, 'SM', p1, { ba: '1000.01', pa: '500.51', net: '1500.52' })]);
+        eq(
+          'a live BA / PA above the policy amounts is flagged for review, never rejected or truncated',
+          (
+            await one<{ r: string }>(
+              `select review_required || '/' || array_to_string(review_flags, ',') || '/' || ba || '/' || pa || '/' || net r
+                 from public.payroll_lines where batch_id=$1 and staff_id=$2`,
+              [b, sm],
+            )
+          ).r,
+          'true/BA_ABOVE_POLICY_AMOUNT,PA_ABOVE_POLICY_AMOUNT,PA_ABOVE_REVIEW_LIMIT,NET_ABOVE_REVIEW_LIMIT/1000.01/500.51/1500.52',
+        );
+        await refusal('  and it needs the review before submit', 'PAYROLL_LINE_REVIEW_REQUIRED', () => submit(b));
+        await replace(b, [mk(staff['ssm']!, 'SSM', p2, { ba: '900.01', net: '900.01' })]);
+        eq(
+          '  a policy with no review limits still flags BA above its monthly BA (900.00)',
+          (
+            await one<{ r: string }>(
+              `select array_to_string(review_flags, ',') r from public.payroll_lines where batch_id=$1 and staff_id=$2`,
+              [b, staff['ssm']!],
+            )
+          ).r,
+          'BA_ABOVE_POLICY_AMOUNT',
+        );
+        await replace(b, [
+          mk(sm, 'SM', p1, { ba: '1000.00', pa: '500.00', pb: '250.50', net: '1750.50' }),
+          mk(staff['sm-alt']!, 'SM', p1, { ba: '100.00', pa: '400.00', net: '500.00' }),
+          mk(staff['ssm']!, 'SSM', p2, { ba: '100.00', pb: '99899.00', net: '99999.00' }),
+        ]);
+        const lineOf = async (batch: string, staffId: string) =>
+          one<{ id: string; review_required: boolean; flags: string; net: string }>(
+            `select id, review_required, array_to_string(review_flags, ',') flags, net
+               from public.payroll_lines where batch_id=$1 and staff_id=$2`,
+            [batch, staffId],
+          );
+        const flagged = await lineOf(b, sm);
+        const atLimit = await lineOf(b, staff['sm-alt']!);
+        const noLimit = await lineOf(b, staff['ssm']!);
+        eq(
+          'a line above the configured PA and NET limits is flagged, its figure kept whole',
+          `${flagged.review_required}/${flagged.flags}/${flagged.net}`,
+          'true/PA_ABOVE_REVIEW_LIMIT,NET_ABOVE_REVIEW_LIMIT/1750.50',
+        );
+        eq('a figure exactly at a limit is not flagged', `${atLimit.review_required}/${atLimit.flags}`, 'false/');
+        eq('PB has no policy bound: a policy with no limits never flags it (99899.00)', `${noLimit.review_required}/${noLimit.net}`, 'false/99999.00');
+        const review = async (lineId: string, note: string, actor = finance) =>
+          (await one<{ s: string }>('select public.review_payroll_line($1,$2,$3) as s', [lineId, note, actor])).s;
+        await refusal('a batch with an unreviewed flagged line cannot be submitted', 'PAYROLL_LINE_REVIEW_REQUIRED', () => submit(b));
+        await refusal('  not even through the payroll write flag', 'PAYROLL_LINE_REVIEW_REQUIRED', async () => {
+          await flagOn('afhomes.payroll_write');
+          await db.query(`update public.payroll_batches set status='submitted', submitted_by=$2, submitted_at=now() where id=$1`, [b, finance]);
+        });
+        await refusal('a line that is not flagged needs no review', 'PAYROLL_LINE_REVIEW_NOT_REQUIRED', () => review(atLimit.id, 'Looks fine to me'));
+        await refusal('a review needs a note', 'PAYROLL_REVIEW_NOTE_REQUIRED', () => review(flagged.id, 'ok'));
+        await refusal('a Sales Manager cannot review a line', 'MUTATION_FORBIDDEN', () => review(flagged.id, 'Looks fine to me', sm));
+        await refusal('a review cannot be written directly', 'PAYROLL_LINE_IMMUTABLE', () =>
+          db.query(`update public.payroll_lines set review_note='direct', reviewed_by=$2, reviewed_at=now() where id=$1`, [flagged.id, finance]),
+        );
+        await refusal('a review can never change a figure, even with the flag', 'PAYROLL_LINE_IMMUTABLE', async () => {
+          await flagOn('afhomes.payroll_write');
+          await db.query(
+            `update public.payroll_lines set net='1500.00', review_note='trimmed to the limit', reviewed_by=$2, reviewed_at=now() where id=$1`,
+            [flagged.id, finance],
+          );
+        });
+        eq('Finance records the review note', await review(flagged.id, 'Checked against the signed sales report'), 'reviewed');
+        eq('  reviewing again is an idempotent replay', await review(flagged.id, 'Checked against the signed sales report'), 'reviewed');
+        eq('  with one PAYROLL_LINE_REVIEWED event', await auditCount('PAYROLL_LINE_REVIEWED', flagged.id), 1);
+        await refusal('  and nobody reviews it a second time', 'PAYROLL_LINE_ALREADY_REVIEWED', () =>
+          review(flagged.id, 'A different opinion', boss),
+        );
+        eq('  the reviewed figure is unchanged', (await lineOf(b, sm)).net, '1750.50');
+        eq('with every flagged line reviewed, Finance submits', await submit(b), 'submitted');
+        eq('the Super Admin approves the batch (finalized)', await approveBatch(b), 'approved');
+        // --- audit: the Q1 basis travels with every live approval and disbursement ----------
+        const BASIS = JSON.stringify({ source: 'owner_reported', decisionOption: 'C_BOTH_MODELS', evidenceStatus: 'awaiting_evidence' });
+        const basisOf = async (action: string, entity: string) => {
+          const g = (
+            await one<{ g: { source: string; decisionOption: string; evidenceStatus: string } | null }>(
+              `select after_data->'governingBasis' g from public.audit_events where action=$1 and entity_id=$2`,
+              [action, entity],
+            )
+          ).g;
+          return g ? JSON.stringify({ source: g.source, decisionOption: g.decisionOption, evidenceStatus: g.evidenceStatus }) : 'missing';
+        };
+        eq('the batch approval audit carries the Q1 basis', await basisOf('PAYROLL_BATCH_APPROVED', b), BASIS);
+        const disb = (
+          await one<{ id: string }>('select public.record_payroll_disbursement($1,$2,$3,$4,$5::date,$6) as id', [
+            flagged.id,
+            '1750.50',
+            'bank',
+            `PR-${RUN}-88-D`,
+            today,
+            finance,
+          ])
+        ).id;
+        eq('the disbursement audit carries the Q1 basis', await basisOf('PAYROLL_DISBURSEMENT_RECORDED', disb), BASIS);
+        eq('the policy approval audit carries the Q1 basis', await basisOf('COMPENSATION_POLICY_APPROVED', p1), BASIS);
+
+        // --- ending a window; finalized payroll protects it --------------------------------
+        await refusal('Finance cannot end a policy', 'MUTATION_FORBIDDEN', () => endP(p1, '2021-06-15', 'Closed by finance', finance));
+        await refusal('an end needs a note', 'COMPENSATION_POLICY_END_NOTE_REQUIRED', () => endP(p1, '2021-06-15', 'no'));
+        await refusal('a window cannot end before it opens', 'COMPENSATION_POLICY_END_DATE_INVALID', () => endP(p1, '2020-12-31'));
+        await refusal('a window cannot cut a finalized payroll month it paid', 'COMPENSATION_POLICY_IN_USE_BY_FINALIZED_PAYROLL', () =>
+          endP(p1, '2021-02-15'),
+        );
+        await refusal('  not even through the write flag', 'COMPENSATION_POLICY_IN_USE_BY_FINALIZED_PAYROLL', async () => {
+          await flagOn('afhomes.compensation_policy_write');
+          await db.query(
+            `update public.ist_compensation_policies set effective_until='2021-02-15', ended_by=$2, ended_at=now(),
+                    end_note='direct attempt' where id=$1`,
+            [p1, boss],
+          );
+        });
+        await refusal('a pending policy cannot be ended', 'COMPENSATION_POLICY_NOT_APPROVED', () => endP(p3, '2021-12-31'));
+        eq('the approver closes the window mid-month, after the finalized month', await endP(p1, '2021-06-15'), 'ended');
+        eq('  ending again is an idempotent replay', await endP(p1, '2021-06-15'), 'ended');
+        eq('  with one COMPENSATION_POLICY_ENDED event', await auditCount('COMPENSATION_POLICY_ENDED', p1), 1);
+        await refusal('a closed window is never moved again', 'COMPENSATION_POLICY_IMMUTABLE', () => endP(p1, '2021-07-31'));
+        eq('the next policy is approved once the old window closes', await approveP(p3, 'BOARD-RES-TEST-002'), 'approved');
+        eq(
+          'approving a later policy never rewrote the finalized batch or its lines',
+          (
+            await one<{ r: string }>(
+              `select b.status || '/' || b.total_net || '/' || l.policy_id::text || '/' || l.net r
+                 from public.payroll_batches b join public.payroll_lines l on l.batch_id=b.id
+                where b.id=$1 and l.staff_id=$2`,
+              [b, sm],
+            )
+          ).r,
+          `approved/102249.50/${p1}/1750.50`,
+        );
+
+        // --- effective-dated segments (6.8) and the transition rule -------------------------
+        type Seg = { from: string; to: string; days: number; policyId: string | null; policyVersion: number | null };
+        type RankSeg = { rank: string; period: string; singlePolicy: boolean; transition: boolean; segments: Seg[] };
+        const segments = async (period: string, actor = finance) =>
+          (
+            await one<{ s: { period: string; transitionRuleApproved: boolean; ranks: RankSeg[] } }>(
+              'select public.payroll_policy_segments($1,$2) as s',
+              [period, actor],
+            )
+          ).s;
+        const june = await segments('2021-06');
+        const juneSm = june.ranks.find((r) => r.rank === 'SM')!;
+        eq(
+          'June: SM has two segments (old policy to the 15th, new from the 16th), a transition',
+          JSON.stringify({ t: juneSm.transition, s: juneSm.singlePolicy, segs: juneSm.segments.map((x) => [x.from, x.to, x.days, x.policyId]) }),
+          JSON.stringify({ t: true, s: false, segs: [['2021-06-01', '2021-06-15', 15, p1], ['2021-06-16', '2021-06-30', 15, p3]] }),
+        );
+        eq('  the transition rule is not approved', june.transitionRuleApproved, false);
+        const may = (await segments('2021-05')).ranks;
+        check(
+          'May: one SM policy for the whole month (single), SSM single, SVD none (configuration required)',
+          may[0]!.singlePolicy && !may[0]!.transition && may[0]!.segments.length === 1 &&
+            may[1]!.singlePolicy && !may[2]!.singlePolicy && !may[2]!.transition && may[2]!.segments[0]!.policyId === null,
+          JSON.stringify(may),
+        );
+        await refusal('segments need the payroll view permission', 'MUTATION_FORBIDDEN', () => segments('2021-06', sm));
+        await refusal('segments need a valid period', 'PERIOD_INVALID', () => segments('2021-13'));
+        const b6 = await mkBatch('2021-06');
+        await refusal('a computed line in a mid-month transition month is blocked by the rule', 'POLICY_TRANSITION_RULE_NOT_APPROVED', () =>
+          replace(b6, [mk(sm, 'SM', p1)]),
+        );
+        await replace(b6, [blocked(sm, 'POLICY_TRANSITION_RULE_NOT_APPROVED: the policy changes on 2021-06-16')]);
+        await refusal('  the blocked transition month cannot be submitted', 'PAYROLL_CONFIGURATION_REQUIRED', () => submit(b6));
+        // TEST FIXTURE ONLY: the transition rule approved. Segment payouts do not exist, so the
+        // month is still never paid whole at the first-of-month policy.
+        await setDecision(RULE, true);
+        eq('(test fixture) the segments report the rule as approved', (await segments('2021-06')).transitionRuleApproved, true);
+        await refusal('(test fixture) even with the rule approved a transition month is refused', 'POLICY_SEGMENT_PAYOUT_NOT_IMPLEMENTED', () =>
+          replace(b6, [mk(sm, 'SM', p1)]),
+        );
+        await refusal('  and the blocked month cannot be submitted', 'PAYROLL_CONFIGURATION_REQUIRED', () => submit(b6));
+        await setDecision(RULE, false);
+        const b7 = await mkBatch('2021-07');
+        await replace(b7, [mk(sm, 'SM', p3)]);
+        eq('a month fully under the new policy behaves exactly as before', await submit(b7), 'submitted');
+
+        // --- derived lifecycle ---------------------------------------------------------------
+        const states = (
+          await one<{ s: { policyId: string; lifecycle: string; lastFinalizedPeriod: string | null }[] }>(
+            'select public.ist_compensation_policy_states($1) as s',
+            [finance],
+          )
+        ).s;
+        const stateOf = (id: string) => states.find((x) => x.policyId === id);
+        eq(
+          'derived lifecycle: ended+replaced = superseded, open = active, awaiting = pending_approval',
+          `${stateOf(p1)?.lifecycle}/${stateOf(p1)?.lastFinalizedPeriod}/${stateOf(p3)?.lifecycle}/${stateOf(pSelf)?.lifecycle}`,
+          'superseded/2021-02/active/pending_approval',
+        );
+        await refusal('the lifecycle view needs a payroll permission', 'MUTATION_FORBIDDEN', () =>
+          db.query('select public.ist_compensation_policy_states($1)', [sm]),
+        );
+
+        // --- a month that BECOMES a transition after its line was computed ------------------
+        const b8 = await mkBatch('2021-08');
+        await replace(b8, [mk(sm, 'SM', p3)]);
+        await endP(p3, '2021-08-15');
+        await setDecision(RULE, true); // TEST FIXTURE ONLY
+        await refusal('(test fixture) submit re-checks: a month cut mid-way is refused even with the rule approved', 'PAYROLL_CONFIGURATION_REQUIRED', () =>
+          submit(b8),
+        );
+        await setDecision(RULE, false);
+        await refusal('  and with the rule pending', 'PAYROLL_CONFIGURATION_REQUIRED', () => submit(b8));
+
+        // --- privileges -----------------------------------------------------------------------
+        const FNS = [
+          'public.approve_payroll_batch(uuid,uuid)',
+          'public.record_payroll_disbursement(uuid,text,text,text,date,uuid,text)',
+          'public.save_ist_compensation_policy_draft(uuid,jsonb,uuid,text)',
+          'public.submit_ist_compensation_policy(uuid,uuid)',
+          'public.return_ist_compensation_policy(uuid,text,uuid)',
+          'public.approve_ist_compensation_policy(uuid,text,text,uuid)',
+          'public.end_ist_compensation_policy(uuid,date,text,uuid)',
+          'public.review_payroll_line(uuid,text,uuid)',
+          'public.payroll_policy_segments(text,uuid)',
+          'public.ist_compensation_policy_states(uuid)',
+        ];
+        const priv88 = await one<{ bad: number; svc: boolean; helper: boolean; del: boolean; trig: number }>(
+          `select (select count(*)::int from unnest($1::text[]) f, unnest(array['anon','authenticated']) r
+                    where has_function_privilege(r, f, 'EXECUTE')) as bad,
+                  (select bool_and(has_function_privilege('service_role', f, 'EXECUTE')) from unnest($1::text[]) f) as svc,
+                  (select bool_or(has_function_privilege(r, f, 'EXECUTE')) from unnest(array[
+                     'private.ist_compensation_policy_segments(text,text)',
+                     'private.compensation_policy_transition_rule_approved()',
+                     'private.q1_governing_basis()',
+                     'private.is_placeholder_text(text)',
+                     'private.ist_compensation_policy_lifecycle(uuid,date)',
+                     'private.payroll_batch_policies_ok(uuid)']) f,
+                     unnest(array['anon','authenticated','service_role']) r) as helper,
+                  has_table_privilege('service_role','public.ist_compensation_policies','DELETE')
+                    or has_table_privilege('service_role','public.ist_compensation_policies','TRUNCATE')
+                    or has_table_privilege('service_role','public.governing_policy_decisions','DELETE') as del,
+                  (select count(*)::int from pg_trigger where tgname in
+                     ('ist_compensation_policies_no_truncate','ist_compensation_policies_protect')) as trig`,
+          [FNS],
+        );
+        eq('anon and authenticated cannot execute the Phase 8 functions', priv88.bad, 0);
+        check('service_role can execute them; the private helpers stay private', priv88.svc && !priv88.helper, JSON.stringify(priv88));
+        check('the server role cannot delete or truncate policy or decision history; guard + truncate triggers exist', !priv88.del && priv88.trig === 2, JSON.stringify(priv88));
+      } catch (error) {
+        check('section 88 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own88 ? 'rollback' : 'rollback to savepoint finops88');
+      }
+    }
+    {
+      section('89. Finance Phase 9: IST engagements, performance rules, KPI / collection evidence');
+      // Migration 20270105000009. Rolled back: approved engagements, rules and audit history are
+      // immutable. EVERY engagement and rule here is a TEST FIXTURE, never approved policy.
+      let own89 = false;
+      try {
+        await db.query('savepoint finops89');
+      } catch {
+        await db.query('begin');
+        own89 = true;
+      }
+      try {
+        const finance = staff['finance']!;
+        const boss = staff['super-admin']!;
+        const admin = staff['admin']!;
+        const sm = staff['sm']!;
+        const smAlt = staff['sm-alt']!;
+        const ssm = staff['ssm']!;
+        const bronze = byCode.get('BRONZE')!;
+        const line = (message: string) => message.split('\n')[0];
+        const refusal = async (name: string, code: string, fn: () => Promise<unknown>) => {
+          const message = await throwsIsolated(name, fn);
+          check(`  -> ${code}`, message.includes(code), line(message));
+        };
+        const flagOn = () => db.query(`select set_config('afhomes.ist_governed_write','on',true)`);
+        const auditCount = async (action: string, entity: string) =>
+          (
+            await one<{ n: number }>('select count(*)::int n from public.audit_events where action=$1 and entity_id=$2', [
+              action,
+              entity,
+            ])
+          ).n;
+        const setDecision = async (key: string, approved: boolean) => {
+          // TEST FIXTURE ONLY (rolled back): no function can do this.
+          await db.query(`select set_config('afhomes.governing_policy_write','on',true)`);
+          await db.query(
+            `update public.governing_policy_decisions
+                set status=$2, decided_by=case when $2='approved' and source is null then $3::uuid end,
+                    decided_at=case when $2='approved' then now() end
+              where key=$1`,
+            [key, approved ? 'approved' : 'pending', boss],
+          );
+          await db.query(`select set_config('afhomes.governing_policy_write','off',true)`);
+        };
+        type StaffPerf = {
+          staffId: string;
+          rank: string;
+          contractStart: string | null;
+          contractEnd: string | null;
+          suspendedFrom: string | null;
+          kpi: string;
+          collection: string;
+          verifiedCash: string;
+          assumedCredit: string;
+          approvedAdjustmentsTotal: string;
+          proposedAdjustmentsTotal: string;
+          status: string;
+          blockers: string[];
+          evidenceHash: string;
+          evidenceCount: number;
+          ruleId: string | null;
+          ruleVersion: number | null;
+          engagementId: string | null;
+        };
+        type Item = {
+          staffId: string | null;
+          paymentId: string;
+          saleId: string | null;
+          reservationId: string | null;
+          amount: string;
+          eligibility: string;
+          reasonCode: string | null;
+          evidenceClass: string;
+          countPeriod: string | null;
+          countDate: string | null;
+          isClosingPayment: boolean;
+          contractPriceSnapshot: string | null;
+          cumulativeVerifiedAtPeriodEnd: string;
+          approvedAdjustmentsTotal: string;
+          proposedAdjustmentsTotal: string;
+          assumedCredit: string;
+        };
+        const perf = async (period: string, actor = finance) =>
+          (
+            await one<{
+              r: {
+                period: string;
+                ruleId: string | null;
+                ruleVersion: number | null;
+                ruleBlocker: string | null;
+                unattributed: { count: number; total: string };
+                offRoster: { count: number; total: string };
+                staff: StaffPerf[];
+              };
+            }>('select public.ist_period_performance($1,$2) as r', [period, actor])
+          ).r;
+        // Exact-decimal arithmetic in PostgreSQL numeric: no float ever touches a money assertion.
+        const money = async (expr: string, params: unknown[] = []) =>
+          (await one<{ v: string }>(`select private.money(${expr}) v`, params)).v;
+        const sumMoney = (xs: string[]) =>
+          money('(select coalesce(sum(x::numeric), 0) from unnest($1::text[]) x)', [xs]);
+        const perfOf = async (period: string, staffId: string) => (await perf(period)).staff.find((x) => x.staffId === staffId)!;
+        const evidence = async (period: string, staffId: string, actor = finance) =>
+          (
+            await one<{ r: { summary: StaffPerf | null; items: Item[] } }>(
+              'select public.ist_staff_performance_evidence($1,$2,$3) as r',
+              [period, staffId, actor],
+            )
+          ).r;
+        const brief = (x: StaffPerf) => `${x.status}/${x.kpi}/${x.collection}/${x.verifiedCash}/${x.assumedCredit}/${x.blockers.join(',')}`;
+        const untouched = async () =>
+          (
+            await one<{ n: string }>(
+              `select (select count(*) from public.payroll_batches) || '/' || (select count(*) from public.payroll_lines)
+                      || '/' || (select count(*) from public.payroll_disbursements)
+                      || '/' || (select count(*) from public.payroll_simulation_disbursements)
+                      || '/' || (select count(*) from public.ist_compensation_policies) n`,
+            )
+          ).n;
+        const payrollBefore = await untouched();
+
+        // --- default state: nothing seeded, everything blocked, zero money ------------------
+        eq(
+          'no engagement and no performance rule is seeded',
+          (
+            await one<{ n: string }>(
+              `select (select count(*) from public.ist_engagements) || '/' || (select count(*) from public.ist_performance_rules) n`,
+            )
+          ).n,
+          '0/0',
+        );
+        eq(
+          'no module key was added for engagements or performance',
+          (await one<{ n: number }>(`select count(*)::int n from public.modules where key ~ '(engagement|performance)'`)).n,
+          0,
+        );
+        const d0 = await perf('2022-03');
+        check(
+          'default: the IST roster is listed and every member is BLOCKED with zero money',
+          d0.staff.length >= 3 &&
+            [sm, smAlt, ssm].every((id) => d0.staff.some((x) => x.staffId === id)) &&
+            d0.staff.every(
+              (x) =>
+                x.status === 'BLOCKED' &&
+                x.kpi === '0.00' &&
+                x.collection === '0.00' &&
+                x.verifiedCash === '0.00' &&
+                x.assumedCredit === '0.00' &&
+                x.blockers.includes('RULE_NOT_APPROVED') &&
+                x.blockers.includes('MISSING_ENGAGEMENT') &&
+                x.contractStart === null &&
+                x.ruleId === null &&
+                x.engagementId === null,
+            ),
+          JSON.stringify(d0.staff.slice(0, 2)),
+        );
+        eq('  with the reason stated once for the month', `${d0.ruleBlocker}/${d0.ruleId}`, 'RULE_NOT_APPROVED/null');
+        eq('  ranks follow the role (vice_director -> SVD mapping preserved)', d0.staff.find((x) => x.staffId === ssm)!.rank, 'SSM');
+        await refusal('a Sales Manager cannot read IST performance', 'MUTATION_FORBIDDEN', () => perf('2022-03', sm));
+        await refusal('  nor the evidence drill-down', 'MUTATION_FORBIDDEN', () => evidence('2022-03', sm, sm));
+        await refusal('performance needs a valid period', 'PERIOD_INVALID', () => perf('2022-13'));
+
+        // --- synthetic verified money (TEST FIXTURE) ------------------------------------------
+        const reservationFixtures89 = new Set<string>();
+        const mkSale89 = async (label: string, seller: string | null, origin = 'normal') => {
+          if (origin === 'normal') {
+            await db.query('savepoint f89_purchase_fixture');
+            // A historical SM may now hold an oversight role. Originate while
+            // they are an SM, then restore the current role used by performance.
+            const previousRole = await one<{ role_id: string }>('select role_id from public.staff_role_assignments where staff_id=$1', [seller]);
+            await db.query(`update public.staff_role_assignments set role_id=(select id from public.roles where slug='sales_manager') where staff_id=$1`, [seller]);
+            try {
+              const world = await makePurchaseFixtures(db, { actor: seller!, reviewer: boss,
+                createdCustomers: [], createdApplications: [] });
+              const purchase = await world.executed();
+              const fee = (await one<{ id: string }>('select public.record_reservation_payment_once($1,$2,$3,$4) id',
+                [randomUUID(), purchase.reservationId, { amount: purchase.fee, paymentPurpose: 'reservation_fee',
+                  method: 'cash', receiptStoragePath: await receiptObject('card') }, finance])).id;
+              // Synthetic clock fixture: keep the reservation event outside the
+              // historical KPI months exercised below, without omitting it.
+              await db.query("update public.payments set posting_period='2039-01',paid_on='2039-01-01' where id=$1", [fee]);
+              await db.query(`update public.payments set status='verified',verified_at='2039-01-01T04:00:00Z',verified_by=$2 where id=$1`, [fee, finance]);
+              reservationFixtures89.add(purchase.reservationId);
+              return purchase.reservationId;
+            } catch (error) {
+              await db.query('rollback to savepoint f89_purchase_fixture');
+              throw error;
+            } finally {
+              await db.query('update public.staff_role_assignments set role_id=$2 where staff_id=$1', [seller, previousRole.role_id]);
+            }
+          }
+          const sId = uuidFor(`sale:f89:${label}`);
+          const sn = (await one<{ sale_number: string }>('select * from public.next_sale_number()')).sale_number;
+          await db.query(
+            `insert into public.card_sales
+             (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+              cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
+              commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at, origin)
+           values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days',$10)`,
+            [
+              sId,
+              sn,
+              await mkCustomer(`fin89${label}`, `f89${label}`),
+              bronze.id,
+              seller,
+              bronze.cash_price,
+              bronze.minimum_down_payment,
+              bronze.yearly_points,
+              bronze.commission_rate,
+              origin,
+            ],
+          );
+          return sId;
+        };
+        const record89 = async (sale: string, amount: string, tag: string, period: string, paidOn: string) => {
+          if (reservationFixtures89.has(sale)) {
+            const id = (await one<{ id: string }>('select public.record_reservation_payment_once($1,$2,$3,$4) id',
+              [randomUUID(), sale, { amount, paymentPurpose: 'contractual_installment', method: 'cash',
+                reference: `REF-${RUN}-89-${tag}`, receiptStoragePath: await receiptObject('card') }, finance])).id;
+            await db.query('update public.payments set posting_period=$2,paid_on=$3::date where id=$1', [id, period, paidOn]);
+            return id;
+          }
+          const id = (
+            await one<{ id: string }>(
+              `select public.record_card_payment($1,$2,'installment','cash',$3,null,$4,$5) as id`,
+              [sale, amount, `REF-${RUN}-89-${tag}`, await receiptObject('card'), finance],
+            )
+          ).id;
+          await db.query('update public.payments set posting_period=$2, paid_on=$3::date where id=$1', [id, period, paidOn]);
+          return id;
+        };
+        // Historical test fixtures set their verified facts once, before the immutable boundary.
+        const pay89 = async (sale: string, amount: string, tag: string, period: string, paidOn: string, verifiedOn = paidOn) => {
+          const id = await record89(sale, amount, tag, period, paidOn);
+          await db.query(`update public.payments set status='verified', verified_by=$3,
+            verified_at=$2::timestamptz where id=$1`, [id, `${verifiedOn}T04:00:00Z`, finance]);
+          return id;
+        };
+        const price = bronze.cash_price; // contract price snapshot
+        const threshold = await money('$1::numeric * 25 / 100', [price]); // under the 25% TEST FIXTURE rule below
+        const A1 = await money('$1::numeric * 25 / 100 - 1000', [price]);
+        const s1 = await mkSale89('a', sm);
+        const s2 = await mkSale89('b', smAlt);
+        const s3 = await mkSale89('c', sm);
+        const a1 = await pay89(s1, A1, 'A1', '2022-03', '2022-03-10');
+        const a2 = await pay89(s1, '1000.00', 'A2', '2022-04', '2022-04-05');
+        await pay89(s1, '500.00', 'A3', '2022-05', '2022-05-06');
+        await pay89(s2, '2000.00', 'B1', '2022-03', '2022-03-14');
+        await pay89(s2, '1500.00', 'B2', '2022-03', '2022-03-15');
+        // Money that is not verified never counts: recorded, rejected, voided.
+        const pending = await record89(s3, '700.00', 'P', '2022-03', '2022-03-11');
+        const rejected = await record89(s3, '800.00', 'R', '2022-03', '2022-03-12');
+        await db.query(`select public.verify_purchase_payment_once($1,$2,'rejected','synthetic rejection',$3)`, [randomUUID(), rejected, finance]);
+        const voided = await record89(s3, '900.00', 'V', '2022-03', '2022-03-13');
+        await db.query(`update public.payments set status='voided', voided_at=now() where id=$1`, [voided]);
+        // Adjustments on a1: one approved (Q13 TEST FIXTURE), one still proposed.
+        const propose = async (payment: string, kind: string, amount: string) =>
+          (
+            await one<{ id: string }>(
+              `select public.propose_payment_adjustment($1,$2,$3,$4,'Adjustment under review','2022-03-20'::date,null) as id`,
+              [payment, finance, kind, amount],
+            )
+          ).id;
+        const adjApproved = await propose(a1, 'reversal', '300.00');
+        await propose(a1, 'refund', '200.00');
+        await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', true);
+        await db.query('select public.resolve_payment_adjustment($1,$2,$3,$4)', [
+          adjApproved,
+          'approved',
+          'TEST FIXTURE approval of a reversal',
+          boss,
+        ]);
+        await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', false);
+
+        // A proposal is not money: it never changes the evidence hash. An approved adjustment does.
+        await db.query('savepoint f89_hash');
+        try {
+          const hashNow = async () =>
+            (await one<{ h: string | null }>(
+              `select private.ist_period_performance_rows('2022-04', $1) -> 0 ->> 'evidenceHash' as h`, [sm])).h;
+          const h0 = await hashNow();
+          const extra = await propose(a2, 'refund', '50.00'); // a2 counts in 2022-04 and has no open proposal
+          check('a proposed adjustment leaves the evidence hash unchanged', !!h0 && (await hashNow()) === h0);
+          await setDecision('Q13_PAYMENT_ADJUSTMENT_AUTHORITY', true);
+          await db.query('select public.resolve_payment_adjustment($1,$2,$3,$4)', [extra, 'approved', 'TEST FIXTURE approval of a refund', boss]);
+          check('  an approved adjustment changes it', !!h0 && (await hashNow()) !== h0);
+        } catch (error) {
+          check('evidence hash adjustment checks completed', false, safeErrorMessage(error));
+        } finally {
+          await db.query('rollback to savepoint f89_hash');
+        }
+
+        const noRule = await evidence('2022-03', sm);
+        eq(
+          'with no approved rule the verified payment is listed but UNDETERMINED (RULE_NOT_APPROVED)',
+          noRule.items.map((i) => `${i.paymentId}/${i.amount}/${i.evidenceClass}/${i.eligibility}/${i.reasonCode}`).join(';'),
+          `${a1}/${A1}/VERIFIED_CASH/UNDETERMINED/RULE_NOT_APPROVED`,
+        );
+        eq('  and the member stays BLOCKED with zero money', brief(noRule.summary!), 'BLOCKED/0.00/0.00/0.00/0.00/MISSING_ENGAGEMENT,RULE_NOT_APPROVED');
+        eq('  the evidence is counted', noRule.summary!.evidenceCount, 1);
+
+        // --- engagements: RBAC, validation, idempotency, no direct write ---------------------
+        const saveE = async (id: string | null, f: Record<string, unknown>, actor = finance, key: string | null = null) =>
+          (
+            await one<{ id: string }>('select public.save_ist_engagement_draft($1,$2::jsonb,$3,$4) as id', [
+              id,
+              JSON.stringify(f),
+              actor,
+              key,
+            ])
+          ).id;
+        const submitE = async (id: string, actor = finance) =>
+          (await one<{ s: string }>('select public.submit_ist_engagement($1,$2) as s', [id, actor])).s;
+        const returnE = async (id: string, reason: string, actor = boss) =>
+          (await one<{ s: string }>('select public.return_ist_engagement($1,$2,$3) as s', [id, reason, actor])).s;
+        const approveE = async (id: string, ref = 'TEST-FIXTURE-APPROVAL-001', note = 'TEST FIXTURE approval note', actor = boss) =>
+          (await one<{ s: string }>('select public.approve_ist_engagement($1,$2,$3,$4) as s', [id, ref, note, actor])).s;
+        const endE = async (id: string, end: string | null, susp: string | null, note = 'TEST FIXTURE end of engagement', actor = boss) =>
+          (
+            await one<{ s: string }>('select public.end_ist_engagement($1,$2::date,$3::date,$4,$5) as s', [id, end, susp, note, actor])
+          ).s;
+        const eFields = (over: Record<string, unknown> = {}) => ({
+          staffId: sm,
+          rank: 'SM',
+          contractStart: '2022-03-01',
+          evidenceReference: 'TEST-FIXTURE-CONTRACT-SM-001',
+          ...over,
+        });
+        await refusal('Finance cannot draft an engagement without a delegated permission', 'MUTATION_FORBIDDEN', () => saveE(null, eFields()));
+        await refusal('a Sales Manager cannot draft an engagement', 'MUTATION_FORBIDDEN', () => saveE(null, eFields(), sm));
+        // TEST FIXTURE: dynamic-RBAC delegation (rolled back): drafting to Finance, approval to the Admin.
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, true, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_policy'
+           on conflict (role_id, module_id) do update set can_view=true, can_create=true, can_update=true`,
+          [finance],
+        );
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, false, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_policy_approval'
+           on conflict (role_id, module_id) do update set can_view=true, can_update=true`,
+          [admin],
+        );
+        for (const [name, over] of [
+          ['an unknown field', { approvedBy: boss }],
+          ['a malformed staff id', { staffId: 'sm' }],
+          ['an unknown staff member', { staffId: randomUUID() }],
+          ['an OST rank', { rank: 'OST' }],
+          ['an impossible date', { contractStart: '2022-02-30' }],
+          ['an end before the start', { contractEnd: '2022-02-28' }],
+          ['a short evidence reference', { evidenceReference: 'DOC-1' }],
+          ['a placeholder evidence reference', { evidenceReference: 'N/A N/A N/A' }],
+        ] as const) {
+          await refusal(`an engagement draft with ${name} is refused`, 'IST_ENGAGEMENT_INVALID', () => saveE(null, eFields(over)));
+        }
+        const e1 = await saveE(null, eFields(), finance, `KE-${RUN}-89`);
+        eq('an engagement create replays by idempotency key and the same payload', await saveE(null, eFields(), finance, `KE-${RUN}-89`), e1);
+        await refusal('  the same key with another payload is refused', 'IST_ENGAGEMENT_IDEMPOTENCY_CONFLICT', () =>
+          saveE(null, eFields({ contractStart: '2022-03-02' }), finance, `KE-${RUN}-89`),
+        );
+        eq('  with one IST_ENGAGEMENT_DRAFT_CREATED event', await auditCount('IST_ENGAGEMENT_DRAFT_CREATED', e1), 1);
+        await refusal('an engagement cannot be updated directly', 'IST_ENGAGEMENT_DIRECT_WRITE_REFUSED', () =>
+          db.query(`update public.ist_engagements set contract_start='2020-01-01' where id=$1`, [e1]),
+        );
+        await refusal('  nor inserted directly', 'IST_ENGAGEMENT_DIRECT_WRITE_REFUSED', () =>
+          db.query(
+            `insert into public.ist_engagements (staff_id, rank, contract_start, evidence_reference, created_by)
+             values ($1,'SM','2020-01-01','FORGED-CONTRACT-REFERENCE',$2)`,
+            [sm, finance],
+          ),
+        );
+        await refusal('even with a forged write flag a row is born a draft', 'IST_ENGAGEMENT_TRANSITION_INVALID', async () => {
+          await flagOn();
+          await db.query(
+            `insert into public.ist_engagements
+               (staff_id, rank, contract_start, evidence_reference, created_by, status, submitted_by, submitted_at,
+                approved_by, approved_at, approval_evidence_reference, approval_note)
+             values ($1,'SM','2020-01-01','FORGED-CONTRACT-REFERENCE',$2,'approved',$2,now(),$3,now(),'FORGED-APPROVAL-REF','forged approval')`,
+            [sm, finance, boss],
+          );
+        });
+        await refusal('even with a forged write flag a draft cannot jump to approved', 'IST_ENGAGEMENT_TRANSITION_INVALID', async () => {
+          await flagOn();
+          await db.query(
+            `update public.ist_engagements set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='FORGED-APPROVAL-REF', approval_note='forged approval' where id=$1`,
+            [e1, boss],
+          );
+        });
+        await refusal('an engagement is never deleted', 'IST_ENGAGEMENT_IMMUTABLE', () =>
+          db.query('delete from public.ist_engagements where id=$1', [e1]),
+        );
+        await refusal('  nor truncated', 'IST_ENGAGEMENT_IMMUTABLE', () => db.query('truncate public.ist_engagements'));
+        await saveE(e1, eFields({ evidenceReference: 'TEST-FIXTURE-CONTRACT-SM-002' }));
+        await saveE(e1, eFields({ evidenceReference: 'TEST-FIXTURE-CONTRACT-SM-002' }));
+        eq('an edit writes one DRAFT_UPDATED event; an unchanged edit writes none', await auditCount('IST_ENGAGEMENT_DRAFT_UPDATED', e1), 1);
+        await refusal('the staff member cannot change on an edit', 'IST_ENGAGEMENT_INVALID', () => saveE(e1, eFields({ staffId: smAlt })));
+
+        // --- engagement lifecycle and separation of duties -------------------------------------
+        eq('Finance submits the engagement', await submitE(e1), 'pending_approval');
+        eq('  submitting again is an idempotent replay', await submitE(e1), 'pending_approval');
+        eq('  with one IST_ENGAGEMENT_SUBMITTED event', await auditCount('IST_ENGAGEMENT_SUBMITTED', e1), 1);
+        await refusal('a pending engagement cannot be edited', 'IST_ENGAGEMENT_NOT_EDITABLE', () => saveE(e1, eFields()));
+        await refusal('  nor its content changed with a forged flag', 'IST_ENGAGEMENT_TRANSITION_INVALID', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set contract_start='2020-01-01' where id=$1`, [e1]);
+        });
+        await refusal('Finance cannot return an engagement', 'MUTATION_FORBIDDEN', () => returnE(e1, 'Needs the signed contract', finance));
+        await refusal('Finance cannot approve an engagement', 'MUTATION_FORBIDDEN', () => approveE(e1, undefined, undefined, finance));
+        await refusal('the guard rechecks the proposed approval actor permission', 'MUTATION_FORBIDDEN', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set status='approved', approved_by=$2, approved_at=now(),
+            approval_evidence_reference='TEST-FIXTURE-APPROVAL', approval_note='TEST FIXTURE approval' where id=$1`, [e1, sm]);
+        });
+        const ownEngagement = await saveE(null, eFields({ staffId: admin }));
+        await submitE(ownEngagement);
+        await refusal('an approver cannot approve their own staff engagement', 'IST_ENGAGEMENT_SELF_APPROVAL', () => approveE(ownEngagement, undefined, undefined, admin));
+        await refusal('the guard also refuses approval of the approver staff engagement', 'IST_ENGAGEMENT_SELF_APPROVAL', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set status='approved', approved_by=$2, approved_at=now(),
+            approval_evidence_reference='TEST-FIXTURE-APPROVAL', approval_note='TEST FIXTURE approval' where id=$1`, [ownEngagement, admin]);
+        });
+        await refusal('a return needs a reason', 'IST_ENGAGEMENT_RETURN_REASON_REQUIRED', () => returnE(e1, 'no'));
+        eq('the approver returns it to draft', await returnE(e1, 'Needs the signed contract'), 'draft');
+        eq('  returning again is an idempotent replay', await returnE(e1, 'Needs the signed contract'), 'draft');
+        await refusal('a draft cannot be approved', 'IST_ENGAGEMENT_NOT_PENDING', () => approveE(e1));
+        await submitE(e1);
+        await refusal('an approval needs an evidence reference of 10+ characters', 'IST_ENGAGEMENT_EVIDENCE_REQUIRED', () => approveE(e1, 'REF-1'));
+        await refusal('  that is not a placeholder', 'IST_ENGAGEMENT_EVIDENCE_REQUIRED', () => approveE(e1, '--- N/A ---'));
+        await refusal('an approval needs a real note', 'IST_ENGAGEMENT_APPROVAL_NOTE_REQUIRED', () => approveE(e1, undefined, '-----'));
+        await refusal('even with a forged flag the guard refuses an approval without evidence', 'IST_ENGAGEMENT_EVIDENCE_REQUIRED', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set status='approved', approved_by=$2, approved_at=now() where id=$1`, [e1, boss]);
+        });
+        await refusal('(test fixture) with Q1 pending no engagement can be approved', 'IST_PAYROLL_NOT_AUTHORIZED', async () => {
+          await setDecision('Q1_GOVERNING_COMPENSATION_MODEL', false);
+          await approveE(e1);
+        });
+        eq('the Super Admin approves the engagement Finance drafted', await approveE(e1), 'approved');
+        eq('  approving again is an idempotent replay', await approveE(e1), 'approved');
+        eq('  with one IST_ENGAGEMENT_APPROVED event', await auditCount('IST_ENGAGEMENT_APPROVED', e1), 1);
+        check(
+          '  whose payload carries the Q1 basis',
+          (
+            await one<{ ok: boolean }>(
+              `select after_data->'governingBasis'->>'source' = 'owner_reported' ok from public.audit_events
+                where action='IST_ENGAGEMENT_APPROVED' and entity_id=$1`,
+              [e1],
+            )
+          ).ok,
+        );
+        // The drafter can never approve; the starting day of this one is a window boundary below.
+        const e2 = await saveE(null, eFields({ staffId: smAlt, contractStart: '2022-03-15', evidenceReference: 'TEST-FIXTURE-CONTRACT-ALT-001' }), boss);
+        await submitE(e2);
+        await refusal('the drafter cannot approve their own engagement', 'IST_ENGAGEMENT_SELF_APPROVAL', () => approveE(e2));
+        await refusal('  not even with a forged flag and a forged actor list', 'IST_ENGAGEMENT_SELF_APPROVAL', async () => {
+          await flagOn();
+          await db.query(
+            `update public.ist_engagements set prior_actor_ids='{}', status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='FORGED-APPROVAL-REF', approval_note='forged approval' where id=$1`,
+            [e2, boss],
+          );
+        });
+        eq('a delegated approver approves it', await approveE(e2, undefined, undefined, admin), 'approved');
+        // Anyone who EVER submitted: survives a return that clears submitted_by.
+        const e3 = await saveE(null, eFields({ staffId: ssm, rank: 'SSM', contractStart: '2022-01-01', evidenceReference: 'TEST-FIXTURE-CONTRACT-SSM-001' }));
+        await submitE(e3, boss);
+        await returnE(e3, 'Returned to clear the submitter', admin);
+        await submitE(e3);
+        await refusal('a person who EVER submitted cannot approve, even after a return', 'IST_ENGAGEMENT_SELF_APPROVAL', () => approveE(e3));
+        eq('  the delegated approver can', await approveE(e3, undefined, undefined, admin), 'approved');
+        // Immutability and overlap.
+        await refusal('an approved engagement cannot be edited', 'IST_ENGAGEMENT_NOT_EDITABLE', () => saveE(e1, eFields()));
+        await refusal('  nor directly, even with a forged flag', 'IST_ENGAGEMENT_IMMUTABLE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set contract_start='2020-01-01' where id=$1`, [e1]);
+        });
+        await refusal('  nor set back to draft', 'IST_ENGAGEMENT_IMMUTABLE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set status='draft' where id=$1`, [e1]);
+        });
+        const e4 = await saveE(null, eFields({ contractStart: '2022-06-01', evidenceReference: 'TEST-FIXTURE-CONTRACT-SM-003' }));
+        await submitE(e4);
+        await refusal('an overlapping engagement for the same person is refused', 'IST_ENGAGEMENT_OVERLAP', () => approveE(e4));
+        await refusal('Finance cannot end an engagement', 'MUTATION_FORBIDDEN', () => endE(e1, '2022-04-05', null, undefined, finance));
+        await refusal('an end needs a note', 'IST_ENGAGEMENT_END_NOTE_REQUIRED', () => endE(e1, '2022-04-05', null, 'no'));
+        await refusal('an end needs a date', 'IST_ENGAGEMENT_END_DATE_INVALID', () => endE(e1, null, null));
+        await refusal('an engagement cannot end before it starts', 'IST_ENGAGEMENT_END_DATE_INVALID', () => endE(e1, '2022-02-28', null));
+        await refusal('a pending engagement cannot be ended', 'IST_ENGAGEMENT_NOT_APPROVED', () => endE(e4, '2022-12-31', null));
+
+        // --- performance rules: validation, lifecycle, incomplete rule -------------------------
+        const saveR = async (id: string | null, f: Record<string, unknown>, actor = finance, key: string | null = null) =>
+          (
+            await one<{ id: string }>('select public.save_ist_performance_rule_draft($1,$2::jsonb,$3,$4) as id', [
+              id,
+              JSON.stringify(f),
+              actor,
+              key,
+            ])
+          ).id;
+        const submitR = async (id: string, actor = finance) =>
+          (await one<{ s: string }>('select public.submit_ist_performance_rule($1,$2) as s', [id, actor])).s;
+        const returnR = async (id: string, reason: string, actor = boss) =>
+          (await one<{ s: string }>('select public.return_ist_performance_rule($1,$2,$3) as s', [id, reason, actor])).s;
+        const approveR = async (id: string, ref = 'TEST-FIXTURE-RULE-APPROVAL', note = 'TEST FIXTURE approval note', actor = boss) =>
+          (await one<{ s: string }>('select public.approve_ist_performance_rule($1,$2,$3,$4) as s', [id, ref, note, actor])).s;
+        const endR = async (id: string, until: string, note = 'TEST FIXTURE end of rule', actor = boss) =>
+          (await one<{ s: string }>('select public.end_ist_performance_rule($1,$2::date,$3,$4) as s', [id, until, note, actor])).s;
+        const rFields = (over: Record<string, unknown> = {}) => ({
+          effectiveFrom: '2022-03-01',
+          attributionBasis: 'seller_only',
+          closedDealThresholdPct: '25',
+          countDateBasis: 'verified_posting_period',
+          adjustmentTreatment: 'report_only',
+          sourceReference: 'TEST FIXTURE ONLY - synthetic rule, not approved policy',
+          ...over,
+        });
+        const approvedRule = async (f: Record<string, unknown>) => {
+          const id = await saveR(null, f);
+          await submitR(id);
+          await approveR(id);
+          return id;
+        };
+        await refusal('a Sales Manager cannot draft a performance rule', 'MUTATION_FORBIDDEN', () => saveR(null, rFields(), sm));
+        for (const [name, over] of [
+          ['an unknown field', { status: 'approved' }],
+          ['an unknown attribution basis', { attributionBasis: 'own_sales' }],
+          ['a zero threshold', { closedDealThresholdPct: '0' }],
+          ['a zero threshold written 0.00', { closedDealThresholdPct: '0.00' }],
+          ['a threshold above 100', { closedDealThresholdPct: '100.01' }],
+          ['a numeric (non-text) threshold', { closedDealThresholdPct: 25 }],
+          ['an unknown count-date basis', { countDateBasis: 'recorded_at' }],
+          ['netting adjustments', { adjustmentTreatment: 'net' }],
+          ['an assumed credit rate above 1', { assumedCreditRate: '1.5' }],
+          ['an impossible date', { effectiveFrom: '2022-02-30' }],
+          ['a placeholder source reference', { sourceReference: 'tbd' }],
+        ] as const) {
+          await refusal(`a rule draft with ${name} is refused`, 'IST_PERFORMANCE_RULE_INVALID', () => saveR(null, rFields(over)));
+        }
+        await refusal('even with a forged flag the table refuses a 0.00 threshold', 'ist_performance_rules_threshold_check', async () => {
+          await flagOn();
+          await db.query(
+            `insert into public.ist_performance_rules (rule_version, effective_from, closed_deal_threshold_pct, source_reference, created_by)
+             values (99,'2022-01-01','0.00','FORGED RULE SOURCE REFERENCE',$1)`,
+            [finance],
+          );
+        });
+        // --- rule variants, each ALONE in a rolled-back savepoint -------------------------------
+        // Only ONE rule shape can ever be approved in a database (rule succession, below), so
+        // every other shape is proven here on its own and rolled back.
+        const variant = async (name: string, f: Record<string, unknown>, body: (ruleId: string) => Promise<void>) => {
+          await db.query('savepoint f89_variant');
+          try {
+            await body(await approvedRule(f));
+          } catch (error) {
+            check(`rule variant completed: ${name}`, false, safeErrorMessage(error));
+          } finally {
+            await db.query('rollback to savepoint f89_variant');
+          }
+        };
+        const incompleteRule = await saveR(null, {
+          effectiveFrom: '2022-01-01', attributionBasis: 'seller_only', sourceReference: 'TEST FIXTURE ONLY - incomplete rule',
+        });
+        await submitR(incompleteRule);
+        await refusal('an incomplete performance rule cannot be approved', 'IST_PERFORMANCE_RULE_INCOMPLETE', () => approveR(incompleteRule));
+        await refusal('the guard also refuses approving an incomplete performance rule', 'IST_PERFORMANCE_RULE_INCOMPLETE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_performance_rules set status='approved', approved_by=$2, approved_at=now(),
+            approval_evidence_reference='TEST-FIXTURE-APPROVAL', approval_note='TEST FIXTURE approval' where id=$1`, [incompleteRule, boss]);
+        });
+        await variant('team genealogy', rFields({ attributionBasis: 'team_genealogy' }), async () => {
+          const m = await perf('2022-03');
+          check(
+            'team_genealogy is BLOCKED: genealogy has no validity window (GENEALOGY_NOT_EFFECTIVE_DATED), no roll-up',
+            m.ruleBlocker === 'GENEALOGY_NOT_EFFECTIVE_DATED' &&
+              m.staff.every((x) => x.status === 'BLOCKED' && x.blockers.includes('GENEALOGY_NOT_EFFECTIVE_DATED') && x.collection === '0.00' && x.kpi === '0.00'),
+            JSON.stringify(m.staff.slice(0, 1)),
+          );
+        });
+        await variant('assumed credit', rFields({ assumedCreditRate: '0.1' }), async () => {
+          const m = await perf('2022-03');
+          check(
+            'an approved assumed-credit rate has no approved base: blocked, assumed credit stays 0.00',
+            m.ruleBlocker === 'ASSUMED_CREDIT_BASE_NOT_DEFINED' && m.staff.every((x) => x.status === 'BLOCKED' && x.assumedCredit === '0.00'),
+            JSON.stringify(m.ruleBlocker),
+          );
+        });
+        await variant('paid_on', rFields({ effectiveFrom: '2022-01-01', countDateBasis: 'paid_on' }), async () => {
+          const s4 = await mkSale89('d', ssm);
+          // ONE payment that overshoots the 25% threshold: paid in January, verified in February.
+          const over = await money('$1::numeric * 25 / 100 + 500', [price]);
+          const c1 = await pay89(s4, over, 'C1', '2023-02', '2023-01-20', '2023-02-02');
+          const janEv = (await evidence('2023-01', ssm)).items.find((i) => i.paymentId === c1)!;
+          const febEv = (await evidence('2023-02', ssm)).items.find((i) => i.paymentId === c1)!;
+          const jan = await perfOf('2023-01', ssm);
+          const feb = await perfOf('2023-02', ssm);
+          eq(
+            'under count_date_basis = paid_on the same receipt counts once, in the month it was paid',
+            `${janEv.eligibility}/${janEv.countPeriod}/${jan.collection}|${febEv.eligibility}/${febEv.reasonCode}/${feb.collection}`,
+            `ELIGIBLE/2023-01/${over}|INELIGIBLE/OUTSIDE_COUNT_PERIOD/0.00`,
+          );
+          eq(
+            '  and a single payment overshooting the threshold closes the deal: KPI in the paid_on month only',
+            `${janEv.isClosingPayment}/${jan.status}/${jan.kpi}|${feb.status}/${feb.kpi}`,
+            `true/CALCULABLE/${price}|CALCULABLE/0.00`,
+          );
+        });
+        eq(
+          'the variants left nothing behind: no rule is approved',
+          (await one<{ n: number }>(`select count(*)::int n from public.ist_performance_rules where status='approved'`)).n,
+          0,
+        );
+        const r1 = await saveR(null, rFields(), finance, `KR-${RUN}-89`);
+        eq('a rule create replays by idempotency key and the same payload', await saveR(null, rFields(), finance, `KR-${RUN}-89`), r1);
+        await refusal('  the same key with another payload is refused', 'IST_PERFORMANCE_RULE_IDEMPOTENCY_CONFLICT', () =>
+          saveR(null, rFields({ closedDealThresholdPct: '40' }), finance, `KR-${RUN}-89`),
+        );
+        await refusal('a rule cannot be updated directly', 'IST_PERFORMANCE_RULE_DIRECT_WRITE_REFUSED', () =>
+          db.query(`update public.ist_performance_rules set closed_deal_threshold_pct='1' where id=$1`, [r1]),
+        );
+        await refusal('even with a forged flag a draft rule cannot jump to approved', 'IST_PERFORMANCE_RULE_TRANSITION_INVALID', async () => {
+          await flagOn();
+          await db.query(
+            `update public.ist_performance_rules set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='FORGED-APPROVAL-REF', approval_note='forged approval' where id=$1`,
+            [r1, boss],
+          );
+        });
+        await refusal('a rule is never deleted', 'IST_PERFORMANCE_RULE_IMMUTABLE', () =>
+          db.query('delete from public.ist_performance_rules where id=$1', [r1]),
+        );
+        await refusal('  nor truncated', 'IST_PERFORMANCE_RULE_IMMUTABLE', () => db.query('truncate public.ist_performance_rules'));
+        await refusal('even with a forged write flag a rule is born a draft', 'IST_PERFORMANCE_RULE_TRANSITION_INVALID', async () => {
+          await flagOn();
+          await db.query(
+            `insert into public.ist_performance_rules
+               (rule_version, effective_from, attribution_basis, closed_deal_threshold_pct, count_date_basis, adjustment_treatment,
+                source_reference, created_by, status, submitted_by, submitted_at, approved_by, approved_at,
+                approval_evidence_reference, approval_note)
+             values (98,'2020-01-01','seller_only','25','verified_posting_period','report_only','FORGED RULE SOURCE REFERENCE',
+                     $1,'approved',$1,now(),$2,now(),'FORGED-APPROVAL-REF','forged approval')`,
+            [finance, boss],
+          );
+        });
+        eq('a draft rule approves nothing: March is still RULE_NOT_APPROVED', (await perf('2022-03')).ruleBlocker, 'RULE_NOT_APPROVED');
+        eq('Finance submits the rule', await submitR(r1), 'pending_approval');
+        eq('  a pending rule approves nothing either', (await perf('2022-03')).ruleBlocker, 'RULE_NOT_APPROVED');
+        await refusal('Finance cannot approve a rule', 'MUTATION_FORBIDDEN', () => approveR(r1, undefined, undefined, finance));
+        await refusal('a rule return needs a reason', 'IST_PERFORMANCE_RULE_RETURN_REASON_REQUIRED', () => returnR(r1, 'no'));
+        eq('the approver returns the rule', await returnR(r1, 'Needs the signed memo'), 'draft');
+        await submitR(r1, boss); // the Super Admin re-submits it, so can never approve it
+        await refusal('the submitter cannot approve the rule', 'IST_PERFORMANCE_RULE_SELF_APPROVAL', () => approveR(r1));
+        await refusal('a rule approval needs evidence that is not a placeholder', 'IST_PERFORMANCE_RULE_EVIDENCE_REQUIRED', () =>
+          approveR(r1, 'none', undefined, admin),
+        );
+        eq('a delegated approver approves the TEST FIXTURE rule', await approveR(r1, undefined, undefined, admin), 'approved');
+        eq('  with one IST_PERFORMANCE_RULE_APPROVED event', await auditCount('IST_PERFORMANCE_RULE_APPROVED', r1), 1);
+        await refusal('an approved rule cannot be changed, even with a forged flag', 'IST_PERFORMANCE_RULE_IMMUTABLE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_performance_rules set closed_deal_threshold_pct='1' where id=$1`, [r1]);
+        });
+        // Same rule shape as r1 (the threshold written 25.00 is the same number).
+        const r2 = await saveR(null, rFields({ effectiveFrom: '2022-09-01', closedDealThresholdPct: '25.00' }));
+        await submitR(r2);
+        await refusal('an overlapping rule is refused; nothing is superseded silently', 'IST_PERFORMANCE_RULE_OVERLAP', () => approveR(r2));
+        check(
+          'both draft RPCs take the advisory lock BEFORE the idempotency replay lookup (structural)',
+          (
+            await one<{ ok: boolean }>(
+              `select bool_and(position('pg_advisory_xact_lock' in p.prosrc) > 0
+                               and position('pg_advisory_xact_lock' in p.prosrc) < position('idempotency_key = v_key' in p.prosrc)) ok
+                 from pg_proc p
+                where p.oid in ('public.save_ist_engagement_draft(uuid,jsonb,uuid,text)'::regprocedure,
+                                'public.save_ist_performance_rule_draft(uuid,jsonb,uuid,text)'::regprocedure)`,
+            )
+          ).ok,
+        );
+
+        // --- figures under the TEST FIXTURE rule (seller_only, 25%, verified_posting_period) ----
+        const march = await perf('2022-03');
+        eq('March is calculable under the one approved rule', `${march.ruleBlocker}/${march.ruleId}`, `null/${r1}`);
+        check(
+          'the evidence hash covers the member: every roster line has a different hash, even with no evidence',
+          new Set(march.staff.map((x) => x.evidenceHash)).size === march.staff.length,
+        );
+        const smMar = march.staff.find((x) => x.staffId === sm)!;
+        eq(
+          'SM March: verified cash counted, deal not yet closed, no blockers',
+          brief(smMar),
+          `CALCULABLE/0.00/${A1}/${A1}/0.00/`,
+        );
+        eq('  contract start comes from the approved engagement', `${smMar.contractStart}/${smMar.contractEnd}/${smMar.engagementId}`, `2022-03-01/null/${e1}`);
+        eq(
+          '  adjustments are reported beside the figure, never deducted',
+          `${smMar.approvedAdjustmentsTotal}/${smMar.proposedAdjustmentsTotal}/${smMar.collection}`,
+          `300.00/200.00/${A1}`,
+        );
+        const smMarEv = await evidence('2022-03', sm);
+        eq(
+          '  recorded, rejected and voided payments are not evidence',
+          smMarEv.items.map((i) => i.paymentId).join(','),
+          a1,
+        );
+        eq(
+          '  (none of the three is evidence for anyone in the month it is dated in)',
+          (
+            await one<{ n: number }>(
+              `select count(*)::int n from private.ist_period_performance_evidence('2022-03', null) ev where ev.payment_id = any($1::uuid[])`,
+              [[pending, rejected, voided]],
+            )
+          ).n,
+          0,
+        );
+        check('  no assumed credit on any evidence row', smMarEv.items.every((i) => i.assumedCredit === '0.00'));
+        const altMar = march.staff.find((x) => x.staffId === smAlt)!;
+        const altMarEv = await evidence('2022-03', smAlt);
+        eq(
+          'engagement window: the day before contract start is UNDETERMINED, the start day itself is ELIGIBLE',
+          altMarEv.items.map((i) => `${i.amount}/${i.eligibility}/${i.reasonCode}`).join(';'),
+          '2000.00/UNDETERMINED/OUTSIDE_ENGAGEMENT_WINDOW;1500.00/ELIGIBLE/null',
+        );
+        eq('  the unresolved window blocks every figure', `${brief(altMar)}|${altMar.evidenceCount}`, 'BLOCKED/0.00/0.00/0.00/0.00/OUTSIDE_ENGAGEMENT_WINDOW|2');
+        check(
+          'no double counting across persons: each payment has exactly one staff member',
+          altMarEv.items.every((i) => i.staffId === smAlt && i.paymentId !== a1) &&
+            smMarEv.items.every((i) => i.staffId === sm) &&
+            (await sumMoney(march.staff.map((x) => x.verifiedCash))) === A1,
+          JSON.stringify(march.staff.map((x) => x.verifiedCash)),
+        );
+        eq('a member with an engagement and no evidence is calculable at zero', `${brief(march.staff.find((x) => x.staffId === ssm)!)}`, 'CALCULABLE/0.00/0.00/0.00/0.00/');
+        check(
+          'a member with no approved engagement stays BLOCKED (MISSING_ENGAGEMENT)',
+          march.staff.filter((x) => ![sm, smAlt, ssm].includes(x.staffId)).every((x) => x.status === 'BLOCKED' && x.blockers.join() === 'MISSING_ENGAGEMENT'),
+        );
+        const smApr = await perfOf('2022-04', sm);
+        eq('SM April: the payment that reaches 25% closes the deal - KPI = the contract price snapshot', brief(smApr), `CALCULABLE/${price}/1000.00/1000.00/0.00/`);
+        const aprEv = await evidence('2022-04', sm);
+        eq(
+          '  the closing payment is marked, with the cumulative verified money on the contract',
+          aprEv.items.map((i) => `${i.paymentId}/${i.isClosingPayment}/${i.contractPriceSnapshot}/${i.cumulativeVerifiedAtPeriodEnd}`).join(';'),
+          `${a2}/true/${price}/${threshold}`,
+        );
+        const smMay = await perfOf('2022-05', sm);
+        eq('SM May: a later payment on the closed deal is collection only - never a second KPI credit', brief(smMay), 'CALCULABLE/0.00/500.00/500.00/0.00/');
+        eq(
+          'no double counting across months: the sale is credited exactly once',
+          await sumMoney([smMar.kpi, smApr.kpi, smMay.kpi]),
+          await money('$1::numeric', [price]),
+        );
+        eq('the evidence hash is stable across calls', (await perfOf('2022-04', sm)).evidenceHash, smApr.evidenceHash);
+        await refusal('a verified count date cannot be rewritten even within its original month', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.payments set verified_at='2022-04-06T04:00:00Z' where id=$1`, [a2]));
+        eq('refusing the count-date rewrite preserves its evidence hash', (await perfOf('2022-04', sm)).evidenceHash, smApr.evidenceHash);
+        check('  and is a sha256 that differs between months', /^[0-9a-f]{64}$/.test(smApr.evidenceHash) && smApr.evidenceHash !== smMar.evidenceHash);
+        // Later money never moves the credit; a late receipt counts in exactly one month.
+        const juneBefore = await perfOf('2022-06', sm);
+        await pay89(s1, '400.00', 'A4', '2022-06', '2022-06-07');
+        const a5 = await pay89(s1, '300.00', 'A5', '2022-07', '2022-03-20', '2022-07-02'); // paid in March, verified in July
+        const smApr2 = await perfOf('2022-04', sm);
+        eq('a later payment leaves the closed month untouched (figures and hash)', `${brief(smApr2)}|${smApr2.evidenceHash}`, `${brief(smApr)}|${smApr.evidenceHash}`);
+        check('  and changes the hash of the month it landed in', (await perfOf('2022-06', sm)).evidenceHash !== juneBefore.evidenceHash);
+        const lateInMarch = (await evidence('2022-03', sm)).items.find((i) => i.paymentId === a5)!;
+        const lateInJuly = (await evidence('2022-07', sm)).items.find((i) => i.paymentId === a5)!;
+        eq(
+          'a receipt paid in March but verified in July counts once, in July (verified_posting_period)',
+          `${lateInMarch.eligibility}/${lateInMarch.reasonCode}/${lateInMarch.countPeriod}|${lateInJuly.eligibility}/${(await perfOf('2022-03', sm)).collection}/${(await perfOf('2022-07', sm)).collection}`,
+          `INELIGIBLE/OUTSIDE_COUNT_PERIOD/2022-07|ELIGIBLE/${A1}/300.00`,
+        );
+
+        // --- engagement end and suspension boundaries -----------------------------------------
+        eq('the approver ends the engagement on the day of the April payment', await endE(e1, '2022-04-05', null), 'ended');
+        eq('  ending again is an idempotent replay', await endE(e1, '2022-04-05', null), 'ended');
+        await refusal('a different approver cannot re-end an engagement', 'IST_ENGAGEMENT_IMMUTABLE', () => endE(e1, '2022-04-05', null, undefined, admin));
+        eq('  with one IST_ENGAGEMENT_ENDED event', await auditCount('IST_ENGAGEMENT_ENDED', e1), 1);
+        await refusal('an end date is never moved', 'IST_ENGAGEMENT_IMMUTABLE', () => endE(e1, '2022-12-31', null));
+        const smApr3 = await perfOf('2022-04', sm);
+        eq('the last contract day is still inside the window', `${brief(smApr3)}|${smApr3.contractEnd}`, `CALCULABLE/${price}/1000.00/1000.00/0.00/|2022-04-05`);
+        const mayEv = await evidence('2022-05', sm);
+        eq(
+          'a payment after the contract end is UNDETERMINED and blocks payroll',
+          `${mayEv.items.map((i) => `${i.eligibility}/${i.reasonCode}`).join(';')}|${brief(mayEv.summary!)}`,
+          'UNDETERMINED/OUTSIDE_ENGAGEMENT_WINDOW|BLOCKED/0.00/0.00/0.00/0.00/MISSING_ENGAGEMENT,OUTSIDE_ENGAGEMENT_WINDOW',
+        );
+        check(
+          'the evidence hash covers the engagement dates: setting the end date changed the April hash',
+          smApr3.evidenceHash !== smApr.evidenceHash && /^[0-9a-f]{64}$/.test(smApr3.evidenceHash),
+        );
+        // Two approved engagements touching one month (ended on the 5th, a new one from the 16th).
+        const e5 = await saveE(
+          null,
+          eFields({ contractStart: '2022-04-16', contractEnd: '2022-05-31', evidenceReference: 'TEST-FIXTURE-CONTRACT-SM-004' }),
+        );
+        await submitE(e5);
+        eq('a second engagement for the same person, later in the same month, is approved', await approveE(e5), 'approved');
+        eq(
+          'a month touched by two approved engagements is BLOCKED with zero money (ENGAGEMENT_CHANGES_WITHIN_PERIOD)',
+          brief(await perfOf('2022-04', sm)),
+          'BLOCKED/0.00/0.00/0.00/0.00/ENGAGEMENT_CHANGES_WITHIN_PERIOD',
+        );
+        eq(
+          '  a month inside only one of them is not',
+          (await perfOf('2022-05', sm)).blockers.includes('ENGAGEMENT_CHANGES_WITHIN_PERIOD'),
+          false,
+        );
+        eq('the next engagement is approved once the old one has ended', await approveE(e4), 'approved');
+        eq('a suspension date is recorded on the approved engagement', await endE(e2, null, '2022-03-15'), 'ended');
+        await refusal('  and is never moved', 'IST_ENGAGEMENT_IMMUTABLE', () => endE(e2, null, '2022-03-20'));
+        const altSusp = await evidence('2022-03', smAlt);
+        eq(
+          'no approved rule covers suspension: evidence on or after it is UNDETERMINED and blocks the member',
+          `${altSusp.items.map((i) => `${i.eligibility}/${i.reasonCode}`).join(';')}|${brief(altSusp.summary!)}|${altSusp.summary!.suspendedFrom}`,
+          'UNDETERMINED/OUTSIDE_ENGAGEMENT_WINDOW;UNDETERMINED/ENGAGEMENT_SUSPENDED|BLOCKED/0.00/0.00/0.00/0.00/ENGAGEMENT_SUSPENDED,OUTSIDE_ENGAGEMENT_WINDOW|2022-03-15',
+        );
+
+        // --- rule windows: a mid-month change ----------------------------------------------------
+        await refusal('Finance cannot end a rule', 'MUTATION_FORBIDDEN', () => endR(r1, '2022-08-15', undefined, finance));
+        await refusal('a rule cannot end before it starts', 'IST_PERFORMANCE_RULE_END_DATE_INVALID', () => endR(r1, '2022-02-28'));
+        eq('the approver closes the rule window mid-August', await endR(r1, '2022-08-15'), 'ended');
+        await refusal('a closed rule window is never moved', 'IST_PERFORMANCE_RULE_IMMUTABLE', () => endR(r1, '2022-12-31'));
+        const aug = await perf('2022-08');
+        check(
+          'a month the rule does not cover whole is blocked (RULE_CHANGES_WITHIN_PERIOD)',
+          aug.ruleBlocker === 'RULE_CHANGES_WITHIN_PERIOD' && aug.staff.every((x) => x.status === 'BLOCKED' && x.kpi === '0.00'),
+          JSON.stringify(aug.ruleBlocker),
+        );
+        // --- rule succession: one rule shape, ever (until a transition rule is approved) --------
+        eq(
+          'governing key PERFORMANCE_RULE_TRANSITION_RULE is seeded pending, with its audit row',
+          (
+            await one<{ r: string }>(
+              `select g.status || '/' || (select count(*) from public.audit_events a
+                                           where a.action='GOVERNING_POLICY_KEY_SEEDED' and a.entity_id=g.key) r
+                 from public.governing_policy_decisions g where g.key='PERFORMANCE_RULE_TRANSITION_RULE'`,
+            )
+          ).r,
+          'pending/1',
+        );
+        const forgeApproveR = async (id: string) => {
+          await flagOn();
+          await db.query(
+            `update public.ist_performance_rules set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='FORGED-APPROVAL-REF', approval_note='forged approval' where id=$1`,
+            [id, boss],
+          );
+        };
+        let rDiff = '';
+        for (const [name, over] of [
+          ['a different Closed Deal threshold (25% -> 40%)', { closedDealThresholdPct: '40' }],
+          ['a different count-date basis', { countDateBasis: 'paid_on' }],
+          ['a different attribution basis', { attributionBasis: 'team_genealogy' }],
+          ['no adjustment treatment', { adjustmentTreatment: null }],
+        ] as const) {
+          const id = await saveR(null, rFields({ effectiveFrom: '2022-09-01', ...over }));
+          await submitR(id);
+          rDiff = rDiff || id;
+          await refusal(`a successor rule with ${name} cannot be approved`,
+            'adjustmentTreatment' in over ? 'IST_PERFORMANCE_RULE_INCOMPLETE' : 'PERFORMANCE_RULE_TRANSITION_RULE_NOT_APPROVED', () => approveR(id));
+        }
+        await refusal('  not even through the write flag', 'PERFORMANCE_RULE_TRANSITION_RULE_NOT_APPROVED', () => forgeApproveR(rDiff));
+        await refusal('(test fixture) even with the transition key approved, succession is not implemented', 'PERFORMANCE_RULE_SUCCESSION_NOT_IMPLEMENTED', async () => {
+          await setDecision('PERFORMANCE_RULE_TRANSITION_RULE', true);
+          await approveR(rDiff);
+        });
+        await refusal('  nor through the write flag', 'PERFORMANCE_RULE_SUCCESSION_NOT_IMPLEMENTED', async () => {
+          await setDecision('PERFORMANCE_RULE_TRANSITION_RULE', true);
+          await forgeApproveR(rDiff);
+        });
+        eq('a successor with the SAME rule shape (25.00 = 25) is approved once the window is free', await approveR(r2), 'approved');
+        await pay89(s1, '200.00', 'A6', '2022-09', '2022-09-05');
+        eq(
+          'under the successor the closed deal is collection only: the contract is still credited exactly once',
+          brief(await perfOf('2022-09', sm)),
+          'CALCULABLE/0.00/200.00/200.00/0.00/',
+        );
+
+        // --- Asia/Manila month boundary (rows inserted already verified: the DB stamps the month) ---
+        const s5 = await mkSale89('m', ssm);
+        const m0 = await pay89(s5, '600.00', 'M0', '2022-09', '2022-09-10');
+        const verifiedClone = async (tag: string, verifiedAt: string) =>
+          one<{ id: string; p: string }>(
+            `insert into public.payments
+               select (jsonb_populate_record(null::public.payments, to_jsonb(p) || jsonb_build_object(
+                 'id', gen_random_uuid(),
+                 'payment_number', private.claim_af_id('AF-PAY','public.payments'::regclass,'payment_number'),
+                 'reference', $2::text, 'receipt_storage_path', $3::text, 'or_number', null,
+                 'posting_period', null, 'verified_at', $4::text))).*
+                 from public.payments p where p.id = $1
+             returning id, posting_period as p`,
+            [m0, `REF-${RUN}-89-${tag}`, await receiptObject('card'), verifiedAt],
+          );
+        const m1 = await verifiedClone('M1', '2022-10-31T15:59:59Z'); // 23:59:59 on 31 October in Manila
+        const m2 = await verifiedClone('M2', '2022-10-31T16:00:00Z'); // 00:00:00 on 1 November in Manila
+        eq('the posting month is stamped in Asia/Manila: one second before midnight is October, midnight is November', `${m1.p}/${m2.p}`, '2022-10/2022-11');
+        const stamp = (items: Item[]) => items.map((i) => `${i.paymentId}/${i.eligibility}/${i.countPeriod}/${i.countDate}`).join(';');
+        eq(
+          'Manila month boundary: each receipt counts in its own Manila month, on its own Manila day',
+          `${stamp((await evidence('2022-10', ssm)).items)}|${stamp((await evidence('2022-11', ssm)).items)}`,
+          `${m1.id}/ELIGIBLE/2022-10/2022-10-31|${m2.id}/ELIGIBLE/2022-11/2022-11-01`,
+        );
+        eq(
+          '  and is collected exactly once',
+          `${(await perfOf('2022-10', ssm)).collection}/${(await perfOf('2022-11', ssm)).collection}`,
+          '600.00/600.00',
+        );
+        await db.query('savepoint f89_off_roster');
+        const offBefore = (await perf('2022-10')).offRoster;
+        await db.query(`update public.staff_users set status='inactive' where id=$1`, [ssm]);
+        const offAfter = (await perf('2022-10')).offRoster;
+        eq('verified payments of an off-roster seller remain visible', `${offAfter.count}/${offAfter.total}`,
+          `${offBefore.count + 1}/${await money('$1::numeric + 600', [offBefore.total])}`);
+        await db.query('rollback to savepoint f89_off_roster');
+
+        // --- engagement rank, imported sales, payments with no staff seller ---------------------
+        const vd = staff['vice-director']!;
+        const eVd = await saveE(
+          null,
+          eFields({ staffId: vd, rank: 'SM', contractStart: '2022-09-01', contractEnd: '2022-12-31', evidenceReference: 'TEST-FIXTURE-CONTRACT-VD-001' }),
+        );
+        await submitE(eVd);
+        await approveE(eVd);
+        const vdOct = await perfOf('2022-10', vd);
+        eq(
+          'an engagement whose rank differs from the role blocks the member (ENGAGEMENT_RANK_MISMATCH)',
+          `${vdOct.rank}/${brief(vdOct)}`,
+          'SVD/BLOCKED/0.00/0.00/0.00/0.00/ENGAGEMENT_RANK_MISMATCH',
+        );
+        const sImp = await mkSale89('imp', sm, 'legacy_import');
+        const pImp = await pay89(sImp, '700.00', 'IMP', '2022-10', '2022-10-12');
+        const impEv = await evidence('2022-10', sm);
+        eq(
+          'an imported sale has no approved treatment: UNDETERMINED, and the seller is BLOCKED with zero money',
+          `${impEv.items.map((i) => `${i.paymentId}/${i.eligibility}/${i.reasonCode}`).join(';')}|${brief(impEv.summary!)}`,
+          `${pImp}/UNDETERMINED/IMPORTED_SALE_TREATMENT_NOT_APPROVED|BLOCKED/0.00/0.00/0.00/0.00/IMPORTED_SALE_TREATMENT_NOT_APPROVED`,
+        );
+        const un0 = (await perf('2022-10')).unattributed;
+        const unattributedSale = await mkSale89('unattributed', null, 'legacy_import');
+        const unattributedPayment = await pay89(unattributedSale, '700.00', 'UNATTRIBUTED', '2022-10', '2022-10-12');
+        const octAll = await perf('2022-10');
+        eq(
+          'a verified payment with no staff seller is INELIGIBLE (NO_STAFF_SELLER) and in no member figures',
+          `${
+            (
+              await one<{ r: string }>(
+                `select ev.eligibility || '/' || ev.reason_code || '/' || (ev.staff_id is null) r
+                   from private.ist_period_performance_evidence('2022-10', null) ev where ev.payment_id=$1`,
+                [unattributedPayment],
+              )
+            ).r
+          }|${brief(octAll.staff.find((x) => x.staffId === sm)!)}`,
+          'INELIGIBLE/NO_STAFF_SELLER/true|BLOCKED/0.00/0.00/0.00/0.00/IMPORTED_SALE_TREATMENT_NOT_APPROVED',
+        );
+        eq(
+          '  but it is reported for the period as unattributed { count, total }, never dropped silently',
+          `${octAll.unattributed.count}/${octAll.unattributed.total}`,
+          `${un0.count + 1}/${await money('$1::numeric + 700', [un0.total])}`,
+        );
+
+        // --- one contract: a reservation and the sale it is finalized into ----------------------
+        await db.query('savepoint f89_contract');
+        try {
+          // Same preconditions section 58 sets for the purchase flow (rolled back with this section).
+          await db.query(
+            `update public.role_permissions set can_update = true, can_view = true
+              where role_id = (select id from public.roles where slug = 'sales_manager')
+                and module_id = (select id from public.modules where key = 'sales.card_sales')`,
+          );
+          await db.query(`select set_config('request.jwt.claim.sub', $1, true)`, [sm]);
+          const world = await makePurchaseFixtures(db, {
+            actor: sm,
+            reviewer: boss,
+            createdCustomers: createdCustomerIds,
+            createdApplications: createdApplicationIds,
+          });
+          const pur = await world.executed();
+          const payRes = async (amount: string, tag: string, type: string, purpose: string) => {
+            const id = (
+              await one<{ id: string }>(
+                'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid) as id',
+                [
+                  randomUUID(),
+                  pur.reservationId,
+                  JSON.stringify({
+                    amount,
+                    method: 'bank',
+                    paymentType: type,
+                    paymentPurpose: purpose,
+                    reference: `F89-${tag}-${pur.reservationId.slice(0, 8)}`,
+                    receiptStoragePath: await paymentReceipt(db),
+                  }),
+                  finance,
+                ],
+              )
+            ).id;
+            await db.query('select public.verify_purchase_payment_once($1::uuid,$2::uuid,$3::text,$4::text,$5::uuid)', [
+              randomUUID(),
+              id,
+              'verified',
+              null,
+              finance,
+            ]);
+            return id;
+          };
+          const rest = await money('$1::numeric - $2::numeric', [pur.total, pur.fee]);
+          const q1 = await payRes(pur.fee, 'P1', 'installment', 'reservation_fee');
+          const q2 = await payRes(rest, 'P2', 'installment', 'contractual_installment');
+          const nowPeriod = (await one<{ p: string }>('select posting_period p from public.payments where id=$1', [q2])).p;
+          const ours = async (staffId = sm) => {
+            const ev = await evidence(nowPeriod, staffId);
+            return { summary: ev.summary, items: ev.items.filter((i) => i.paymentId === q1 || i.paymentId === q2) };
+          };
+          const shape = (items: Item[]) =>
+            [...items]
+              .sort((a, b) => (a.paymentId === q1 ? 0 : 1) - (b.paymentId === q1 ? 0 : 1))
+              .map((i) => `${i.saleId}/${i.reservationId}/${i.eligibility}/${i.reasonCode}/${i.contractPriceSnapshot}/${i.cumulativeVerifiedAtPeriodEnd}`)
+              .join(';');
+          const before = await ours();
+          eq(
+            'a reservation with no sale yet is a contract on its own: price from the reservation snapshot',
+            shape(before.items),
+            `null/${pur.reservationId}/ELIGIBLE/null/${pur.total}/${pur.total};null/${pur.reservationId}/ELIGIBLE/null/${pur.total}/${pur.total}`,
+          );
+          eq('  with exactly one closing payment', before.items.filter((i) => i.isClosingPayment).length, 1);
+          // Migration 20270105000010: only a finalized reservation makes the payment -> sale link stick.
+          await refusal('a verified reservation payment cannot be linked to a sale by hand', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', async () => {
+            await db.query('update public.payments set sale_id=$2 where id=$1', [q1, sImp]);
+            await db.query('set constraints public.payments_verified_sale_link_check immediate');
+          });
+          await db.query('set constraints public.payments_verified_sale_link_check deferred');
+          const saleId = (
+            await one<{ id: string }>('select public.finalize_reservation_purchase_once($1::uuid,$2::uuid,$3::uuid) as id', [
+              randomUUID(),
+              pur.reservationId,
+              finance,
+            ])
+          ).id;
+          const after = await ours();
+          eq(
+            'finalized into a sale it is the SAME contract: same payments, same price, now keyed by the sale',
+            shape(after.items),
+            `${saleId}/${pur.reservationId}/ELIGIBLE/null/${pur.total}/${pur.total};${saleId}/${pur.reservationId}/ELIGIBLE/null/${pur.total}/${pur.total}`,
+          );
+          eq(
+            '  still credited by exactly one closing payment - the same one',
+            after.items.filter((i) => i.isClosingPayment).map((i) => i.paymentId).join(','),
+            before.items.filter((i) => i.isClosingPayment).map((i) => i.paymentId).join(','),
+          );
+          await refusal(
+            'the finalized sale price snapshot cannot be changed', 'SALE_FINANCIAL_DETAILS_IMMUTABLE', () => db.query(
+            `update public.card_sales set cash_price_snapshot = private.money(cash_price_snapshot::numeric + 1) where id=$1`,
+            [saleId]));
+          await refusal(
+            'the finalized seller cannot be changed', 'SALE_FINANCIAL_DETAILS_IMMUTABLE', () => db.query(
+            `update public.card_sales set seller_staff_id=$2 where id=$1`,
+            [saleId, ssm]));
+          await refusal(
+            'the finalized price snapshot cannot be removed', 'SALE_FINANCIAL_DETAILS_IMMUTABLE', () => db.query(
+            `update public.card_sales set cash_price_snapshot = null where id=$1`,
+            [saleId]));
+          eq('refused commercial changes preserve every payment figure', shape((await ours()).items), shape(after.items));
+          await refusal('a finalized reservation cannot be given another finalizer', 'RESERVATION_FINALIZED', () =>
+            db.query('update public.reservation_agreements set finalized_by=$2 where id=$1', [pur.reservationId, ssm]));
+          await refusal('  nor another finalization time', 'RESERVATION_FINALIZED', () =>
+            db.query(`update public.reservation_agreements set finalized_at=finalized_at + interval '1 second' where id=$1`, [pur.reservationId]));
+          // (the sale link was already frozen by the existing reservation guard, which answers first)
+          await refusal('  nor another sale', 'RESERVATION_SALE_IMMUTABLE', () =>
+            db.query('update public.reservation_agreements set sale_id=$2 where id=$1', [pur.reservationId, sImp]));
+          // The link is validated and audited at commit; run that check now, inside this savepoint.
+          await db.query('set constraints public.payments_verified_sale_link_check immediate');
+          await db.query('set constraints public.payments_verified_sale_link_check deferred');
+          eq('the original verified-to-sale links are audited once per payment',
+            (await one<{ n: number }>(`select count(*)::int n from public.audit_events where action='VERIFIED_PAYMENT_SALE_LINKED'
+              and entity_id=any($1::text[])`, [[q1,q2]])).n, 2);
+        } catch (error) {
+          check('reservation + sale contract checks completed', false, safeErrorMessage(error));
+        } finally {
+          await db.query('rollback to savepoint f89_contract');
+        }
+
+        // --- nothing above touches payroll, simulations or compensation policy -----------------
+        eq('payroll batches, lines, disbursements, simulations and policies are untouched', await untouched(), payrollBefore);
+
+        // --- a finalized LIVE payroll month is never rewritten (TEST FIXTURE payroll below) -----
+        const polId = (
+          await one<{ id: string }>('select public.save_ist_compensation_policy_draft($1,$2::jsonb,$3,$4) as id', [
+            null,
+            JSON.stringify({
+              rank: 'SM',
+              monthlyBa: '1000',
+              baTarget: '10',
+              monthlyPa: '500.5',
+              paTarget: '5',
+              pbTarget: '20000',
+              pbRate: '0.05',
+              collectionGate: '0.4',
+              effectiveFrom: '2023-01-01',
+              basisNote: 'TEST FIXTURE ONLY - synthetic policy',
+            }),
+            finance,
+            null,
+          ])
+        ).id;
+        await db.query('select public.submit_ist_compensation_policy($1,$2)', [polId, finance]);
+        await db.query('select public.approve_ist_compensation_policy($1,$2,$3,$4)', [polId, 'TEST-EVIDENCE-001', 'TEST FIXTURE approval note', boss]);
+        const batch89 = (await one<{ id: string }>('select public.create_payroll_batch($1,$2) as id', ['2023-03', finance])).id;
+        await db.query('select public.replace_payroll_batch_lines($1,$2::jsonb,$3)', [
+          batch89,
+          JSON.stringify([
+            {
+              staffId: sm,
+              rank: 'SM',
+              status: 'computed',
+              policyId: polId,
+              ba: '100.00',
+              pa: '0.00',
+              pb: '0.00',
+              adjustments: '0.00',
+              withheld: '0.00',
+              net: '100.00',
+              inputs: { fixture: true, evidenceHash: (await perfOf('2023-03', sm)).evidenceHash },
+              result: { fixture: true },
+            },
+          ]),
+          finance,
+        ]);
+        const IN_USE_E = 'IST_ENGAGEMENT_IN_USE_BY_FINALIZED_PAYROLL';
+        const IN_USE_R = 'IST_PERFORMANCE_RULE_IN_USE_BY_FINALIZED_PAYROLL';
+        const eBack = await saveE(null, eFields({ staffId: vd, rank: 'SVD', contractStart: '2023-03-31', evidenceReference: 'TEST-FIXTURE-CONTRACT-VD-002' }));
+        await submitE(eBack);
+        const rBack = await saveR(null, rFields({ effectiveFrom: '2022-08-16', effectiveUntil: '2022-08-31' }));
+        await submitR(rBack);
+        const forgeApproveE = async (id: string) => {
+          await flagOn();
+          await db.query(
+            `update public.ist_engagements set status='approved', approved_by=$2, approved_at=now(),
+                    approval_evidence_reference='FORGED-APPROVAL-REF', approval_note='forged approval' where id=$1`,
+            [id, boss],
+          );
+        };
+        await db.query('savepoint f89_draft_batch');
+        eq('(baseline) a DRAFT live batch protects nothing: the same backdated approval is accepted', await approveE(eBack), 'approved');
+        await db.query('rollback to savepoint f89_draft_batch');
+        const evidenceRefusals = async (action: 'submit' | 'approve') => {
+          const call = () => db.query(`select public.${action}_payroll_batch($1,$2)`, [batch89, action === 'submit' ? finance : boss]);
+          await refusal(`${action} refuses a live line with no evidence hash`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            const missingBatch = (await one<{ id: string }>('select public.create_payroll_batch($1,$2) id', ['2023-02', finance])).id;
+            await db.query('select public.replace_payroll_batch_lines($1,$2::jsonb,$3)', [missingBatch, JSON.stringify([{
+              staffId: sm, rank: 'SM', status: 'computed', policyId: polId, ba: '100.00', pa: '0.00', pb: '0.00',
+              adjustments: '0.00', withheld: '0.00', net: '100.00', inputs: { fixture: true }, result: { fixture: true },
+            }]), finance]);
+            if (action === 'approve') {
+              // TEST FIXTURE ONLY: legacy submitted row predating evidence enforcement.
+              await db.query(`select set_config('afhomes.payroll_write','on',true)`);
+              await db.query(`update public.payroll_batches set status='submitted', submitted_by=$2, submitted_at=now() where id=$1`, [missingBatch, finance]);
+              await db.query(`select set_config('afhomes.payroll_write','off',true)`);
+            }
+            await db.query(`select public.${action}_payroll_batch($1,$2)`, [missingBatch, action === 'submit' ? finance : boss]);
+          });
+          await refusal(`${action} refuses changed live payment evidence`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await pay89(s1, '1.00', `H1-${action}`, '2023-03', '2023-03-10');
+            await call();
+          });
+          await refusal(`${action} refuses a line whose member left the roster`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await db.query(`update public.staff_users set status='inactive' where id=$1`, [sm]);
+            await call();
+          });
+          await refusal(`${action} refuses after the engagement is suspended inside the month`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await endE(e4, null, '2023-03-15');
+            await call();
+          });
+          await refusal(`${action} refuses after the engagement is ended inside the month`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await endE(e4, '2023-03-15', null);
+            await call();
+          });
+          await refusal(`${action} refuses after the rule window is cut inside the month`, 'PAYROLL_EVIDENCE_CHANGED', async () => {
+            await endR(r2, '2023-03-15');
+            await call();
+          });
+        };
+        await evidenceRefusals('submit');
+        await db.query('select public.submit_payroll_batch($1,$2)', [batch89, finance]);
+        await evidenceRefusals('approve');
+        eq(
+          '(test fixture) the 2023-03 live payroll batch is approved',
+          (await one<{ s: string }>('select public.approve_payroll_batch($1,$2) as s', [batch89, boss])).s,
+          'approved',
+        );
+        // Migration 20270105000010: a disbursement records money that already moved, so changed
+        // evidence never refuses it; it is recorded AND flagged in the audit trail. Rolled back.
+        for (const changed of [false, true]) {
+          await db.query('savepoint f89_disb');
+          try {
+            if (changed) await pay89(s1, '1.00', 'LATE-DISBURSEMENT', '2023-03', '2023-03-20');
+            const line = await one<{ id: string; h: string }>(
+              `select id, inputs->>'evidenceHash' as h from public.payroll_lines where batch_id=$1`, [batch89]);
+            const disb = (await one<{ id: string }>('select public.record_payroll_disbursement($1,$2,$3,$4,$5,$6) as id',
+              [line.id, '100.00', 'bank', `PR-${RUN}-89-LATE`, '2023-03-21', finance])).id;
+            eq(`a disbursement is recorded ${changed ? 'even after the evidence changed' : 'when the evidence is unchanged'}`,
+              (await one<{ n: number }>('select count(*)::int n from public.payroll_disbursements where id=$1 and line_id=$2', [disb, line.id])).n, 1);
+            const flags = (await db.query<{ b: string | null; a: string | null; staff: string }>(
+              `select before_data->>'evidenceHash' as b, after_data->>'evidenceHash' as a, after_data->>'staffId' as staff
+                 from public.audit_events where action='PAYROLL_DISBURSEMENT_EVIDENCE_CHANGED' and entity_id=$1`, [disb])).rows;
+            eq(changed ? '  and flagged once in the audit trail' : '  with no evidence-changed audit event', flags.length, changed ? 1 : 0);
+            if (changed) {
+              check('  the flag carries the stored hash and a different current hash, for the paid member',
+                flags[0]?.b === line.h && !!flags[0]?.a && flags[0]?.a !== line.h && flags[0]?.staff === sm,
+                JSON.stringify(flags[0] ?? null));
+            }
+            eq('  the ordinary disbursement audit event is still written',
+              (await one<{ n: number }>(`select count(*)::int n from public.audit_events where action='PAYROLL_DISBURSEMENT_RECORDED' and entity_id=$1`, [disb])).n, 1);
+          } catch (error) {
+            check(`disbursement ${changed ? 'after changed evidence' : 'with unchanged evidence'} completed`, false, safeErrorMessage(error));
+          } finally {
+            await db.query('rollback to savepoint f89_disb');
+          }
+        }
+
+        await refusal('an engagement cannot be ended inside a finalized live payroll month', IN_USE_E, () => endE(e4, '2023-03-30', null));
+        await refusal('  nor in an earlier month', IN_USE_E, () => endE(e4, '2022-12-31', null));
+        await refusal('  nor suspended on or before the last finalized day', IN_USE_E, () => endE(e4, null, '2023-03-31'));
+        await refusal('  not even through the write flag', IN_USE_E, async () => {
+          await flagOn();
+          await db.query(
+            `update public.ist_engagements set contract_end='2023-02-15', ended_by=$2, ended_at=now(), end_note='direct attempt' where id=$1`,
+            [e4, boss],
+          );
+        });
+        await refusal('an engagement whose window starts in a finalized payroll month cannot be approved', IN_USE_E, () => approveE(eBack));
+        await refusal('  not even through the write flag', IN_USE_E, () => forgeApproveE(eBack));
+        eq('ending on the last finalized day leaves that month whole, and is allowed', await endE(e4, '2023-03-31', null), 'ended');
+        const eFwd = await saveE(null, eFields({ staffId: vd, rank: 'SVD', contractStart: '2023-04-01', evidenceReference: 'TEST-FIXTURE-CONTRACT-VD-003' }));
+        await submitE(eFwd);
+        eq('an engagement starting the day after the finalized month is approved', await approveE(eFwd), 'approved');
+        // Who ended an engagement, when and why is recorded once (0009 guard + RPC).
+        await refusal('the recorded end note of an ended engagement cannot be rewritten', 'IST_ENGAGEMENT_IMMUTABLE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set end_note='rewritten end note' where id=$1`, [e4]);
+        });
+        await refusal('  nor who ended it or when', 'IST_ENGAGEMENT_IMMUTABLE', async () => {
+          await flagOn();
+          await db.query(`update public.ist_engagements set ended_by=$2, ended_at=now() + interval '1 second' where id=$1`, [e4, finance]);
+        });
+        await db.query('savepoint f89_second_date');
+        try {
+          const endRecord = async () =>
+            one<{ by: string; at: string; note: string; susp: string | null }>(
+              `select ended_by as by, ended_at::text as at, end_note as note, suspended_from::text as susp
+                 from public.ist_engagements where id=$1`, [eFwd]);
+          await endE(eFwd, '2023-06-30', null, 'TEST FIXTURE first end note');
+          const first = await endRecord();
+          eq('the second date (a suspension) can still be set by the same person', await endE(eFwd, null, '2023-05-15', 'TEST FIXTURE later suspension note'), 'ended');
+          const second = await endRecord();
+          check('  without rewriting who ended it, when, or the first note',
+            second.susp === '2023-05-15' && second.by === first.by && second.at === first.at && second.note === first.note,
+            JSON.stringify(second));
+          eq('  the later note is kept in the audit trail',
+            (await one<{ n: number }>(`select count(*)::int n from public.audit_events where action='IST_ENGAGEMENT_ENDED'
+              and entity_id=$1 and reason='TEST FIXTURE later suspension note'`, [eFwd])).n, 1);
+        } catch (error) {
+          check('second end-date checks completed', false, safeErrorMessage(error));
+        } finally {
+          await db.query('rollback to savepoint f89_second_date');
+        }
+
+        await refusal('a rule window cannot be cut inside a finalized live payroll month', IN_USE_R, () => endR(r2, '2023-03-30'));
+        await refusal('  not even through the write flag', IN_USE_R, async () => {
+          await flagOn();
+          await db.query(
+            `update public.ist_performance_rules set effective_until='2023-02-15', ended_by=$2, ended_at=now(), end_note='direct attempt' where id=$1`,
+            [r2, boss],
+          );
+        });
+        await refusal('a rule whose window starts in a finalized payroll month cannot be approved', IN_USE_R, () => approveR(rBack));
+        await refusal('  not even through the write flag', IN_USE_R, () => forgeApproveR(rBack));
+        eq('closing the rule on the last finalized day is allowed', await endR(r2, '2023-03-31'), 'ended');
+        const rFwd = await saveR(null, rFields({ effectiveFrom: '2023-04-01' }));
+        await submitR(rFwd);
+        eq('a same-shape rule starting the day after the finalized month is approved', await approveR(rFwd), 'approved');
+
+        // --- privileges -----------------------------------------------------------------------
+        // --- migration 20270105000010: financial history is never deleted or rewritten --------
+        await refusal('a verified payment in an open month is never deleted', 'FINANCIAL_HISTORY_PROTECTED', () =>
+          db.query('delete from public.payments where id=$1', [a1]));
+        await refusal('  nor voided or re-dated directly', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.payments set status='voided', voided_at=now() where id=$1`, [a1]));
+        await refusal('  nor moved to another contract', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', async () => {
+          await db.query('update public.payments set sale_id=$2 where id=$1', [a1, sImp]);
+          await db.query('set constraints public.payments_verified_sale_link_check immediate');
+        });
+        // payments and card_sales carry pending trigger events inside this section's transaction,
+        // so PostgreSQL refuses their TRUNCATE before any trigger runs; the guard is proven by
+        // execution on the other two and by its presence on all four.
+        for (const table of ['commissions', 'audit_events'])
+          await refusal(`${table} is never truncated`, 'FINANCIAL_HISTORY_PROTECTED', () =>
+            db.query(`truncate public.${table} cascade`));
+        eq(
+          'the truncate guard is installed and enabled on payments, card_sales, commissions and audit_events',
+          (await one<{ n: number }>(
+            `select count(*)::int n from pg_trigger g
+              where g.tgname = 'a_financial_history_truncate_guard' and g.tgenabled = 'O'
+                and g.tgrelid in ('public.payments'::regclass, 'public.card_sales'::regclass,
+                                  'public.commissions'::regclass, 'public.audit_events'::regclass)`,
+          )).n,
+          4,
+        );
+        await refusal('an audit event is never rewritten', 'FINANCIAL_HISTORY_PROTECTED', () =>
+          db.query(`update public.audit_events set reason='rewritten' where id = (select id from public.audit_events order by created_at desc limit 1)`));
+        check(
+          'the server role cannot delete or truncate payments, sales, commissions or audit events, nor update audit events',
+          !(await one<{ b: boolean }>(
+            `select bool_or(has_table_privilege('service_role', t, 'DELETE') or has_table_privilege('service_role', t, 'TRUNCATE'))
+                      or has_table_privilege('service_role', 'public.audit_events', 'UPDATE') as b
+               from unnest(array['public.payments','public.card_sales','public.commissions','public.audit_events']) t`,
+          )).b,
+        );
+        eq(
+          'every writer of payments, adjustments, sales, commissions and reservations takes the shared evidence lock',
+          (await one<{ n: number }>(
+            `select count(*)::int n from pg_trigger g
+              where g.tgname = 'a_financial_evidence_write_lock' and g.tgenabled = 'O'
+                and g.tgrelid in ('public.payments'::regclass, 'public.payment_adjustments'::regclass, 'public.card_sales'::regclass,
+                                  'public.commissions'::regclass, 'public.reservation_agreements'::regclass)`,
+          )).n,
+          5,
+        );
+        eq(
+          'the five decision functions take the evidence lock once, directly after their actor check (comments ignored)',
+          (await one<{ n: number }>(
+            `select count(*)::int n from pg_proc p
+              where p.oid in ('public.submit_payroll_batch(uuid,uuid)'::regprocedure, 'public.approve_payroll_batch(uuid,uuid)'::regprocedure,
+                              'public.record_payroll_disbursement(uuid,text,text,text,date,uuid)'::regprocedure,
+                              'public.close_payroll_batch(uuid,uuid)'::regprocedure, 'public.close_accounting_period(text,uuid)'::regprocedure)
+                and regexp_replace(p.prosrc, '--[^\\n]*', '', 'g')
+                    ~ 'perform\\s+private\\.mutation_actor_role\\([^;]*;\\s*perform\\s+private\\.financial_decision_lock\\('
+                and (select count(*) from regexp_matches(regexp_replace(p.prosrc, '--[^\\n]*', '', 'g'),
+                                                         'pg_advisory_xact_lock\\(hashtextextended|financial_decision_lock\\(', 'g')) = 1`,
+          )).n,
+          5,
+        );
+        // A second session: this section's open transaction already holds the evidence lock (it wrote
+        // payments and approved a live batch), so a live decision elsewhere must give up cleanly.
+        {
+          const other = new Client({ connectionString: target.url });
+          await other.connect();
+          try {
+            await other.query('begin');
+            const held = async () =>
+              Number((await other.query(`select count(*)::int n from pg_locks where locktype='advisory' and pid=pg_backend_pid()`)).rows[0].n);
+            const timeout = async () => String((await other.query(`select current_setting('lock_timeout') as t`)).rows[0].t);
+            const t0 = await timeout();
+            await other.query('select private.financial_decision_lock(false)');
+            eq('a simulation (p_take = false) takes no decision lock and does not wait', await held(), 0);
+            const started = Date.now();
+            let message = '';
+            try {
+              await other.query('select private.financial_decision_lock(true)');
+            } catch (error) {
+              message = safeErrorMessage(error);
+            }
+            const waited = Date.now() - started;
+            check('a live decision blocked by a holder fails with FINANCIAL_EVIDENCE_BUSY', message.includes('FINANCIAL_EVIDENCE_BUSY'), line(message));
+            check('  after about 10 seconds, not indefinitely', waited >= 9000 && waited < 20000, `${waited}ms`);
+            await other.query('rollback');
+            eq('  and lock_timeout is not left changed for the session', await timeout(), t0);
+          } catch (error) {
+            check('decision lock checks completed', false, safeErrorMessage(error));
+          } finally {
+            await other.end().catch(() => undefined);
+          }
+        }
+        {
+          const t0 = (await one<{ t: string }>(`select current_setting('lock_timeout') as t`)).t;
+          await db.query('select private.financial_decision_lock(true)');
+          eq('a granted decision lock leaves lock_timeout as it found it',
+            (await one<{ t: string }>(`select current_setting('lock_timeout') as t`)).t, t0);
+        }
+        // Becoming verified changes the verification fields only.
+        const unverified = await record89(s3, '1.00', 'M3-UNVERIFIED', '2023-05', '2023-05-02');
+        await refusal('a payment cannot be verified and re-priced in one statement', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.payments set status='verified', verified_by=$2, verified_at=now(), amount='2.00' where id=$1`, [unverified, finance]));
+        await refusal('  nor moved to another contract while being verified', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.payments set status='verified', verified_by=$2, verified_at=now(), sale_id=$3 where id=$1`, [unverified, finance, sImp]));
+        await refusal('  nor verified without a verifier', 'VERIFIED_PAYMENT_DETAILS_IMMUTABLE', () =>
+          db.query(`update public.payments set status='verified', verified_at=now() where id=$1`, [unverified]));
+        eq('  the refused payment is still unverified',
+          (await one<{ s: string }>('select status as s from public.payments where id=$1', [unverified])).s, 'recorded');
+
+        const FNS = [
+          'public.save_ist_engagement_draft(uuid,jsonb,uuid,text)',
+          'public.submit_ist_engagement(uuid,uuid)',
+          'public.return_ist_engagement(uuid,text,uuid)',
+          'public.approve_ist_engagement(uuid,text,text,uuid)',
+          'public.end_ist_engagement(uuid,date,date,text,uuid)',
+          'public.save_ist_performance_rule_draft(uuid,jsonb,uuid,text)',
+          'public.submit_ist_performance_rule(uuid,uuid)',
+          'public.return_ist_performance_rule(uuid,text,uuid)',
+          'public.approve_ist_performance_rule(uuid,text,text,uuid)',
+          'public.end_ist_performance_rule(uuid,date,text,uuid)',
+          'public.ist_period_performance(text,uuid)',
+          'public.ist_staff_performance_evidence(text,uuid,uuid)',
+        ];
+        const priv89 = await one<{ bad: number; svc: boolean; helper: boolean; tbl: boolean; del: boolean; rls: boolean }>(
+          `select (select count(*)::int from unnest($1::text[]) f, unnest(array['anon','authenticated']) r
+                    where has_function_privilege(r, f, 'EXECUTE')) as bad,
+                  (select bool_and(has_function_privilege('service_role', f, 'EXECUTE')) from unnest($1::text[]) f) as svc,
+                  (select bool_or(has_function_privilege(r, f, 'EXECUTE')) from unnest(array[
+                     'private.ist_governed_transition(text,text,uuid,uuid,text,text)',
+                     'private.ist_period_performance_evidence(text,uuid)',
+                     'private.ist_period_performance_rows(text,uuid)',
+                     'private.ist_performance_rule_for(text)',
+                     'private.ist_performance_rule_blocker(text)',
+                     'private.performance_rule_transition_rule_approved()',
+                     'private.ist_last_finalized_live_payroll_day()',
+                     'private.ist_performance_rule_succession_check(uuid,text,text,text,text)']) f,
+                     unnest(array['anon','authenticated','service_role']) r) as helper,
+                  (select bool_or(has_table_privilege(r, t, 'SELECT') or has_table_privilege(r, t, 'INSERT')
+                                  or has_table_privilege(r, t, 'UPDATE') or has_table_privilege(r, t, 'DELETE'))
+                     from unnest(array['public.ist_engagements','public.ist_performance_rules']) t,
+                          unnest(array['anon','authenticated']) r) as tbl,
+                  (select bool_or(has_table_privilege('service_role', t, 'INSERT') or has_table_privilege('service_role', t, 'UPDATE')
+                                  or has_table_privilege('service_role', t, 'DELETE') or has_table_privilege('service_role', t, 'TRUNCATE'))
+                     from unnest(array['public.ist_engagements','public.ist_performance_rules']) t) as del,
+                  (select bool_and(c.relrowsecurity) from pg_class c
+                    where c.oid in ('public.ist_engagements'::regclass, 'public.ist_performance_rules'::regclass)) as rls`,
+          [FNS],
+        );
+        eq('anon and authenticated cannot execute the Phase 9 functions', priv89.bad, 0);
+        check('service_role can execute them; the private helpers stay private', priv89.svc && !priv89.helper, JSON.stringify(priv89));
+        check(
+          'browser roles hold no privilege on the new tables; RLS is on; the server role cannot delete or truncate them',
+          !priv89.tbl && !priv89.del && priv89.rls,
+          JSON.stringify(priv89),
+        );
+      } catch (error) {
+        check('section 89 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own89 ? 'rollback' : 'rollback to savepoint finops89');
+      }
+    }
     section('8. minimum down payment at every boundary, all three plans');
     /* ---------------------------------------------------------------- */
     for (const [code, down, justUnder] of [
@@ -2058,10 +6308,10 @@ async function main(): Promise<void> {
       .sale_number;
     await db.query(
       `insert into public.card_sales
-       (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+       (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
         cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
         commission_rate_snapshot, expected_commission_snapshot, status, balance_due_at)
-     values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now() + interval '365 days')`,
+     values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now() + interval '365 days')`,
       [
         recOnlySale,
         recCn,
@@ -2607,10 +6857,10 @@ async function main(): Promise<void> {
     ).sale_number;
     await db.query(
       `insert into public.card_sales
-       (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+       (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
         cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
         commission_rate_snapshot, expected_commission_snapshot, status, balance_due_at)
-     values ($1,$2,$3,$4,'staff',$5,$6,$6,'10000.00',25000,$7,'2400.00','payment_verified', now() + interval '365 days')`,
+     values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,'10000.00',25000,$7,'2400.00','payment_verified', now() + interval '365 days')`,
       [
         rollSale,
         rollSaleNumber,
@@ -3228,10 +7478,10 @@ async function main(): Promise<void> {
       )) as PlanRow;
       await db.query(
         `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
             cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
             commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at)
-         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
+         values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
         [
           sId,
           sn,
@@ -3406,7 +7656,9 @@ async function main(): Promise<void> {
       'a member cannot read commission records',
       await asA(async (c) => {
         try {
-          const res = await c.query('select * from public.commissions');
+          // A granted column, not `*`: since 20270105000017 `*` names the ungranted evidence
+          // column and is refused outright, which would pass here whatever RLS did.
+          const res = await c.query('select id from public.commissions');
           return res.rows.length;
         } catch {
           return 0;
@@ -3661,10 +7913,10 @@ async function main(): Promise<void> {
     const claimPlan = await one<PlanRow>(`select * from public.card_plans where code = 'BRONZE'`);
     await db.query(
       `insert into public.card_sales
-         (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+         (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
           cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
           commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at)
-       values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
+       values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
       [
         claimSale,
         claimSn,
@@ -4117,10 +8369,10 @@ async function main(): Promise<void> {
       const plan = await one<PlanRow>(`select * from public.card_plans where code = 'GOLD'`);
       await db.query(
         `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
             cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
             commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at)
-         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
+         values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days')`,
         [
           saleId,
           saleNo,
@@ -5789,11 +10041,11 @@ async function main(): Promise<void> {
       const excluded = await one<{ n: number }>(
         `select count(*)::int as n from public.role_permissions rp
            join public.modules m on m.id = rp.module_id
-          where m.key in ('finance.final_qualification','finance.commission_payouts',
+          where m.key in ('finance.final_qualification',
                           'network.withdrawals','governance.config')`,
       );
       check(
-        'the four unresolved modules stay granted to nobody',
+        'the three unresolved modules stay granted to nobody',
         excluded.n === 0,
         `rows=${excluded.n}`,
       );
@@ -6279,11 +10531,11 @@ async function main(): Promise<void> {
       eq('expected commission resolves from the live Gold rate', expectedComm.v, '0.00');
       await db.query(
         `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
             cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
             commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at,
             created_by, referral_relationship_id)
-         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted', now(), now() + interval '365 days', $5, $11)`,
+         values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,$10,'submitted', now(), now() + interval '365 days', $5, $11)`,
         [
           saleId,
           saleNo,
@@ -6298,8 +10550,9 @@ async function main(): Promise<void> {
           ostEdge.id,
         ],
       );
-      // The sale-creation handler also opens the commission as pending; the
-      // trigger owns the hierarchy snapshots, so both are asserted, not built.
+      // Historical fixture with explicit recorded ancestry. Current normal-sale
+      // trigger capture is proven through real finalization in section 81.
+      await historicalSaleSnapshot(db, saleId, [ost, sm, ssm, vd]);
       await db.query(
         `insert into public.commissions
            (sale_id, beneficiary_type, beneficiary_staff_id, amount, rate_snapshot, basis_amount_snapshot, status)
@@ -6341,7 +10594,7 @@ async function main(): Promise<void> {
           where sale_id = $1 order by depth`,
         [saleId],
       );
-      eq('the insert trigger captured seller + 3 uplines', snapRows.rows.length, 4);
+      eq('historical fixture retains seller + 3 recorded uplines', snapRows.rows.length, 4);
       eq('depth 0 is the seller', String(snapRows.rows[0]!.ancestor_staff_id), ost);
       eq('depth 3 is the VD', String(snapRows.rows[3]!.ancestor_staff_id), vd);
       // A duplicate open application for the same customer and plan is refused
@@ -6349,9 +10602,9 @@ async function main(): Promise<void> {
       const dupeRefused = await throws('duplicate open application refused', () =>
         db.query(
           `insert into public.card_sales
-             (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+             (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
               cash_price_snapshot, status, submitted_at, balance_due_at)
-           values ($1,$2,$3,$4,'staff',$5,$6,$6,'submitted', now(), now() + interval '365 days')`,
+           values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,'submitted', now(), now() + interval '365 days')`,
           [
             uuidFor('e2e:sale:dupe'),
             `${saleNo}-DUPE`,
@@ -7328,10 +11581,10 @@ async function main(): Promise<void> {
         .sale_number;
       await db.query(
         `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
             cash_price_snapshot, minimum_down_payment_snapshot, yearly_points_snapshot,
             commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at, created_by)
-         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days', $5)`,
+         values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,$8,$9,'0.00','submitted', now(), now() + interval '365 days', $5)`,
         [
           sale2,
           sn2,
@@ -7388,6 +11641,9 @@ async function main(): Promise<void> {
       await db.query('delete from public.card_sale_hierarchy_snapshots where sale_id = $1', [
         sale2,
       ]);
+      // Migration 20270105000010: a verified payment is deleted only under the cleanup switch
+      // (transaction-local; it ends with the commit below).
+      await db.query(`set local afhomes.allow_purchase_test_cleanup = 'on'`);
       await db.query('delete from public.payments where id = $1', [payPartial]);
       await db.query('delete from public.card_sales where id = $1', [sale2]);
       await db.query('commit');
@@ -7452,9 +11708,9 @@ async function main(): Promise<void> {
       const schemeRefused = await throws('unknown scheme code is refused by CHECK', () =>
         db.query(
           `insert into public.card_sales
-            (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+            (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
              cash_price_snapshot, payment_scheme, status, submitted_at, balance_due_at)
-           values ($1,$2,$3,$4,'staff',$5,$6,$6,'move_c','submitted', now(), now() + interval '365 days')`,
+           values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,'move_c','submitted', now(), now() + interval '365 days')`,
           [badSaleId, badSaleNo, badCust, vipGold.id, staff['ost']!, vipGold.cash_price],
         ),
       );
@@ -7474,13 +11730,13 @@ async function main(): Promise<void> {
       ).sale_number;
       await db.query(
         `insert into public.card_sales
-          (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
+          (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id, cash_price,
            cash_price_snapshot, minimum_down_payment_snapshot, payment_scheme,
            reservation_fee_snapshot, required_initial_snapshot, installment_months_snapshot,
            monthly_amount_snapshot, validity_months_snapshot, yearly_points_snapshot,
            commission_rate_snapshot, expected_commission_snapshot, status, submitted_at, balance_due_at,
            created_by, referral_relationship_id)
-         values ($1,$2,$3,$4,'staff',$5,$6,$6,$7,'move_b1_40_12','10000.00','96000.00',12,'12000.00',144,$8,$9,'9600.00','submitted', now(), now() + interval '365 days', $5, $10)`,
+         values ('legacy_import',$1,$2,$3,$4,'staff',$5,$6,$6,$7,'move_b1_40_12','10000.00','96000.00',12,'12000.00',144,$8,$9,'9600.00','submitted', now(), now() + interval '365 days', $5, $10)`,
         [
           vipSale,
           vipSaleNo,
@@ -7920,7 +12176,7 @@ async function main(): Promise<void> {
       // a real RPC call counts as proof here - never a mock.
       {
         const body = await one<{ prosrc: string }>(
-          `select prosrc from pg_proc where proname = 'save_customer_application'`,
+          `select prosrc from pg_proc where oid = 'private.save_customer_application_before_workflow(uuid,uuid,jsonb,jsonb,jsonb)'::regprocedure`,
         );
         const code = stripSqlComments(body.prosrc);
         check(
@@ -8119,6 +12375,8 @@ async function main(): Promise<void> {
 
         // Explicit tidy-up for this section's rows (the shared cleanup also
         // covers them via the synthetic customers; both paths are idempotent).
+        await db.query('delete from public.reservation_agreement_holders where agreement_id in (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))', [appIds]);
+        await db.query('delete from public.reservation_agreements where customer_application_id=any($1::uuid[])', [appIds]);
         await db.query(
           'delete from public.customer_application_holders where application_id = any($1::uuid[])',
           [appIds],
@@ -9177,7 +13435,21 @@ async function main(): Promise<void> {
           ).record.derivedCategory,
           'RESERVATION_PAID',
         );
-        await db.query('update card_sales set seller_staff_id=$1 where id=$2', [
+        // TEST FIXTURE ONLY: migration 20270105000010 freezes a sale's seller of record, and no
+        // product path re-seats one. The two directory-filter checks below need a sale under a
+        // chosen seller, so the fixture rewrite runs with this session's triggers off.
+        const reseatFixtureSale = async (sql: string, params: unknown[]) => {
+          await db.query(`set session_replication_role = 'replica'`);
+          try {
+            await db.query(sql, params);
+          } finally {
+            await db.query(`set session_replication_role = 'origin'`);
+          }
+        };
+        const frozenSeller = await throwsIsolated('a sale seller cannot be rewritten directly', () =>
+          db.query('update card_sales set seller_staff_id=$1 where id=$2', [actor, reservation.saleId]));
+        check('  -> SALE_FINANCIAL_DETAILS_IMMUTABLE', frozenSeller.includes('SALE_FINANCIAL_DETAILS_IMMUTABLE'), frozenSeller);
+        await reseatFixtureSale('update card_sales set seller_staff_id=$1 where id=$2', [
           actor,
           reservation.saleId,
         ]);
@@ -9190,7 +13462,7 @@ async function main(): Promise<void> {
           ).record.id,
           reservation.customerId,
         );
-        await db.query(
+        await reseatFixtureSale(
           "update card_sales set seller_type='staff',seller_staff_id=$1,seller_ost_id=null where id=$2",
           [staff['ost'], reservation.saleId],
         );
@@ -9506,7 +13778,7 @@ async function main(): Promise<void> {
         db,
         url: target.url,
         actor: staff['super-admin']!,
-        seller: staff['ost']!,
+        seller: staff['sm']!,
         employee: staff['hr']!,
         run: RUN,
         createdCustomers: createdCustomerIds,
@@ -9641,13 +13913,14 @@ async function main(): Promise<void> {
         // A fully paid, finalized purchase: the only input activation accepts.
         finalized: async () => {
           const purchase = await (await purchaseWorld()).executed();
+          const balance = await verifiedReservationFee(db, purchase.reservationId, staff['finance']!);
           await db.query(
             'select public.record_reservation_payment_once($1::uuid,$2::uuid,$3::jsonb,$4::uuid)',
             [
               randomUUID(),
               purchase.reservationId,
               {
-                amount: purchase.total,
+                amount: balance,
                 method: 'cash',
                 paymentType: 'full',
                 // One bank reference per transfer: unique per fully paid purchase.
@@ -9708,7 +13981,8 @@ async function main(): Promise<void> {
         const world = await purchaseWorld();
         const before = await generate();
         const purchase = await world.executed(); // BRONZE spot_cash: B1 + C + 01
-        const pay = await world.record(purchase.reservationId, purchase.total, {
+        const balance = await verifiedReservationFee(db, purchase.reservationId, staff['finance']!);
+        const pay = await world.record(purchase.reservationId, balance, {
           paymentType: 'full',
           paymentPurpose: 'contractual_full',
         });
@@ -11812,9 +16086,9 @@ async function main(): Promise<void> {
         const sale = uuidFor('points:sale');
         await db.query(
           `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
             cash_price, balance_due_at, status)
-         values ($1, $2, $3, $4, 'staff', $5, '100000.00', now() + interval '30 days', 'draft')`,
+         values ('legacy_import',$1, $2, $3, $4, 'staff', $5, '100000.00', now() + interval '30 days', 'draft')`,
           [
             sale,
             `AF-CSALE-PTS${stamp
@@ -13191,9 +17465,9 @@ async function main(): Promise<void> {
         saleId = uuidFor('p66:sale');
         await db.query(
           `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
             cash_price, balance_due_at, status)
-         values ($1, $2, $3, (select id from public.card_plans where code = 'GOLD'),
+         values ('legacy_import',$1, $2, $3, (select id from public.card_plans where code = 'GOLD'),
                  'staff', $4, '100000.00', now() + interval '30 days', 'draft')`,
           [
             saleId,
@@ -14152,9 +18426,9 @@ async function main(): Promise<void> {
         sale = uuidFor(`${s67}:sale`);
         await db.query(
           `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
             cash_price, balance_due_at, status)
-         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+         values ('legacy_import',$1,$2,$3,(select id from public.card_plans where code='GOLD'),
                  'staff',$4,'100000.00', now() + interval '30 days','draft')`,
           [sale, `AF-CSALE${s67.replace(/[^a-z0-9]/gi, '').toUpperCase()}`, buyer, staff['sm']!],
         );
@@ -14938,9 +19212,9 @@ async function main(): Promise<void> {
         sale69 = uuidFor(`${s69}:sale`);
         await db.query(
           `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
             cash_price, balance_due_at, status)
-         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+         values ('legacy_import',$1,$2,$3,(select id from public.card_plans where code='GOLD'),
                  'staff',$4,'100000.00', now() + interval '30 days','draft')`,
           [
             sale69,
@@ -15506,9 +19780,9 @@ async function main(): Promise<void> {
         sale70 = uuidFor(`${s70}:sale`);
         await db.query(
           `insert into public.card_sales
-           (id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
+           (origin, id, sale_number, customer_id, plan_id, seller_type, seller_staff_id,
             cash_price, balance_due_at, status)
-         values ($1,$2,$3,(select id from public.card_plans where code='GOLD'),
+         values ('legacy_import',$1,$2,$3,(select id from public.card_plans where code='GOLD'),
                  'staff',$4,'100000.00', now() + interval '30 days','draft')`,
           [
             sale70,
@@ -17011,8 +21285,8 @@ async function main(): Promise<void> {
           const sale = uuidFor(`${s71}:sale:${tag}`);
           await db.query(
             `insert into public.card_sales
-             (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
-             values($1,$2,$3,(select id from public.card_plans where code=$4),'staff',$5,'100000.00', now() + interval '30 days','draft')`,
+             (origin, id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
+             values('legacy_import',$1,$2,$3,(select id from public.card_plans where code=$4),'staff',$5,'100000.00', now() + interval '30 days','draft')`,
             [
               sale,
               `AF-CSALE${s71.replace(/[^a-z0-9]/gi, '').toUpperCase()}${tag}`,
@@ -17191,8 +21465,8 @@ async function main(): Promise<void> {
         const orphanSale = uuidFor(`${s71}:orphan-sale`);
         await db.query(
           `insert into public.card_sales
-           (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
-           values($1,$2,$3,(select id from public.card_plans where code='BRONZE'),'staff',$4,'100000.00', now() + interval '30 days','draft')`,
+           (origin, id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,balance_due_at,status)
+           values('legacy_import',$1,$2,$3,(select id from public.card_plans where code='BRONZE'),'staff',$4,'100000.00', now() + interval '30 days','draft')`,
           [
             orphanSale,
             `AF-CSALE${s71.replace(/[^a-z0-9]/gi, '').toUpperCase()}ORPHAN`,
@@ -17351,7 +21625,7 @@ async function main(): Promise<void> {
       // and are recorded, so the shared cleanup removes staff, links and
       // auth rows; applications and customers are removed inline below.
       {
-        const actor = staff['sm']!;
+        const actor = staff['super-admin']!;
         const bronzePlan = await one<{ id: string }>(
           `select id from public.card_plans where code = 'BRONZE'`,
         );
@@ -17434,6 +21708,7 @@ async function main(): Promise<void> {
         const chainHeader = (customerId: string, extra: Record<string, unknown> = {}) => ({
           customerId,
           planId: bronzePlan.id,
+          smStaffId: csm1,
           paymentScheme: 'spot_cash',
           salesManagerName: '',
           svdName: '',
@@ -17558,13 +21833,22 @@ async function main(): Promise<void> {
             }),
           ),
         );
-        check('unknown names the subject rule', /SUBJECT_NOT_FOUND/.test(unknown), unknown);
+        check('unknown seller is refused', /SELLER_INACTIVE/.test(unknown), unknown);
         const malformedCustomer = await mkChainCustomer('malformed');
         const malformed = await throws('a malformed id is refused', () =>
           saveChain(chainHeader(malformedCustomer, { smStaffId: 'not-a-uuid' })),
         );
-        check('malformed names the subject rule', /SUBJECT_NOT_FOUND/.test(malformed), malformed);
+        check('malformed seller UUID is refused', /invalid input syntax for type uuid/.test(malformed), malformed);
 
+        await db.query('begin');
+        await db.query("set local afhomes.allow_purchase_test_cleanup='on'");
+        await db.query(`delete from private.purchase_document_evidence where reservation_id in
+          (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`, [chainApps]);
+        await db.query(`delete from private.official_ra_issuances where reservation_id in
+          (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`, [chainApps]);
+        await db.query(`delete from public.reservation_agreement_holders where agreement_id in
+          (select id from public.reservation_agreements where customer_application_id=any($1::uuid[]))`, [chainApps]);
+        await db.query('delete from public.reservation_agreements where customer_application_id=any($1::uuid[])', [chainApps]);
         await db.query(
           'delete from public.customer_application_holders where application_id = any($1::uuid[])',
           [chainApps],
@@ -17578,6 +21862,7 @@ async function main(): Promise<void> {
           [chainApps],
         );
         eq('section rows are removed', chainRemaining.n, 0);
+        await db.query('commit');
       }
 
       section(
@@ -17644,6 +21929,7 @@ async function main(): Promise<void> {
               ssotActor,
               JSON.stringify({
                 planId: ssotPlanId,
+                smStaffId: staff['sm'],
                 paymentScheme: 'spot_cash',
                 salesManagerName: '',
                 vipRecommenderName: '',
@@ -18683,6 +22969,7 @@ async function main(): Promise<void> {
         const m78CustomerId = { value: '' };
         const m78Header = (payload: Record<string, unknown>): Record<string, unknown> => ({
           planId: m78PlanId,
+          smStaffId: staff['sm'],
           paymentScheme: 'spot_cash',
           // The application always carries its customer; omitting it would null a
           // NOT NULL column, which is a different defect from the one under test.
@@ -19152,6 +23439,7 @@ async function main(): Promise<void> {
           'finance.payroll_approval',
           'finance.payroll_close',
           'finance.payroll_policy',
+          'finance.payroll_policy_approval',
         ];
         const can = async (who: string, module: string, action: string) =>
           (
@@ -19161,7 +23449,7 @@ async function main(): Promise<void> {
             )
           ).ok;
         eq(
-          'the four payroll modules exist',
+          'the five payroll modules exist (0008 adds finance.payroll_policy_approval)',
           (
             await db.query<{ key: string }>(
               `select key from public.modules where key like 'finance.payroll%' order by key`,
@@ -19205,21 +23493,43 @@ async function main(): Promise<void> {
         );
         eq('no approved policy -> nothing payable (Configuration Required)', await policyFor('SM'), null);
 
+        // Since migration 0008 a policy is written only through the governed RPCs. TEST FIXTURE:
+        // Finance is delegated finance.payroll_policy for this rolled-back savepoint only, so the
+        // Super Admin (never the drafter) can approve.
+        await db.query(
+          `insert into public.role_permissions (role_id, module_id, can_view, can_create, can_update, can_delete)
+           select a.role_id, m.id, true, true, true, false
+             from public.staff_role_assignments a, public.modules m
+            where a.staff_id=$1 and m.key='finance.payroll_policy'
+           on conflict (role_id, module_id) do update set can_view=true, can_create=true, can_update=true`,
+          [staff['finance']!],
+        );
         const insertPolicy = (rank: string, from: string, until: string | null, ba = '1.00') =>
-          one<{ id: string }>(
-            `insert into public.ist_compensation_policies
-               (rank, monthly_ba, ba_target, monthly_pa, pa_target, pb_target, pb_rate, collection_gate,
-                effective_from, effective_until, basis_note, created_by)
-             values ($1,$2,'2.00','3.00','4.00','5.00','0.01','0.40',$3::date,$4::date,'synthetic test policy',$5)
-             returning id`,
-            [rank, ba, from, until, staff['super-admin']!],
-          );
-        const approve = (id: string) =>
-          db.query(
-            `update public.ist_compensation_policies
-                set status='approved', approved_by=$2, approved_at=now() where id=$1`,
-            [id, staff['super-admin']!],
-          );
+          one<{ id: string }>('select public.save_ist_compensation_policy_draft(null,$1::jsonb,$2) as id', [
+            JSON.stringify({
+              rank,
+              monthlyBa: ba,
+              baTarget: '2.00',
+              monthlyPa: '3.00',
+              paTarget: '4.00',
+              pbTarget: '5.00',
+              pbRate: '0.01',
+              collectionGate: '0.40',
+              effectiveFrom: from,
+              effectiveUntil: until,
+              basisNote: 'synthetic test policy',
+            }),
+            staff['finance']!,
+          ]);
+        const approve = async (id: string) => {
+          await db.query('select public.submit_ist_compensation_policy($1,$2)', [id, staff['finance']!]);
+          await db.query('select public.approve_ist_compensation_policy($1,$2,$3,$4)', [
+            id,
+            'TEST-FIXTURE-EVIDENCE',
+            'synthetic test approval',
+            staff['super-admin']!,
+          ]);
+        };
         const firstLine = (message: string) => message.split('\n')[0];
 
         const first = (await insertPolicy('SM', '2026-01-01', null)).id;
@@ -19258,10 +23568,11 @@ async function main(): Promise<void> {
           firstLine(overlap),
         );
         // A rate change is a NEW row: close the old window, then approve the next.
-        await db.query(
-          `update public.ist_compensation_policies set effective_until='2026-12-31' where id=$1`,
-          [first],
-        );
+        await db.query(`select public.end_ist_compensation_policy($1,'2026-12-31'::date,$2,$3)`, [
+          first,
+          'Closed for the 2027 policy',
+          staff['super-admin']!,
+        ]);
         await approve(second);
         eq(
           'the next policy is approved once the old window closes; history keeps the old figure',
@@ -19275,14 +23586,39 @@ async function main(): Promise<void> {
         );
 
         const badMoney = await throwsIsolated(
-          'a non-exact-decimal amount is refused by the table',
+          'a non-exact-decimal amount is refused by the RPC',
           () => insertPolicy('SSM', '2026-01-01', null, '1e6'),
         );
-        check('  -> check constraint (amount)', /check constraint/i.test(badMoney), firstLine(badMoney));
-        const badRank = await throwsIsolated('an OST rank is refused by the table', () =>
+        check('  -> COMPENSATION_POLICY_INVALID (amount)', badMoney.includes('COMPENSATION_POLICY_INVALID'), firstLine(badMoney));
+        const badRank = await throwsIsolated('an OST rank is refused by the RPC', () =>
           insertPolicy('OST', '2026-01-01', null),
         );
-        check('  -> check constraint (rank)', /check constraint/i.test(badRank), firstLine(badRank));
+        check('  -> COMPENSATION_POLICY_INVALID (rank)', badRank.includes('COMPENSATION_POLICY_INVALID'), firstLine(badRank));
+        const rawInsert = (rank: string, ba: string) =>
+          db.query(
+            `insert into public.ist_compensation_policies
+               (rank, policy_version, monthly_ba, ba_target, monthly_pa, pa_target, pb_target, pb_rate,
+                collection_gate, effective_from, basis_note, created_by)
+             values ($1,99,$2,'2.00','3.00','4.00','5.00','0.01','0.40','2026-01-01','synthetic test policy',$3)`,
+            [rank, ba, staff['finance']!],
+          );
+        const direct = await throwsIsolated('a policy cannot be inserted outside the RPCs', () => rawInsert('SSM', '1.00'));
+        check(
+          '  -> COMPENSATION_POLICY_DIRECT_WRITE_REFUSED',
+          direct.includes('COMPENSATION_POLICY_DIRECT_WRITE_REFUSED'),
+          firstLine(direct),
+        );
+        // The table CHECKs still hold even when the transaction-local flag is forged.
+        const flagMoney = await throwsIsolated('even with the write flag, a non-exact amount is refused by the table', async () => {
+          await db.query(`select set_config('afhomes.compensation_policy_write','on',true)`);
+          await rawInsert('SSM', '1e6');
+        });
+        check('  -> check constraint (amount)', /check constraint/i.test(flagMoney), firstLine(flagMoney));
+        const flagRank = await throwsIsolated('even with the write flag, an OST rank is refused by the table', async () => {
+          await db.query(`select set_config('afhomes.compensation_policy_write','on',true)`);
+          await rawInsert('OST', '1.00');
+        });
+        check('  -> check constraint (rank)', /check constraint/i.test(flagRank), firstLine(flagRank));
 
         const browser = await one<{ a: boolean; b: boolean }>(
           `select has_table_privilege('anon','public.ist_compensation_policies','SELECT') as a,
@@ -19293,6 +23629,34 @@ async function main(): Promise<void> {
         check('section 80 completed', false, safeErrorMessage(error));
       } finally {
         await db.query(own80 ? 'rollback' : 'rollback to savepoint finops80');
+      }
+      section('81. Owner-confirmed application, agreement and Finance workflow');
+      let own81 = false;
+      try {
+        await db.query('savepoint finops81');
+      } catch {
+        await db.query('begin');
+        own81 = true;
+      }
+      try {
+        const count = await runWorkflowAlignmentChecks(db);
+        check(`owner-confirmed workflow: ${count} real database assertions`, count >= 40);
+      } catch (error) {
+        check('owner-confirmed workflow completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own81 ? 'rollback' : 'rollback to savepoint finops81');
+      }
+      section('82. Atomic selected-seller commission rate configuration');
+      let own82 = false;
+      try { await db.query('savepoint bulk82'); }
+      catch { await db.query('begin'); own82 = true; }
+      try {
+        const count = await runBulkCommissionRuleChecks(db);
+        check('bulk configuration: permission, replacement, retry and atomic rollback', count >= 14);
+      } catch (error) {
+        check('bulk commission configuration completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own82 ? 'rollback' : 'rollback to savepoint bulk82');
       }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
@@ -19527,9 +23891,6 @@ async function main(): Promise<void> {
            (select id from public.customer_applications where customer_id = any($1::uuid[]))`,
           [custSet],
         );
-        await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [
-          custSet,
-        ]);
         // Customer-application rows reference synthetic customers (and synthetic
         // sales, already removed above). Holders go before headers; headers go
         // before the customer row itself. Documents were removed with payments.
@@ -19560,6 +23921,7 @@ async function main(): Promise<void> {
           'delete from public.customer_applications where customer_id = any($1::uuid[])',
           [custSet],
         );
+        await db?.query('delete from public.card_sales where customer_id = any($1::uuid[])', [custSet]);
         // The conversion records an alias for every legacy value it rewrites and
         // the alias table has no FK to the entity, so deleting the customer left
         // the alias behind. A second run against the same database then hit

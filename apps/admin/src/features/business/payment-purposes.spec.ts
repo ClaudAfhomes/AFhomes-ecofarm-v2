@@ -23,15 +23,26 @@ const purposes = (payments: LedgerPayment[], terms = installmentTerms) =>
 
 describe('payment purpose availability', () => {
   it('offers the reservation fee first, then the down payment', () => {
-    expect(purposes([])).toEqual(['reservation_fee', 'contractual_down_payment']);
+    expect(purposes([])).toEqual(['reservation_fee']);
     const options = availablePurposes(installmentTerms, []);
-    expect(options[0]).toMatchObject({ purpose: 'reservation_fee', amount: '10000.00' });
-    expect(options[1]).toMatchObject({ purpose: 'contractual_down_payment', amount: '40000.00' });
+    expect(options[0]).toMatchObject({
+      purpose: 'reservation_fee',
+      amount: '10000.00',
+      locked: true,
+    });
+    expect(purposes([pay('reservation_fee', '10000.00', 'recorded')])).toEqual([]);
+    expect(purposes([], { ...installmentTerms, reservationFee: '0.00' })).toEqual([
+      'contractual_down_payment',
+      'contractual_installment',
+      'contractual_full',
+    ]);
   });
 
   it('never offers the reservation fee again once one is recorded or verified', () => {
     for (const status of ['recorded', 'verified']) {
-      expect(purposes([pay('reservation_fee', '10000.00', status)])).not.toContain('reservation_fee');
+      expect(purposes([pay('reservation_fee', '10000.00', status)])).not.toContain(
+        'reservation_fee',
+      );
     }
     // A rejected/voided fee frees it again.
     for (const status of ['rejected', 'voided']) {
@@ -41,7 +52,11 @@ describe('payment purpose availability', () => {
 
   it('down payment excludes the fee already collected and disappears once one exists', () => {
     const afterFee = availablePurposes(installmentTerms, [pay('reservation_fee', '10000.00')]);
-    expect(afterFee.map((o) => o.purpose)).toEqual(['contractual_down_payment']);
+    expect(afterFee.map((o) => o.purpose)).toEqual([
+      'contractual_down_payment',
+      'contractual_installment',
+      'contractual_full',
+    ]);
     expect(afterFee[0]!.amount).toBe('30000.00');
     const afterDown = [
       pay('reservation_fee', '10000.00'),
@@ -63,7 +78,8 @@ describe('payment purpose availability', () => {
 
   it('counts pending money against the balance and caps the installment', () => {
     const ledger = [
-      pay('contractual_down_payment', '40000.00'),
+      pay('reservation_fee', '10000.00'),
+      pay('contractual_down_payment', '30000.00'),
       pay('contractual_installment', '57000.00', 'recorded'),
     ];
     expect(payableBalance(installmentTerms, ledger)).toBe('3000.00');
@@ -80,19 +96,31 @@ describe('payment purpose availability', () => {
     expect(purposes([pay('contractual_down_payment', '100000.00', 'recorded')])).toEqual([]);
   });
 
-  it('a spot-cash purchase (no monthly amount) never offers installments', () => {
+  it('a spot-cash purchase accepts partial payments without changing its agreed scheme', () => {
     const spot = { ...installmentTerms, monthlyAmount: null, installmentMonths: null };
+    expect(
+      availablePurposes(spot, [pay('reservation_fee', '10000.00')]).find(
+        (o) => o.purpose === 'contractual_installment',
+      )?.label,
+    ).toBe('Partial payment');
     expect(purposes([pay('reservation_fee', '10000.00')], spot)).toEqual([
       'contractual_down_payment',
+      'contractual_installment',
       'contractual_full',
     ]);
-    expect(purposes([pay('contractual_down_payment', '40000.00')], spot)).toEqual([
-      'contractual_full',
-    ]);
+    expect(
+      purposes(
+        [pay('reservation_fee', '10000.00'), pay('contractual_down_payment', '30000.00')],
+        spot,
+      ),
+    ).toEqual(['contractual_installment', 'contractual_full']);
   });
 
   it('treats a legacy payment with no purpose as contractual', () => {
-    const options = purposes([pay(null, '40000.00')]);
+    const options = purposes([pay(null, '40000.00')], {
+      ...installmentTerms,
+      reservationFee: '0.00',
+    });
     expect(options).toEqual(['contractual_installment', 'contractual_full']);
   });
 });

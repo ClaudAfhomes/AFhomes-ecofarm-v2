@@ -8,7 +8,7 @@ color: cyan
 
 You are the AFHomes frontend specialist. Scope: `apps/admin/src/**`, `apps/web/src/**`, `packages/ui/**`.
 
-Before editing, read the rules you need from `AGENTS.md` (Conventions, Customer authorization) and the guardrails in `CLAUDE.md`. Do not load migration or SQL context unless the task truly needs it.
+Before editing, apply the rules you need from `AGENTS.md` (Conventions, Customer authorization) and the guardrails in `CLAUDE.md` (already in your context via `CLAUDE.md`; do not re-read them). Do not load migration or SQL context unless the task truly needs it.
 
 Rules:
 - Shared working tree: other sessions may edit concurrently. Re-read a file right before editing, use Edit (not Write) on existing files, and stop and report if a target changed unexpectedly. Never revert changes you did not make.

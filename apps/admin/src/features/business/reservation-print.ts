@@ -19,6 +19,7 @@ type Holder = {
 };
 type ReservationPaper = {
   draft?: ApplicationRaDraft;
+  reservationNumber?: string;
   tier: string;
   primary: Holder;
   secondary: Holder | null;
@@ -55,9 +56,11 @@ export function draftReservationPaper(
   paymentScheme: PaymentScheme,
   plan?: CardProduct,
   draft?: ApplicationRaDraft,
+  reservationNumber?: string,
 ): ReservationPaper {
   return {
     draft,
+    reservationNumber,
     primary: toHolder(primary),
     secondary: tier === 'GOLD' && secondary ? toHolder(secondary) : null,
     tier,
@@ -89,7 +92,7 @@ export function reservationPaperRows(data: ReservationPaper): PaperRow[] {
   const cells = (...values: ReturnType<typeof field>[]) => rows.push({ cells: values });
   cells(
     field('Reservation date', d?.reservationDate),
-    field('Official Reservation Agreement Number', a?.reservationNumber),
+    field('Official Reservation Agreement Number', a?.reservationNumber ?? data.reservationNumber),
     field('Revision', d?.revisionNumber),
     field('Agreement date', d?.agreementDate),
   );

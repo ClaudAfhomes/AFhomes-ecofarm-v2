@@ -34,8 +34,16 @@ const LABEL: Record<SignedDocumentOwner, string> = {
   applications: 'signed Customer Application',
   reservations: 'signed Reservation Agreement',
 };
+const TITLE: Record<SignedDocumentOwner, string> = {
+  applications: 'Signed Application Form',
+  reservations: 'Signed Reservation Agreement',
+};
 
-export function useSignedDocument(owner: SignedDocumentOwner, id: string | undefined, enabled = true) {
+export function useSignedDocument(
+  owner: SignedDocumentOwner,
+  id: string | undefined,
+  enabled = true,
+) {
   const docs = useQuery({
     queryKey: ['signed-documents', owner, id],
     queryFn: () => listSignedDocuments(owner, id!),
@@ -95,12 +103,15 @@ export function useSignedDocument(owner: SignedDocumentOwner, id: string | undef
     if (!id) throw new Error('Save the record before reviewing its signed document.');
     let list: SignedDocument[];
     try {
-      list = (await docs.refetch()).data ?? [];
+      const result = await docs.refetch();
+      if (result.error) throw result.error;
+      list = result.data ?? [];
     } catch (error) {
       throw new SignedDocumentStepError('loading the document status', error);
     }
     if (list.some((d) => d.status === 'accepted')) return;
-    let pendingId = registeredId.current ?? list.find((d) => d.status === 'pending_review')?.id ?? null;
+    let pendingId =
+      registeredId.current ?? list.find((d) => d.status === 'pending_review')?.id ?? null;
     if (file && !registeredId.current) {
       try {
         const grant = await requestSignedDocumentUpload(owner, id, {
@@ -144,27 +155,36 @@ export function useSignedDocument(owner: SignedDocumentOwner, id: string | undef
   };
 
   const accepted = docs.data?.some((d) => d.status === 'accepted') ?? false;
-  return { owner, docs, live, accepted, file, previewUrl: fileState.url, fileError, pick, ready, ensureAccepted, reject };
+  return {
+    owner,
+    docs,
+    live,
+    accepted,
+    file,
+    previewUrl: fileState.url,
+    fileError,
+    pick,
+    ready,
+    ensureAccepted,
+    reject,
+  };
 }
 export type SignedDocumentController = ReturnType<typeof useSignedDocument>;
-
-/** Plain reason beside a disabled approve/execute button, or null when it can proceed. */
-export const signedDocumentBlocker = (c: SignedDocumentController): string | null =>
-  c.ready
-    ? null
-    : `Upload the ${LABEL[c.owner]} (PDF, JPEG or PNG) before ${c.owner === 'applications' ? 'approving' : 'executing'}.`;
 
 export function SignedDocumentPanel({
   controller,
   disabled,
+  readOnly = false,
 }: {
   controller: SignedDocumentController;
   disabled?: boolean;
+  readOnly?: boolean;
 }) {
   const { owner, docs, live, accepted, file, previewUrl, fileError, pick, reject } = controller;
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [reviewing, setReviewing] = useState(false);
   // An already-uploaded file previews through the 60 s download link.
   const download = useQuery({
     queryKey: ['signed-document-download', live?.id],
@@ -179,7 +199,7 @@ export function SignedDocumentPanel({
   const latest = docs.data?.[0];
   return (
     <section className={styles.panel} aria-label={`Signed document: ${LABEL[owner]}`}>
-      <h2 className={styles.panelTitle}>Signed document</h2>
+      <h3 className={styles.panelTitle}>{TITLE[owner]}</h3>
       {live ? (
         <p role="status">
           {live.originalFilename} — {live.status === 'accepted' ? 'Accepted' : 'Pending review'}
@@ -192,18 +212,26 @@ export function SignedDocumentPanel({
           {latest.reviewNotes ? `: ${latest.reviewNotes}` : ''}. Upload a replacement.
         </p>
       ) : docs.isSuccess ? (
-        <p role="status">No {LABEL[owner]} has been uploaded yet.</p>
+        <p role="status">Missing — No {LABEL[owner]} has been uploaded yet.</p>
       ) : null}
-      {!accepted ? (
+      {docs.isError ? (
+        <div>
+          <p role="alert">Signed document status could not be loaded. Retry before approval.</p>
+          <Button size="sm" variant="secondary" onClick={() => void docs.refetch()}>
+            Retry Document Status
+          </Button>
+        </div>
+      ) : null}
+      {!accepted && !readOnly ? (
         <div>
           <label htmlFor={`signed-${owner}`}>
-            Signed document file (PDF, JPEG or PNG, max 10 MB)
+            {TITLE[owner]} — Signed document file (PDF, JPEG or PNG, max 10 MB)
           </label>
           <input
             id={`signed-${owner}`}
             type="file"
             accept={SIGNED_DOCUMENT_CONTENT_TYPES.join(',')}
-            disabled={disabled}
+            disabled={disabled || reviewing}
             onChange={(event) => {
               pick(event.target.files?.[0]);
               event.target.value = '';
@@ -211,6 +239,36 @@ export function SignedDocumentPanel({
           />
           {fileError ? <p role="alert">{fileError}</p> : null}
           {file ? <p role="status">Selected: {file.name}</p> : null}
+          <Button
+            size="sm"
+            disabled={disabled || !controller.ready || reviewing || docs.isError}
+            loading={reviewing}
+            loadingLabel="Reviewing…"
+            onClick={async () => {
+              setError('');
+              setReviewing(true);
+              try {
+                await controller.ensureAccepted();
+              } catch (failure) {
+                setError(
+                  failure instanceof Error
+                    ? failure.message
+                    : 'The signed document was not accepted.',
+                );
+              } finally {
+                setReviewing(false);
+              }
+            }}
+          >
+            {file
+              ? owner === 'applications'
+                ? 'Upload Signed Application'
+                : 'Upload Signed RA'
+              : 'Review Signed Documents'}
+          </Button>
+          <p className={styles.hint}>
+            Upload and accept the signed document after reviewing its preview.
+          </p>
         </div>
       ) : null}
       {shownUrl ? (
@@ -235,12 +293,12 @@ export function SignedDocumentPanel({
           />
         )
       ) : null}
-      {pending && !file ? (
+      {pending && !file && !readOnly ? (
         <div>
           <Button
             variant="danger"
             size="sm"
-            disabled={disabled}
+            disabled={disabled || reviewing}
             onClick={() => setRejecting((value) => !value)}
           >
             {rejecting ? 'Cancel' : 'Reject document'}
@@ -257,7 +315,9 @@ export function SignedDocumentPanel({
               <Button
                 variant="danger"
                 size="sm"
-                disabled={reason.trim().length < REJECTION_REASON_MIN_LENGTH}
+                disabled={
+                  disabled || reviewing || reason.trim().length < REJECTION_REASON_MIN_LENGTH
+                }
                 onClick={() => {
                   setError('');
                   reject(reason)
@@ -274,9 +334,9 @@ export function SignedDocumentPanel({
               </Button>
             </div>
           ) : null}
-          {error ? <p role="alert">{error}</p> : null}
         </div>
       ) : null}
+      {error ? <p role="alert">{error}</p> : null}
     </section>
   );
 }

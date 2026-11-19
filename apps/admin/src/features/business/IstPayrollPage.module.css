@@ -1,0 +1,301 @@
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+}
+
+.rankChoices,
+.policyRankGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.rankChoices {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rankChoices legend {
+  margin-bottom: var(--space-2);
+}
+
+.rankChoice,
+.policyRankCard {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface, #fff);
+  color: inherit;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.rankChoice {
+  display: flex;
+  align-items: start;
+  gap: var(--space-2);
+}
+.rankChoice input {
+  accent-color: var(--color-primary, #17543e);
+}
+.policyRankCard {
+  display: grid;
+  gap: var(--space-2);
+  text-align: left;
+  font: inherit;
+}
+.policyRankCard small {
+  color: var(--color-text-secondary);
+}
+.rankChoice:has(input:checked),
+.policyRankCard[aria-pressed='true'] {
+  border-color: var(--color-primary, #17543e);
+  background: var(--color-surface-muted, #f4f8f5);
+}
+.policyRankCard:focus-visible {
+  outline: 2px solid var(--color-primary, #17543e);
+  outline-offset: 3px;
+}
+.policyDetails {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.policyDetails summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .rankChoices,
+  .policyRankGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.contextDetails {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.contextDetails summary,
+.issueDetails summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.contextDetails summary:focus-visible,
+.issueDetails summary:focus-visible {
+  outline: 2px solid var(--color-primary, #17543e);
+  outline-offset: 3px;
+}
+
+.compactText {
+  margin: 0;
+}
+.issueDetails {
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+.issueDetails ul {
+  margin-bottom: 0;
+  padding-left: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  max-width: 260px;
+}
+
+.statusRow,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.form,
+.stack,
+.grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.stack {
+  gap: 4px;
+}
+
+@media (min-width: 640px) {
+  .governedTable {
+    min-width: 1200px;
+  }
+
+  .governedTable td {
+    min-width: 7rem;
+  }
+
+  .governedTable .governedStatus {
+    min-width: 12rem;
+  }
+}
+
+.grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.badge {
+  justify-self: start;
+}
+
+.waiting {
+  margin: 0;
+  font-weight: 600;
+}
+
+.heading {
+  margin: var(--space-3) 0 0;
+  font-size: 16px;
+}
+
+.blockers {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.muted {
+  font-size: 13px;
+  color: var(--color-text-muted, #6b7280);
+}
+
+.chips,
+.picker,
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker,
+.options {
+  display: grid;
+  max-width: 520px;
+}
+
+.options {
+  gap: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.option[aria-selected='true'] {
+  background: var(--color-surface-muted, #f3f4f6);
+}
+
+.option[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--space-3);
+}
+.summaryGrid > div {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface, #fff);
+  min-width: 0;
+}
+.summaryGrid strong {
+  font-size: 1.4rem;
+}
+.summaryGrid small {
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.lineFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+.lineFilters > * {
+  min-width: 0;
+}
+/* Field name above its control, as on the other list toolbars. */
+.lineFilters > label,
+.lineFilters > .chipField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+}
+/* The shared Select grows along its flex axis; in a column that would make it
+   tall, so the controls keep their natural height here. */
+.lineFilters > label > *,
+.lineFilters > .chipField > * {
+  flex: 0 0 auto;
+}
+.evidenceTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+.evidenceTable td,
+.evidenceTable th {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--color-border-default);
+  text-align: left;
+  overflow-wrap: anywhere;
+}

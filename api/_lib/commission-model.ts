@@ -19,6 +19,14 @@ export const toCommission = (row: Record<string, unknown>) => {
     qualifiedAt: isoOrNull(row.qualified_at),
     earnedAt: isoOrNull(row.earned_at),
     paidAt: isoOrNull(row.paid_at),
+    withheldAt: isoOrNull(row.withheld_at),
+    withheldReason: (row.withheld_reason as string | null | undefined) ?? null,
+    commissionType: (row.commission_type as string | null | undefined) ?? null,
+    eligibleAt: isoOrNull(row.eligible_at),
+    paidReference: isoOrNull(row.paid_reference),
+    paidMethod: isoOrNull(row.paid_method),
+    paidOn: isoOrNull(row.paid_on),
+    paidEvidenceReference: isoOrNull(row.paid_evidence_reference),
     createdAt: isoOrNull(row.created_at) ?? '',
   };
 };

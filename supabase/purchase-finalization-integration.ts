@@ -8,6 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { verifiedReservationFee } from './purchase-evidence-fixtures.js';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -75,6 +76,10 @@ export async function runPurchaseFinalizationChecks(world: World) {
       });
   /** Record `parts` and verify each, so the reservation is fully paid. */
   const pay = async (reservationId: string, parts: string[]) => {
+    const terms = (await db.query<{ fee: string; rest: string }>(
+      'select reservation_fee_snapshot fee,private.money($2::numeric-reservation_fee_snapshot::numeric) rest from public.reservation_agreements where id=$1',
+      [reservationId, parts[0]])).rows[0]!;
+    if (terms.rest !== '0.00') parts = [terms.fee, terms.rest, ...parts.slice(1)];
     const ids: string[] = [];
     for (const [index, amount] of parts.entries()) {
       ids.push(
@@ -82,12 +87,12 @@ export async function runPurchaseFinalizationChecks(world: World) {
           reference: `PAY-${index + 1}`,
           method: 'bank',
           // The ledger type is derived from the purpose (repair 20261231000001 s.12).
-          paymentType: index === 0 ? 'down_payment' : 'installment',
-          paymentPurpose: index === 0 ? 'contractual_down_payment' : 'contractual_installment',
+          paymentType: 'installment',
+          paymentPurpose: index === 0 ? 'reservation_fee' : 'contractual_installment',
         }),
       );
+      await world.verify(ids[ids.length - 1]!);
     }
-    for (const id of ids) await world.verify(id);
     return ids;
   };
   // ONLY the sales this section created. createdCustomers is shared with every
@@ -152,7 +157,8 @@ const saleRowsFor = (customerId: string) =>
   void partialIds;
 
   const unverified = await world.executed();
-  await world.record(unverified.reservationId, unverified.total, {
+  const unverifiedBalance = await verifiedReservationFee(db, unverified.reservationId, finance);
+  await world.record(unverified.reservationId, unverifiedBalance, {
     reference: 'FULL-RECORDED',
     method: 'cash',
     paymentType: 'full',
@@ -429,7 +435,8 @@ const saleRowsFor = (customerId: string) =>
   // at recording (verified + pending) and at verification"). This used to
   // record and verify total + 2,500.00 and assert the overpayment was RETAINED.
   const over = await world.executed();
-  await world.record(over.reservationId, over.total, {
+  const overBalance = await verifiedReservationFee(db, over.reservationId, finance);
+  await world.record(over.reservationId, overBalance, {
     reference: 'OVER-1',
     method: 'bank',
     paymentType: 'down_payment',

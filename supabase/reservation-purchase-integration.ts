@@ -41,6 +41,8 @@ export async function makePurchaseFixtures(
   const { actor, createdCustomers, createdApplications } = options;
   const reviewer = options.reviewer ?? actor;
   const seller = options.seller ?? null;
+  const approver = (await db.query<{ id: string }>(`select s.id from public.staff_users s
+    where s.status='active' and private.staff_role_slug(s.id)='super_admin' order by s.id limit 1`)).rows[0]!.id;
   const plan = (
     await db.query<PlanRow>('select id, code, cash_price from public.card_plans where code=$1', [
       options.tier ?? 'BRONZE',
@@ -63,19 +65,14 @@ export async function makePurchaseFixtures(
       [id, cn, `${id}@example.invalid`],
     );
     createdCustomers.push(id);
+    await db.query(`insert into public.identity_documents(subject_type,customer_id,storage_path,original_filename,mime_type,size_bytes,sha256,
+      reviewed_by,reviewed_at,verification_status,reviewed_data,uploaded_by)
+      values('customer',$1,$2,'passport.pdf','application/pdf',2048,repeat('a',64),$3,now(),'confirmed','{"fields":{"idType":"passport"}}',$3)`,
+      [id, `synthetic-purchase/${randomUUID()}.pdf`, actor]);
     return id;
   };
 
-  /**
-   * An application at a workflow stage, through the real RPCs only:
-   *  - `draft`: saved, nothing frozen;
-   *  - `submitted`: the LEGACY submit (no frozen terms, no RA) - an old application;
-   *  - `purchase_submitted`: the purchase submit froze terms AND created the
-   *    linked official RA atomically, in draft (repair 20261231000001 section 8);
-   *  - `approved`: additionally an ACCEPTED signed Customer Application (uploaded
-   *    by the actor, reviewed by `reviewer` - the actor itself by default), then approval, which moves
-   *    the RA to `submitted` (awaiting the signed RA).
-   */
+  /** Current applications originate with one draft RA; approval executes it. */
   const mkApproved = async (
     status: 'draft' | 'submitted' | 'purchase_submitted' | 'approved' = 'approved',
   ) => {
@@ -86,6 +83,7 @@ export async function makePurchaseFixtures(
         actor,
         JSON.stringify({
           customerId,
+          ...(seller ? { smStaffId: seller } : {}),
           planId: plan.id,
           paymentScheme: options.scheme ?? 'spot_cash',
           acquisitionChannels: [],
@@ -133,9 +131,11 @@ export async function makePurchaseFixtures(
         uploader: actor,
         reviewer,
       });
+      const reservation = (await db.query<{ id: string }>('select id from public.reservation_agreements where customer_application_id=$1', [id])).rows[0]!;
+      await acceptedSignedDocument(db, { kind: 'signed_reservation_agreement', entityId: reservation.id, uploader: actor, reviewer });
       await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
         randomUUID(),
-        actor,
+        approver,
         id,
       ]);
     }
@@ -208,15 +208,10 @@ export async function makePurchaseFixtures(
       reviewer,
     });
 
-  /**
-   * Approved application -> the RA created at submission, reopened to DRAFT, no
-   * sale. Approval moves the RA to `submitted`; `reopen` is the real transition
-   * back to an editable draft.
-   */
+  /** Submitted application and RA, awaiting the coordinated decision. */
   const reserved = async () => {
-    const app = await mkApproved('approved');
+    const app = await mkApproved('purchase_submitted');
     const id = app.reservationId!;
-    await transition('reopen', actor, id);
     const { total, fee } = await termsOf(id);
     return {
       applicationId: app.id,
@@ -228,12 +223,10 @@ export async function makePurchaseFixtures(
     };
   };
 
-  /** Approved application -> its RA -> accepted signed RA -> EXECUTED, no sale. */
+  /** Both accepted signatures and one Admin decision: executed RA, no sale. */
   const executed = async () => {
     const app = await mkApproved('approved');
     const id = app.reservationId!;
-    await acceptSignedRa(id);
-    await transition('execute', actor, id);
     const { total, fee } = await termsOf(id);
     return {
       applicationId: app.id,
@@ -333,7 +326,7 @@ export async function runReservationPurchaseChecks({
       [reservationId],
     )
   ).rows[0]!;
-  check('a purchase submission creates an official RA atomically', Boolean(reservationId));
+  check('submission retains its initial official RA', Boolean(reservationId));
   check(
     'the reservation allocates an official RA business number',
     /^[0-9]{4}-[0-9]{4}$/.test(String(row.reservation_number)),
@@ -386,7 +379,7 @@ export async function runReservationPurchaseChecks({
       row.balance_snapshot === termsRow.total_price &&
       row.total_payment_received_snapshot === '0.00',
   );
-  check('the reservation starts as a draft', row.status === 'draft');
+  check('submission moves the original draft RA to submitted', row.status === 'submitted');
   check(
     'the frozen economics survive a live plan price change',
     await (async () => {
@@ -539,7 +532,7 @@ export async function runReservationPurchaseChecks({
           where customer_application_id = any($1::uuid[])`,
         [[approved.id, noTerms.id, otherTerms.id, draftOnly.id, legacySubmitted.id]],
       )
-    ).rows[0]!.n === 2,
+    ).rows[0]!.n === 5,
   );
 
   /* Source immutability */
@@ -598,7 +591,7 @@ export async function runReservationPurchaseChecks({
   const approve = () =>
     db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
       randomUUID(),
-      actor,
+      superAdmin,
       approved.id,
     ]);
   await fails(
@@ -641,103 +634,28 @@ export async function runReservationPurchaseChecks({
         pendingDoc.id,
       ]),
   );
-  await approve();
-  check(
-    'approval with an accepted signed application moves the submission RA to submitted',
-    (await statusNow()) === 'submitted',
-  );
-  // Back to draft through the real transition, so the draft lifecycle is proven.
-  await move('reopen');
-  check('submitted -> draft (reopen)', (await statusNow()) === 'draft');
-
-  await fails('execute is refused from draft', /INVALID_AGREEMENT_TRANSITION/, () =>
-    move('execute'),
-  );
-  await move('submit');
-  check('draft -> submitted', (await statusNow()) === 'submitted');
-  await move('save', { revisionNumber: 'R9' });
-  check(
-    'saving a submitted reservation preserves its lifecycle',
-    (await statusNow()) === 'submitted',
-  );
-  check(
-    'a submitted reservation saves its revised document number',
-    (
-      await db.query('select revision_number from public.reservation_agreements where id=$1', [
-        reservationId,
-      ])
-    ).rows[0]!.revision_number === 'R9',
-  );
-  // Execution needs an ACCEPTED signed RA (repair 20261231000001 section 10).
-  await fails('execution without an accepted signed RA is refused', /SIGNED_RA_DOCUMENT_REQUIRED/, () =>
-    move('execute'),
-  );
+  await fails('an accepted application without signed RA still cannot approve', /SIGNED_RA_DOCUMENT_REQUIRED/, approve);
+  await fails('standalone RA execution is retired', /APPLICATION_APPROVAL_REQUIRED/, () => move('execute'));
   await acceptSignedRa(reservationId);
-  await move('execute');
-  check('submitted -> executed', (await statusNow()) === 'executed');
-  for (const action of ['reopen', 'cancel', 'execute', 'submit']) {
-    await fails(`executed is terminal: ${action} is refused`, /INVALID_AGREEMENT_TRANSITION/, () =>
-      move(action),
-    );
+  await approve();
+  check('one approval executes the linked RA', (await statusNow()) === 'executed');
+  for (const action of ['execute', 'submit']) {
+    await fails(`no extra execution or submission after joint approval: ${action}`,
+      /APPLICATION_APPROVAL_REQUIRED|APPLICATION_SUBMISSION_REQUIRED/, () => move(action));
   }
-  check(
-    'executed stays executed through every refused transition',
-    (await statusNow()) === 'executed',
-  );
-  check(
-    'each recorded revision is immutable evidence',
-    (
-      await db.query<{ n: number }>(
-        `select count(*)::int as n from private.purchase_document_evidence
-          where kind='reservation' and source_id=$1`,
-        [reservationId],
-      )
-    ).rows[0]!.n >= 3,
-  );
-
-  await fails('an executed reservation cannot be cancelled', /INVALID_AGREEMENT_TRANSITION/, () =>
-    move('cancel'),
-  );
-
-  /* A cancelled (never executed) agreement frees the application for a new one. */
-  // The RA comes from the submission and approval already moved it to submitted.
-  const cancelApp = await mkApproved('approved');
+  check('approval preserves immutable document revisions',
+    (await db.query<{ n: number }>(`select count(*)::int n from private.purchase_document_evidence where kind='reservation' and source_id=$1`, [reservationId])).rows[0]!.n >= 2);
+  await move('cancel', {}, superAdmin);
+  check('an unfunded cancellation coordinates application and executed RA',
+    (await db.query(`select a.status application_status,r.status from public.customer_applications a join public.reservation_agreements r on r.customer_application_id=a.id where a.id=$1`, [approved.id])).rows.some(r => r.application_status==='cancelled' && r.status==='cancelled'));
+  await fails('cancellation never silently replaces a signed RA', /APPLICATION_NOT_APPROVED|INVALID_APPLICATION_TRANSITION/, () => reserve(approved.id, approved.termsId));
+  const cancelApp = await mkApproved('purchase_submitted');
   const cancelReservation = cancelApp.reservationId!;
-  await transition('save', actor, cancelReservation, { revisionNumber: 'R1' });
-  check(
-    'saving a submitted agreement retains its status and revision',
-    (
-      await db.query(
-        'select status,revision_number from public.reservation_agreements where id=$1',
-        [cancelReservation],
-      )
-    ).rows.some((row) => row.status === 'submitted' && row.revision_number === 'R1'),
-  );
-  await transition('cancel', actor, cancelReservation);
-  check(
-    'a cancelled agreement is recorded as cancelled, never executed',
-    (
-      await db.query<{ status: string }>(
-        'select status from public.reservation_agreements where id=$1',
-        [cancelReservation],
-      )
-    ).rows[0]!.status === 'cancelled',
-  );
-  const replacement = await reserve(cancelApp.id, cancelApp.termsId);
-  check(
-    'a cancelled agreement frees the application for exactly one replacement',
-    Boolean(replacement) && replacement !== cancelReservation,
-  );
-  check(
-    'the replacement is the only live agreement for that application',
-    (
-      await db.query<{ n: number }>(
-        `select count(*)::int as n from public.reservation_agreements
-          where customer_application_id=$1 and status<>'cancelled'`,
-        [cancelApp.id],
-      )
-    ).rows[0]!.n === 1,
-  );
+  await fails('RA metadata changes use the application workflow', /APPLICATION_SUBMISSION_REQUIRED/, () => transition('save', actor, cancelReservation, { revisionNumber: 'R1' }));
+  await transition('cancel', superAdmin, cancelReservation);
+  check('cancellation retains the original RA history',
+    (await db.query("select count(*)::int n from public.reservation_agreements where customer_application_id=$1 and status='cancelled'", [cancelApp.id])).rows[0]!.n === 1);
+  await fails('cancelled application cannot obtain a replacement implicitly', /APPLICATION_NOT_APPROVED/, () => reserve(cancelApp.id, cancelApp.termsId));
 
   /* Legacy sale-origin reservations are untouched by this path. */
   const legacyCustomer = await mkCustomer();
@@ -745,9 +663,9 @@ export async function runReservationPurchaseChecks({
   await db.query(
     `insert into public.card_sales (id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
        cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
-       commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at)
+       commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at,origin)
      select $1, sale_number, $2, $3, 'staff', $4, $5, $5, '10000.00', 10000,
-            '0', '0.00', 'submitted', now(), now()
+            '0', '0.00', 'submitted', now(), now(),'legacy_import'
      from public.next_sale_number()`,
     [legacySale, legacyCustomer, plan.id, actor, plan.cash_price],
   );
@@ -796,35 +714,12 @@ export async function runReservationPurchaseChecks({
       .then(() => true),
   );
 
-  /* A super admin may reserve on behalf of another seller; the creator is recorded. */
-  // The submission already created this application's RA, so the reviewer's
-  // reservation is the replacement after that RA is cancelled (one live RA rule).
-  const reviewerApp = await mkApproved('approved');
-  await transition('cancel', actor, reviewerApp.reservationId!);
-  const reviewerReservation = (
-    await db.query<{ id: string }>(
-      'select public.reserve_application_purchase_once($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::jsonb) as id',
-      [randomUUID(), superAdmin, reviewerApp.id, reviewerApp.termsId, reserveInput()],
-    )
-  ).rows[0]!.id;
-  check(
-    'a reviewer with the update grant reserves for an application they do not own',
-    (
-      await db.query<{ created_by: string }>(
-        'select created_by from public.reservation_agreements where id=$1',
-        [reviewerReservation],
-      )
-    ).rows[0]!.created_by === superAdmin,
-  );
-  check(
-    'the reviewer did not become the seller: the frozen terms seller stands',
-    (
-      await db.query<{ seller_staff_id: string }>(
-        'select seller_staff_id from public.reservation_agreements where id=$1',
-        [reviewerReservation],
-      )
-    ).rows[0]!.seller_staff_id === termsRow.seller_staff_id,
-  );
+  const reviewerApp = await mkApproved('purchase_submitted');
+  await acceptSignedRa(reviewerApp.reservationId!);
+  await acceptedSignedDocument(db, { kind: 'signed_customer_application', entityId: reviewerApp.id, uploader: actor, reviewer: superAdmin });
+  await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [randomUUID(), superAdmin, reviewerApp.id]);
+  check('Super Admin approves another seller without changing attribution',
+    (await db.query('select seller_staff_id,status from public.reservation_agreements where id=$1', [reviewerApp.reservationId])).rows.some(r => r.seller_staff_id===actor && r.status==='executed'));
 
   /* An Admin may submit an SM's draft (repair 20261231000001 section 30). */
   const admin = staff['admin']!;
@@ -842,8 +737,8 @@ export async function runReservationPurchaseChecks({
     )
   ).rows;
   check(
-    "an Admin submitting an SM's draft creates the RA, with the SM as seller of record",
-    adminRa.length === 1 && adminRa[0]!.created_by === admin && adminRa[0]!.seller_staff_id === actor,
+    "an Admin submitting an SM's draft retains the original RA and seller",
+    adminRa.length === 1 && adminRa[0]!.created_by === actor && adminRa[0]!.seller_staff_id === actor,
     JSON.stringify(adminRa),
   );
   await fails(
@@ -905,10 +800,25 @@ export async function runReservationPurchaseChecks({
     createdCustomers,
     createdApplications,
   });
-  const legacyApp = await legacyFixtures.mkApproved('approved');
-  const legacyApp2 = await legacyFixtures.mkApproved('approved');
-  for (const app of [legacyApp, legacyApp2])
-    await legacyFixtures.transition('cancel', legacySeller, app.reservationId!);
+  // Historical approved applications predate immediate RA creation. Build
+  // that historical shape explicitly; current applications keep their signed RA.
+  const historicalApproved = async () => {
+    const customerId = await legacyFixtures.mkCustomer();
+    const id = (await db.query<{ id: string }>('select private.save_customer_application_before_workflow(null,$1,$2,$3,null) id',
+      [legacySeller, { customerId, planId: plan.id, paymentScheme: 'spot_cash', acquisitionChannels: [], consentAcknowledged: true,
+        acknowledgedAt: '2026-10-07', primarySignatureStatus: 'received', validIdReceived: true },
+        { firstName: 'ANNA', lastName: 'RIVERA', birthDate: '1990-01-01', permanentAddressLine1: '1 Garden Street',
+          cityMunicipality: 'Calamba', province: 'Laguna', mobile: '+639170000001', email: `${customerId}@example.invalid`, printedName: 'ANNA RIVERA' }])).rows[0]!.id;
+    createdApplications.push(id);
+    await db.query('select public.submit_customer_application($1,$2)', [id, legacySeller]);
+    await db.query("update public.customer_applications set status='approved',approved_at=now() where id=$1", [id]);
+    const hash = await fetchProposalHash(db, id, legacySeller);
+    await db.query('select public.review_application_purchase_terms_once($1,$2,$3,$4,$5,null)',
+      [randomUUID(), legacySeller, id, hash, 'Historical commercial terms confirmed.']);
+    return { id };
+  };
+  const legacyApp = await historicalApproved();
+  const legacyApp2 = await historicalApproved();
   // The frozen seller stops being an SM (a legacy reassignment; becoming an OST
   // needs the separate OST workflow, so an SSM role stands in for "not an SM").
   await db.query(

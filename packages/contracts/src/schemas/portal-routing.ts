@@ -53,7 +53,7 @@ export function operationsPath(path: string): string {
   const suffix = match[2] ?? '';
   if (
     match[1] === 'finance' &&
-    /^\/(payments|activation|commissions|commission-settings)(\/|$)/.test(suffix)
+    /^\/(payments|month-end|payroll|activation|commissions|commission-settings)(\/|$)/.test(suffix)
   )
     return `/admin/finance${suffix}`;
   return `/admin${suffix}`;

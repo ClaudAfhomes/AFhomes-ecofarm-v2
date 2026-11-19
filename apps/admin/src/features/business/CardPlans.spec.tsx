@@ -395,7 +395,12 @@ describe('Card Plans states', () => {
     renderWithProviders(<BusinessProductsPage />);
     await screen.findByRole('heading', { name: 'Gold' });
     expect(screen.getByRole('searchbox', { name: 'Search card plans' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Filter by status' })).toBeInTheDocument();
+    const status = screen.getByRole('radiogroup', { name: 'Filter by status' });
+    expect(within(status).getByRole('radio', { name: 'Active' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(within(status).getAllByRole('radio')).toHaveLength(3);
   });
 
   /**

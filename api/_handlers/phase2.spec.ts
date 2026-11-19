@@ -445,6 +445,17 @@ describe('customers', () => {
     expect(state.status).toBe(404);
   });
 
+  it('preserves a customer and receipt when financial history blocks permanent deletion', async () => {
+    const db = install({ tables: {
+      payments: [{ id: 'receipt-kept', customer_id: CUSTOMER.prospect, status: 'verified', receipt_storage_path: 'afhomes-payment-receipts/kept.png' }],
+    } });
+    const state = await call('customers', { method: 'DELETE', path: CUSTOMER.prospect, token: TOKEN.superAdmin });
+    expect(state.status).toBe(409);
+    expect(db.rows('payments')[0]!.receipt_storage_path).toBe('afhomes-payment-receipts/kept.png');
+    expect(db.calls.some((entry) => entry.table === 'purge_customer')).toBe(false);
+    expect(db.calls.some((entry) => entry.op === 'deleteUser')).toBe(false);
+  });
+
   it('hard-deletes an unused customer and removes its Auth user', async () => {
     const id = 'aaaaaaaa-0000-4000-8000-000000000099';
     const authId = '99999999-0000-4000-8000-000000000099';
@@ -525,17 +536,17 @@ describe('customers', () => {
     expect(state.status).toBe(403);
   });
 
-  it('purges a customer together with their history', async () => {
+  it('refuses to purge a customer with retained financial history', async () => {
     const db = install();
     const purged = await call('customers', {
       method: 'DELETE',
       path: CUSTOMER.active,
       token: TOKEN.superAdmin,
     });
-    expect(purged.status).toBe(200);
-    expect(db.rows('customers').some((row) => row.id === CUSTOMER.active)).toBe(false);
-    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(false);
-    expect(db.rows('memberships').some((m) => m.customer_id === CUSTOMER.active)).toBe(false);
+    expect(purged.status).toBe(409);
+    expect(db.rows('customers').some((row) => row.id === CUSTOMER.active)).toBe(true);
+    expect(db.rows('card_sales').some((sale) => sale.customer_id === CUSTOMER.active)).toBe(true);
+    expect(db.rows('memberships').some((m) => m.customer_id === CUSTOMER.active)).toBe(true);
   });
 });
 
@@ -634,219 +645,25 @@ describe('customer active-membership mapping', () => {
 describe('card sales', () => {
   beforeEach(() => install());
 
-  it('creates a sale with a full commercial snapshot and a pending commission', async () => {
+  it.each([TOKEN2.salesManager, TOKEN.admin, TOKEN.superAdmin])('requires the Application & RA workflow for %s', async (token) => {
     const db = install();
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(201);
-    const body = state.body as Record<string, unknown>;
-    expect(body).toMatchObject({
-      cashPrice: '60000.00',
-      minimumDownPayment: '20000.00',
-      yearlyPoints: 60000,
-      commissionRate: '0.04',
-      expectedCommission: '2400.00',
-      status: 'submitted',
-    });
-
-    const sale = db.rows('card_sales').find((r) => r.sale_number === body.saleNumber)!;
-    expect(sale.cash_price_snapshot).toBe('60000.00');
-    expect(sale.expected_commission_snapshot).toBe('2400.00');
-    expect(sale.seller_staff_id).toBe(STAFF2.salesManager);
-
-    const commission = db.rows('commissions').find((c) => c.sale_id === sale.id)!;
-    expect(commission).toMatchObject({
-      amount: '2400.00',
-      rate_snapshot: '0.04',
-      basis_amount_snapshot: '60000.00',
-      status: 'pending',
-      beneficiary_staff_id: STAFF2.salesManager,
-    });
-    expect(db.rows('audit_events').some((e) => e.action === 'APPLICATION_SUBMITTED')).toBe(true);
+    const before = structuredClone(db.rows('card_sales'));
+    const result = await call('sales', { method: 'POST', path: '', token, body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold } });
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ error: { code: 'PURCHASE_WORKFLOW_REQUIRED' } });
+    expect(db.rows('card_sales')).toEqual(before);
+    expect(db.calls.some(c => c.table === 'next_sale_number')).toBe(false);
   });
 
-  it('creates an SM-owned sale with the same server-side commercial snapshot', async () => {
+  it('keeps existing commercial snapshots after catalogue edits', async () => {
     const db = install();
-    db
-      .rows('staff_role_assignments')
-      .find((assignment) => assignment.staff_id === UUID.viewerStaff)!.role_id = UUID.role.custom;
-    db.rows('role_permissions').push({
-      role_id: UUID.role.custom,
-      module_id: 'module:sales.card_sales',
-      can_view: true,
-      can_create: true,
-      can_update: false,
-      can_delete: false,
-    });
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN.viewer,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({
-      sellerStaffId: UUID.viewerStaff,
-      cashPrice: '60000.00',
-      minimumDownPayment: '20000.00',
-      yearlyPoints: 60000,
-      commissionRate: '0.04',
-      expectedCommission: '2400.00',
-    });
+    db.rows('card_plans').find(r => r.id === PRODUCT.gold)!.cash_price = '90000.00';
+    const result = await call('sales', { path: SALE.submitted, token: TOKEN2.finance });
+    expect(result.body).toMatchObject({ cashPrice: '60000.00', expectedCommission: '2400.00' });
   });
 
-  it('a later price change cannot alter an existing sale', async () => {
-    const db = install();
-    await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN.admin,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    const sale = db.rows('card_sales').find((r) => r.id === SALE.submitted)!;
-    expect(sale.id).toBe(SALE.submitted);
-
-    db.rows('card_plans').find((r) => r.id === PRODUCT.gold)!.cash_price = '90000.00';
-    const detail = await call('sales', { path: `${SALE.submitted}`, token: TOKEN.admin });
-    expect((detail.body as { cashPrice: string }).cashPrice).toBe('60000.00');
-    expect((detail.body as { expectedCommission: string }).expectedCommission).toBe('2400.00');
-  });
-
-  it('refuses to sell an inactive product', async () => {
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.retired },
-    });
-    expect(state.status).toBe(409);
-    expect(err(state.body).message).toMatch(/product inactive/);
-  });
-
-  it('refuses a cancelled customer', async () => {
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.cancelled, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(409);
-  });
-
-  it('404s an unknown product or customer', async () => {
-    const badProduct = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: '99999999-9999-4999-8999-999999999999' },
-    });
-    expect(badProduct.status).toBe(404);
-    const badCustomer = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: '99999999-9999-4999-8999-999999999999', productId: PRODUCT.gold },
-    });
-    expect(badCustomer.status).toBe(404);
-  });
-
-  it('derives the upline from the seller relationship, not the request', async () => {
-    const db = install();
-    const created = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.bronze },
-    });
-    const saleNumber = (created.body as { saleNumber: string }).saleNumber;
-    const sale = db.rows('card_sales').find((r) => r.sale_number === saleNumber)!;
-    // salesManager's authoritative upline is the Senior Sales Manager (smToSsm).
-    expect(sale.referral_relationship_id).toBe(REFERRAL.smToSsm);
-  });
-
-  it('records no upline for a seller without an authoritative relationship', async () => {
-    const db = install();
-    db.rows('referral_relationships').length = 0;
-    const created = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    const saleNumber = (created.body as { saleNumber: string }).saleNumber;
-    expect(
-      db.rows('card_sales').find((r) => r.sale_number === saleNumber)!.referral_relationship_id,
-    ).toBeNull();
-  });
-
-  it('rejects a body that tries to assert the seller for someone outside the downline', async () => {
-    const db = install();
-    const before = db.rows('card_sales').length;
-    // The creating SM must be the seller of record: a body naming any other
-    // seller (even a valid, active account) is refused before any write.
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: {
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-        sellerStaffId: UUID.superAdminStaff,
-      },
-    });
-    expect(state.status).toBe(403);
-    expect(err(state.body).message).toMatch(/seller of record/);
-    // No sale row was created.
-    expect(db.rows('card_sales')).toHaveLength(before);
-  });
-
-  it('denies sale creation by admin even for valid seller', async () => {
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN.admin,
-      body: {
-        customerId: CUSTOMER.prospect,
-        productId: PRODUCT.gold,
-        sellerStaffId: UUID.superAdminStaff,
-      },
-    });
-    expect(state.status).toBe(403);
-  });
-
-  it('denies sale creation without sales.card_sales create', async () => {
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN.viewer,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(403);
-  });
-
-  it('rejects a malformed request body', async () => {
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: 'nope', productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(400);
-  });
-
-  it('maps the one-open-application-per-customer index to a conflict', async () => {
-    install({ writeErrors: { card_sales: { code: '23505', message: 'duplicate key' } } });
-    const state = await call('sales', {
-      method: 'POST',
-      path: '',
-      token: TOKEN2.salesManager,
-      body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
-    });
-    expect(state.status).toBe(409);
+  it.each([TOKEN.viewer, TOKEN2.ost, TOKEN2.seniorSalesManager, TOKEN2.viceDirector])('refuses unauthorized direct origination for %s', async (token) => {
+    expect((await call('sales', { method: 'POST', path: '', token, body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold } })).status).toBe(403);
   });
 
   it('shows a seller only their own sales', async () => {

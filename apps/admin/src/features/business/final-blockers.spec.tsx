@@ -22,7 +22,7 @@ const session = vi.hoisted(() => ({
     roleId: '00000000-0000-4000-8000-0000000000f2',
     roleSlug: 'sales_manager',
     roleName: 'Sales Manager',
-    afHomesPermissions: [] as never[],
+    afHomesPermissions: [{ moduleKey: 'sales.customers', canView: true, canCreate: true, canUpdate: true, canDelete: false }],
     status: 'active' as const,
   } as Record<string, unknown>,
 }));

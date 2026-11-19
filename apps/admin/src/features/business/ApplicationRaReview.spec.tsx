@@ -10,6 +10,10 @@ const plan = {
   standardInstallmentMonths: 4,
 } as CardProduct;
 describe('preliminary RA review', () => {
+  it('shows the issued number from the linked agreement', () => {
+    renderWithProviders(<ApplicationRaReview value={{ reservationNumber: 'OLD-DRAFT' }} reservationNumber="2026-0002" defaults={{}} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Official Reservation Agreement Number')).toHaveValue('2026-0002');
+  });
  it('keeps official issuance pending and preserves a separately labelled legacy proposal', () => {
   renderWithProviders(<ApplicationRaReview value={{reservationNumber:'OLD-DRAFT'}} defaults={{}} onChange={vi.fn()} />);
   expect(screen.getByLabelText('Official Reservation Agreement Number')).toHaveValue('Pending authorized reservation issuance');

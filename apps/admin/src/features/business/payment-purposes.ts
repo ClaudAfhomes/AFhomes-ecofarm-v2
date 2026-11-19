@@ -14,7 +14,7 @@ export type PaymentPurpose = NonNullable<RecordPaymentRequest['paymentPurpose']>
 export const PAYMENT_PURPOSE_LABEL: Record<PaymentPurpose, string> = {
   reservation_fee: 'Reservation payment',
   contractual_down_payment: 'Down payment',
-  contractual_installment: 'Monthly installment',
+  contractual_installment: 'Partial payment / installment',
   contractual_full: 'Full payment (remaining balance)',
 };
 
@@ -47,7 +47,7 @@ export interface PurposeOption {
   amount: string;
   /** Largest amount the form accepts. */
   max: string;
-  /** True when the amount is fixed (full payment = exact remaining balance). */
+  /** Amount must match the fee or full balance; the input remains editable. */
   locked: boolean;
 }
 
@@ -89,7 +89,7 @@ export function nextPaymentStep(item: {
   if (item.fullyPaid || compareMoney(item.remainingBalance, ZERO) <= 0) {
     if (item.origin === 'reservation') return { key: 'finalize', label: 'Finalize purchase' };
     return item.activatable
-      ? { key: 'activate', label: 'Activate' }
+      ? { key: 'activate', label: 'Activate VIP Membership' }
       : { key: 'none', label: 'Awaiting activation' };
   }
   if (
@@ -104,16 +104,16 @@ export function nextPaymentStep(item: {
     : { key: 'full', label: 'Record full payment', purpose: 'contractual_full' };
 }
 
-export function availablePurposes(terms: PurchaseTerms, payments: LedgerPayment[]): PurposeOption[] {
+export function availablePurposes(
+  terms: PurchaseTerms,
+  payments: LedgerPayment[],
+): PurposeOption[] {
   const active = payments.filter(isActive);
   const remaining = payableBalance(terms, payments);
   if (compareMoney(remaining, ZERO) <= 0) return [];
   const feePayments = active.filter((p) => p.paymentPurpose === 'reservation_fee');
   // A payment with no recorded purpose is a legacy contractual payment.
   const contractual = active.filter((p) => p.paymentPurpose !== 'reservation_fee');
-  const hasDown = contractual.some(
-    (p) => p.paymentPurpose === 'contractual_down_payment' || p.paymentPurpose === null,
-  );
   const options: PurposeOption[] = [];
 
   if (
@@ -127,9 +127,14 @@ export function availablePurposes(terms: PurchaseTerms, payments: LedgerPayment[
       label: PAYMENT_PURPOSE_LABEL.reservation_fee,
       amount: terms.reservationFee,
       max: terms.reservationFee,
-      locked: false,
+      locked: true,
     });
   }
+  if (
+    compareMoney(terms.reservationFee, ZERO) > 0 &&
+    !payments.some((p) => p.paymentPurpose === 'reservation_fee' && p.status === 'verified')
+  )
+    return options;
   if (contractual.length === 0) {
     // The required initial includes the reservation fee already collected.
     const owed = subtractMoney(terms.requiredInitial, sum(feePayments));
@@ -143,23 +148,21 @@ export function availablePurposes(terms: PurchaseTerms, payments: LedgerPayment[
         locked: false,
       });
   }
-  if (hasDown && terms.monthlyAmount && terms.installmentMonths) {
-    options.push({
+  options.push(
+    {
       purpose: 'contractual_installment',
-      label: PAYMENT_PURPOSE_LABEL.contractual_installment,
-      amount: min(terms.monthlyAmount, remaining),
+      label: terms.monthlyAmount ? 'Installment / partial payment' : 'Partial payment',
+      amount: terms.monthlyAmount ? min(terms.monthlyAmount, remaining) : remaining,
       max: remaining,
       locked: false,
-    });
-  }
-  if (contractual.length > 0 || !terms.monthlyAmount) {
-    options.push({
+    },
+    {
       purpose: 'contractual_full',
       label: PAYMENT_PURPOSE_LABEL.contractual_full,
       amount: remaining,
       max: remaining,
       locked: true,
-    });
-  }
+    },
+  );
   return options;
 }

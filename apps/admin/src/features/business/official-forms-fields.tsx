@@ -19,6 +19,8 @@ import {
   OLDEST_HOLDER_AGE,
   CIVIL_STATUS_OPTIONS,
   SEX_OPTIONS,
+  PREFIX_OPTIONS,
+  SUFFIX_OPTIONS,
   tinNumberSchema,
   optionalContactNumberSchema,
   aaNumberSchema,
@@ -348,6 +350,9 @@ export function SelectField({
  * generic: a holder with no suffix has NONE, which is not the same statement
  * as a record where the field was never filled in.
  */
+/** Chip value standing in for "no prefix/suffix"; never sent to the server. */
+const NO_HONORIFIC = '__none';
+
 const choiceOptions = (values: readonly string[], emptyLabel = 'Not specified') => [
   { value: '', label: emptyLabel },
   ...values.map((value) => ({ value, label: value })),
@@ -462,6 +467,21 @@ export function HolderFields({
   const visible = (section: string) =>
     !tabbed || activeSection === (section === 'identity' ? 'personal' : section);
   const set = (key: keyof ApplicationHolder, next: string) => onChange({ ...value, [key]: next });
+  // In the wizard, Prefix and Suffix are one-click chips instead of dropdowns.
+  // The empty choice gets a real value so "None" stays a visible, clickable
+  // chip (empty-value chips are hidden) and a mis-click can be undone.
+  const honorific = (key: 'prefix' | 'suffix', label: string, values: readonly string[]) => (
+    <SelectField
+      cards={tabbed}
+      appearance="inline"
+      label={label}
+      value={tabbed ? value[key] || NO_HONORIFIC : (value[key] ?? '')}
+      onChange={(v) => set(key, v === NO_HONORIFIC ? '' : v)}
+      options={withStoredValue(choiceOptions(values, 'None'), value[key]).map((option) =>
+        tabbed && option.value === '' ? { ...option, value: NO_HONORIFIC } : option,
+      )}
+    />
+  );
   const identityFields = (
     <>
       <SelectField
@@ -558,12 +578,7 @@ export function HolderFields({
             </h3>
           ) : null}
           <div className={tabbed ? v4.grid2 : sectioned ? styles.editorGrid : styles.fieldContents}>
-            <Field
-              label="Prefix"
-              value={value.prefix ?? ''}
-              onChange={(v) => set('prefix', v.slice(0, 20))}
-              placeholder="Optional - Mr., Ms., Dr."
-            />
+            {honorific('prefix', 'Prefix', PREFIX_OPTIONS)}
             <Field
               label="First name"
               value={value.firstName}
@@ -587,12 +602,7 @@ export function HolderFields({
               onChange={(v) => set('lastName', v)}
               required
             />
-            <Field
-              label="Suffix"
-              value={value.suffix ?? ''}
-              placeholder="Optional suffix"
-              onChange={(v) => set('suffix', v.slice(0, 20))}
-            />
+            {honorific('suffix', 'Suffix', SUFFIX_OPTIONS)}
             <DateField
               label="Birth date"
               value={value.birthDate}

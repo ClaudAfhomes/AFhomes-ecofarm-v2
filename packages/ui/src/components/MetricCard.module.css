@@ -74,9 +74,8 @@ a.card:focus-visible {
   font-size: var(--text-body);
   color: var(--color-text-primary);
   letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* The metric name must stay readable on narrow cards: wrap, never truncate. */
+  overflow-wrap: break-word;
 }
 
 .description {

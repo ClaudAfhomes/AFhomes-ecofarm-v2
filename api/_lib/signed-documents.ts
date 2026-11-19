@@ -54,8 +54,8 @@ const SCOPES = {
   reservations: {
     kind: 'signed_reservation_agreement',
     column: 'reservation_id',
-    module: 'sales.card_sales',
-    action: 'create',
+    module: 'sales.customers',
+    action: 'update',
   },
 } as const;
 type Scope = keyof typeof SCOPES;
@@ -193,6 +193,12 @@ export async function handleSignedDocuments(
       return (fail(res, 'NOT_FOUND', 'Record not found', 404), true);
 
     if (listing) {
+      const { data: application, error: applicationError } = await db
+        .from('customer_applications')
+        .select('workflow_revision')
+        .eq('id', applicationId)
+        .maybeSingle();
+      if (applicationError) throw applicationError;
       const { data, error } = await db
         .from('purchase_signed_documents')
         .select('*')
@@ -200,7 +206,10 @@ export async function handleSignedDocuments(
         .eq('kind', scope.kind)
         .order('uploaded_at', { ascending: false });
       if (error) throw error;
-      return (list(res, await shape(db, (data ?? []) as Row[])), true);
+      const current = ((data ?? []) as Row[]).filter(
+        (doc) => (doc.workflow_revision ?? 1) === (application?.workflow_revision ?? 1),
+      );
+      return (list(res, await shape(db, current)), true);
     }
 
     if (upload) {

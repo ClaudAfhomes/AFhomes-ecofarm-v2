@@ -19,6 +19,7 @@ const application = {
   requestId,
   customerId: CUSTOMER.prospect,
   planId: PRODUCT.gold,
+  smStaffId: UUID.viewerStaff,
   tier: 'GOLD',
   paymentScheme: 'spot_cash',
   consentAcknowledged: false,

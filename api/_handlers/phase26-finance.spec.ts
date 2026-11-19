@@ -615,7 +615,12 @@ describe('Phase 26 commission lifecycle', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: { reference: 'PAYOUT-26-1' },
+      body: {
+        reference: 'PAYOUT-26-1',
+        method: 'Bank transfer',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Bank advice PAYOUT-26-1 on file',
+      },
     });
     expect(paid.status).toBe(200);
     expect(paid.body).toMatchObject({
@@ -630,8 +635,65 @@ describe('Phase 26 commission lifecycle', () => {
     expect(row.status).toBe('paid');
     expect(row.paid_by).toBe(UUID.adminStaff);
     expect(row.paid_reference).toBe('PAYOUT-26-1');
+    expect(row.paid_method).toBe('Bank transfer');
+    expect(row.paid_on).toBe('2026-11-01');
+    expect(row.paid_evidence_reference).toBe('Bank advice PAYOUT-26-1 on file');
     expect(typeof row.paid_at === 'string' && row.paid_at.length > 0).toBe(true);
+    expect(paid.body).toMatchObject({
+      paidReference: 'PAYOUT-26-1',
+      paidMethod: 'Bank transfer',
+      paidOn: '2026-11-01',
+      paidEvidenceReference: 'Bank advice PAYOUT-26-1 on file',
+    });
     expect(db.rows('audit_events').some((e) => e.action === 'COMMISSION_PAID')).toBe(true);
+  });
+
+  it('28c. recording an external payment requires reference, method, evidence and a non-future date', async () => {
+    const db = install();
+    await callCommissions({
+      method: 'POST',
+      path: '99990000-0000-4000-8000-000000000002/qualify',
+      token: TOKEN.admin,
+      body: { decision: 'earned', notes: 'Qualification before payment checks.' },
+    });
+    const pay = (body: Record<string, unknown>) =>
+      callCommissions({
+        method: 'POST',
+        path: '99990000-0000-4000-8000-000000000002/pay',
+        token: TOKEN.admin,
+        body,
+      });
+    // Each body below is complete except for the one fact under test.
+    const evidenceReference = 'Cash voucher REF-777 on file';
+    expect((await pay({})).status).toBe(400);
+    expect((await pay({ method: 'Cash', paidOn: '2026-11-01', evidenceReference })).status).toBe(400);
+    expect((await pay({ reference: 'REF-777', paidOn: '2026-11-01', evidenceReference })).status).toBe(400);
+    expect((await pay({ reference: 'REF-777', method: 'Cash', evidenceReference })).status).toBe(400);
+    expect((await pay({ reference: 'REF-777', method: 'Cash', paidOn: '2026-11-01' })).status).toBe(400);
+    expect(
+      (await pay({ reference: 'REF-777', method: 'Cash', paidOn: '2026-11-01', evidenceReference: 'short' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await pay({ reference: 'REF-777', method: 'Cash', paidOn: '2026-02-30', evidenceReference })).status,
+    ).toBe(400);
+    // Punctuation only: the database could not check it for reuse by another payout.
+    expect(
+      (await pay({ reference: '- / -', method: 'Cash', paidOn: '2026-11-01', evidenceReference })).status,
+    ).toBe(400);
+    // Year 0 is not a PostgreSQL date (would be a 500); an obvious typo year is refused too.
+    expect(
+      (await pay({ reference: 'REF-777', method: 'Cash', paidOn: '0000-01-01', evidenceReference })).status,
+    ).toBe(400);
+    expect(
+      (await pay({ reference: 'REF-777', method: 'Cash', paidOn: '0026-11-01', evidenceReference })).status,
+    ).toBe(400);
+    const future = await pay({ reference: 'REF-777', method: 'Cash', paidOn: '2999-01-01', evidenceReference });
+    expect(future.status).toBe(400);
+    expect(err(future.body).message).toMatch(/future/i);
+    const row = db.rows('commissions').find((c) => c.id === '99990000-0000-4000-8000-000000000002')!;
+    expect(row.status).toBe('earned');
+    expect(db.rows('audit_events').some((e) => e.action === 'COMMISSION_PAID')).toBe(false);
   });
 
   it('28b. repeated Mark Paid is idempotent (no second mutation, no second audit)', async () => {
@@ -646,7 +708,12 @@ describe('Phase 26 commission lifecycle', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: {},
+      body: {
+        reference: 'IDEM-REF-1',
+        method: 'Bank transfer',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Bank advice IDEM-REF-1 on file',
+      },
     });
     expect(first.status).toBe(200);
     const audits = db.rows('audit_events').filter((e) => e.action === 'COMMISSION_PAID').length;
@@ -683,7 +750,12 @@ describe('Phase 26 commission lifecycle', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: {},
+      body: {
+        reference: 'BACK-REF-1',
+        method: 'Cash',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Cash voucher BACK-REF-1 on file',
+      },
     });
     const backwards = await callCommissions({
       method: 'POST',
@@ -864,7 +936,7 @@ describe('Phase 26 seller commission scoping', () => {
           body: { decision: 'earned', notes: 'Historical commission was already settled.' },
         })
       ).status,
-    ).toBe(409);
+    ).toBe(403);
     expect(
       (
         await callCommissions({
@@ -877,6 +949,72 @@ describe('Phase 26 seller commission scoping', () => {
     ).toBe(409);
     expect(historical).toEqual(snapshot);
     void installScoped;
+  });
+
+  it('33b. a seller reading their own paid commission does not receive the payout evidence reference', async () => {
+    const db = install();
+    db.rows('role_permissions').push({
+      role_id: '20202020-0000-4000-8000-000000000003',
+      module_id: 'module:network.commissions',
+      can_view: true,
+      can_create: false,
+      can_update: false,
+      can_delete: false,
+    });
+    const id = '99990000-0000-4000-8000-000000002603';
+    db.rows('commissions').push({
+      id,
+      sale_id: SALE.unpaid,
+      ost_id: null,
+      beneficiary_type: 'staff',
+      beneficiary_staff_id: STAFF2.salesManager,
+      beneficiary_ost_id: null,
+      amount: '1200.00',
+      rate_snapshot: '0.04',
+      basis_amount_snapshot: '30000.00',
+      status: 'paid',
+      qualification_notes: 'Qualified for the evidence visibility check.',
+      qualified_at: '2026-10-01T00:00:00.000Z',
+      qualified_by: UUID.adminStaff,
+      earned_at: '2026-10-01T00:00:00.000Z',
+      paid_at: '2026-11-03T00:00:00.000Z',
+      cancelled_at: null,
+      cancellation_reason: null,
+      paid_by: UUID.adminStaff,
+      paid_reference: 'SELLER-PAY-1',
+      paid_method: 'Bank transfer',
+      paid_on: '2026-11-02',
+      paid_evidence_reference: 'Internal filing note 2603',
+      created_at: '2026-09-28T00:00:00.000Z',
+    });
+    const own = (body: unknown) =>
+      (data(body) as Record<string, unknown>[]).find((r) => r.id === id)!;
+    // The payee still sees how and when they were paid.
+    const sellerList = await callCommissions({ path: '', token: TOKEN2.salesManager });
+    expect(own(sellerList.body)).toMatchObject({
+      paidReference: 'SELLER-PAY-1',
+      paidMethod: 'Bank transfer',
+      paidOn: '2026-11-02',
+      paidEvidenceReference: null,
+    });
+    // The search path shapes rows separately; it must not leak the evidence either.
+    const sellerSearch = await callCommissions({
+      path: '',
+      token: TOKEN2.salesManager,
+      query: { search: 'paid' },
+    });
+    expect(own(sellerSearch.body).paidEvidenceReference).toBeNull();
+    const sellerDetail = await callCommissions({ path: id, token: TOKEN2.salesManager });
+    expect(sellerDetail.status).toBe(200);
+    expect((sellerDetail.body as Record<string, unknown>).paidEvidenceReference).toBeNull();
+    // Finance keeps the internal evidence pointer.
+    const financeDetail = await callCommissions({ path: id, token: TOKEN2.finance });
+    expect((financeDetail.body as Record<string, unknown>).paidEvidenceReference).toBe(
+      'Internal filing note 2603',
+    );
+    expect(own((await callCommissions({ path: '', token: TOKEN2.finance })).body)).toMatchObject({
+      paidEvidenceReference: 'Internal filing note 2603',
+    });
   });
 
   it('35/36. historical attribution is frozen; a genealogy change never moves it', async () => {
@@ -926,7 +1064,12 @@ describe('Phase 26 audit', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: { reference: 'AUDIT-REF-1' },
+      body: {
+        reference: 'AUDIT-REF-1',
+        method: 'Bank transfer',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Bank advice AUDIT-REF-1 on file',
+      },
     });
     const qualified = db.rows('audit_events').find((e) => e.action === 'COMMISSION_QUALIFIED')!;
     expect(qualified.entity_id).toBe('99990000-0000-4000-8000-000000000002');
@@ -1027,7 +1170,12 @@ describe('Phase 26 integration flow', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: { reference: 'INT-FLOW-1' },
+      body: {
+        reference: 'INT-FLOW-1',
+        method: 'Bank transfer',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Bank advice INT-FLOW-1 on file',
+      },
     });
     expect(paid.status).toBe(200);
     expect(paid.body).toMatchObject({ status: 'paid', amount: '2400.00' });
@@ -1036,7 +1184,12 @@ describe('Phase 26 integration flow', () => {
       method: 'POST',
       path: '99990000-0000-4000-8000-000000000002/pay',
       token: TOKEN.admin,
-      body: { reference: 'INT-FLOW-1' },
+      body: {
+        reference: 'INT-FLOW-1',
+        method: 'Bank transfer',
+        paidOn: '2026-11-01',
+        evidenceReference: 'Bank advice INT-FLOW-1 on file',
+      },
     });
     expect(retry.status).toBe(200);
   });
@@ -1063,19 +1216,19 @@ describe('D-12 one membership per customer at sale creation', () => {
       },
     });
     expect(state.status).toBe(409);
-    expect(JSON.stringify(state.body)).toMatch(/already has an active membership/);
+    expect(JSON.stringify(state.body)).toMatch(/PURCHASE_WORKFLOW_REQUIRED/);
     // No sale row, so no payment can ever be recorded toward it.
     expect(db.rows('card_sales')).toHaveLength(before);
   });
 
-  it('allows a first sale for a customer with no membership', async () => {
+  it('requires Application & RA even for a first purchase', async () => {
     const state = await callSales({
       method: 'POST',
       path: '',
       token: TOKEN2.salesManager,
       body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold },
     });
-    expect(state.status).toBe(201);
+    expect(state.status).toBe(409);
   });
 
   it('a direct API bypass with another seller is still blocked', async () => {
@@ -1090,6 +1243,13 @@ describe('D-12 one membership per customer at sale creation', () => {
       },
     });
     expect(state.status).toBe(409);
-    expect(JSON.stringify(state.body)).toMatch(/one membership per customer/);
+    expect(JSON.stringify(state.body)).toMatch(/PURCHASE_WORKFLOW_REQUIRED/);
   });
+});
+
+it('mounts the Supabase Commission Settings roster and validates authorization and filters', async () => {
+  install();
+  expect((await callCommissions({path:'rules/roster',token:TOKEN.superAdmin,query:{limit:'1'}})).status).toBe(200);
+  expect((await callCommissions({path:'rules/roster',token:TOKEN.superAdmin,query:{limit:'101'}})).status).toBe(400);
+  expect((await callCommissions({path:'rules/roster'})).status).toBe(401);
 });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { listMigrations, startDisposablePostgres } from './lib/local-postgres.mjs';
@@ -10,6 +11,7 @@ import { makePurchaseFixtures } from '../../../supabase/reservation-purchase-int
 import {
   acceptedSignedDocument,
   paymentReceipt,
+  verifiedReservationFee,
 } from '../../../supabase/purchase-evidence-fixtures.ts';
 import { customerImportContinuationSchema } from '../../../packages/contracts/src/schemas/customer-import-continuation.ts';
 
@@ -71,7 +73,7 @@ try {
   ]) {
     const statuses = [
       ['Pending', '0.00', 'application'],
-      ['Reservation Paid', '10000.00', 'reservation'],
+      ['Reservation Paid', '10000.00', 'application'],
       ['Down Payment', '20000.00', 'finance'],
       ['Partially Paid', '30000.00', 'finance'],
       ['Fully Paid', total, 'activation'],
@@ -127,10 +129,24 @@ try {
       if (tier === 'GOLD' && status === 'Partially Paid') fields.contract_date = manilaToday;
       if (tier === 'GOLD' && status === 'Active VIP') goldVipFields = fields;
       if (tier === 'BRONZE' && status === 'Fully Paid') committedSample = { row, stage };
-      const historical = ['active','inactive'].includes(stage);
-      if (historical) Object.assign(fields, { existing_card_activation_date: '2026-01-01', existing_card_valid_until: status === 'Expired' ? '2026-09-01' : '2030-01-01', existing_stay_points_total: '10000' });
-      if (tier === 'GOLD' && status === 'Active VIP') Object.assign(fields, { purchase_reference: '26101400003G1C01S', existing_vip_control_number: '26101400003G1C01S' });
-      if (tier === 'SILVER' && status === 'Active VIP') Object.assign(fields, { purchase_reference: '26101400002S1C01N', existing_vip_control_number: '26101400002S1C01N', contract_classification: 'Non-Standard' });
+      const historical = ['active', 'inactive'].includes(stage);
+      if (historical)
+        Object.assign(fields, {
+          existing_card_activation_date: '2026-01-01',
+          existing_card_valid_until: status === 'Expired' ? '2026-09-01' : '2030-01-01',
+          existing_stay_points_total: '10000',
+        });
+      if (tier === 'GOLD' && status === 'Active VIP')
+        Object.assign(fields, {
+          purchase_reference: '26101400003G1C01S',
+          existing_vip_control_number: '26101400003G1C01S',
+        });
+      if (tier === 'SILVER' && status === 'Active VIP')
+        Object.assign(fields, {
+          purchase_reference: '26101400002S1C01N',
+          existing_vip_control_number: '26101400002S1C01N',
+          contract_classification: 'Non-Standard',
+        });
       const payments =
         amount === '0.00' || historical
           ? []
@@ -211,6 +227,7 @@ try {
           validIdReceived: true,
           reservationPaymentProofReceived: false,
           referrerStaffId: staff.referrer,
+          smStaffId: staff.sm,
         };
         const appId = (
           await db.query('select public.save_customer_application(null,$1,$2,$3,null) id', [
@@ -219,6 +236,12 @@ try {
             normalized.customerFacts.primary,
           ])
         ).rows[0].id;
+        await db.query(
+          `insert into public.identity_documents(subject_type,customer_id,storage_path,original_filename,mime_type,size_bytes,sha256,
+          reviewed_by,reviewed_at,verification_status,reviewed_data,uploaded_by)
+          values('customer',$1,$2,'passport.pdf','application/pdf',2048,repeat('a',64),$3,now(),'confirmed','{"fields":{"idType":"passport"}}',$3)`,
+          [intake.customerId, `synthetic-import/${randomUUID()}.pdf`, staff.actor],
+        );
         // Purchase workflow (repair 20261231000001): a super-admin originator names
         // an ACTIVE Sales Manager as seller of record (an OST never is); the RA is
         // created at submission; approval needs an ACCEPTED signed application and
@@ -243,11 +266,6 @@ try {
           uploader: staff.actor,
           reviewer: staff.vd,
         });
-        await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
-          randomUUID(),
-          staff.actor,
-          appId,
-        ]);
         existingReservation = (
           await db.query(
             "select id from public.reservation_agreements where customer_application_id=$1 and status<>'cancelled'",
@@ -260,10 +278,12 @@ try {
           uploader: staff.actor,
           reviewer: staff.vd,
         });
-        await db.query(
-          "select public.transition_purchase_reservation_once($1,$2,$3,'execute','{}')",
-          [randomUUID(), staff.actor, existingReservation],
-        );
+        await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
+          randomUUID(),
+          staff.actor,
+          appId,
+        ]);
+
         await db.query(
           'update private.customer_import_purchase_sources set application_id=$1 where id=$2',
           [appId, intake.importContinuation.sourceId],
@@ -317,22 +337,294 @@ try {
       }
       const first = await commit();
       assert.equal(first.importContinuation.stage, stage);
-      const ids=(await db.query('select c.ra_number,c.vip_card_number,src.purchase_reference from public.customers c join private.customer_import_purchase_sources src on src.customer_id=c.id where c.id=$1',[first.customerId])).rows[0];
-      assert.match(ids.vip_card_number,/^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/);
-      assert.equal(ids.purchase_reference,ids.vip_card_number,'Purchase reference must be the official VIP card ID');
-      assert.notEqual(ids.ra_number,ids.vip_card_number,'Customer ID and VIP card ID are separate');
-      if(fields.existing_vip_control_number) assert.equal(ids.vip_card_number,fields.existing_vip_control_number);
+      if (status === 'Reservation Paid') {
+        assert.equal(first.importContinuation.externallyVerified, false);
+        assert.equal(first.importContinuation.saleId, null);
+        const state = (
+          await db.query(
+            `select
+          (select count(*)::int from public.payments where customer_id=$1) payments,
+          (select count(*)::int from public.card_sales where customer_id=$1) sales,
+          (select count(*)::int from private.customer_external_import_receipts where source_id=$2) receipts,
+          (select count(*)::int from private.customer_import_payment_claims where source_id=$2 and status='claim') claims`,
+            [first.customerId, first.importContinuation.sourceId],
+          )
+        ).rows[0];
+        assert.deepEqual(state, { payments: 0, sales: 0, receipts: 0, claims: 1 });
+        if (tier === 'BRONZE') {
+          const clients = [new pg.Client({connectionString:postgres.url}),new pg.Client({connectionString:postgres.url})];
+          try {
+            await Promise.all(clients.map(client=>client.connect()));
+            const retries=await Promise.all(clients.map(client=>client.query('select public.commit_external_customer_import_row($1,$2,$3) result',[row,staff.actor,normalized.externalReason])));
+            for(const retry of retries) {
+              assert.equal(retry.rows[0].result.customerId,first.customerId);
+              assert.equal(retry.rows[0].result.importContinuation.externallyVerified,false);
+            }
+          } finally { await Promise.all(clients.map(client=>client.end())); }
+        }
+        const repeated = await commit();
+        assert.equal(repeated.customerId, first.customerId);
+        assert.equal(repeated.importContinuation.externallyVerified, false);
+        assert.equal(
+          (
+            await db.query(
+              "select count(*)::int n from public.audit_events where entity_id=$1 and action='IMPORTED_RESERVATION_APPROVAL_REQUIRED'",
+              [row],
+            )
+          ).rows[0].n,
+          1,
+        );
+        await assert.rejects(
+          db.query('select public.commit_external_customer_import_row($1,$2,$3)', [
+            row,
+            staff.referrer,
+            normalized.externalReason,
+          ]),
+          /PERMISSION|FORBIDDEN|IMPORT_SOURCE|NOT_ALLOWED|ACCESS|ACTOR/i,
+        );
+        if (tier === 'GOLD') {
+          const sourceId = first.importContinuation.sourceId;
+          const claims = async () =>
+            (
+              await db.query('select public.customer_import_payment_claims($1,$2,null) result', [
+                staff.actor,
+                sourceId,
+              ])
+            ).rows[0].result;
+          let claim = (await claims())[0];
+          const proof = (
+            await db.query(
+              "select public.prepare_import_claim_proof($1,$2,'application/pdf') result",
+              [claim.id, staff.actor],
+            )
+          ).rows[0].result;
+          await db.query('insert into storage.objects(bucket_id,name) values($1,$2)', [
+            proof.bucket,
+            proof.path,
+          ]);
+          await db.query('select public.complete_import_claim_proof($1,$2,$3,$4)', [
+            claim.id,
+            staff.actor,
+            proof.proofDocumentId,
+            'a'.repeat(64),
+          ]);
+          const accept = async (candidate) =>
+            (
+              await db.query(
+                'select public.accept_import_payment_claim_once($1,$2,$3,$4,$5,$6) result',
+                [
+                  candidate.id,
+                  staff.actor,
+                  randomUUID(),
+                  candidate.expectedClaimVersion,
+                  candidate.expectedTargetVersion,
+                  { kind: 'record', proofDocumentId: proof.proofDocumentId },
+                ],
+              )
+            ).rows[0].result;
+          await assert.rejects(accept((await claims())[0]), /RESERVATION_NOT_EXECUTED/);
+          const tokens = (
+            await db.query('select public.preview_customer_import_continuation($1,$2) result', [
+              row,
+              staff.actor,
+            ])
+          ).rows[0].result;
+          const plan = (await db.query('select id from public.card_plans where code=$1', [tier]))
+            .rows[0].id;
+          const draft = (
+            await db.query(
+              'select public.complete_import_application_once($1,$2,$3,$4,$5,$6,$7,null,null) result',
+              [
+                row,
+                staff.actor,
+                randomUUID(),
+                tokens.expectedSourceHash,
+                tokens.expectedTargetVersion,
+                {
+                  customerId: first.customerId,
+                  planId: plan,
+                  svdStaffId: staff.vd,
+                  ssmStaffId: staff.ssm,
+                  smStaffId: staff.sm,
+                  referrerStaffId: staff.referrer,
+                  paymentScheme: 'spot_cash',
+                  tier,
+                  consentAcknowledged: true,
+                  acknowledgedAt: fields.contract_date,
+                  primarySignatureStatus: 'received',
+                  validIdReceived: true,
+                  reservationPaymentProofReceived: true,
+                },
+                normalized.customerFacts.primary,
+              ],
+            )
+          ).rows[0].result;
+          const app = draft.applicationId;
+          const ra = (
+            await db.query(
+              'select id from public.reservation_agreements where customer_application_id=$1',
+              [app],
+            )
+          ).rows[0].id;
+          await db.query(
+            `insert into public.identity_documents(subject_type,customer_id,storage_path,original_filename,mime_type,size_bytes,sha256,
+            reviewed_by,reviewed_at,verification_status,reviewed_data,uploaded_by)
+            values('customer',$1,$2,'passport.pdf','application/pdf',2048,repeat('a',64),$3,now(),'confirmed','{"fields":{"idType":"passport"}}',$3)`,
+            [first.customerId, `synthetic-import/${randomUUID()}.pdf`, staff.actor],
+          );
+          const offer = (
+            await db.query('select public.purchase_terms_proposal($1,$2,$3) result', [
+              app,
+              staff.actor,
+              staff.sm,
+            ])
+          ).rows[0].result;
+          await db.query('select public.submit_purchase_application_once($1,$2,$3,$4,$5)', [
+            randomUUID(),
+            staff.actor,
+            app,
+            offer.expectedProposalHash,
+            staff.sm,
+          ]);
+          for (const [kind, entityId] of [
+            ['signed_customer_application', app],
+            ['signed_reservation_agreement', ra],
+          ]) {
+            await acceptedSignedDocument(db, {
+              kind,
+              entityId,
+              uploader: staff.actor,
+              reviewer: staff.vd,
+            });
+          }
+          await assert.rejects(accept((await claims())[0]), /RESERVATION_NOT_EXECUTED/);
+          await db.query("select public.decide_purchase_application_once($1,$2,$3,'approved')", [
+            randomUUID(),
+            staff.actor,
+            app,
+          ]);
+          assert.equal(
+            (await db.query('select status from public.reservation_agreements where id=$1', [ra]))
+              .rows[0].status,
+            'executed',
+          );
+          claim = (await claims())[0];
+          const recorded = await accept(claim);
+          assert.equal((await accept(claim)).paymentId, recorded.paymentId);
+          const payment = (
+            await db.query('select status,paid_on::text from public.payments where id=$1', [
+              recorded.paymentId,
+            ])
+          ).rows[0];
+          assert.equal(payment.status, 'recorded');
+          assert.equal(payment.paid_on, '2026-10-02');
+          assert.equal(
+            (await db.query('select public.purchase_financial_summary($1) result', [ra])).rows[0]
+              .result.verifiedTotal,
+            '0.00',
+          );
+          await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)", [
+            randomUUID(),
+            recorded.paymentId,
+            staff.actor,
+          ]);
+          assert.equal(
+            (await db.query('select public.purchase_financial_summary($1) result', [ra])).rows[0]
+              .result.verifiedTotal,
+            '10000.00',
+          );
+          assert.equal(
+            (
+              await db.query(
+                'select count(*)::int n from public.reservation_agreements where customer_application_id=$1',
+                [app],
+              )
+            ).rows[0].n,
+            1,
+          );
+          assert.equal((await commit()).importContinuation.externallyVerified, false);
+          await db.query('begin');
+          try {
+            // Approved and verified synthetic history represents an earlier accepted import.
+            await db.query(`insert into private.customer_external_import_receipts(source_id,application_id,reservation_id,confirmed_by,source_hash,reason,paid_total,remaining_balance,destination)
+              values($1,$2,$3,$4,private.import_source_hash($5),$6,'10000.00','302000.00','reservation')`,
+              [sourceId,app,ra,staff.actor,row,normalized.externalReason]);
+            const before=(await db.query('select to_jsonb(p) value from public.payments p where customer_id=$1 order by id',[first.customerId])).rows;
+            const accepted=await commit();
+            assert.equal(accepted.importContinuation.externallyVerified,true);
+            assert.deepEqual((await db.query('select to_jsonb(p) value from public.payments p where customer_id=$1 order by id',[first.customerId])).rows,before);
+          } finally { await db.query('rollback'); }
+          console.log(
+            'PASS deferred reservation claim: combined approval, receipt, recording, verification, original date and retry',
+          );
+        }
+        console.log(
+          JSON.stringify({
+            tier,
+            status,
+            stage,
+            verifiedPaid: '0.00',
+            approvalRequired: true,
+            retryReusedRecords: true,
+          }),
+        );
+        continue;
+      }
+      const ids = (
+        await db.query(
+          'select c.ra_number,c.vip_card_number,src.purchase_reference from public.customers c join private.customer_import_purchase_sources src on src.customer_id=c.id where c.id=$1',
+          [first.customerId],
+        )
+      ).rows[0];
+      assert.match(ids.vip_card_number, /^[0-9]{11}[BGS]1[CT][0-9]{2}[SN]$/);
+      assert.equal(
+        ids.purchase_reference,
+        ids.vip_card_number,
+        'Purchase reference must be the official VIP card ID',
+      );
+      assert.notEqual(
+        ids.ra_number,
+        ids.vip_card_number,
+        'Customer ID and VIP card ID are separate',
+      );
+      if (fields.existing_vip_control_number)
+        assert.equal(ids.vip_card_number, fields.existing_vip_control_number);
       else assert.equal(ids.vip_card_number.at(-1), 'S', 'New issuance is Standard-only');
       if (tier === 'SILVER' && status === 'Active VIP') {
         await db.query('begin');
         try {
-          const unissued = (await db.query("insert into public.customers(customer_number,first_name,last_name,email,phone,status) select customer_number,'SYNTHETIC','UNISSUED',$1,'09175550007','prospect' from public.next_customer_number() returning id", [`${randomUUID()}@example.invalid`])).rows[0].id;
+          const unissued = (
+            await db.query(
+              "insert into public.customers(customer_number,first_name,last_name,email,phone,status) select customer_number,'SYNTHETIC','UNISSUED',$1,'09175550007','prospect' from public.next_customer_number() returning id",
+              [`${randomUUID()}@example.invalid`],
+            )
+          ).rows[0].id;
           await db.query('savepoint supplied_evidence');
-          await db.query("update public.customer_import_rows set normalized_data=jsonb_set(normalized_data,'{externalVerified}','false') where id=$1", [row]);
-          await assert.rejects(db.query('select private.import_customer_vip_number($1,$2,$3)', [row, unissued, staff.actor]), /IMPORT_VIP_EXISTING_EVIDENCE_REQUIRED/);
+          await db.query(
+            "update public.customer_import_rows set normalized_data=jsonb_set(normalized_data,'{externalVerified}','false') where id=$1",
+            [row],
+          );
+          await assert.rejects(
+            db.query('select private.import_customer_vip_number($1,$2,$3)', [
+              row,
+              unissued,
+              staff.actor,
+            ]),
+            /IMPORT_VIP_EXISTING_EVIDENCE_REQUIRED/,
+          );
           await db.query('rollback to savepoint supplied_evidence');
-          await db.query("update public.customer_import_rows set raw_data=jsonb_set(raw_data,'{existing_vip_control_number}','\"\"') where id=$1", [row]);
-          await assert.rejects(db.query('select private.import_customer_vip_number($1,$2,$3)', [row, unissued, staff.actor]), /IMPORT_VIP_CLASSIFICATION_UNSUPPORTED/);
+          await db.query(
+            "update public.customer_import_rows set raw_data=jsonb_set(raw_data,'{existing_vip_control_number}','\"\"') where id=$1",
+            [row],
+          );
+          await assert.rejects(
+            db.query('select private.import_customer_vip_number($1,$2,$3)', [
+              row,
+              unissued,
+              staff.actor,
+            ]),
+            /IMPORT_VIP_CLASSIFICATION_UNSUPPORTED/,
+          );
         } finally {
           await db.query('rollback');
         }
@@ -404,7 +696,7 @@ try {
         'Application/reservation plan must be visible before finalization',
       );
       assert.equal(Number(summaryRow.verified_paid), Number(amount));
-      if (status==='Expired') assert.equal(summaryRow.derived_category, 'EXPIRED');
+      if (status === 'Expired') assert.equal(summaryRow.derived_category, 'EXPIRED');
       assert.equal(Number(summaryRow.frozen_total), stage === 'application' ? 0 : Number(total));
       assert.equal(
         Number(summaryRow.open_reservation_total),
@@ -418,7 +710,7 @@ try {
         summaryRow.payment_status,
         stage === 'application'
           ? 'no_payment'
-          : ['activation','active','inactive'].includes(stage)
+          : ['activation', 'active', 'inactive'].includes(stage)
             ? 'fully_paid'
             : 'partially_paid',
       );
@@ -439,16 +731,38 @@ try {
       );
       await db.query('set constraints all immediate');
       if (historical) {
-        const member = (await db.query('select m.*,m.points_anniversary::text anniversary_date,a.id account_id,a.balance from public.memberships m join public.points_accounts a on a.membership_id=m.id where m.customer_id=$1',[first.customerId])).rows[0];
-        assert.equal(member.status, stage === 'active' ? 'active' : status === 'Expired' ? 'expired' : status === 'Cancelled' ? 'cancelled' : 'suspended');
-        assert.equal(Number(member.balance),stage === 'active' ? 10000 : 0);
-        assert.equal(member.anniversary_date,'2026-01-01');
-        if (tier==='GOLD' && stage==='active') activeHistory={customerId:first.customerId,membershipId:member.id};
+        const member = (
+          await db.query(
+            'select m.*,m.points_anniversary::text anniversary_date,a.id account_id,a.balance from public.memberships m join public.points_accounts a on a.membership_id=m.id where m.customer_id=$1',
+            [first.customerId],
+          )
+        ).rows[0];
+        assert.equal(
+          member.status,
+          stage === 'active'
+            ? 'active'
+            : status === 'Expired'
+              ? 'expired'
+              : status === 'Cancelled'
+                ? 'cancelled'
+                : 'suspended',
+        );
+        assert.equal(Number(member.balance), stage === 'active' ? 10000 : 0);
+        assert.equal(member.anniversary_date, '2026-01-01');
+        if (tier === 'GOLD' && stage === 'active')
+          activeHistory = { customerId: first.customerId, membershipId: member.id };
         if (stage === 'active') {
           await db.query('begin');
-          await db.query("insert into public.points_ledger(account_id,entry_type,amount,balance_after,actor_id,reason) values($1,'adjustment',-1000,9000,$2,'Synthetic spend after import')",[member.account_id,staff.actor]);
-          await db.query('update public.points_accounts set balance=9000 where id=$1',[member.account_id]);
-          await db.query('update public.memberships set points_balance=9000 where id=$1',[member.id]);
+          await db.query(
+            "insert into public.points_ledger(account_id,entry_type,amount,balance_after,actor_id,reason) values($1,'adjustment',-1000,9000,$2,'Synthetic spend after import')",
+            [member.account_id, staff.actor],
+          );
+          await db.query('update public.points_accounts set balance=9000 where id=$1', [
+            member.account_id,
+          ]);
+          await db.query('update public.memberships set points_balance=9000 where id=$1', [
+            member.id,
+          ]);
           await db.query('commit');
         }
       }
@@ -493,15 +807,44 @@ try {
         first.importContinuation.reservationId,
       );
       assert.equal(reimport.importContinuation.saleId, first.importContinuation.saleId);
-      if(tier==='BRONZE' && stage==='active') {
-        const identified={...fields,purchase_reference:ids.vip_card_number,existing_vip_control_number:ids.vip_card_number,ra_number:ids.ra_number,customer_id:ids.ra_number};
-        const identifiedNormalized={...normalized,customerFacts:buildImportedCustomerFacts(identified)};
-        const j=randomUUID(),r=randomUUID();
-        await db.query("insert into public.customer_import_jobs(id,source_type,source_name,status,total_rows,valid_rows,created_by,validated_at) values($1,'excel','assigned-ids.xlsx','ready',1,1,$2,now())",[j,staff.actor]);
-        await db.query("insert into public.customer_import_rows(id,import_job_id,row_number,raw_data,normalized_data,validation_status,action) values($1,$2,2,$3,$4,'valid','UPDATE')",[r,j,identified,identifiedNormalized]);
-        await db.query('select public.prepare_customer_import_batch(array[$1::uuid],$2)',[r,staff.actor]);
-        const identifiedResult=(await db.query('select public.commit_external_customer_import_row($1,$2,$3) result',[r,staff.actor,normalized.externalReason])).rows[0].result;
-        assert.equal(identifiedResult.importContinuation.applicationId,first.importContinuation.applicationId,'Filling generated IDs must reuse the original purchase');
+      if (tier === 'BRONZE' && stage === 'active') {
+        const identified = {
+          ...fields,
+          purchase_reference: ids.vip_card_number,
+          existing_vip_control_number: ids.vip_card_number,
+          ra_number: ids.ra_number,
+          customer_id: ids.ra_number,
+        };
+        const identifiedNormalized = {
+          ...normalized,
+          customerFacts: buildImportedCustomerFacts(identified),
+        };
+        const j = randomUUID(),
+          r = randomUUID();
+        await db.query(
+          "insert into public.customer_import_jobs(id,source_type,source_name,status,total_rows,valid_rows,created_by,validated_at) values($1,'excel','assigned-ids.xlsx','ready',1,1,$2,now())",
+          [j, staff.actor],
+        );
+        await db.query(
+          "insert into public.customer_import_rows(id,import_job_id,row_number,raw_data,normalized_data,validation_status,action) values($1,$2,2,$3,$4,'valid','UPDATE')",
+          [r, j, identified, identifiedNormalized],
+        );
+        await db.query('select public.prepare_customer_import_batch(array[$1::uuid],$2)', [
+          r,
+          staff.actor,
+        ]);
+        const identifiedResult = (
+          await db.query('select public.commit_external_customer_import_row($1,$2,$3) result', [
+            r,
+            staff.actor,
+            normalized.externalReason,
+          ])
+        ).rows[0].result;
+        assert.equal(
+          identifiedResult.importContinuation.applicationId,
+          first.importContinuation.applicationId,
+          'Filling generated IDs must reuse the original purchase',
+        );
       }
       const ledger = (
         await db.query(
@@ -576,8 +919,17 @@ try {
         historical ? 1 : 0,
       );
       if (historical) {
-        const balance = (await db.query('select a.balance from public.points_accounts a join public.memberships m on m.id=a.membership_id where m.customer_id=$1',[first.customerId])).rows[0].balance;
-        assert.equal(Number(balance),stage === 'active' ? 9000 : 0,'Reimport must not restore spent points or credit inactive cards');
+        const balance = (
+          await db.query(
+            'select a.balance from public.points_accounts a join public.memberships m on m.id=a.membership_id where m.customer_id=$1',
+            [first.customerId],
+          )
+        ).rows[0].balance;
+        assert.equal(
+          Number(balance),
+          stage === 'active' ? 9000 : 0,
+          'Reimport must not restore spent points or credit inactive cards',
+        );
       }
       await assert.rejects(
         db.query(
@@ -596,6 +948,8 @@ try {
       );
       if (tier === 'BRONZE' && status === 'Partially Paid') {
         const reservation = first.importContinuation.reservationId;
+        // Legacy imported totals remain immutable; additional money must meet current RF rules.
+        await verifiedReservationFee(db, reservation, staff.actor);
         // Finance records against a REAL receipt object and an explicit purpose
         // (repair 20261231000001 section 12); the type is derived from the purpose.
         const receipt = `reservation/${reservation}/${randomUUID()}.pdf`;
@@ -608,7 +962,7 @@ try {
             randomUUID(),
             reservation,
             {
-              amount: '30000.00',
+              amount: '20000.00',
               paymentPurpose: 'contractual_full',
               method: 'cash',
               reference: randomUUID(),
@@ -624,7 +978,7 @@ try {
         ).rows[0].record;
         assert.equal(
           Number(beforeVerification.verified_paid),
-          30000,
+          40000,
           'Recorded payments must not reduce a verified balance',
         );
         await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)", [
@@ -724,7 +1078,12 @@ try {
     ]);
   const freshPerson = (base) => {
     const key = randomUUID();
-    return { ...base, customer_key: key, email: `${key}@example.invalid`, purchase_reference: `EXTERNAL-${key}` };
+    return {
+      ...base,
+      customer_key: key,
+      email: `${key}@example.invalid`,
+      purchase_reference: `EXTERNAL-${key}`,
+    };
   };
 
   // D. The SM is the only seller: a referrer with no active Sales Manager upline
@@ -770,9 +1129,10 @@ try {
     await assert.rejects(commitRow(duplicate), /IMPORT_DUPLICATE_VIP_CARD_NUMBER/);
     assert.equal(
       (
-        await db.query('select count(*)::int n from private.vip_card_number_issuances where vip_card_number=$1', [
-          goldVipFields.existing_vip_control_number,
-        ])
+        await db.query(
+          'select count(*)::int n from private.vip_card_number_issuances where vip_card_number=$1',
+          [goldVipFields.existing_vip_control_number],
+        )
       ).rows[0].n,
       1,
     );
@@ -797,16 +1157,23 @@ try {
         `both rows carrying one VIP Card number are flagged: ${JSON.stringify(p)}`,
       );
     }
-    console.log('PASS duplicate VIP Card numbers (system registry or same file) are row-level errors');
+    console.log(
+      'PASS duplicate VIP Card numbers (system registry or same file) are row-level errors',
+    );
     // One customer's own rows may repeat their number (repair section 28).
     const sameCustomerJob = await newJob();
     const person = freshPerson(goldVipFields);
     const own = '26101400077G1C01S';
     for (let i = 0; i < 2; i++) {
-      const ownRow = await importRow(sameCustomerJob, { ...person, existing_vip_control_number: own });
+      const ownRow = await importRow(sameCustomerJob, {
+        ...person,
+        existing_vip_control_number: own,
+      });
       const p = await previewOf(ownRow);
       assert.ok(
-        !(p.conflicts ?? []).some((c) => c.message === 'VIP Card number appears more than once in this file'),
+        !(p.conflicts ?? []).some(
+          (c) => c.message === 'VIP Card number appears more than once in this file',
+        ),
         `rows of the SAME customer repeating its number are not flagged: ${JSON.stringify(p)}`,
       );
     }
@@ -823,7 +1190,7 @@ try {
         existing_vip_control_number: keyless,
       });
       await db.query(
-        "update public.customer_import_rows set raw_data=raw_data||'{\"email\":\"\",\"customer_key\":\"\"}'::jsonb where id=$1",
+        'update public.customer_import_rows set raw_data=raw_data||\'{"email":"","customer_key":""}\'::jsonb where id=$1',
         [id],
       );
       keylessRows.push(id);
@@ -831,7 +1198,9 @@ try {
     for (const row of keylessRows) {
       const p = await previewOf(row);
       assert.ok(
-        (p.conflicts ?? []).some((c) => c.message === 'VIP Card number appears more than once in this file'),
+        (p.conflicts ?? []).some(
+          (c) => c.message === 'VIP Card number appears more than once in this file',
+        ),
         `two key-less rows carrying one VIP Card number are both flagged: ${JSON.stringify(p)}`,
       );
     }
@@ -849,15 +1218,26 @@ try {
     ).rows.map((r) => r.id);
     try {
       const again = (await commitRow(committedSample.row)).rows[0].result;
-      assert.equal(again.importContinuation.stage, committedSample.stage, JSON.stringify(again.importContinuation));
+      assert.equal(
+        again.importContinuation.stage,
+        committedSample.stage,
+        JSON.stringify(again.importContinuation),
+      );
       assert.ok(
-        !(again.importContinuation.conflicts ?? []).some((c) => c.code === 'IMPORT_SELLER_SM_REQUIRED'),
+        !(again.importContinuation.conflicts ?? []).some(
+          (c) => c.code === 'IMPORT_SELLER_SM_REQUIRED',
+        ),
         'an already-imported row is not re-judged by the seller rule',
       );
     } finally {
-      await db.query('update public.referral_relationships set is_active=true where id=any($1::uuid[])', [paused]);
+      await db.query(
+        'update public.referral_relationships set is_active=true where id=any($1::uuid[])',
+        [paused],
+      );
     }
-    console.log('PASS an already-imported row keeps its stage when its seller can no longer be resolved');
+    console.log(
+      'PASS an already-imported row keeps its stage when its seller can no longer be resolved',
+    );
   }
   assert.equal(
     (
@@ -891,15 +1271,19 @@ try {
     createdApplications: [],
   });
   const normalApp = await normalFixtures.mkApproved('approved');
-  const normal = (await db.query('select id as "reservationId",total_price_snapshot as total,reservation_fee_snapshot as fee from public.reservation_agreements where customer_application_id=$1',[normalApp.id])).rows[0];
-  assert(normal.reservationId,'The purchase submission creates the reservation');
+  const normal = (
+    await db.query(
+      'select id as "reservationId",total_price_snapshot as total,reservation_fee_snapshot as fee from public.reservation_agreements where customer_application_id=$1',
+      [normalApp.id],
+    )
+  ).rows[0];
+  assert(normal.reservationId, 'The purchase submission creates the reservation');
   // Changed with the rule (repair 20261231000001 header: "Finance records/verifies
   // each payment against a real receipt object"): approval no longer records the
   // reservation fee itself. The RA is executed (accepted signed RA), then Finance
   // records the fee with its purpose and a real receipt, and verifies it. This used
   // to assert 'Normal approval records the reservation fee for Finance verification'.
-  await normalFixtures.acceptSignedRa(normal.reservationId);
-  await normalFixtures.transition('execute', staff.actor, normal.reservationId);
+
   const feePayment = {
     id: (
       await db.query('select public.record_reservation_payment_once($1,$2,$3,$4) id', [
@@ -915,7 +1299,11 @@ try {
       ])
     ).rows[0].id,
   };
-  await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)",[randomUUID(),feePayment.id,staff.actor]);
+  await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)", [
+    randomUUID(),
+    feePayment.id,
+    staff.actor,
+  ]);
 
   const normalPayment = (
     await db.query('select public.record_reservation_payment_once($1,$2,$3,$4) id', [
@@ -953,6 +1341,7 @@ try {
       staff.actor,
       {
         customerId: normalApp.customerId,
+        smStaffId: staff.sm,
         planId: normalFixtures.plan.id,
         paymentScheme: 'spot_cash',
         consentAcknowledged: false,
@@ -973,25 +1362,76 @@ try {
     ]),
     /APPLICATION_ACKNOWLEDGMENT_REQUIRED/,
   );
-  await checkStayDateAllowances({ db, url:postgres.url, actor:staff.actor, ...activeHistory });
+  await checkStayDateAllowances({ db, url: postgres.url, actor: staff.actor, ...activeHistory });
   const protectedCustomer = await normalFixtures.mkCustomer('protected-vip');
-  const issued = (await db.query("select public.generate_vip_card_number('BRONZE','CASH',1) number")).rows[0].number;
-  await db.query('update public.customers set vip_card_number=$1 where id=$2', [issued, protectedCustomer]);
-  await assert.rejects(db.query('update public.customers set vip_card_number=null where id=$1', [protectedCustomer]), /VIP_CARD_NUMBER_IMMUTABLE/);
+  const issued = (
+    await db.query("select public.generate_vip_card_number('BRONZE','CASH',1) number")
+  ).rows[0].number;
+  await db.query('update public.customers set vip_card_number=$1 where id=$2', [
+    issued,
+    protectedCustomer,
+  ]);
+  await assert.rejects(
+    db.query('update public.customers set vip_card_number=null where id=$1', [protectedCustomer]),
+    /VIP_CARD_NUMBER_IMMUTABLE/,
+  );
+  await db.query('delete from public.identity_documents where customer_id=$1', [protectedCustomer]);
   await db.query('delete from public.customers where id=$1', [protectedCustomer]);
   const replacementCustomer = await normalFixtures.mkCustomer('cannot-reuse-vip');
-  await assert.rejects(db.query('update public.customers set vip_card_number=$1 where id=$2', [issued, replacementCustomer]), /VIP_CARD_NUMBER_ALREADY_ISSUED/);
-  assert.equal((await db.query('select count(*)::int n from private.vip_card_number_issuances where vip_card_number=$1', [issued])).rows[0].n, 1);
-  await db.query("update private.company_customer_id_counters set last_issued=9999 where issue_year=extract(year from current_date)::int");
-  const boundaryCustomer=await normalFixtures.mkCustomer('counter-boundary');
-  assert.match((await db.query('select ra_number from public.customers where id=$1',[boundaryCustomer])).rows[0].ra_number,/^[0-9]{4}-10000$/,'Company Customer ID must expand instead of truncating at 9999');
+  await assert.rejects(
+    db.query('update public.customers set vip_card_number=$1 where id=$2', [
+      issued,
+      replacementCustomer,
+    ]),
+    /VIP_CARD_NUMBER_ALREADY_ISSUED/,
+  );
+  assert.equal(
+    (
+      await db.query(
+        'select count(*)::int n from private.vip_card_number_issuances where vip_card_number=$1',
+        [issued],
+      )
+    ).rows[0].n,
+    1,
+  );
+  await db.query(
+    'update private.company_customer_id_counters set last_issued=9999 where issue_year=extract(year from current_date)::int',
+  );
+  const boundaryCustomer = await normalFixtures.mkCustomer('counter-boundary');
+  assert.match(
+    (await db.query('select ra_number from public.customers where id=$1', [boundaryCustomer]))
+      .rows[0].ra_number,
+    /^[0-9]{4}-10000$/,
+    'Company Customer ID must expand instead of truncating at 9999',
+  );
   await db.query("select setval('private.vip_card_number_seq',99998,true)");
-  assert.match((await db.query("select public.generate_vip_card_number('GOLD','CASH',1) number")).rows[0].number,/^[0-9]{6}99999G1C01S$/);
-  await assert.rejects(db.query("select public.generate_vip_card_number('GOLD','CASH',1)"),/VIP_CARD_NUMBER_RANGE_EXHAUSTED/);
-  const invariants=await db.query(readFileSync(new URL('../../../supabase/security/rls_invariants.sql',import.meta.url),'utf8'));
-  assert.deepEqual((Array.isArray(invariants) ? invariants : [invariants]).flatMap(result=>result.rows),[],'RLS invariants must pass');
+  assert.match(
+    (await db.query("select public.generate_vip_card_number('GOLD','CASH',1) number")).rows[0]
+      .number,
+    /^[0-9]{6}99999G1C01S$/,
+  );
+  await assert.rejects(
+    db.query("select public.generate_vip_card_number('GOLD','CASH',1)"),
+    /VIP_CARD_NUMBER_RANGE_EXHAUSTED/,
+  );
+  const invariants = await db.query(
+    readFileSync(new URL('../../../supabase/security/rls_invariants.sql', import.meta.url), 'utf8'),
+  );
+  assert.deepEqual(
+    (Array.isArray(invariants) ? invariants : [invariants]).flatMap((result) => result.rows),
+    [],
+    'RLS invariants must pass',
+  );
   // Forward repair is idempotent and must preserve all already-imported data.
-  await db.query(readFileSync(new URL('../../../supabase/migrations/20261223000001_afhomes_customer_historical_import.sql',import.meta.url),'utf8'));
+  await db.query(
+    readFileSync(
+      new URL(
+        '../../../supabase/migrations/20270105000020_afhomes_external_import_coordinated_reservation.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  );
   console.log('External customer import: PASS (local disposable PostgreSQL only).');
 } finally {
   await postgres.stop();

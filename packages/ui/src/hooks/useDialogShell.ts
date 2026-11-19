@@ -52,6 +52,14 @@ export function useDialogShell({
       if (restoreFocus && previouslyFocused) previouslyFocused.focus();
     };
 
+    // Initial focus lives here, after the trigger is captured: StrictMode's
+    // mount-cleanup-mount runs restore() in between, so focusing only once in a
+    // separate effect left focus on the trigger behind the modal.
+    if (!panel.contains(document.activeElement)) {
+      const autofocusTarget = panel.querySelector<HTMLElement>('[data-autofocus]');
+      (autofocusTarget ?? getFocusable(panel)[0] ?? panel).focus();
+    }
+
     if (!lockScroll) {
       return restore;
     }
@@ -71,25 +79,6 @@ export function useDialogShell({
   // consumers pass inline `onClose` closures with unstable identity.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-
-  // Move initial focus into the panel exactly once per open transition.
-  // Previously this lived in the same effect as the keydown listener, so any
-  // parent re-render (e.g. typing into a parent-owned input) re-fired
-  // `first.focus()` and yanked focus back to the first focusable element.
-  const wasOpenRef = useRef(false);
-  useEffect(() => {
-    const wasOpen = wasOpenRef.current;
-    wasOpenRef.current = open;
-    if (!open || wasOpen) return;
-
-    const panel = panelRef.current;
-    if (!panel) return;
-
-    const autofocusTarget = panel.querySelector<HTMLElement>('[data-autofocus]');
-    const focusables = getFocusable(panel);
-    const first = autofocusTarget ?? focusables[0] ?? panel;
-    first.focus();
-  }, [open, panelRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,7 +103,11 @@ export function useDialogShell({
       const lastEl = items[items.length - 1]!;
       const active = document.activeElement;
 
-      if (event.shiftKey && (active === firstEl || active === panel)) {
+      // Focus that escaped to the page behind the modal comes straight back.
+      if (!panel.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? lastEl : firstEl).focus();
+      } else if (event.shiftKey && (active === firstEl || active === panel)) {
         event.preventDefault();
         lastEl.focus();
       } else if (!event.shiftKey && active === lastEl) {

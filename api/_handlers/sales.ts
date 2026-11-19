@@ -1,4 +1,3 @@
-import { requireVipSaleCreator } from '../_lib/vip-sale-creator.js';
 import {
   handlePaymentExtras,
   receiptDetailsOf,
@@ -23,25 +22,16 @@ import { saleListQuerySchema, toSale, type SaleMoney } from '../_lib/sale-model.
  */
 import { z } from 'zod';
 import {
-  createSaleSchema,
+  canCreateVipSale,
   recordPaymentSchema,
   verifyPaymentSchema,
   activateSaleSchema,
   canTransitionSale,
   hierarchyAllowsUpline,
-  paymentSchemeLabel,
   SALE_ACTIVATABLE,
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
-import {
-  calculateCommission,
-  productSaleRejection,
-  resolveSeller,
-  resolveSchemeEconomics,
-  snapshotSaleTerms,
-  snapshotSchemeTerms,
-} from '../_lib/commerce.js';
 import { summarizePayments } from '../_lib/commerce.js';
 import {
   audit,
@@ -66,42 +56,7 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const parseListQuery = (req: VercelRequest) => saleListQuerySchema.safeParse(req.query);
 
-/** Staff ids the actor may sell on behalf of: themselves plus their downline. */
-async function downlineOf(db: Db, uplineId: string): Promise<string[]> {
-  const { data } = await db
-    .from('referral_relationships')
-    .select('subject_staff_id')
-    .eq('upline_staff_id', uplineId)
-    .eq('is_active', true);
-  const direct = (data ?? []).map((row: { subject_staff_id: string }) => row.subject_staff_id);
-  // One level deep is enough for Phase 2 selling scope; deeper chains resolve
-  // through the same table in the Genealogy phase.
-  const out = new Set<string>([uplineId, ...direct]);
-  for (const id of direct) {
-    const { data: deeper } = await db
-      .from('referral_relationships')
-      .select('subject_staff_id')
-      .eq('upline_staff_id', id)
-      .eq('is_active', true);
-    for (const row of (deeper ?? []) as { subject_staff_id: string }[])
-      out.add(row.subject_staff_id);
-  }
-  return [...out];
-}
 
-/**
- * A plan's category must be active for a NEW application. A missing category
- * row fails closed (not sellable) rather than assumed.
- */
-async function categoryIsActive(db: Db, categoryId: unknown): Promise<boolean> {
-  const { data, error } = await db
-    .from('card_categories')
-    .select('is_active')
-    .eq('id', String(categoryId ?? ''))
-    .maybeSingle();
-  if (error) throw error;
-  return (data as { is_active?: unknown } | null)?.is_active === true;
-}
 
 async function loadSaleView(db: Db, id: string) {
   const { data, error } = await db
@@ -271,275 +226,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    /* ---------------- create ---------------- */
+    /* ---------------- legacy creation ---------------- */
     if (subPath(req) === '' && method(req) === 'POST') {
       const auth = await authorizeAfHomes(req, 'sales.card_sales', 'create');
       if ('error' in auth) return deny(res, auth);
-      if (
-        !requireVipSaleCreator(auth, res, (jsonBody(req) as Record<string, unknown>)?.sellerStaffId)
-      )
-        return;
-      const parsed = createSaleSchema.safeParse(jsonBody(req));
-      if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid sale request', 400);
-      const input = parsed.data;
-
-      const { data: product, error: productError } = await db
-        .from('card_plans')
-        .select('*')
-        .eq('id', input.productId)
-        .maybeSingle();
-      if (productError) throw productError;
-      if (!product) return fail(res, 'NOT_FOUND', 'Card product not found', 404);
-
-      const rejection = productSaleRejection(
-        {
-          isActive: product.is_active === true,
-          cashPrice: product.cash_price,
-          minimumDownPayment: product.minimum_down_payment,
-        },
-        // A plan is selectable for a NEW application only when its category
-        // is active too. A missing category fails closed: not sellable.
-        (await categoryIsActive(db, product.category_id)) === true,
+      if (!canCreateVipSale(auth))
+        return fail(res, 'FORBIDDEN', 'Only an active SM, Admin or Super Admin may originate an application and RA.', 403);
+      return fail(
+        res,
+        'PURCHASE_WORKFLOW_REQUIRED',
+        'Create an Application & RA, obtain approval, then finalize the fully verified purchase.',
+        409,
       );
-      if (rejection) return fail(res, 'CONFLICT', rejection.replace(/_/g, ' ').toLowerCase(), 409);
-
-      const { data: customer, error: customerError } = await db
-        .from('customers')
-        .select('id, status')
-        .eq('id', input.customerId)
-        .maybeSingle();
-      if (customerError) throw customerError;
-      if (!customer) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      if (customer.status === 'cancelled')
-        return fail(res, 'CONFLICT', 'A cancelled customer cannot buy a card', 409);
-
-      // Launch restriction D-12: one membership per customer. The schema
-      // enforces a single membership row per customer, so without this
-      // creation-time guard a second sale could reach full payment and then
-      // strand at activation with money attached. Refuse before any sale row
-      // (and therefore any payment) exists. Any status counts: even a
-      // non-active membership row would still collide at activation.
-      const { data: existingMembership, error: membershipError } = await db
-        .from('memberships')
-        .select('id')
-        .eq('customer_id', input.customerId)
-        .maybeSingle();
-      if (membershipError) throw membershipError;
-      if (existingMembership)
-        return fail(
-          res,
-          'CONFLICT',
-          'This customer already has an active membership. Only one membership per customer is supported at launch.',
-          409,
-        );
-
-      // Seller resolution - the anti-spoofing gate.
-      const downline = await downlineOf(db, auth.userId);
-      let target: { staffId: string; roleSlug: string; status: string } | null = null;
-      if (input.sellerStaffId && input.sellerStaffId !== auth.userId) {
-        const { data: sellerRow } = await db
-          .from('staff_users')
-          .select('id, status')
-          .eq('id', input.sellerStaffId)
-          .maybeSingle();
-        if (sellerRow) {
-          const { data: assignment } = await db
-            .from('staff_role_assignments')
-            .select('role_id')
-            .eq('staff_id', sellerRow.id)
-            .maybeSingle();
-          const { data: role } = assignment
-            ? await db
-                .from('roles')
-                .select('slug')
-                .eq('id', assignment.role_id)
-                .eq('is_active', true) // same as SQL private.staff_role_slug
-                .maybeSingle()
-            : { data: null };
-          target = {
-            staffId: sellerRow.id,
-            roleSlug: String((role as { slug?: string } | null)?.slug ?? ''),
-            status: String(sellerRow.status ?? ''),
-          };
-        }
-      }
-      const seller = resolveSeller({
-        actorId: auth.userId,
-        actorRole: auth.roleSlug,
-        requestedSellerId: input.sellerStaffId,
-        target,
-        downlineIds: downline,
-      });
-      if ('error' in seller) {
-        return fail(res, 'FORBIDDEN', seller.error.replace(/_/g, ' ').toLowerCase(), 403);
-      }
-
-      // Upline comes from the seller's own authoritative relationship, never
-      // from the request body.
-      const { data: relationship } = await db
-        .from('referral_relationships')
-        .select('*')
-        .eq('subject_staff_id', seller.staffId)
-        .eq('is_active', true)
-        .maybeSingle();
-
-      // BR-RATE-06: invalid inputs generate no sale number. The scheme is
-      // resolved (and can reject) before the sequence is consumed, so a
-      // rejected scheme never burns a number. The VIP Stage 1 rule holds:
-      // the client selects only the scheme code and every figure is resolved
-      // server-side, so a tampered body cannot change what a sale costs.
-      // Bronze B1/B2 is rejected here - the UI hiding those options is never
-      // the control.
-      const scheme = resolveSchemeEconomics(
-        {
-          cashPrice: product.cash_price,
-          installmentPrice: product.installment_price,
-          reservationFee: product.reservation_fee,
-          spotCashDays: product.spot_cash_days,
-          standardInstallmentMonths: product.standard_installment_months,
-          validityYears: product.validity_years,
-          moveAEnabled: product.move_a_enabled,
-          moveB1Enabled: product.move_b1_enabled,
-          moveB2Enabled: product.move_b2_enabled,
-        },
-        input.paymentScheme,
-      );
-      if ('error' in scheme) {
-        if (scheme.error === 'SCHEME_NOT_ALLOWED_FOR_TIER') {
-          return fail(
-            res,
-            'CONFLICT',
-            `${paymentSchemeLabel(input.paymentScheme)} is not available for the ${product.name} tier`,
-            409,
-          );
-        }
-        if (scheme.error === 'INSTALLMENT_PRICE_NOT_SET') {
-          return fail(
-            res,
-            'CONFLICT',
-            'The installment price is not configured for this card plan',
-            409,
-          );
-        }
-        return fail(res, 'CONFLICT', 'The payment schedule is not available for this sale', 409);
-      }
-
-      const { data: sequence, error: seqError } = await db.rpc('next_sale_number');
-      if (seqError) return mapRpcError(res, seqError);
-      // next_sale_number() is RETURNS TABLE, so live PostgREST answers with a
-      // one-row array. A missing or blank number is a generation failure: the
-      // sale must fail BEFORE the row is inserted, never persist a blank.
-      const saleNumber = singleRpcText(sequence, 'sale_number');
-      if (!saleNumber) return fail(res, 'INTERNAL', 'Sale number generation failed', 500);
-
-      const saleDate = new Date().toISOString().slice(0, 10);
-      const { data: resolvedRule, error: ruleError } = await db.rpc('resolve_commission_rule', {
-        p_seller_type: 'staff',
-        p_seller_id: seller.staffId,
-        p_sale_date: saleDate,
-      });
-      // Deployment compatibility only: code may briefly run before the
-      // unapplied migration exists. Once the resolver exists, its explicit
-      // account -> role -> zero result is authoritative. Other RPC failures
-      // still fail closed.
-      if (ruleError && (ruleError as { code?: string }).code !== '42883')
-        return mapRpcError(res, ruleError);
-      const commissionRule = singleRpcRow(resolvedRule) as Record<string, unknown> | null;
-      const resolvedCommissionRate = String(
-        commissionRule?.rate ?? (ruleError ? product.commission_rate : '0'),
-      );
-      const commissionRuleId =
-        typeof commissionRule?.rule_id === 'string' ? commissionRule.rule_id : null;
-
-      const terms = snapshotSaleTerms({
-        id: product.id,
-        isActive: product.is_active === true,
-        cashPrice: product.cash_price,
-        minimumDownPayment: product.minimum_down_payment,
-        yearlyPoints: product.yearly_points,
-        commissionRate: resolvedCommissionRate,
-      });
-      // VIP Stage 1 figures ride in their own columns; the frozen SELECTED
-      // total below is the commercial record.
-      const schemeTerms = snapshotSchemeTerms(scheme.economics);
-      // The frozen SELECTED total is the commercial record: commission basis
-      // and every payment threshold derive from it, never from the live plan.
-      const frozenTotal = schemeTerms.schemeTotalSnapshot;
-      const expectedCommission = calculateCommission(frozenTotal, resolvedCommissionRate);
-      const now = new Date().toISOString();
-
-      const { data: sale, error: saleError } = await db
-        .from('card_sales')
-        .insert({
-          sale_number: saleNumber,
-          customer_id: input.customerId,
-          plan_id: input.productId,
-          seller_type: 'staff',
-          seller_staff_id: seller.staffId,
-          seller_ost_id: null,
-          // Snapshot columns are written explicitly, never spread: the commercial
-          // terms must be frozen on the sale at creation.
-          cash_price: frozenTotal,
-          cash_price_snapshot: frozenTotal,
-          minimum_down_payment_snapshot: terms.minimumDownPaymentSnapshot,
-          payment_scheme: schemeTerms.paymentScheme,
-          reservation_fee_snapshot: schemeTerms.reservationFeeSnapshot,
-          required_initial_snapshot: schemeTerms.requiredInitialSnapshot,
-          installment_months_snapshot: schemeTerms.installmentMonthsSnapshot,
-          monthly_amount_snapshot: schemeTerms.monthlyAmountSnapshot,
-          validity_months_snapshot: schemeTerms.validityMonthsSnapshot,
-          yearly_points_snapshot: terms.yearlyPointsSnapshot,
-          commission_rate_snapshot: terms.commissionRateSnapshot,
-          commission_rule_id: commissionRuleId,
-          commission_base_snapshot: frozenTotal,
-          expected_commission_snapshot: expectedCommission,
-          status: 'submitted',
-          submitted_at: now,
-          balance_due_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-          referral_relationship_id: relationship?.id ?? null,
-          created_by: auth.userId,
-        })
-        .select('*')
-        .single();
-      if (saleError) {
-        if ((saleError as { code?: string }).code === '23505')
-          return fail(
-            res,
-            'CONFLICT',
-            'This customer already has an open application for this card',
-            409,
-          );
-        throw saleError;
-      }
-
-      // One commission per sale, created pending. Never earned here. The basis
-      // is the frozen SELECTED total (Stage 1 §19), not the live plan price.
-      const { error: commissionError } = await db.from('commissions').insert({
-        sale_id: sale.id,
-        ost_id: null,
-        beneficiary_type: 'staff',
-        beneficiary_staff_id: seller.staffId,
-        amount: expectedCommission,
-        rate_snapshot: terms.commissionRateSnapshot,
-        basis_amount_snapshot: frozenTotal,
-        commission_rule_id: commissionRuleId,
-        status: 'pending',
-      });
-      if (commissionError) throw commissionError;
-
-      await audit(db, auth.userId, 'APPLICATION_SUBMITTED', 'card_sale', String(sale.id), null, {
-        saleNumber,
-        customerId: input.customerId,
-        productId: input.productId,
-        sellerStaffId: seller.staffId,
-        paymentScheme: schemeTerms.paymentScheme,
-        frozenTotal,
-        expectedCommission,
-      });
-
-      const view = await loadSaleView(db, String(sale.id));
-      if (!view) return fail(res, 'INTERNAL', 'Sale was created but could not be read back', 500);
-      return res.status(201).json(toSale(view));
     }
 
     /* ---------------- detail ---------------- */

@@ -1,9 +1,11 @@
 /** Finance period summary and month-end close API client. */
 
 import {
+  accountingPeriodReadinessSchema,
   accountingPeriodSchema,
   financePeriodSummarySchema,
   type AccountingPeriod,
+  type AccountingPeriodReadiness,
   type FinancePeriodSummary,
 } from '@afhomes/contracts';
 import { z } from 'zod';
@@ -37,3 +39,12 @@ const act = (period: string, action: 'submit' | 'return' | 'close', body?: unkno
 export const submitPeriod = (period: string) => act(period, 'submit');
 export const returnPeriod = (period: string, reason: string) => act(period, 'return', { reason });
 export const closePeriod = (period: string) => act(period, 'close');
+
+export const periodReadinessKey = (period: string) =>
+  ['business', 'queue', 'readiness', period] as const;
+
+export const getPeriodReadiness = (period: string): Promise<AccountingPeriodReadiness> =>
+  request(
+    `/queues/periods/${encodeURIComponent(period)}/readiness`,
+    accountingPeriodReadinessSchema,
+  );

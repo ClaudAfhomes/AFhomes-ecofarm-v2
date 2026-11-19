@@ -70,6 +70,19 @@ describe('payment scheme guide (internal IST reference)', () => {
     expect(screen.getByText(/Never chain Move A into B1 or B2/i)).toBeInTheDocument();
   });
 
+  it('still renders when an active plan has no balance left after the reservation fee', async () => {
+    // A spot-cash-only plan (installment price 0) used to make the monthly
+    // figure negative, and the exact-money helper's throw blanked the page.
+    mockedGetCardProducts.mockResolvedValue([
+      GOLD,
+      { ...GOLD, id: '44444444-4444-4444-8444-444444444444', code: 'CASH', name: 'Cash Only', cashPrice: '10000.00', installmentPrice: '0.00', moveB1Enabled: false, moveB2Enabled: false },
+    ]);
+    renderWithProviders(<PaymentSchemeGuidePage />);
+    expect(await screen.findByText('Cash Only')).toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+    expect(screen.getAllByText('₱312,000.00')).not.toHaveLength(0);
+  });
+
   /**
    * The confidentiality banner must be visible from the FIRST paint. Gating it
    * behind the data it warns about would leave a blank, unlabelled page for the

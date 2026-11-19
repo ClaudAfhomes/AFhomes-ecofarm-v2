@@ -1,4 +1,8 @@
-import { paymentDuplicateReviewSchema, proposePaymentAdjustmentSchema } from '@afhomes/contracts';
+import {
+  paymentDuplicateReviewSchema,
+  proposePaymentAdjustmentSchema,
+  resolvePaymentAdjustmentSchema,
+} from '@afhomes/contracts';
 
 import { authorizeAfHomes } from './afhomes-access.js';
 import {
@@ -23,9 +27,14 @@ import { UUID_PATTERN } from './payment-receipts.js';
  *   GET  payments/:id/adjustments        -> reversal / returned-check / refund proposals
  *   POST payments/:id/adjustments        -> PROPOSE one (never approves; no balance changes)
  *
- * Every rule is enforced in SQL (20270105000002); this module shapes requests.
- * Returns true when it handled the request.
+ *   POST payments/:id/adjustments/:adjId/resolve  { decision, note }  finance.payment_adjustment_decision
+ *   GET  payments/adjustment-resolution-gate      -> { q13Status, canDecide, authorized } (read-only)
+ *
+ * Every rule is enforced in SQL (20270105000002, 20270105000007); this module shapes
+ * requests. Resolution is gated by its own module AND governing decision Q13
+ * (pending = every decision refused). Returns true when it handled the request.
  */
+const Q13_KEY = 'Q13_PAYMENT_ADJUSTMENT_AUTHORITY';
 
 /** Optional receipt details sent with a record request, in the SQL function's shape. */
 export function receiptDetailsOf(input: {
@@ -70,6 +79,71 @@ export async function handlePaymentExtras(
   const review = at('POST', 'duplicate-review');
   const listAdjustments = at('GET', 'adjustments');
   const propose = at('POST', 'adjustments');
+  const resolve = route(
+    req,
+    'POST',
+    /^payments\/([0-9a-f-]+)\/adjustments\/([0-9a-f-]+)\/resolve$/,
+  );
+  const gate = route(req, 'GET', /^payments\/adjustment-resolution-gate$/);
+
+  if (gate) {
+    const viewer = await authorizeAfHomes(req, 'finance.payment_verification');
+    if ('error' in viewer) return (deny(res, viewer), true);
+    const decider = await authorizeAfHomes(req, 'finance.payment_adjustment_decision', 'update');
+    const canDecide = !('error' in decider);
+    const { data, error } = await db
+      .from('governing_policy_decisions')
+      .select('*')
+      .eq('key', Q13_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    const approved = (data as Record<string, unknown> | null)?.status === 'approved';
+    res.status(200).json({
+      q13Status: approved ? 'approved' : 'pending',
+      canDecide,
+      authorized: approved && canDecide,
+    });
+    return true;
+  }
+
+  if (resolve) {
+    // Own module: nobody resolves with Finance verification rights alone. SQL re-checks it
+    // and Q13 on every call.
+    const decider = await authorizeAfHomes(req, 'finance.payment_adjustment_decision', 'update');
+    if ('error' in decider) return (deny(res, decider), true);
+    const [paymentId, adjustmentId] = [resolve[1]!, resolve[2]!];
+    if (!UUID_PATTERN.test(paymentId) || !UUID_PATTERN.test(adjustmentId))
+      return (fail(res, 'NOT_FOUND', 'Payment adjustment not found', 404), true);
+    const parsed = resolvePaymentAdjustmentSchema.safeParse(jsonBody(req));
+    if (!parsed.success)
+      return (
+        fail(
+          res,
+          'VALIDATION_ERROR',
+          'Choose approved, rejected or withdrawn and give a note of at least 5 characters',
+          400,
+        ),
+        true
+      );
+    const found = await db
+      .from('payment_adjustments')
+      .select('id')
+      .eq('id', adjustmentId)
+      .eq('payment_id', paymentId)
+      .maybeSingle();
+    if (found.error) throw found.error;
+    if (!found.data) return (fail(res, 'NOT_FOUND', 'Payment adjustment not found', 404), true);
+    const { data, error } = await db.rpc('resolve_payment_adjustment', {
+      p_adjustment_id: adjustmentId,
+      p_decision: parsed.data.decision,
+      p_note: parsed.data.note,
+      p_actor_id: decider.userId,
+    });
+    if (error) return (mapRpcError(res, error), true);
+    res.status(200).json({ id: adjustmentId, status: data ?? parsed.data.decision });
+    return true;
+  }
+
   const hit = matches ?? review ?? listAdjustments ?? propose;
   if (!hit) return false;
 
@@ -135,7 +209,9 @@ export async function handlePaymentExtras(
     .order('requested_at', { ascending: false });
   if (error) throw error;
   const rows = (data ?? []) as Record<string, unknown>[];
-  const ids = [...new Set(rows.map((r) => String(r.requested_by)))];
+  const ids = [
+    ...new Set(rows.flatMap((r) => [r.requested_by, r.decided_by].filter(Boolean).map(String))),
+  ];
   const names = new Map<string, string>();
   if (ids.length) {
     const staff = await db.from('staff_users').select('id, full_name').in('id', ids);
@@ -156,6 +232,11 @@ export async function handlePaymentExtras(
       requestedBy: r.requested_by,
       requestedByName: names.get(String(r.requested_by)) ?? null,
       requestedAt: isoOrNull(r.requested_at) ?? '',
+      decidedBy: (r.decided_by as string | null | undefined) ?? null,
+      decidedByName: r.decided_by ? (names.get(String(r.decided_by)) ?? null) : null,
+      decidedAt: isoOrNull(r.decided_at),
+      decisionNote: (r.decision_note as string | null | undefined) ?? null,
+      postingPeriod: (r.posting_period as string | null | undefined) ?? null,
     })),
   );
   return true;

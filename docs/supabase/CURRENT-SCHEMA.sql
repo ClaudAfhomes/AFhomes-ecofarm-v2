@@ -6,7 +6,7 @@
 -- and whenever repository migrations change: node scripts/update-schema-index.mjs.
 -- Verify the sorted manifest and table inventory against the actual migration files.
 -- Local verification and live application are separate; record live applies only after confirmation.
--- Migration count: 153. Public table inventory: 60. Private table inventory: 32.
+-- Migration count: 189. Public table inventory: 75. Private table inventory: 32.
 -- Confirmed scoped live apply 2026-10-24: shared production ikaevepedpqygdlipsei has 127 history entries.
 -- Its 60 public and 30 private application table names match this inventory.
 -- Applied exactly 20261215000002 and 20261223000001 through 20261223000004; history increased 120 -> 125.
@@ -21,6 +21,17 @@
 -- Optional review reasons and application ID mirroring reconciled; browser purge execution revoked.
 -- Business row counts, private buckets, verification settings and the RLS audit baseline were unchanged.
 -- No backfill, administrator change, historical-gap repair or website deployment was performed.
+-- Confirmed scoped live apply 2026-11-18: exactly 20270105000017 (commission payout details).
+-- Payment-fact guards, safe browser column grants and original financial/policy rows were verified.
+-- See MIGRATION-APPLICATIONS.md for its checksum, local replay and hosted post-apply evidence.
+-- Confirmed scoped live apply 2026-11-18: exactly 20270105000018; history 183 -> 184.
+-- Atomic selected-seller rate operation matches local proof; all 107 application table contents preserved.
+-- Three historical files remain unrecorded but their features are present through later migrations; see application log.
+-- Confirmed scoped live apply 2026-11-19: exactly 20270105000020; history 185 -> 186.
+-- Reservation Paid claims require combined approval; provisional RA reused; original payment dates retained.
+-- All 107 application-table contents and four affected function ACLs preserved; read-only post-commit proof passed.
+-- Confirmed scoped live apply 2026-11-18: exactly 20270105000019; history 184 -> 185.
+-- Imported draft applications retain coordinated approval as their next stage; all 107 application table contents preserved.
 -- The manifest below includes pending SQL and MUST NOT be interpreted as an applied-schema dump.
 -- Full function/column definition equality is not established by matching table names.
 -- The 2026-10-23 historical baseline is in ../DEVELOPMENT-FINALIZATION-2026-10-23.md.
@@ -223,7 +234,44 @@
 --   20261228000001_afhomes_application_holder_prefix.sql
 --   20261229000001_afhomes_application_ra_draft.sql
 --   20261230000001_afhomes_official_ra_numbering.sql
+--   20261230000002_afhomes_app_ra_at_submission.sql
+--   20261230000003_afhomes_finance_evidence_overpayment.sql
+--   20261230000004_afhomes_vip_id_at_first_qualifying.sql
+--   20261230000005_afhomes_commission_at_40pct.sql
+--   20261230000006_afhomes_activation_gate_final.sql
+--   20261230000007_afhomes_finance_commission_payout_permission.sql
+--   20261230000008_afhomes_upload_signed_ra_document.sql
+--   2026123000014_afhomes_mutation_receipt_vip_fields.sql
+--   2026123000016_afhomes_signed_ra_fk_cascade.sql
+--   2026123000017_afhomes_commission_records_fk_cascade.sql
+--   2026123000018_afhomes_customer_applications_fk_cascade.sql
+--   2026123000019_afhomes_purchase_document_evidence_fk_setnull.sql
+--   2026123000020_afhomes_purchase_test_cleanup_fix.sql
+--   2026123000021_afhomes_restore_overpayment_protection.sql
+--   2026123000022_afhomes_mutation_test_cleanup_bypass.sql
+--   20261231000001_afhomes_workflow_integrity_repair.sql
+--   20270105000001_afhomes_finops_foundation.sql
+--   20270105000002_afhomes_finops_payments.sql
+--   20270105000003_afhomes_finops_periods.sql
+--   20270105000004_afhomes_finops_commissions.sql
+--   20270105000005_afhomes_finops_payroll.sql
+--   20270105000006_afhomes_finops_closing.sql
+--   20270105000007_afhomes_finops_adjustment_resolution.sql
+--   20270105000008_afhomes_finops_q1_policy_lifecycle.sql
+--   20270105000009_afhomes_finops_ist_performance_evidence.sql
+--   20270105000010_afhomes_finops_financial_evidence_integrity.sql
+--   20270105000011_afhomes_finops_operational_integrity.sql
+--   20270105000012_afhomes_finops_qp_governance.sql
+--   20270105000013_afhomes_finops_payroll_reconciliation.sql
+--   20270105000014_afhomes_finops_commission_decision_integrity.sql
+--   20270105000015_afhomes_finops_payroll_proof_required.sql
+--   20270105000016_afhomes_coordinated_application_workflow.sql
+--   20270105000017_afhomes_finops_commission_payout_details.sql
+--   20270105000018_afhomes_bulk_commission_rules.sql
+--   20270105000019_afhomes_import_coordinated_approval_stage.sql
+--   20270105000020_afhomes_external_import_coordinated_reservation.sql
 -- Public table inventory (derived from CREATE/DROP TABLE statements; checked by local DB test):
+--   public.accounting_periods
 --   public.audit_events
 --   public.card_categories
 --   public.card_plans
@@ -235,6 +283,8 @@
 --   public.cms_page_sections
 --   public.cms_page_versions
 --   public.cms_pages
+--   public.commission_payouts
+--   public.commission_recovery_cases
 --   public.commission_rules
 --   public.commissions
 --   public.customer_application_documents
@@ -248,13 +298,24 @@
 --   public.departments
 --   public.earning_claims
 --   public.final_qualifications
+--   public.governing_policy_decisions
 --   public.identity_documents
+--   public.ist_compensation_policies
+--   public.ist_engagements
+--   public.ist_performance_rules
 --   public.memberships
 --   public.modules
 --   public.network_member_profiles
 --   public.ost_applications
 --   public.ost_members
+--   public.payment_adjustments
 --   public.payments
+--   public.payroll_batches
+--   public.payroll_disbursement_proofs
+--   public.payroll_disbursement_reviews
+--   public.payroll_disbursements
+--   public.payroll_lines
+--   public.payroll_simulation_disbursements
 --   public.point_earning_rules
 --   public.point_redemption_rules
 --   public.points_accounts
@@ -263,6 +324,7 @@
 --   public.purchase_lines
 --   public.purchase_payments
 --   public.purchase_point_refunds
+--   public.purchase_signed_documents
 --   public.purchases
 --   public.redemption_items
 --   public.redemption_quotes
@@ -298,7 +360,7 @@
 --   private.member_workbook_rows
 --   private.mutation_requests
 --   private.official_ra_issuances
---   private.official_ra_year_counters
+--   private.official_ra_sequences
 --   private.ost_accreditation_renewals
 --   private.ost_accreditation_terms
 --   private.ost_applicant_changes

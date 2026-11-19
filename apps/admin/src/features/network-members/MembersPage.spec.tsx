@@ -178,7 +178,7 @@ function showCreate() {
 
 const openCreate = async () => {
   fireEvent.click(screen.getAllByRole('button', { name: 'Create IST' })[0]!);
-  await screen.findByLabelText('Full Name');
+  await screen.findByLabelText('First Name');
   await screen.findByRole('option', { name: 'Sales' });
 };
 
@@ -205,7 +205,9 @@ it('opens each new OST creation with blank identity, credentials and manual AA f
 
 const fillRequired = () => {
   fireEvent.change(screen.getByLabelText('Choose profile photo'), { target: { files: [new File(['photo'], 'profile.jpg', { type: 'image/jpeg' })] } });
-  fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'New Member' } });
+  fireEvent.change(screen.getByLabelText('First Name'), { target: { value: 'New' } });
+  fireEvent.change(screen.getByLabelText('Last Name'), { target: { value: 'Member' } });
+  fireEvent.change(screen.getByLabelText('Government ID upload *'), { target: { files: [new File(['%PDF-1.7 test'], 'id.pdf', { type: 'application/pdf' })] } });
   fireEvent.change(screen.getByLabelText('Date of Birth'), { target: { value: '1992-05-06' } });
   fireEvent.change(screen.getByLabelText('Sex'), { target: { value: 'Male' } });
   fireEvent.change(screen.getByLabelText('Civil Status'), { target: { value: 'Single' } });
@@ -378,7 +380,7 @@ describe('Members page', () => {
     await screen.findByText('No members');
     await openCreate();
     // Nothing filled yet: the first unmet requirement reads as guidance.
-    expect(await screen.findByText('Enter the full name.')).toBeInTheDocument();
+    expect(await screen.findByText('Enter the first and last name.')).toBeInTheDocument();
   });
 
   it('names the invalid field before the request leaves', async () => {
@@ -456,10 +458,10 @@ describe('Members page', () => {
     showCreate();
     await screen.findByText('No members');
     await openCreate();
-    fireEvent.change(screen.getByLabelText('Full Name'), {
+    fireEvent.change(screen.getByLabelText('First Name'), {
       target: { value: 'juan2 dela-cruz!' },
     });
-    expect(screen.getByLabelText('Full Name')).toHaveValue('Juan Dela-cruz');
+    expect(screen.getByLabelText('First Name')).toHaveValue('Juan Dela-cruz');
     fireEvent.change(screen.getByLabelText('No. / Street'), {
       target: { value: '123 mango st' },
     });
@@ -575,11 +577,11 @@ describe('Members page', () => {
     // The same sections creation renders, in the same order.
     for (const section of [
       'Assignment',
-      'Identity',
-      'Home Address',
+      'Personal information',
+      'Home address',
       'Contact',
       'Work',
-      'Government IDs',
+      'Identification',
       'Account',
       'Head',
       'Referrer Details',
@@ -722,7 +724,7 @@ describe('Members page', () => {
     // be dismissed, so a create can never land after the operator "cancelled".
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled());
     expect(create).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByLabelText('Full Name')).toBeInTheDocument();
+    expect(screen.getByLabelText('First Name')).toBeInTheDocument();
     release(ROW);
     await waitFor(() => expect(createMember).toHaveBeenCalled());
     Swal.close();

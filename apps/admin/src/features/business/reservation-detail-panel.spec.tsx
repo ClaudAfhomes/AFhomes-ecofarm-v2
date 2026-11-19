@@ -197,6 +197,8 @@ beforeEach(() => {
     overpaidAmount: '0.00',
     fullyPaid: false,
     saleId: null,
+    vipCardNumber: null,
+    commissionEligibleAt: null,
   };
   payments = [payment()];
   URL.createObjectURL = () => 'blob:stub';
@@ -215,14 +217,34 @@ const renderDetail = (user: SessionUser = FINANCE) =>
   );
 
 describe('Application-origin reservation detail', () => {
+  it('shows the purchase-specific Card ID and the recorded eligibility milestone', async () => {
+    finance = {
+      ...finance,
+      vipCardNumber: '26111600001BRZ01S',
+      commissionEligibleAt: '2026-11-16T01:30:00.000Z',
+    };
+    renderDetail();
+    expect(await screen.findByText('26111600001BRZ01S')).toBeInTheDocument();
+    expect(screen.getByText('Commission Eligible')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /generate.*card/i })).toBeNull();
+  });
+
+  it('keeps application-linked RA decisions on the application', async () => {
+    current = agreement({ status: 'submitted', executedAt: null });
+    renderDetail();
+    expect(
+      await screen.findByRole('link', { name: 'Open application and RA approval' }),
+    ).toHaveAttribute('href', `/admin/customers/applications/${current.customerApplicationId}`);
+    for (const name of ['Review and execute', 'Cancel', 'Reopen to draft', 'Submit'])
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(calls.decide).not.toHaveBeenCalled();
+  });
+
   it('links the review-required alert to the customer application editor', async () => {
     const appId = 'aaaaaaaa-0000-4000-8000-000000000001';
     renderWithProviders(
       <Routes>
-        <Route
-          path="/admin/sales/reservations/new"
-          element={<ReservationAgreementEditorPage />}
-        />
+        <Route path="/admin/sales/reservations/new" element={<ReservationAgreementEditorPage />} />
       </Routes>,
       { route: `/admin/sales/reservations/new?application=${appId}`, user: FINANCE },
     );
@@ -233,9 +255,7 @@ describe('Application-origin reservation detail', () => {
   it('shows the AF-RES, the lifecycle state and NO sale before finalization', async () => {
     renderDetail();
     expect(await screen.findByText('AF-RES-ZZZZZ')).toBeTruthy();
-    expect(
-      await screen.findByText('Not created'),
-    ).toBeTruthy();
+    expect(await screen.findByText('Not created')).toBeTruthy();
   });
 
   it('shows the frozen total, the INCLUDED reservation amount, verified and remaining', async () => {

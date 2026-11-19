@@ -279,9 +279,9 @@ describe('activation refreshes lookups without reload', () => {
       );
       renderWithProviders(<App />, { route: '/admin/finance/activation', user: finance });
       const row = (await screen.findByText('SALE-260002')).closest('tr')!;
-      await user.click(within(row).getByRole('button', { name: 'Activate' }));
-      const confirmation = await screen.findByRole('dialog', { name: 'Activate membership' });
-      await user.click(within(confirmation).getByRole('button', { name: 'Activate' }));
+      await user.click(within(row).getByRole('button', { name: 'Activate VIP Membership' }));
+      const confirmation = await screen.findByRole('dialog', { name: 'Activate VIP Membership' });
+      await user.click(within(confirmation).getByRole('button', { name: 'Activate VIP Membership' }));
       await waitFor(() => {
         expect(invalidate).toHaveBeenCalledWith({
           queryKey: ['business', 'queue', 'activation'],

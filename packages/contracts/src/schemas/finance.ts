@@ -113,6 +113,9 @@ export const financePeriodSummarySchema = z.object({
   unassignedVerified: z.number().optional(),
   /** Fingerprint of the payments that make up the period. */
   paymentSetHash: z.string().optional(),
+  /** Approved adjustments posted to this month (disclosed only; verifiedTotal is NOT netted). */
+  approvedAdjustmentsCount: z.number().optional(),
+  approvedAdjustmentsTotal: exactDecimalStringSchema.optional(),
 });
 export type FinancePeriodSummary = z.infer<typeof financePeriodSummarySchema>;
 
@@ -128,6 +131,20 @@ export const accountingPeriodSchema = z.object({
   snapshot: z.record(z.string(), z.unknown()).nullable(),
 });
 export type AccountingPeriod = z.infer<typeof accountingPeriodSchema>;
+
+/** Pre-close readiness (20270105000006): blockers stop submission, warnings never do. */
+const readinessItemSchema = z.object({
+  code: z.string(),
+  count: z.number().int().nonnegative(),
+  message: z.string(),
+});
+export const accountingPeriodReadinessSchema = z.object({
+  period: z.string(),
+  ready: z.boolean(),
+  blockers: z.array(readinessItemSchema),
+  warnings: z.array(readinessItemSchema),
+});
+export type AccountingPeriodReadiness = z.infer<typeof accountingPeriodReadinessSchema>;
 
 export const returnAccountingPeriodSchema = z.object({
   reason: z.string().trim().min(5).max(500),
@@ -158,8 +175,42 @@ export const paymentAdjustmentSchema = z.object({
   requestedBy: z.string().uuid(),
   requestedByName: z.string().nullable(),
   requestedAt: z.string(),
+  /** Resolution fields (20270105000007); null while the proposal is open. */
+  decidedBy: z.string().uuid().nullable().optional(),
+  decidedByName: z.string().nullable().optional(),
+  decidedAt: z.string().nullable().optional(),
+  decisionNote: z.string().nullable().optional(),
+  /** Accounting month an APPROVED adjustment is posted to (YYYY-MM). */
+  postingPeriod: z.string().nullable().optional(),
 });
 export type PaymentAdjustment = z.infer<typeof paymentAdjustmentSchema>;
+
+/**
+ * Resolve a proposal. The note is mandatory; the actor is always the session.
+ * Who may resolve is NOT decided (open question Q13): while it is pending the
+ * server refuses every decision.
+ */
+export const paymentAdjustmentDecisionSchema = z.enum(['approved', 'rejected', 'withdrawn']);
+export const resolvePaymentAdjustmentSchema = z.object({
+  decision: paymentAdjustmentDecisionSchema,
+  note: z.string().trim().min(5).max(500),
+});
+export type ResolvePaymentAdjustmentRequest = z.infer<typeof resolvePaymentAdjustmentSchema>;
+export const resolvePaymentAdjustmentResultSchema = z.object({
+  id: z.string().uuid(),
+  status: paymentAdjustmentDecisionSchema,
+});
+/** Read-only: lets the UI disable the resolve buttons with a reason. */
+export const paymentAdjustmentResolutionGateSchema = z.object({
+  q13Status: z.enum(['pending', 'approved']),
+  /** The caller holds finance.payment_adjustment_decision (update). */
+  canDecide: z.boolean(),
+  /** Q13 approved AND the caller may decide. The server re-checks on every call. */
+  authorized: z.boolean(),
+});
+export type PaymentAdjustmentResolutionGate = z.infer<
+  typeof paymentAdjustmentResolutionGateSchema
+>;
 
 /**
  * Record a payment. `amount` must be a positive exact-decimal string. The
@@ -357,9 +408,21 @@ export const commissionSchema = z.object({
   qualifiedAt: z.string().nullable(),
   earnedAt: z.string().nullable(),
   paidAt: z.string().nullable(),
+  /** Set while Finance holds the commission (20270105000004); a held commission cannot be paid. */
+  withheldAt: z.string().nullable().optional(),
+  withheldReason: z.string().nullable().optional(),
+  /** DSC (seller). DRI is reserved and refused by the database. */
+  commissionType: z.string().nullable().optional(),
+  /** Instant verified settlement reached 40% (eligibility, NOT approval or payment). */
+  eligibleAt: z.string().nullable().optional(),
+  /** Recorded external payment facts (20270105000017); null on historical rows. */
+  paidReference: z.string().nullable().optional(),
+  paidMethod: z.string().nullable().optional(),
+  paidOn: z.string().nullable().optional(),
+  paidEvidenceReference: z.string().nullable().optional(),
   createdAt: z.string(),
 });
-export type Commission = z.infer<typeof commissionSchema>;
+export type Commission =z.infer<typeof commissionSchema>;
 
 export const commissionRuleTargetSchema = z.enum(['role', 'staff', 'ost']);
 /** A commission rate is a fraction of the sale: 0 to 1 (1 = 100%). */
@@ -506,11 +569,37 @@ export type QualifyCommissionRequest = z.infer<typeof qualifyCommissionSchema>;
 /**
  * Explicit paid decision. This is the ONLY way a commission reaches `paid`:
  * `earned -> paid`, permission-gated and audited. The amount and the
- * seller/upline snapshot never change here. `reference` is an optional
- * payout reference stored as `paid_reference` when the column exists.
+ * seller/upline snapshot never change here. Records an EXTERNAL payment
+ * already made: its reference (unique across payouts), method, date and
+ * supporting evidence reference (same 10-500 character rule as payroll proof).
+ * The amount is always the frozen commission amount; no partial payout exists.
  */
 export const markCommissionPaidSchema = z.object({
-  reference: z.string().trim().max(100).optional(),
+  reference: z
+    .string()
+    .trim()
+    .min(3, 'Enter the external payment reference.')
+    .max(100)
+    // The database compares references by their letters and digits only
+    // (private.normalize_payment_key); a reference without any could not be
+    // checked for reuse by another payout.
+    .refine((v) => /[A-Za-z0-9]/.test(v), 'The reference must contain a letter or number.'),
+  method: z.string().trim().min(1, 'Enter the payment method.').max(40),
+  evidenceReference: z
+    .string()
+    .trim()
+    .min(10, 'Enter the payment evidence reference (at least 10 characters).')
+    .max(500),
+  paidOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter the payment date.')
+    .refine((v) => {
+      const d = new Date(`${v}T00:00:00Z`);
+      return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+    }, 'Enter a real calendar date.')
+    // Sanity floor against typos (e.g. year 0026); not a business rule. The
+    // recorded date is frozen once saved, so an obvious slip is refused early.
+    .refine((v) => v >= '2000-01-01', 'Enter a real payment date.'),
 });
 export type MarkCommissionPaidRequest = z.infer<typeof markCommissionPaidSchema>;
 

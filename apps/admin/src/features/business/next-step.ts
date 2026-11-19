@@ -12,13 +12,13 @@ export interface RowStep {
 export function applicationNextStep(app: { id: string; status: string }): RowStep {
   switch (app.status) {
     case 'draft':
-      return { label: 'Upload signed application', to: `/admin/customers/applications/${app.id}` };
+      return { label: 'Submit for Approval', to: `/admin/customers/applications/${app.id}` };
     case 'submitted':
-      return { label: 'Review and approve', to: `/admin/customers/applications/${app.id}` };
+      return { label: 'Review Signed Documents', to: `/admin/customers/applications/${app.id}` };
     case 'approved':
       return {
-        label: 'Create reservation',
-        to: `/admin/sales/reservations/new?application=${encodeURIComponent(app.id)}`,
+        label: 'Continue in Finance',
+        to: '/admin/finance/payments',
       };
     default:
       return { label: 'No action due', to: null };
@@ -31,13 +31,20 @@ export function reservationNextStep(item: {
   status: string;
   saleId: string | null;
   fullyPaid: boolean;
+  customerApplicationId?: string | null;
 }): RowStep {
+  if (item.customerApplicationId && (item.status === 'draft' || item.status === 'submitted'))
+    return {
+      label: 'Open Application & RA',
+      to: `/admin/customers/applications/${item.customerApplicationId}`,
+    };
   if (item.status === 'draft')
     return { label: 'Continue draft', to: `/admin/sales/reservations/${item.id}` };
   if (item.status === 'submitted')
     return { label: 'Review and execute', to: `/admin/sales/reservations/${item.id}` };
   if (item.status === 'executed') {
-    if (item.saleId && item.fullyPaid) return { label: 'Activate', to: '/admin/finance/activation' };
+    if (item.saleId && item.fullyPaid)
+      return { label: 'Activate VIP Membership', to: '/admin/finance/activation' };
     return {
       label: item.fullyPaid ? 'Finalize purchase' : 'Record payment',
       to: `/admin/finance/payments?search=${encodeURIComponent(item.reservationNumber)}`,

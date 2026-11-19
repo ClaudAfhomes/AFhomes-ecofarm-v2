@@ -37,7 +37,6 @@ import {
   subPath,
 } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
-import { storageClient } from '../_lib/storage.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
 const fullName = (row: Record<string, unknown>) =>
@@ -775,50 +774,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .maybeSingle();
       if (readError) throw readError;
       if (!before) return fail(res, 'NOT_FOUND', 'Customer not found', 404);
-      // Collect storage paths before any deletion so files can be purged even
-      // after the DB rows are gone. Identity documents and payment receipts
-      // are both removed; storage removal runs first so a failure leaves the
-      // database intact and the purge can be retried.
-      const { data: identityDocs, error: identityDocsReadError } = await db
-        .from('identity_documents')
-        .select('storage_path')
-        .eq('customer_id', id);
-      if (identityDocsReadError) throw identityDocsReadError;
-      const { data: customerPayments, error: paymentsReadError } = await db
-        .from('payments')
-        .select('receipt_storage_path')
-        .eq('customer_id', id);
-      if (paymentsReadError) throw paymentsReadError;
-      const pathsByBucket = new Map<string, string[]>();
-      const collectPath = (storagePath: unknown) => {
-        const value = String(storagePath ?? '');
-        const slash = value.indexOf('/');
-        if (slash <= 0) return;
-        const bucket = value.slice(0, slash);
-        const objectPath = value.slice(slash + 1);
-        const bucketPaths = pathsByBucket.get(bucket) ?? [];
-        bucketPaths.push(objectPath);
-        pathsByBucket.set(bucket, bucketPaths);
-      };
-      for (const row of (identityDocs ?? []) as Array<{ storage_path?: unknown }>)
-        collectPath(row.storage_path);
-      for (const row of (customerPayments ?? []) as Array<{ receipt_storage_path?: unknown }>)
-        collectPath(row.receipt_storage_path);
-      const storage = storageClient();
-      let identityDocumentsPurged = (identityDocs ?? []).length;
-      let receiptsPurged = 0;
-      if (storage && pathsByBucket.size > 0) {
-        for (const [bucket, paths] of pathsByBucket) {
-          const removed = await storage.from(bucket).remove(paths);
-          if (removed.error) throw removed.error;
-        }
-        receiptsPurged = (customerPayments ?? []).filter(
-          (row: { receipt_storage_path?: unknown }) => row.receipt_storage_path,
-        ).length;
-      }
-      // Transactional cascade of every dependent record. The SECURITY DEFINER
-      // function runs as service role and deletes in dependency order; a
-      // failure rolls back the whole purge so no half-deleted customer remains.
+      const history = await Promise.all(
+        ['payments', 'card_sales', 'reservation_agreements', 'purchases', 'identity_documents'].map((table) =>
+          db.from(table).select('id').eq('customer_id', id).limit(1),
+        ),
+      );
+      for (const result of history) if (result.error) throw result.error;
+      if (history.some((result) => result.data?.length))
+        return mapRpcError(res, { message: 'CUSTOMER_FINANCIAL_HISTORY_PROTECTED' });
+      // The database rechecks retention under its financial and customer locks.
       const { error: purgeError } = await db.rpc('purge_customer', {
         p_customer_id: id,
       });
@@ -835,8 +799,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         {
           deleted: true,
-          identityDocumentsPurged,
-          receiptsPurged,
+          identityDocumentsPurged: 0,
+          receiptsPurged: 0,
         },
       );
       return res.status(200).json({ deleted: true });

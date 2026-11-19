@@ -1,9 +1,6 @@
 /**
- * Sale origination for POST /sales (amended 11 Nov 2026).
- *
- * Business rule: the sales.card_sales create permission decides who may originate;
- * OST never may. The seller of record is always an ACTIVE Sales Manager: an SM
- * creator is the seller; Admin / Super Admin must name the SM.
+ * POST /sales cannot bypass application approval and RA execution. Authorized
+ * originators receive workflow guidance; other roles are denied.
  *
  * Regression: the guard was once an async function called without `await`, so
  * `!promise` was always false. The handler wrote a 403 and then KEPT RUNNING,
@@ -88,81 +85,37 @@ async function post(token: string, body: Record<string, unknown>) {
 }
 
 const BODY = { customerId: CUSTOMER.prospect, productId: PRODUCT.gold };
-const message = (body: unknown) => (body as { error?: { message?: string } }).error?.message ?? '';
 
-describe('POST /sales origination: module permission decides who; an active SM is always the seller', () => {
-  const refused: [string, string, RegExp][] = [
-    // The fixture VD, Finance and HR hold no sales.card_sales create grant, so the module check refuses first.
-    ['Vice Director (no grant)', TOKEN2.viceDirector, /./],
-    ['Finance (no grant)', TOKEN2.finance, /./],
-    ['HR (no grant)', TOKEN2.hr, /./],
-    // OST holds the grant in the fixture but may never originate.
-    ['OST', TOKEN2.ost, /OST or inactive account/],
-  ];
 
-  for (const [label, token, why] of refused) {
-    it(`refuses ${label} with one 403 and no side effects`, async () => {
-      const out = await post(token, { ...BODY, sellerStaffId: STAFF2.salesManager });
-      expect(out.state.status).toBe(403);
+describe('POST /sales requires the approved application workflow for authorized originators', () => {
+  it.each([
+    ['Vice Director', TOKEN2.viceDirector],
+    ['Senior Sales Manager', TOKEN2.seniorSalesManager],
+    ['Finance', TOKEN2.finance],
+    ['HR', TOKEN2.hr],
+    ['OST', TOKEN2.ost],
+  ])('refuses %s with one 403 and no side effects', async (_role, token) => {
+    const out = await post(token, { ...BODY, sellerStaffId: STAFF2.salesManager });
+    expect(out.state.status).toBe(403);
+    expect(out.writes).toBe(1);
+    expect(out.salesAdded).toBe(0);
+    expect(out.commissionsAdded).toBe(0);
+    expect(out.numbersIssued).toBe(0);
+  });
+
+  it.each([
+    ['Admin', TOKEN.admin],
+    ['Super Admin', TOKEN.superAdmin],
+    ['Sales Manager', TOKEN2.salesManager],
+  ])('requires %s to finalize through the application and RA workflow', async (_role, token) => {
+    for (const sellerStaffId of [undefined, STAFF2.salesManager, STAFF2.ost, UUID.superAdminStaff]) {
+      const out = await post(token, { ...BODY, ...(sellerStaffId ? { sellerStaffId } : {}) });
+      expect(out.state.status).toBe(409);
+      expect(out.state.body).toMatchObject({ error: { code: 'PURCHASE_WORKFLOW_REQUIRED' } });
       expect(out.writes).toBe(1);
       expect(out.salesAdded).toBe(0);
       expect(out.commissionsAdded).toBe(0);
       expect(out.numbersIssued).toBe(0);
-      expect(message(out.state.body)).toMatch(why);
-    });
-  }
-
-  for (const [label, token] of [
-    ['Admin', TOKEN.admin],
-    ['Super Admin', TOKEN.superAdmin],
-  ] as const) {
-    it(`lets ${label} create the sale for an active SM, who is the seller of record`, async () => {
-      const out = await post(token, { ...BODY, sellerStaffId: STAFF2.salesManager });
-      expect(out.state.status).toBe(201);
-      expect(out.writes).toBe(1);
-      expect(out.salesAdded).toBe(1);
-      expect(out.db.rows('card_sales').at(-1)!.seller_staff_id).toBe(STAFF2.salesManager);
-    });
-
-    it(`refuses ${label} without a named SM, before any write`, async () => {
-      const out = await post(token, BODY);
-      expect(out.state.status).toBe(400);
-      expect(out.writes).toBe(1);
-      expect(message(out.state.body)).toMatch(/seller of record/);
-      expect(out.salesAdded).toBe(0);
-      expect(out.numbersIssued).toBe(0);
-    });
-
-    it(`refuses ${label} naming a non-SM (themselves or an OST) as seller`, async () => {
-      const out = await post(token, { ...BODY, sellerStaffId: STAFF2.ost });
-      expect(out.state.status).toBe(403);
-      expect(out.salesAdded).toBe(0);
-      expect(out.numbersIssued).toBe(0);
-    });
-  }
-
-  it('lets an active Sales Manager create the sale as the seller of record', async () => {
-    const out = await post(TOKEN2.salesManager, BODY);
-    expect(out.state.status).toBe(201);
-    expect(out.writes).toBe(1);
-    expect(out.salesAdded).toBe(1);
-    expect(out.numbersIssued).toBe(1);
-    const sale = out.db.rows('card_sales').at(-1)!;
-    expect(sale.seller_staff_id).toBe(STAFF2.salesManager);
-  });
-
-  it('refuses a Sales Manager naming another seller, before any write', async () => {
-    const out = await post(TOKEN2.salesManager, { ...BODY, sellerStaffId: UUID.superAdminStaff });
-    expect(out.state.status).toBe(403);
-    expect(out.writes).toBe(1);
-    expect(message(out.state.body)).toMatch(/seller of record/);
-    expect(out.salesAdded).toBe(0);
-    expect(out.numbersIssued).toBe(0);
-  });
-
-  it('accepts a Sales Manager naming themselves as the seller', async () => {
-    const out = await post(TOKEN2.salesManager, { ...BODY, sellerStaffId: STAFF2.salesManager });
-    expect(out.state.status).toBe(201);
-    expect(out.salesAdded).toBe(1);
+    }
   });
 });

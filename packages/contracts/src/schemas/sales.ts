@@ -26,6 +26,7 @@ import {
   saleStatusSchema,
   spotCashStateSchema,
 } from './lifecycle.js';
+import { nullableSuffixSchema, optionalSuffixSchema } from './official-forms.js';
 
 /* ================================================================== */
 /* Card products                                                       */
@@ -333,7 +334,7 @@ export const createCustomerSchema = z.object({
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
   lastName: personNameSchema,
-  suffix: z.string().trim().max(20).optional(),
+  suffix: optionalSuffixSchema,
   dateOfBirth: dateOfBirthSchema,
   gender: genderSchema.optional(),
   email: emailSchema,
@@ -398,7 +399,8 @@ export const updateCustomerSchema = z
     firstName: personNameSchema.optional(),
     middleName: nullablePersonNameSchema,
     lastName: personNameSchema.optional(),
-    suffix: z.string().trim().max(20).nullable().optional(),
+    // Blank or N/A clears the suffix (null); otherwise only a fixed value.
+    suffix: nullableSuffixSchema,
     gender: genderSchema.nullable().optional(),
     dateOfBirth: dateOfBirthSchema.nullable().optional(),
     email: emailSchema.optional(),

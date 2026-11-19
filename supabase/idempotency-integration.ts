@@ -38,10 +38,10 @@ export async function runIdempotencyChecks(ctx: Context) {
   );
   ctx.createdCustomers.push(customer);
   await db.query(
-    `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
+    `insert into public.card_sales(origin,id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
     cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
     commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at)
-    select $1,sale_number,$2,$3,'staff',$4,$5,$5,$6,$7,$8,'0.00','submitted',now(),now()+interval '365 days'
+    select 'legacy_import',$1,sale_number,$2,$3,'staff',$4,$5,$5,$6,$7,$8,'0.00','submitted',now(),now()+interval '365 days'
     from public.next_sale_number()`,
     [
       sale,
@@ -213,6 +213,7 @@ export async function runIdempotencyChecks(ctx: Context) {
   check('denied actor gets no request marker', (await markerCount(String(deniedPayment[0]))) === 0);
 
   const header = {
+    smStaffId: seller,
     customerId: customer,
     planId: gold.id,
     paymentScheme: 'spot_cash',
@@ -365,10 +366,10 @@ export async function runIdempotencyChecks(ctx: Context) {
   );
   ctx.createdCustomers.push(laterCustomer);
   await db.query(
-    `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
+    `insert into public.card_sales(origin,id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,
     cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,
     commission_rate_snapshot,expected_commission_snapshot,status,submitted_at,balance_due_at)
-    select $1,n.sale_number,$2,s.plan_id,s.seller_type,s.seller_staff_id,s.cash_price,s.cash_price_snapshot,
+    select 'legacy_import',$1,n.sale_number,$2,s.plan_id,s.seller_type,s.seller_staff_id,s.cash_price,s.cash_price_snapshot,
     s.minimum_down_payment_snapshot,s.yearly_points_snapshot,s.commission_rate_snapshot,s.expected_commission_snapshot,
     'submitted',now(),now()+interval '365 days' from public.card_sales s cross join public.next_sale_number() n where s.id=$3`,
     [laterSale, laterCustomer, sale],

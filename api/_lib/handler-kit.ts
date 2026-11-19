@@ -94,12 +94,73 @@ export async function audit(
 }
 
 /**
+ * IST engagements and performance rules (20270105000009) raise one code family per
+ * kind (PREFIX_NOT_FOUND, PREFIX_INVALID, ...). Built once so both kinds stay identical.
+ */
+const IST_GOVERNED_KINDS = [
+  ['IST_ENGAGEMENT', 'engagement'],
+  ['IST_PERFORMANCE_RULE', 'performance rule'],
+] as const;
+const IST_GOVERNED_SUFFIXES: Record<string, [FailureCode, number, (noun: string) => string]> = {
+  NOT_FOUND: ['NOT_FOUND', 404, (n) => `IST ${n} not found.`],
+  INVALID: ['VALIDATION_ERROR', 400, (n) => `The IST ${n} has an invalid value.`],
+  NOT_EDITABLE: ['CONFLICT', 409, (n) => `Only a draft ${n} can be edited.`],
+  NOT_PENDING: ['CONFLICT', 409, (n) => `This ${n} is not waiting for approval.`],
+  NOT_APPROVED: ['CONFLICT', 409, (n) => `Only an approved ${n} can be ended.`],
+  TRANSITION_INVALID: ['CONFLICT', 409, (n) => `That change is not allowed for this ${n} status.`],
+  IMMUTABLE: ['CONFLICT', 409, (n) => `An approved ${n} cannot be changed that way; each end or suspension date is set once.`],
+  IN_USE_BY_FINALIZED_PAYROLL: ['CONFLICT', 409, (n) => `This ${n} already backs an approved or closed payroll month, so it cannot be changed that way.`],
+  OVERLAP: ['CONFLICT', 409, (n) => `This ${n} overlaps an approved one. End the earlier one first.`],
+  IDEMPOTENCY_CONFLICT: ['CONFLICT', 409, () => 'This request identifier was already used with different data.'],
+  SELF_APPROVAL: ['FORBIDDEN', 403, (n) => `Whoever drafted, edited or submitted a ${n} cannot approve it.`],
+  DIRECT_WRITE_REFUSED: ['FORBIDDEN', 403, (n) => `An IST ${n} can only be changed through its workflow.`],
+  EVIDENCE_REQUIRED: ['VALIDATION_ERROR', 400, () => 'Enter the reference of the approval document (10 to 500 characters).'],
+  APPROVAL_NOTE_REQUIRED: ['VALIDATION_ERROR', 400, () => 'Give an approval note of at least 5 characters.'],
+  RETURN_REASON_REQUIRED: ['VALIDATION_ERROR', 400, (n) => `Give a reason of at least 5 characters for returning the ${n}.`],
+  END_NOTE_REQUIRED: ['VALIDATION_ERROR', 400, (n) => `Give a note of at least 5 characters for ending the ${n}.`],
+  END_DATE_INVALID: ['VALIDATION_ERROR', 400, (n) => `The end date must be a real date inside the ${n} window.`],
+};
+const IST_GOVERNED_STATUS: Record<string, [FailureCode, number]> = {};
+const IST_GOVERNED_MESSAGES: Record<string, string> = {};
+for (const [prefix, noun] of IST_GOVERNED_KINDS)
+  for (const [suffix, [failure, status, text]] of Object.entries(IST_GOVERNED_SUFFIXES)) {
+    IST_GOVERNED_STATUS[`${prefix}_${suffix}`] = [failure, status];
+    IST_GOVERNED_MESSAGES[`${prefix}_${suffix}`] = text(noun);
+  }
+/**
+ * Extra IST governed codes (e.g. rule-succession refusals). Add one line per code here;
+ * they flow into both the status table and the message table.
+ */
+const IST_GOVERNED_EXTRA: Record<string, [FailureCode, number, string]> = {
+  IST_PERFORMANCE_RULE_INCOMPLETE: [
+    'CONFLICT',
+    409,
+    'Complete the performance rule choices before approval. Record the attribution, closed-deal threshold, count-date basis and adjustment treatment.',
+  ],
+  PERFORMANCE_RULE_TRANSITION_RULE_NOT_APPROVED: [
+    'CONFLICT',
+    409,
+    'This rule changes the threshold, count date, attribution or adjustment treatment of an approved rule. Changing those needs an approved transition rule (Presidential decision), which is pending. Nothing was changed.',
+  ],
+  PERFORMANCE_RULE_SUCCESSION_NOT_IMPLEMENTED: [
+    'CONFLICT',
+    409,
+    'A performance rule with a different shape cannot succeed an approved rule yet: split crediting is not built. Nothing was changed.',
+  ],
+};
+for (const [code, [failure, status, text]] of Object.entries(IST_GOVERNED_EXTRA)) {
+  IST_GOVERNED_STATUS[code] = [failure, status];
+  IST_GOVERNED_MESSAGES[code] = text;
+}
+const IST_INVALID_CODES = new Set(IST_GOVERNED_KINDS.map(([prefix]) => `${prefix}_INVALID`));
+
+/**
  * Map a Postgres RPC error onto a client error. The raw driver message is
  * logged server-side only - it can name relations, columns, and constraints.
  */
 export function mapRpcError(
   res: VercelResponse,
-  error: { message?: string; code?: string } | null,
+  error: { message?: string; code?: string; details?: string } | null,
 ): void {
   const message = String(error?.message ?? '');
   const [code] = message.split(':');
@@ -196,6 +257,15 @@ export function mapRpcError(
     PURCHASE_TERMS_VERSION_CONFLICT: ['CONFLICT', 409],
     APPLICATION_NOT_APPROVED: ['CONFLICT', 409],
     RESERVATION_ALREADY_EXISTS: ['CONFLICT', 409],
+    APPLICATION_APPROVAL_FORBIDDEN: ['FORBIDDEN', 403],
+    APPLICATION_APPROVAL_REQUIRED: ['CONFLICT', 409],
+    APPLICATION_SUBMISSION_REQUIRED: ['CONFLICT', 409],
+    LINKED_RESERVATION_REQUIRED: ['CONFLICT', 409],
+    PURCHASE_HAS_PAYMENTS: ['CONFLICT', 409],
+    PURCHASE_WORKFLOW_REQUIRED: ['CONFLICT', 409],
+    RESERVATION_PAYMENT_REQUIRED: ['CONFLICT', 409],
+    RESERVATION_FEE_MUST_MATCH_TERMS: ['VALIDATION_ERROR', 400],
+    CURRENT_ID_DOCUMENT_REQUIRED: ['CONFLICT', 409],
     REVIEW_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
     RESERVATION_FEE_INVALID: ['CONFLICT', 409],
     SCHEME_SCHEDULE_UNAVAILABLE: ['CONFLICT', 409],
@@ -275,6 +345,10 @@ export function mapRpcError(
     PAYMENT_DETAILS_INVALID: ['VALIDATION_ERROR', 400],
     PAYMENT_NOT_VERIFIED: ['CONFLICT', 409],
     VERIFIED_PAYMENT_DETAILS_IMMUTABLE: ['CONFLICT', 409],
+    FINANCIAL_HISTORY_PROTECTED: ['CONFLICT', 409],
+    CUSTOMER_FINANCIAL_HISTORY_PROTECTED: ['CONFLICT', 409],
+    SALE_FINANCIAL_DETAILS_IMMUTABLE: ['CONFLICT', 409],
+    COMMISSION_FINANCIAL_DETAILS_IMMUTABLE: ['CONFLICT', 409],
     PAYMENT_ADJUSTMENT_KIND_INVALID: ['VALIDATION_ERROR', 400],
     PAYMENT_ADJUSTMENT_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
     PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT: ['VALIDATION_ERROR', 400],
@@ -293,6 +367,101 @@ export function mapRpcError(
     PERIOD_OUT_OF_ORDER: ['CONFLICT', 409],
     PERIOD_SELF_APPROVAL: ['FORBIDDEN', 403],
     PERIOD_RETURN_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    // Commission operations (20270105000004).
+    DRI_NOT_AUTHORIZED: ['FORBIDDEN', 403],
+    COMMISSION_TYPE_IMMUTABLE: ['CONFLICT', 409],
+    COMMISSION_WITHHELD: ['CONFLICT', 409],
+    COMMISSION_NOT_FOUND: ['NOT_FOUND', 404],
+    COMMISSION_NOT_HOLDABLE: ['CONFLICT', 409],
+    COMMISSION_NOT_PAYABLE: ['CONFLICT', 409],
+    COMMISSION_NOT_PAID: ['CONFLICT', 409],
+    COMMISSION_HOLD_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMMISSION_PAYOUT_FAILURE_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMMISSION_PAYOUT_HISTORY_IMMUTABLE: ['CONFLICT', 409],
+    COMMISSION_PAYOUT_NOT_FOUND: ['NOT_FOUND', 404],
+    COMMISSION_PAYOUT_NOT_PAID: ['CONFLICT', 409],
+    DUPLICATE_PAYOUT_REFERENCE: ['CONFLICT', 409],
+    PAYOUT_REFERENCE_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYOUT_REFERENCE_MISMATCH: ['CONFLICT', 409],
+    COMMISSION_RECOVERY_ALREADY_PROPOSED: ['CONFLICT', 409],
+    COMMISSION_RECOVERY_EXCEEDS_COMMISSION: ['VALIDATION_ERROR', 400],
+    COMMISSION_RECOVERY_HISTORY_IMMUTABLE: ['CONFLICT', 409],
+    COMMISSION_RECOVERY_NOT_FOUND: ['NOT_FOUND', 404],
+    COMMISSION_RECOVERY_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMMISSION_RECOVERY_TRIGGER_INVALID: ['VALIDATION_ERROR', 400],
+    // IST payroll (20270105000005). The governing gate is a CONFLICT (state), not a permission failure.
+    IST_PAYROLL_NOT_AUTHORIZED: ['CONFLICT', 409],
+    PAYROLL_SIMULATION_ONLY: ['CONFLICT', 409],
+    PAYROLL_SIMULATION_BASIS_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYROLL_MODE_INVALID: ['VALIDATION_ERROR', 400],
+    GOVERNING_POLICY_LOCKED: ['CONFLICT', 409],
+    PAYROLL_CONFIGURATION_REQUIRED: ['CONFLICT', 409],
+    PAYROLL_EVIDENCE_CHANGED: ['CONFLICT', 409],
+    PAYROLL_PROOF_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYROLL_PROOF_CONFLICT: ['CONFLICT', 409],
+    PAYROLL_RECONCILIATION_ALREADY_RECORDED: ['CONFLICT', 409],
+    PAYROLL_RECONCILIATION_REQUIRED: ['CONFLICT', 409],
+    FINANCIAL_EVIDENCE_BUSY: ['CONFLICT', 409],
+    PAYROLL_BATCH_NOT_FOUND: ['NOT_FOUND', 404],
+    PAYROLL_BATCH_NOT_EDITABLE: ['CONFLICT', 409],
+    PAYROLL_BATCH_EMPTY: ['CONFLICT', 409],
+    PAYROLL_BATCH_NOT_SUBMITTED: ['CONFLICT', 409],
+    PAYROLL_SELF_APPROVAL: ['FORBIDDEN', 403],
+    PAYROLL_RETURN_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYROLL_BATCH_LOCKED: ['CONFLICT', 409],
+    PAYROLL_BATCH_TRANSITION_INVALID: ['CONFLICT', 409],
+    PAYROLL_DIRECT_WRITE_REFUSED: ['FORBIDDEN', 403],
+    PAYROLL_LINE_INVALID: ['VALIDATION_ERROR', 400],
+    PAYROLL_LINE_DUPLICATE: ['CONFLICT', 409],
+    PAYROLL_LINE_IMMUTABLE: ['CONFLICT', 409],
+    PAYROLL_LINE_NOT_FOUND: ['NOT_FOUND', 404],
+    PAYROLL_LINE_NOT_PAYABLE: ['CONFLICT', 409],
+    PAYROLL_BATCH_NOT_APPROVED: ['CONFLICT', 409],
+    PAYROLL_AMOUNT_MISMATCH: ['VALIDATION_ERROR', 400],
+    PAYROLL_METHOD_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYROLL_LINE_ALREADY_DISBURSED: ['CONFLICT', 409],
+    PAYROLL_DISBURSEMENT_IMMUTABLE: ['CONFLICT', 409],
+    // Payroll close, simulation workflow and month-end readiness (20270105000006).
+    PAYROLL_SELF_CLOSE: ['FORBIDDEN', 403],
+    PAYROLL_BATCH_NOT_FULLY_DISBURSED: ['CONFLICT', 409],
+    PAYROLL_NOT_SIMULATION: ['CONFLICT', 409],
+    PERIOD_HAS_BLOCKERS: ['CONFLICT', 409],
+    // Payment adjustment resolution (20270105000007). Q13 pending is a CONFLICT (state), not a permission failure.
+    PAYMENT_ADJUSTMENT_AUTHORITY_PENDING: ['CONFLICT', 409],
+    PAYMENT_ADJUSTMENT_NOT_FOUND: ['NOT_FOUND', 404],
+    PAYMENT_ADJUSTMENT_DECISION_INVALID: ['VALIDATION_ERROR', 400],
+    PAYMENT_ADJUSTMENT_NOTE_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYMENT_ADJUSTMENT_ALREADY_RESOLVED: ['CONFLICT', 409],
+    PAYMENT_ADJUSTMENT_SELF_DECISION: ['FORBIDDEN', 403],
+    PAYMENT_ADJUSTMENT_DIRECT_WRITE_REFUSED: ['FORBIDDEN', 403],
+    // Compensation policy lifecycle, Q1 owner-reported decision, line review (20270105000008).
+    COMPENSATION_POLICY_NOT_FOUND: ['NOT_FOUND', 404],
+    COMPENSATION_POLICY_INVALID: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_NOT_EDITABLE: ['CONFLICT', 409],
+    COMPENSATION_POLICY_NOT_PENDING: ['CONFLICT', 409],
+    COMPENSATION_POLICY_NOT_APPROVED: ['CONFLICT', 409],
+    COMPENSATION_POLICY_TRANSITION_INVALID: ['CONFLICT', 409],
+    COMPENSATION_POLICY_IN_USE_BY_FINALIZED_PAYROLL: ['CONFLICT', 409],
+    COMPENSATION_POLICY_SELF_APPROVAL: ['FORBIDDEN', 403],
+    COMPENSATION_POLICY_EVIDENCE_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_RETURN_REASON_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_END_NOTE_REQUIRED: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_END_DATE_INVALID: ['VALIDATION_ERROR', 400],
+    COMPENSATION_POLICY_DIRECT_WRITE_REFUSED: ['FORBIDDEN', 403],
+    POLICY_TRANSITION_RULE_NOT_APPROVED: ['CONFLICT', 409],
+    // Raised with SQLSTATE 23505; listed here so the generic unique-violation fallback never swallows it.
+    COMPENSATION_POLICY_IDEMPOTENCY_CONFLICT: ['CONFLICT', 409],
+    POLICY_SEGMENT_PAYOUT_NOT_IMPLEMENTED: ['CONFLICT', 409],
+    // IST engagements and performance rules (20270105000009).
+    ...IST_GOVERNED_STATUS,
+    IST_GOVERNED_KIND_INVALID: ['VALIDATION_ERROR', 400],
+    IST_GOVERNED_ACTION_INVALID: ['VALIDATION_ERROR', 400],
+    STAFF_REQUIRED: ['VALIDATION_ERROR', 400],
+    PAYROLL_LINE_REVIEW_REQUIRED: ['CONFLICT', 409],
+    PAYROLL_LINE_REVIEW_NOT_REQUIRED: ['CONFLICT', 409],
+    PAYROLL_LINE_ALREADY_REVIEWED: ['CONFLICT', 409],
+    PAYROLL_REVIEW_NOTE_REQUIRED: ['VALIDATION_ERROR', 400],
     IMPORT_BATCH_LIMIT: ['VALIDATION_ERROR', 400],
     VIP_CARD_NUMBER_RANGE_EXHAUSTED: ['CONFLICT', 409],
     SELLER_OF_RECORD_MUST_BE_SM: ['FORBIDDEN', 403],
@@ -315,6 +484,14 @@ export function mapRpcError(
       'This request identifier was already used with different data.',
       409,
     );
+  // A concurrent payout with the same bank reference loses the race at the
+  // unique index rather than at the RPC's own duplicate check.
+  if (
+    message.includes('payroll_disbursements_reference_unique') ||
+    message.includes('payroll_simulation_disbursements_batch_reference_unique') ||
+    message.includes('commission_payouts_reference_unique')
+  )
+    return fail(res, 'CONFLICT', 'This bank reference is already used on another payout.', 409);
   if (message.includes('payments_sale_reference_unique'))
     return fail(
       res,
@@ -373,7 +550,132 @@ export function mapRpcError(
     PERIOD_SELF_APPROVAL: 'A period cannot be closed by the person who submitted it.',
     PERIOD_NOT_READY: 'This period has not been submitted for closing.',
     PERIOD_NOT_OPEN: 'This period is not open.',
+    DRI_NOT_AUTHORIZED: 'DRI commissions are not authorized. Only DSC commissions can be created.',
+    COMMISSION_TYPE_IMMUTABLE: 'A commission type cannot be changed once it is recorded.',
+    COMMISSION_WITHHELD: 'This commission is on hold. Release the hold before paying it.',
+    COMMISSION_NOT_FOUND: 'Commission not found.',
+    COMMISSION_NOT_HOLDABLE: 'Only a commission that has not been paid can be put on hold.',
+    COMMISSION_NOT_PAYABLE: 'This commission is not ready to be paid.',
+    COMMISSION_NOT_PAID: 'Only a paid commission can have a recovery proposed.',
+    COMMISSION_HOLD_REASON_REQUIRED: 'Give a reason for the hold.',
+    COMMISSION_PAYOUT_FAILURE_REASON_REQUIRED: 'Give a reason the payout failed.',
+    COMMISSION_PAYOUT_HISTORY_IMMUTABLE: 'Payout history cannot be edited or deleted.',
+    COMMISSION_PAYOUT_NOT_FOUND: 'Payout not found.',
+    COMMISSION_PAYOUT_NOT_PAID: 'Only a paid payout can be marked failed or reconciled.',
+    DUPLICATE_PAYOUT_REFERENCE: 'This bank reference is already used on another payout.',
+    PAYOUT_REFERENCE_REQUIRED: 'Enter the bank reference for the payout.',
+    PAYOUT_REFERENCE_MISMATCH:
+      'This bank reference does not match the one recorded on the payout. Check the bank statement.',
+    COMMISSION_RECOVERY_ALREADY_PROPOSED: 'A recovery is already proposed for this commission.',
+    COMMISSION_RECOVERY_EXCEEDS_COMMISSION:
+      'The recovery amount cannot be more than the commission.',
+    COMMISSION_RECOVERY_HISTORY_IMMUTABLE: 'Recovery history cannot be edited or deleted.',
+    COMMISSION_RECOVERY_NOT_FOUND: 'Recovery case not found.',
+    COMMISSION_RECOVERY_REASON_REQUIRED: 'Give a reason for the recovery proposal.',
+    COMMISSION_RECOVERY_TRIGGER_INVALID: 'Choose a valid reason type for the recovery.',
+    IST_PAYROLL_NOT_AUTHORIZED:
+      'Live IST payroll is not authorized yet: the governing compensation model is awaiting Presidential approval. Only labelled simulations can be prepared.',
+    PAYROLL_SIMULATION_ONLY:
+      'This line belongs to a simulation. Record a simulated payout instead.',
+    PAYROLL_SIMULATION_BASIS_REQUIRED:
+      'Describe the source of the simulation figures (at least 10 characters).',
+    PAYROLL_MODE_INVALID: 'Payroll mode must be live or simulation.',
+    GOVERNING_POLICY_LOCKED:
+      'The governing policy decision cannot be changed from the application.',
+    PAYROLL_CONFIGURATION_REQUIRED:
+      'Some lines are blocked or no longer match an approved compensation policy. Configure the policy and regenerate the draft before submitting or approving.',
+    FINANCIAL_EVIDENCE_BUSY:
+      'Payments are being recorded right now, so this payroll or month-end step could not start. Nothing was changed. Try again in a moment.',
+    PAYROLL_EVIDENCE_CHANGED:
+      'Payroll evidence has changed or is missing. Regenerate the draft and review the current evidence before submitting or approving.',
+    PAYROLL_PROOF_REQUIRED: 'Enter the supporting payment or reconciliation evidence reference, at least 10 characters.',
+    PAYROLL_PROOF_CONFLICT: 'This external payment already carries a different proof reference.',
+    PAYROLL_RECONCILIATION_ALREADY_RECORDED: 'This external payment already has a recorded reconciliation review.',
+    PAYROLL_RECONCILIATION_REQUIRED: 'Review the changed evidence on the recorded external payment before closing this payroll batch.',
+    PAYROLL_BATCH_NOT_FOUND: 'Payroll batch not found.',
+    PAYROLL_BATCH_NOT_EDITABLE: 'Only a draft or returned payroll batch can be changed.',
+    PAYROLL_BATCH_EMPTY: 'This payroll batch has no lines.',
+    PAYROLL_BATCH_NOT_SUBMITTED: 'This payroll batch is not waiting for approval.',
+    PAYROLL_SELF_APPROVAL: 'A payroll batch cannot be approved by the person who submitted it.',
+    PAYROLL_RETURN_REASON_REQUIRED:
+      'Give a reason of at least 5 characters for returning the batch.',
+    PAYROLL_BATCH_LOCKED: 'An approved payroll batch can no longer be changed.',
+    PAYROLL_BATCH_TRANSITION_INVALID: 'That change is not allowed for this payroll batch status.',
+    PAYROLL_DIRECT_WRITE_REFUSED:
+      'Payroll records can only be changed through the payroll workflow.',
+    PAYROLL_LINE_INVALID: 'A payroll line has invalid or inconsistent figures.',
+    PAYROLL_LINE_DUPLICATE: 'A staff member appears more than once in this payroll batch.',
+    PAYROLL_LINE_IMMUTABLE: 'A payroll line cannot be edited; regenerate the draft instead.',
+    PAYROLL_LINE_NOT_FOUND: 'Payroll line not found.',
+    PAYROLL_LINE_NOT_PAYABLE: 'This payroll line has nothing payable.',
+    PAYROLL_BATCH_NOT_APPROVED: 'Payroll can be recorded as paid only after the batch is approved.',
+    PAYROLL_AMOUNT_MISMATCH: 'The amount must equal the approved net pay of the line.',
+    PAYROLL_METHOD_REQUIRED: 'Enter the payment method.',
+    PAYROLL_LINE_ALREADY_DISBURSED: 'This payroll line was already recorded as paid.',
+    PAYROLL_DISBURSEMENT_IMMUTABLE: 'A recorded payroll payment cannot be edited or deleted.',
+    PAYROLL_SELF_CLOSE: 'The person who submitted this batch cannot close it.',
+    PAYROLL_BATCH_NOT_FULLY_DISBURSED: 'Record every payout before closing this batch.',
+    PAYROLL_NOT_SIMULATION: 'This payroll line belongs to a live batch, not a simulation.',
+    PERIOD_HAS_BLOCKERS:
+      'Resolve the blockers listed in Readiness before submitting this period.',
+    PAYMENT_ADJUSTMENT_AUTHORITY_PENDING:
+      'Who may approve, reject or withdraw payment adjustments is awaiting formal approval (Q13). Nothing was changed; the proposal stays on file.',
+    PAYMENT_ADJUSTMENT_NOT_FOUND: 'Payment adjustment not found.',
+    PAYMENT_ADJUSTMENT_DECISION_INVALID: 'Choose approve, reject or withdraw.',
+    PAYMENT_ADJUSTMENT_NOTE_REQUIRED:
+      'Give a note of at least 5 characters explaining the decision.',
+    PAYMENT_ADJUSTMENT_ALREADY_RESOLVED: 'This adjustment has already been resolved.',
+    PAYMENT_ADJUSTMENT_SELF_DECISION:
+      'The person who proposed an adjustment cannot approve or reject it.',
+    PAYMENT_ADJUSTMENT_DIRECT_WRITE_REFUSED:
+      'Adjustments can only be resolved through the resolution workflow.',
+    COMPENSATION_POLICY_NOT_FOUND: 'Compensation policy not found.',
+    COMPENSATION_POLICY_INVALID: 'The compensation policy has an invalid value.',
+    COMPENSATION_POLICY_NOT_EDITABLE: 'Only a draft policy can be edited.',
+    COMPENSATION_POLICY_NOT_PENDING: 'This policy is not waiting for approval.',
+    COMPENSATION_POLICY_NOT_APPROVED: 'Only an approved policy can be ended.',
+    COMPENSATION_POLICY_TRANSITION_INVALID: 'That change is not allowed for this policy status.',
+    COMPENSATION_POLICY_IN_USE_BY_FINALIZED_PAYROLL:
+      'This policy already paid an approved or closed payroll month, so its end date cannot cut that month.',
+    COMPENSATION_POLICY_SELF_APPROVAL:
+      'The person who drafted, edited or submitted a policy cannot approve it.',
+    COMPENSATION_POLICY_EVIDENCE_REQUIRED:
+      'Enter the reference of the approval document (10 to 500 characters).',
+    COMPENSATION_POLICY_APPROVAL_NOTE_REQUIRED:
+      'Give an approval note of at least 5 characters.',
+    COMPENSATION_POLICY_RETURN_REASON_REQUIRED:
+      'Give a reason of at least 5 characters for returning the policy.',
+    COMPENSATION_POLICY_END_NOTE_REQUIRED: 'Give a note of at least 5 characters for ending the policy.',
+    COMPENSATION_POLICY_END_DATE_INVALID:
+      'The end date must be a real date on or after the policy start date.',
+    COMPENSATION_POLICY_DIRECT_WRITE_REFUSED:
+      'Compensation policies can only be changed through the policy workflow.',
+    POLICY_TRANSITION_RULE_NOT_APPROVED:
+      'This month spans two compensation policies and the rule for splitting it is not yet approved. Nothing was computed.',
+    COMPENSATION_POLICY_IDEMPOTENCY_CONFLICT:
+      'This request identifier was already used with different policy data.',
+    POLICY_SEGMENT_PAYOUT_NOT_IMPLEMENTED:
+      'This month spans two compensation policies and paying a split month is not built yet. Nothing was computed.',
+    ...IST_GOVERNED_MESSAGES,
+    IST_GOVERNED_KIND_INVALID: 'That kind of record is not supported.',
+    IST_GOVERNED_ACTION_INVALID: 'That action is not supported.',
+    STAFF_REQUIRED: 'Choose a staff member.',
+    PAYROLL_LINE_REVIEW_REQUIRED:
+      'A payroll line above a review limit needs a Finance review note before this batch can move on.',
+    PAYROLL_LINE_REVIEW_NOT_REQUIRED: 'This payroll line is not flagged for review.',
+    PAYROLL_LINE_ALREADY_REVIEWED: 'This payroll line was already reviewed.',
+    PAYROLL_REVIEW_NOTE_REQUIRED: 'Give a review note of at least 5 characters.',
     PAYMENT_DATE_INVALID: 'The payment date must be a real date that is not in the future.',
+    VERIFIED_PAYMENT_DETAILS_IMMUTABLE:
+      'Verified receipt history is locked. Record a separate adjustment proposal for review.',
+    FINANCIAL_HISTORY_PROTECTED:
+      'Financial history cannot be deleted or replaced. Record a separate adjustment proposal for review.',
+    CUSTOMER_FINANCIAL_HISTORY_PROTECTED:
+      'This customer has financial history or retained documents. Permanent deletion requires an approved retention decision.',
+    SALE_FINANCIAL_DETAILS_IMMUTABLE:
+      'The sale preserves its original commercial terms and seller attribution.',
+    COMMISSION_FINANCIAL_DETAILS_IMMUTABLE:
+      'The commission preserves its original amount, rate, source and beneficiary.',
     PAYMENT_NOT_PENDING: 'Only a payment that is still pending verification can be changed.',
     PAYMENT_NOT_VERIFIED: 'Only a verified payment can be reversed, returned or refunded.',
     PAYMENT_ADJUSTMENT_EXCEEDS_PAYMENT: 'The adjustment cannot be more than the payment.',
@@ -389,7 +691,16 @@ export function mapRpcError(
     SIGNED_APPLICATION_DOCUMENT_REQUIRED:
       'An accepted signed Customer Application is required before approval.',
     SIGNED_RA_DOCUMENT_REQUIRED:
-      'An accepted signed Reservation Agreement is required before execution.',
+      'An accepted signed Reservation Agreement is required before approval.',
+    APPLICATION_APPROVAL_FORBIDDEN: 'Only Admin or Super Admin may approve or reject an application and RA.',
+    APPLICATION_APPROVAL_REQUIRED: 'Approve the application and RA together from the application.',
+    APPLICATION_SUBMISSION_REQUIRED: 'Submit the application and RA before uploading signed documents.',
+    LINKED_RESERVATION_REQUIRED: 'The linked Reservation Agreement is required.',
+    PURCHASE_HAS_PAYMENTS: 'This purchase has payment history and cannot be cancelled through application review.',
+    PURCHASE_WORKFLOW_REQUIRED: 'Use the approved Application & RA purchase workflow.',
+    RESERVATION_PAYMENT_REQUIRED: 'Verify the reservation payment required by these purchase terms first.',
+    RESERVATION_FEE_MUST_MATCH_TERMS: 'Enter the exact reservation fee required by these purchase terms.',
+    CURRENT_ID_DOCUMENT_REQUIRED: 'A current, reviewed identity document is required before submission.',
     ACTIVATION_AGREEMENT_NOT_FINALIZED:
       'The Reservation Agreement must be finalized before this membership can be activated.',
     VIP_CARD_ID_REQUIRED:
@@ -402,7 +713,16 @@ export function mapRpcError(
       mapped[0],
       code === 'SALE_COMPLETE_HIERARCHY_REQUIRED'
         ? 'Complete the seller hierarchy before creating this sale.'
-        : (importMessages[code ?? ''] ?? code!.replace(/_/g, ' ').toLowerCase()),
+        : (code === 'COMPENSATION_POLICY_INVALID' || IST_INVALID_CODES.has(code ?? '')) &&
+            error?.details
+          ? `${
+              code?.startsWith('IST_ENGAGEMENT')
+                ? 'The IST engagement'
+                : code?.startsWith('IST_PERFORMANCE_RULE')
+                  ? 'The performance rule'
+                  : 'The compensation policy'
+            } is invalid: ${error.details}.`
+          : (importMessages[code ?? ''] ?? code!.replace(/_/g, ' ').toLowerCase()),
       mapped[1],
     );
 

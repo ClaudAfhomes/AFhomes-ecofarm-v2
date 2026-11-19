@@ -127,7 +127,7 @@ describe('BusinessCustomersPage views', () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: IMPORTER });
     await screen.findByText('MARIA SANTOS');
-    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Application & RA' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import \/ export/i })).toBeInTheDocument();
   });
 
@@ -135,7 +135,7 @@ describe('BusinessCustomersPage views', () => {
     vi.mocked(getCustomersPage).mockResolvedValue(pageOf([row()], 1));
     renderWithProviders(<BusinessCustomersPage />, { user: STAFF });
     await screen.findByText('MARIA SANTOS');
-    expect(screen.getByRole('button', { name: 'New customer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Application & RA' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /import \/ export/i })).not.toBeInTheDocument();
   });
 });

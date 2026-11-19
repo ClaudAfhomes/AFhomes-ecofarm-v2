@@ -372,8 +372,13 @@ export {
   paymentAdjustmentKindSchema,
   proposePaymentAdjustmentSchema,
   paymentAdjustmentSchema,
+  paymentAdjustmentDecisionSchema,
+  resolvePaymentAdjustmentSchema,
+  resolvePaymentAdjustmentResultSchema,
+  paymentAdjustmentResolutionGateSchema,
   financePeriodSummarySchema,
   accountingPeriodSchema,
+  accountingPeriodReadinessSchema,
   returnAccountingPeriodSchema,
   PAYMENT_RECEIPT_MAX_BYTES,
   paymentReceiptUploadRequestSchema,
@@ -384,8 +389,11 @@ export type {
   PaymentReferenceMatch,
   ProposePaymentAdjustmentRequest,
   PaymentAdjustment,
+  ResolvePaymentAdjustmentRequest,
+  PaymentAdjustmentResolutionGate,
   FinancePeriodSummary,
   AccountingPeriod,
+  AccountingPeriodReadiness,
   PaymentReceiptUploadGrant,
   Payment,
   RecordPaymentRequest,
@@ -501,6 +509,10 @@ export {
   holderBirthDateSchema,
   OLDEST_HOLDER_AGE,
   SUFFIX_OPTIONS,
+  PREFIX_OPTIONS,
+  prefixOptionSchema,
+  normalizeSuffixOption,
+  normalizePrefixOption,
   SEX_OPTIONS,
   CITIZENSHIP_OPTIONS,
   CIVIL_STATUS_OPTIONS,
@@ -564,6 +576,9 @@ export {
   memberCivilStatusSchema,
   memberProfileSchema,
   createMemberSchema,
+  memberIdentityDocumentSchema,
+  memberIdentityDocumentLinkSchema,
+  type MemberIdentityDocument,
   createOstMemberModeSchema,
   createOstMemberSchema,
   createOstMemberResultSchema,
@@ -845,6 +860,8 @@ export * from './schemas/public-verification-settings.js';
 export * from './schemas/ist-portal.js';
 export * from './schemas/imported-sales.js';
 
+export * from './schemas/commission-ops.js';
+export * from './schemas/payroll.js';
 export * from './schemas/cms-content.js';
 export * from './schemas/media.js';
 

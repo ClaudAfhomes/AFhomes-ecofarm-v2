@@ -25,6 +25,8 @@ import {
   closePeriod,
   getAccountingPeriods,
   getFinanceSummary,
+  getPeriodReadiness,
+  periodReadinessKey,
   returnPeriod,
   submitPeriod,
 } from './services-periods';
@@ -100,12 +102,28 @@ export function MonthEndClosePage() {
   const summary = useQuery({
     queryKey: businessKeys.financeSummary(period),
     queryFn: () => getFinanceSummary(period),
+    refetchInterval: 15000,
   });
   const periods = useQuery({
     queryKey: businessKeys.accountingPeriods,
     queryFn: getAccountingPeriods,
+    refetchInterval: 30000,
   });
   const record = periods.data?.find((p) => p.period === period);
+  const readiness = useQuery({
+    queryKey: periodReadinessKey(period),
+    queryFn: () => getPeriodReadiness(period),
+    refetchInterval: 15000,
+  });
+  const blockers = readiness.data?.blockers ?? [];
+  const warnings = readiness.data?.warnings ?? [];
+  const submitBlock = !readiness.isSuccess
+    ? 'Closing checks must load before you can continue.'
+    : blockers.length > 0
+      ? `${blockers.length} ${blockers.length === 1 ? 'blocker' : 'blockers'} to fix first.`
+      : !readiness.data.ready
+        ? 'This month is not ready for closing.'
+        : null;
 
   const run = useBusinessMutation({
     mutationFn: async (kind: 'submit' | 'close' | 'return') => {
@@ -122,7 +140,10 @@ export function MonthEndClosePage() {
       });
       await client.invalidateQueries({ queryKey: businessKeys.queue });
     },
-    onError: (e) => setError(e instanceof Error ? e.message : 'The request failed.'),
+    onError: async (e) => {
+      setError(e instanceof Error ? e.message : 'The request failed.');
+      await client.invalidateQueries({ queryKey: periodReadinessKey(period) });
+    },
   });
 
   const open = (kind: Exclude<Confirm, null>) => {
@@ -136,17 +157,21 @@ export function MonthEndClosePage() {
   const submitterIsMe = Boolean(record?.submittedBy && record.submittedBy === user?.id);
   const earlierOpen = s?.earlierOpenPeriods ?? [];
   const closeBlock =
-    earlierOpen.length > 0
-      ? 'Close earlier months first.'
-      : submitterIsMe
-        ? 'The submitter cannot close.'
-        : null;
+    submitBlock ??
+    (!periods.isSuccess
+      ? 'Approval history must load before closing.'
+      : earlierOpen.length > 0
+        ? 'Close earlier months first.'
+        : submitterIsMe
+          ? 'The submitter cannot close.'
+          : null);
 
   const lines: { label: string; value: string; to?: string; note?: string }[] = s
     ? [
         {
           label: 'Verified',
-          value: `${formatMoney(s.verifiedTotal)} · ${formatCountOrDash(s.verifiedCount)}`,
+          value: formatMoney(s.verifiedTotal),
+          note: `${formatCountOrDash(s.verifiedCount)} payments`,
         },
         {
           label: 'Pending verification',
@@ -189,15 +214,28 @@ export function MonthEndClosePage() {
     <section className={styles.shell}>
       <PageHeader title="Month-End Close" description="Review the month, then close it." />
 
-      <label className={styles.field}>
-        Month
-        <Select
-          aria-label="Month"
-          value={period}
-          onChange={(event) => setPeriod(event.target.value)}
-          options={months.map((m) => ({ value: m, label: monthLabel(m) }))}
-        />
-      </label>
+      <div className={styles.toolbar}>
+        <label className={styles.field}>
+          Month
+          <Select
+            aria-label="Month"
+            value={period}
+            disabled={confirm !== null || run.isPending}
+            onChange={(event) => setPeriod(event.target.value)}
+            options={months.map((m) => ({ value: m, label: monthLabel(m) }))}
+          />
+        </label>
+        <Button
+          variant="secondary"
+          loading={summary.isFetching || periods.isFetching || readiness.isFetching}
+          disabled={confirm !== null || run.isPending}
+          onClick={() =>
+            void Promise.all([summary.refetch(), periods.refetch(), readiness.refetch()])
+          }
+        >
+          Refresh
+        </Button>
+      </div>
 
       {summary.isPending ? (
         <Skeleton style={{ height: 160 }} />
@@ -215,18 +253,114 @@ export function MonthEndClosePage() {
             ) : null}
           </div>
 
-          <ul className={styles.checklist} aria-label="Pre-close checklist">
+          {status !== 'closed' ? (
+            <section className={styles.actionPanel} aria-label="Next closing step">
+              <div>
+                <h2 className={styles.heading}>Next step</h2>
+                <p className={styles.muted}>
+                  {status === 'open'
+                    ? canSubmit
+                      ? 'Review the closing checks, then submit for approval.'
+                      : 'Finance prepares and submits this month for closing.'
+                    : canClose
+                      ? 'Review the submitted month, then close or return it.'
+                      : 'Waiting for an authorized closer to review this month.'}
+                </p>
+              </div>
+              <div className={styles.actions} role="group" aria-label="Month closing actions">
+                {canSubmit && status === 'open' ? (
+                  <>
+                    <Button disabled={submitBlock !== null} onClick={() => open('submit')}>
+                      Submit for closing
+                    </Button>
+                    {submitBlock ? <span className={styles.muted}>{submitBlock}</span> : null}
+                  </>
+                ) : null}
+                {canClose && status === 'ready_for_approval' ? (
+                  <>
+                    <Button disabled={closeBlock !== null} onClick={() => open('close')}>
+                      Close period
+                    </Button>
+                    <Button variant="secondary" onClick={() => open('return')}>
+                      Return
+                    </Button>
+                    {closeBlock ? <span className={styles.muted}>{closeBlock}</span> : null}
+                  </>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          <ul className={styles.metrics} aria-label="Pre-close checklist">
             {lines.map((line) => (
-              <li key={line.label} className={styles.line}>
-                <span>
+              <li key={line.label} className={styles.metric}>
+                <span className={styles.metricLabel}>
                   {line.to ? <Link to={line.to}>{line.label}</Link> : line.label}
-                  {line.note ? <span className={styles.note}> · {line.note}</span> : null}
                 </span>
                 <strong>{line.value}</strong>
+                {line.note ? <small className={styles.note}>{line.note}</small> : null}
               </li>
             ))}
           </ul>
-          <p className={styles.muted}>Counts are disclosed, not blocking.</p>
+          {status !== 'closed' ? (
+            <section className={styles.reviewPanel} aria-label="Closing checks">
+              <h2 className={styles.heading}>Closing checks</h2>
+              <p className={styles.muted}>
+                Blocking issues must be resolved. Warnings do not prevent closing.
+              </p>
+              {readiness.isPending ? <p role="status">Checking this month...</p> : null}
+              {readiness.isError ? (
+                <ErrorState
+                  title="Closing checks unavailable"
+                  error={readiness.error}
+                  onRetry={readiness.refetch}
+                />
+              ) : null}
+              {readiness.isSuccess ? (
+                <ul className={styles.checklist} aria-label="Readiness">
+                  {blockers.map((b) => (
+                    <li key={b.code} className={styles.blocker}>
+                      <strong>Blocker · {b.count}</strong> — {b.message}
+                      {b.code === 'PAYMENT_ADJUSTMENTS_PENDING' ||
+                      b.code === 'PAYMENTS_PENDING_VERIFICATION' ? (
+                        <>
+                          {' '}
+                          <Link to={PAYMENTS_PATH}>
+                            {b.code === 'PAYMENT_ADJUSTMENTS_PENDING'
+                              ? 'Review proposed adjustments'
+                              : 'Review pending payments'}
+                          </Link>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                  {warnings.map((w) => (
+                    <li key={w.code} className={styles.warning}>
+                      <strong>Warning · {w.count}</strong> — {w.message}
+                      {w.code === 'VERIFIED_PAYMENTS_MISSING_EVIDENCE' ? (
+                        <>
+                          {' '}
+                          <Link to={PAYMENTS_PATH}>Review payment evidence</Link>
+                        </>
+                      ) : w.code === 'LIVE_PAYROLL_NOT_CLOSED' ? (
+                        <>
+                          {' '}
+                          <Link to="/admin/finance/payroll">Review payroll</Link>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                  {blockers.length === 0 && warnings.length === 0 ? (
+                    <li className={styles.muted}>
+                      {readiness.data.ready
+                        ? 'Ready to submit.'
+                        : 'The server has not marked this month ready.'}
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
 
           {status === 'closed' ? (
             <div className={styles.snapshot}>
@@ -245,55 +379,49 @@ export function MonthEndClosePage() {
                 ))}
               </ul>
             </div>
-          ) : (
-            <div className={styles.actions}>
-              {canSubmit && status === 'open' ? (
-                <Button onClick={() => open('submit')}>Submit for closing</Button>
-              ) : null}
-              {canClose && status === 'ready_for_approval' ? (
-                <>
-                  <Button disabled={closeBlock !== null} onClick={() => open('close')}>
-                    Close period
-                  </Button>
-                  <Button variant="secondary" onClick={() => open('return')}>
-                    Return
-                  </Button>
-                  {closeBlock ? <span className={styles.muted}>{closeBlock}</span> : null}
-                </>
-              ) : null}
-            </div>
-          )}
+          ) : null}
         </>
       )}
 
-      <h2 className={styles.heading}>History</h2>
-      {periods.isError ? (
-        <ErrorState error={periods.error} onRetry={periods.refetch} />
-      ) : (
-        <ul className={styles.checklist} aria-label="Period history">
-          {(periods.data ?? []).map((p) => (
-            <li key={p.period} className={styles.line}>
-              <span>{monthLabel(p.period)}</span>
-              <StatusChip label={STATUS_LABEL[p.status]} tone={STATUS_TONE[p.status]} />
-            </li>
-          ))}
-          {periods.data?.length === 0 ? <li className={styles.muted}>No periods yet.</li> : null}
-        </ul>
-      )}
+      <details className={styles.history}>
+        <summary>Period history</summary>
+        {periods.isError ? (
+          <ErrorState error={periods.error} onRetry={periods.refetch} />
+        ) : (
+          <ul className={styles.checklist} aria-label="Period history">
+            {(periods.data ?? []).map((p) => (
+              <li key={p.period} className={styles.line}>
+                <span>{monthLabel(p.period)}</span>
+                <StatusChip label={STATUS_LABEL[p.status]} tone={STATUS_TONE[p.status]} />
+              </li>
+            ))}
+            {periods.data?.length === 0 ? <li className={styles.muted}>No periods yet.</li> : null}
+          </ul>
+        )}
+      </details>
 
       {confirm ? (
         <Dialog
           open
-          onClose={() => setConfirm(null)}
+          onClose={() => {
+            if (!run.isPending) setConfirm(null);
+          }}
           title={confirmTitle}
           footer={
             <div className={styles.actions}>
-              <Button variant="secondary" onClick={() => setConfirm(null)}>
+              <Button variant="secondary" disabled={run.isPending} onClick={() => setConfirm(null)}>
                 Cancel
               </Button>
               <Button
                 loading={run.isPending}
-                disabled={confirm === 'return' && reasonTooShort}
+                disabled={
+                  run.isPending ||
+                  (confirm === 'submit'
+                    ? !canSubmit || submitBlock !== null
+                    : confirm === 'close'
+                      ? !canClose || closeBlock !== null
+                      : !canClose || reasonTooShort)
+                }
                 onClick={() => run.mutate(confirm)}
               >
                 {confirmTitle}

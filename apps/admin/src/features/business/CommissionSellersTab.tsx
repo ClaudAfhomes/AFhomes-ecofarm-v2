@@ -8,6 +8,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   Pagination,
   SearchField,
@@ -208,13 +209,13 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
                 ]}
               />
             </label>
-            <label className={styles.field}>
-              Sales
-              <Select
-                aria-label="Filter by sales"
+            <div className={styles.field}>
+              <span aria-hidden="true">Sales</span>
+              <ChoiceChips
+                label="Filter by sales"
                 value={salesFilter}
-                onChange={(event) => {
-                  setSalesFilter(event.target.value as SalesFilter);
+                onChange={(next) => {
+                  setSalesFilter(next as SalesFilter);
                   setPage(1);
                 }}
                 options={[
@@ -224,7 +225,7 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
                   { value: 'needs', label: 'Needs a rate' },
                 ]}
               />
-            </label>
+            </div>
           </>
         }
       />

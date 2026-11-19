@@ -188,10 +188,28 @@ export type MemberProfile = z.infer<typeof memberProfileSchema>;
  * except Vice Director names its head; a Vice Director names none. The OST
  * referrer rides along only for Sales Managers and is optional.
  */
+// Optional in API contracts for legacy/import callers; both manual creation forms require an ID.
+export const memberIdentityDocumentSchema = z
+  .object({
+    mimeType: z.enum(['image/jpeg', 'image/png', 'application/pdf']),
+    dataBase64: z
+      .string()
+      .min(12)
+      .max(2796204)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  })
+  .strict();
+export type MemberIdentityDocument = z.infer<typeof memberIdentityDocumentSchema>;
+export const memberIdentityDocumentLinkSchema = z.object({
+  url: z.string().url().nullable(),
+  expiresAt: z.string().nullable(),
+});
+
 export const createMemberSchema = memberProfileSchema
   .extend({
     // Optional for existing workbook/API callers; manual account forms require a photo.
     profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
+    identityDocument: memberIdentityDocumentSchema.optional(),
     fullName: memberFullNameSchema,
     email: emailSchema,
     temporaryPassword: z.string().min(8).max(128),
@@ -367,6 +385,7 @@ export const manualOstAaNumberSchema = z
 export const createOstMemberSchema = z
   .object({
     profilePhotoBase64: profilePhotoInputSchema.shape.dataBase64.optional(),
+    identityDocument: memberIdentityDocumentSchema.optional(),
     mode: createOstMemberModeSchema,
     temporaryPassword: z.string().min(8).max(128).optional(),
     aaNumberMode: z.enum(['auto', 'manual']).default('auto'),

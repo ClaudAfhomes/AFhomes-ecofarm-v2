@@ -10,7 +10,9 @@
   line-height: 1.6;
   max-width: 100%;
   white-space: normal;
-  overflow-wrap: anywhere;
+  /* break-word, not anywhere: `anywhere` shrinks the chip's min-content so a
+     table column squeezed it into "Syste / m"; long labels still wrap. */
+  overflow-wrap: break-word;
   color: var(--color-text-secondary);
   background-color: var(--color-bg-surface);
 }

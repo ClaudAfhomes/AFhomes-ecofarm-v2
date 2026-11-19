@@ -82,6 +82,7 @@ export async function runOstAccreditationChecks({
       };
       const header = {
         planId: plan,
+        smStaffId: sponsor,
         paymentScheme: 'spot_cash',
         acquisitionChannels: ['Referral'],
         consentAcknowledged: true,
@@ -116,40 +117,9 @@ export async function runOstAccreditationChecks({
         /CUSTOMER_EMAIL_CONFLICT/,
       );
       await db.query('rollback to savepoint duplicate_customer');
-      const sale = randomUUID();
-      await db.query(
-        `insert into public.card_sales(id,sale_number,customer_id,plan_id,seller_type,seller_staff_id,cash_price,cash_price_snapshot,minimum_down_payment_snapshot,yearly_points_snapshot,commission_rate_snapshot,expected_commission_snapshot,status,created_by,balance_due_at)
-        select $1::uuid,'QA-'||($1::uuid)::text,$2::uuid,id,'staff',$3::uuid,cash_price,cash_price,minimum_down_payment,yearly_points,commission_rate,'0.00','draft',$3,now()+interval '365 days' from public.card_plans where id=$4`,
-        [sale, customer, actor, plan],
-      );
-      const input = {
-        saleId: sale,
-        customerApplicationId: application,
-        reservationDate: '2026-10-01',
-        agreementDate: '2026-10-01',
-        primarySignatureStatus: 'received',
-      };
-      const reserve =
-        "select public.reserve_from_customer_application_once($1,$2,$3,$4,null,'[]') id";
-      await db.query('savepoint draft_source');
-      await refused(
-        'reservation rejects a draft application source',
-        reserve,
-        [randomUUID(), actor, input, {}],
-        /APPLICATION_NOT_ELIGIBLE/,
-      );
-      await db.query('rollback to savepoint draft_source');
-      await db.query(
-        "update public.customer_applications set status='submitted',submitted_at=now() where id=$1",
-        [application],
-      );
-      const reservationRequest = randomUUID();
-      const reservation = await scalar(reserve, [
-        reservationRequest,
-        actor,
-        input,
-        { name: 'FORGED CLIENT HOLDER' },
-      ]);
+      const reservation = await scalar('select id from public.reservation_agreements where customer_application_id=$1', [application]);
+      check('customer registration creates its linked draft RA immediately',
+        (await count("select count(*)::int n from public.reservation_agreements where id=$1 and status='draft' and origin='application' and sale_id is null", [reservation])) === 1);
       check(
         'reservation derives the frozen application holder, not client replacement',
         (await count(
@@ -164,10 +134,9 @@ export async function runOstAccreditationChecks({
           [reservation],
         )) === 1,
       );
-      check(
-        'application reservation retry returns one reservation',
-        (await scalar(reserve, [reservationRequest, actor, input, {}])) === reservation,
-      );
+      check('application retry retains exactly one linked reservation',
+        (await scalar(sql, [request, actor, header, primary])) === application &&
+        (await count('select count(*)::int n from public.reservation_agreements where customer_application_id=$1', [application])) === 1);
       check(
         'reservation creates no duplicate customer master',
         (await count('select count(*)::int n from public.customers where email=$1', [

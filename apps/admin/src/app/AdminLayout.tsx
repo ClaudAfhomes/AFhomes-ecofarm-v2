@@ -1,6 +1,6 @@
 import { Suspense, useMemo, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { AppShell, Breadcrumbs, ConfirmDialog, Icon, Skeleton, UserMenu } from '@afhomes/ui';
+import { AppShell, Breadcrumbs, ConfirmDialog, Icon, PageSkeleton, UserMenu } from '@afhomes/ui';
 import { useSession } from '../lib/session';
 import { logoutUrlForRole } from '../lib/portal';
 import {
@@ -10,7 +10,6 @@ import {
   istNavItemsForPermissions,
 } from './navigation';
 import { AdminForbiddenPage } from './AdminForbiddenPage';
-import { GlobalSearch } from './GlobalSearch';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
 import { useProfilePhoto } from '../features/account/profile-photo';
@@ -63,7 +62,7 @@ export function AdminLayout() {
           applicationWorkspace ? (
             <span className={styles.workspaceCrumbs}>
               Sales <span aria-hidden="true">›</span> Customers <span aria-hidden="true">›</span>{' '}
-              <strong>New application</strong>
+              <strong>Create Application &amp; RA</strong>
             </span>
           ) : undefined
         }
@@ -123,21 +122,20 @@ export function AdminLayout() {
         }
         topbarActions={
           <>
-          {gated ? null : <GlobalSearch />}
-          <UserMenu
-            photoUrl={photo.photo.data?.url}
-            name={user?.name}
-            role={user?.roleName}
-            items={[
-              {
-                label: 'My Account',
-                icon: 'user',
-                to: staffPortalPath(user?.roleSlug, '/admin/profile'),
-              },
-              { label: '-', icon: 'user' },
-              { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
-            ]}
-          />
+            <UserMenu
+              photoUrl={photo.photo.data?.url}
+              name={user?.name}
+              role={user?.roleName}
+              items={[
+                {
+                  label: 'My Account',
+                  icon: 'user',
+                  to: staffPortalPath(user?.roleSlug, '/admin/profile'),
+                },
+                { label: '-', icon: 'user' },
+                { label: 'Logout', icon: 'logout', danger: true, onClick: () => setConfirm(true) },
+              ]}
+            />
           </>
         }
       >
@@ -146,13 +144,7 @@ export function AdminLayout() {
           {/* Route pages load on demand: the shell stays mounted while the
           page chunk loads, so navigation never blanks. */}
           <Suspense
-            fallback={
-              <div role="status" aria-label="Loading page">
-                <Skeleton />
-                <Skeleton />
-                <Skeleton />
-              </div>
-            }
+            fallback={<PageSkeleton />}
           >
             <Outlet />
           </Suspense>

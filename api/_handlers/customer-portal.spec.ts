@@ -1002,6 +1002,16 @@ describe('customer profile read model', () => {
 describe('customer membership summary', () => {
   beforeEach(() => install());
 
+  it('shows the latest owned membership with its own purchase VIP ID', async () => {
+    const tables = baseTables();
+    const latest = { ...tables.memberships[0]!, id: 'dddddddd-0000-4000-8000-000000000002', sale_id: 'bbbbbbbb-0000-4000-8000-000000000002', membership_number: 'MBS-000999', activated_at: inHours(1) };
+    tables.memberships.push(latest);
+    install({ tables: { ...tables, reservation_agreements: [{ sale_id: latest.sale_id, vip_card_number: '2026-000099' }] } });
+    const result = await callPortal('membership');
+    expect(result.status).toBe(200);
+    expect(body(result)).toMatchObject({ id: latest.id, vipCardNumber: '2026-000099', membershipNumber: latest.membership_number });
+  });
+
   it('returns the caller own active membership', async () => {
     const s = await callPortal('membership');
     expect(s.status).toBe(200);

@@ -169,24 +169,21 @@
   .tableWrap tbody > tr > td[data-label='Name'] {
     justify-content: flex-start;
     padding-bottom: var(--space-1);
-    padding-right: 48px;
   }
 
   .tableWrap tbody > tr > td[data-label='Name']::before {
     display: none;
   }
 
+  /* Actions get their own row, as on Roles and Departments: floated top-right
+     they covered the staff code (only "-EM" was visible at 375px). */
   .tableWrap tbody > tr > td[data-label='Actions'] {
-    position: absolute;
-    top: var(--space-2);
-    right: var(--space-2);
-    padding: 0;
-    min-width: 0;
+    justify-content: flex-end;
     border-bottom: 0;
   }
 
   .tableWrap tbody > tr > td[data-label='Actions']::before {
-    display: none;
+    margin-right: auto;
   }
 
   .tableWrap tbody > tr > td[data-label='Name'] .identityName {

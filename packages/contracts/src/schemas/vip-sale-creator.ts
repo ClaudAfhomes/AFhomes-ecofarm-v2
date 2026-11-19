@@ -1,17 +1,17 @@
 /**
- * Sale origination (product owner, 11 Nov 2026).
+ * Sale origination (product owner, 16 Nov 2026).
  *
  * WHO may create a VIP sale / submit a Customer Application is decided by the
  * configurable module permission (checked separately, server-side). This helper
- * only adds the fixed exclusions: the account must be active and OST may never
- * originate. The seller of record is always an ACTIVE Sales Manager: an SM
- * creator is the seller; any other permitted creator must name the SM.
+ * also requires an active SM, Admin or Super Admin. Oversight and Finance
+ * permissions never imply origination authority. An SM sells for themselves;
+ * administrators must name the active SM of record.
  */
 export function canCreateVipSale(
   account: { roleSlug?: string; status?: string } | null | undefined,
 ): boolean {
   if (!account || account.status !== 'active') return false;
-  return Boolean(account.roleSlug) && account.roleSlug !== 'ost';
+  return ['sales_manager', 'admin', 'super_admin'].includes(account.roleSlug ?? '');
 }
 
 /** The only role that can be the seller of record of a new sale. */

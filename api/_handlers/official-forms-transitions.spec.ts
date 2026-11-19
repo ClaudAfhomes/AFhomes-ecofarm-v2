@@ -40,16 +40,16 @@ vi.mock('../_lib/afhomes-access.js', () => ({
     if (token.includes('forbidden')) return denied(403, 'FORBIDDEN');
     if (action === 'update' && moduleKey === 'sales.card_sales')
       return token.includes('super-admin')
-        ? { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin' }
+        ? { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin', status: 'active' }
         : denied(403, 'FORBIDDEN');
     if (token.includes('other-seller'))
-      return { userId: '33333333-3333-4333-8333-333333333333', roleSlug: 'sales_manager' };
+      return { userId: '33333333-3333-4333-8333-333333333333', roleSlug: 'sales_manager', status: 'active' };
     if (token.includes('seller'))
       return {
         userId: '11111111-1111-4111-8111-111111111111',
-        roleSlug: 'sales_manager',
+        roleSlug: 'sales_manager', status: 'active',
       };
-    return { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin' };
+    return { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin', status: 'active' };
   },
 }));
 
@@ -352,6 +352,7 @@ describe('official form review lifecycle', () => {
     live.rpcs = [{ fn: 'decide_purchase_application_once', result: APP_ID }];
     const reopened = await call(forms, {
       path: `customer-applications/${APP_ID}/reopen`,
+      token: 'super-admin-token',
       method: 'POST',
       body: { requestId: REQUEST_ID },
     });
@@ -366,6 +367,7 @@ describe('official form review lifecycle', () => {
     };
     const invalid = await call(forms, {
       path: `customer-applications/${APP_ID}/decision`,
+      token: 'super-admin-token',
       method: 'POST',
       body: { requestId: REQUEST_ID, decision: 'approved' },
     });
@@ -868,7 +870,7 @@ describe('application work queue ownership', () => {
     expect(ids).toContain(cancelledReservationApp);
   });
 
-  it('hides an application whose reservation is merely submitted or executed', async () => {
+  it('keeps draft and submitted RA applications in approval work until execution', async () => {
     for (const status of ['draft', 'submitted', 'executed']) {
       installQueue([agreement('bbbbbbbb-0000-4000-8000-00000000c002', progressed, status)]);
       const result = await call(forms, {
@@ -876,7 +878,7 @@ describe('application work queue ownership', () => {
         query: { queue: 'application_work' },
       });
       const ids = (result.body as { data: { id: string }[] }).data.map((row) => row.id);
-      expect(ids, `status ${status}`).not.toContain(progressed);
+      expect(ids.includes(progressed), `status ${status}`).toBe(status !== 'executed');
     }
   });
 
@@ -937,8 +939,8 @@ describe('application work queue ownership', () => {
       ],
       reservation_agreements: [
         agreement('bbbbbbbb-0000-4000-8000-00000000c008', progressed, 'executed'),
-        agreement('bbbbbbbb-0000-4000-8000-00000000c009', second, 'submitted'),
-        agreement('bbbbbbbb-0000-4000-8000-00000000c010', third, 'draft'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c009', second, 'executed'),
+        agreement('bbbbbbbb-0000-4000-8000-00000000c010', third, 'executed'),
       ],
     });
     const result = await call(forms, {

@@ -22,6 +22,14 @@ export const PAYMENT_RECEIPT_BUCKET = 'afhomes-payment-receipts';
 /** Every synthetic storage object, as [bucket, name], for the suite cleanup. */
 export const syntheticStorageObjects: Array<[string, string]> = [];
 
+/** Explicit historical fixture ancestry; imports never infer it in production. */
+export async function historicalSaleSnapshot(db: Client, saleId: string, staffIds: string[]): Promise<void> {
+  await db.query(`insert into public.card_sale_hierarchy_snapshots(sale_id,ancestor_staff_id,ancestor_role,depth,captured_at)
+    select $1,s.id,private.staff_role_slug(s.id),(chain.ordinality-1)::smallint,now()
+    from unnest($2::uuid[]) with ordinality chain(id,ordinality)
+    join public.staff_users s on s.id=chain.id`, [saleId, staffIds]);
+}
+
 export async function storageObject(db: Client, bucket: string, name: string): Promise<string> {
   await db.query('insert into storage.objects (bucket_id, name) values ($1, $2)', [bucket, name]);
   syntheticStorageObjects.push([bucket, name]);
@@ -31,6 +39,20 @@ export async function storageObject(db: Client, bucket: string, name: string): P
 /** A real receipt object; returns the bucket-relative name for `receiptStoragePath`. */
 export const paymentReceipt = (db: Client, label = 'receipt'): Promise<string> =>
   storageObject(db, PAYMENT_RECEIPT_BUCKET, `synthetic-receipts/${label}-${randomUUID()}.pdf`);
+
+/** Fulfil the reservation prerequisite through the same ledger/RPCs as Finance. */
+export async function verifiedReservationFee(db: Client, reservationId: string, finance: string): Promise<string> {
+  const terms = (await db.query<{ fee: string; balance: string }>(
+    'select reservation_fee_snapshot fee,private.money(total_price_snapshot::numeric-reservation_fee_snapshot::numeric) balance from public.reservation_agreements where id=$1',
+    [reservationId])).rows[0]!;
+  if (terms.fee !== '0.00') {
+    const id = (await db.query<{ id: string }>('select public.record_reservation_payment_once($1,$2,$3,$4) id',
+      [randomUUID(), reservationId, { amount: terms.fee, paymentPurpose: 'reservation_fee', method: 'cash',
+        receiptStoragePath: await paymentReceipt(db) }, finance])).rows[0]!.id;
+    await db.query("select public.verify_purchase_payment_once($1,$2,'verified',null,$3)", [randomUUID(), id, finance]);
+  }
+  return terms.balance;
+}
 
 type SignedKind = 'signed_customer_application' | 'signed_reservation_agreement';
 

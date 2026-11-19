@@ -71,6 +71,9 @@ const CustomerImportExportPage = lazy(() =>
     default: m.CustomerImportExportPage,
   })),
 );
+const IstPayrollPage = lazy(() =>
+  import('../features/business/IstPayrollPage').then((m) => ({ default: m.IstPayrollPage })),
+);
 const MonthEndClosePage = lazy(() =>
   import('../features/business/MonthEndClosePage').then((m) => ({
     default: m.MonthEndClosePage,
@@ -352,6 +355,7 @@ export default function App() {
                 path="/admin/finance/month-end"
                 element={protectedPage(<MonthEndClosePage />)}
               />
+              <Route path="/admin/finance/payroll" element={protectedPage(<IstPayrollPage />)} />
               <Route
                 path="/admin/finance/activation"
                 element={protectedPage(<BusinessActivationQueuePage />)}
@@ -381,12 +385,15 @@ export default function App() {
               the sidebar guard and breadcrumb resolve the canonical entry and
               its `network.commissions` key - never the Finance parent prefix. */}
               <Route
-                path="/admin/finance/commissions/settings"
-                element={protectedPage(<Navigate replace to="/admin/commissions/settings" />)}
-              />
-              <Route
                 path="/admin/commissions/settings"
                 element={protectedPage(<CommissionSettingsPage />)}
+              />
+              {/* Keep AFTER the canonical route: the Finance portal maps both paths to
+              /finance/commissions/settings and the first declaration wins, so the
+              reverse order redirects forever. */}
+              <Route
+                path="/admin/finance/commissions/settings"
+                element={protectedPage(<Navigate replace to="/admin/commissions/settings" />)}
               />
               {/* Redemption. Each route is gated on the module key declared for it in
               ADMIN_NAV_ITEMS, so the sidebar and the guard cannot disagree: the

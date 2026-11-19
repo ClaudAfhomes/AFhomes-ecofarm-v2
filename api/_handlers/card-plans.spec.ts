@@ -98,16 +98,10 @@ const JADE = {
   sortOrder: 5,
 };
 
-async function createSale(productId: string, saleNumber: string) {
-  install([{ fn: 'next_sale_number', result: [{ sale_number: saleNumber }] }]);
-  const state = await call('sales', {
-    method: 'POST',
-    path: '',
-    token: TOKEN2.salesManager,
-    body: { customerId: CUSTOMER.prospect, productId },
-  });
-  expect(state.status).toBe(201);
-  return state;
+function seedHistoricalSale(productId: string, saleNumber: string) {
+  const db = install();
+  const sale = db.rows('card_sales').find(r => r.plan_id === productId && r.status === 'submitted')!;
+  sale.sale_number = saleNumber;
 }
 
 describe('existing catalogue loads unchanged', () => {
@@ -372,7 +366,7 @@ describe('editing a card plan', () => {
   });
 
   it('leaves an existing historical sale snapshot unchanged after a plan edit', async () => {
-    await createSale(PRODUCT.gold, 'SALE-910001');
+    seedHistoricalSale(PRODUCT.gold, 'SALE-910001');
     const db = holder.db as FakeSupabase;
     const sale = db.rows('card_sales').find((r) => r.sale_number === 'SALE-910001');
     expect(sale).toMatchObject({
@@ -437,7 +431,7 @@ describe('activate and deactivate', () => {
   });
 
   it('keeps history resolvable while deactivated', async () => {
-    await createSale(PRODUCT.gold, 'SALE-910003');
+    seedHistoricalSale(PRODUCT.gold, 'SALE-910003');
     const db = holder.db as FakeSupabase;
     const saleId = db.rows('card_sales').find((r) => r.sale_number === 'SALE-910003')!.id;
 

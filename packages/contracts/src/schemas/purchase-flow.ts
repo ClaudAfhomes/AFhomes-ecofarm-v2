@@ -255,7 +255,8 @@ export const purchaseReservationSchema = z.discriminatedUnion('origin', [
     customerApplicationId: uuid,
     customerId: uuid,
     sellerStaffId: uuid,
-    purchaseTermsId: uuid,
+    purchaseTermsId: uuid.nullable(),
+    vipCardNumber: z.string().nullable().optional(),
   }),
 ]);
 export type PurchaseReservation = z.infer<typeof purchaseReservationSchema>;
@@ -332,6 +333,8 @@ const reservationFinance = {
   tier: vipTierSchema,
   customerId: uuid,
   customerName: z.string(),
+  vipCardNumber: z.string().nullable().optional(),
+  commissionEligibleAt: timestamp.nullable().optional(),
   productName: z.string(),
   status: reservationAgreementStatusSchema,
   applicationStatus: customerApplicationStatusSchema,

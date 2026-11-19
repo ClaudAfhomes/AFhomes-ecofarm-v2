@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { fireEvent, renderWithProviders, screen, waitFor } from '../../test/utils';
 import {
   SignedDocumentPanel,
-  signedDocumentBlocker,
   useSignedDocument,
 } from './SignedDocumentPanel';
 import * as api from './services-signed-documents';
@@ -52,7 +51,7 @@ function Host() {
     <>
       <SignedDocumentPanel controller={signed} />
       <button
-        disabled={signedDocumentBlocker(signed) !== null}
+        disabled={!signed.ready}
         onClick={() => signed.ensureAccepted().then(
           () => setMessage('accepted'),
           (e: Error) => setMessage(e.message),
@@ -60,7 +59,6 @@ function Host() {
       >
         Review and approve
       </button>
-      <output>{signedDocumentBlocker(signed)}</output>
       <output data-testid="message">{message}</output>
     </>
   );
@@ -86,11 +84,10 @@ beforeEach(() => {
 });
 
 describe('signed document: review and approve', () => {
-  it('blocks with a plain reason until a document is uploaded or picked', async () => {
+  it('blocks until a document is uploaded or picked', async () => {
     renderWithProviders(<Host />);
     expect(await screen.findByText(/No signed Customer Application has been uploaded/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review and approve' })).toBeDisabled();
-    expect(screen.getByText(/Upload the signed Customer Application .* before approving/)).toBeInTheDocument();
     await userEvent.setup().upload(screen.getByLabelText(/Signed document file/), png());
     expect(screen.getByRole('button', { name: 'Review and approve' })).toBeEnabled();
     expect(screen.getByRole('img', { name: 'Signed document preview' })).toHaveAttribute('src', 'blob:signed');

@@ -30,7 +30,9 @@ const CLOSER = userWith(perm('finance.payroll_close', false, true));
 
 let summary: Record<string, unknown>;
 let periods: Record<string, unknown>[];
+let readiness: Record<string, unknown>;
 let summaryStatus = 200;
+let readinessStatus = 200;
 let actionResponse: { status: number; body: unknown };
 const calls: { url: string; method: string; body: unknown }[] = [];
 
@@ -40,6 +42,7 @@ const json = (status: number, body: unknown) =>
 beforeEach(() => {
   calls.length = 0;
   summaryStatus = 200;
+  readinessStatus = 200;
   summary = {
     period: '2026-10',
     status: 'open',
@@ -52,6 +55,7 @@ beforeEach(() => {
     earlierOpenPeriods: [],
   };
   periods = [];
+  readiness = { period: '2026-10', ready: true, blockers: [], warnings: [] };
   actionResponse = {
     status: 200,
     body: { period: '2026-10', status: 'ready_for_approval' },
@@ -67,6 +71,12 @@ beforeEach(() => {
           ? json(200, summary)
           : json(summaryStatus, { error: { code: 'forbidden', message: 'Forbidden' } });
       }
+      if (url.includes('/readiness'))
+        return readinessStatus === 200
+          ? json(200, readiness)
+          : json(readinessStatus, {
+              error: { code: 'UNAVAILABLE', message: 'Readiness unavailable' },
+            });
       if (url.includes('/queues/periods/')) return json(actionResponse.status, actionResponse.body);
       if (url.includes('/queues/periods'))
         return json(200, { data: periods, meta: { total: periods.length } });
@@ -96,6 +106,40 @@ describe('Finance summary cards', () => {
 });
 
 describe('Month-End Close page', () => {
+  it('places closing actions before the summary and keeps warnings non-blocking', async () => {
+    readiness.warnings = [
+      {
+        code: 'VERIFIED_PAYMENTS_MISSING_EVIDENCE',
+        count: 4,
+        message: 'Four receipts need evidence review.',
+      },
+    ];
+    renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
+    const actions = await screen.findByRole('group', { name: 'Month closing actions' });
+    const checklist = screen.getByRole('list', { name: 'Pre-close checklist' });
+    expect(
+      actions.compareDocumentPosition(checklist) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Submit for closing' })).toBeEnabled();
+    expect(await screen.findByRole('link', { name: 'Review payment evidence' })).toHaveAttribute(
+      'href',
+      '/admin/finance/payments',
+    );
+  });
+
+  it('shows a readiness failure and refuses submission until checks recover', async () => {
+    readinessStatus = 503;
+    renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
+    expect(await screen.findByText('Closing checks unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Submit for closing' })).toBeDisabled();
+    readinessStatus = 200;
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Submit for closing' })).toBeEnabled(),
+    );
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
   it('shows the checklist values from the server', async () => {
     summary.earlierOpenPeriods = ['2026-09'];
     renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
@@ -107,6 +151,24 @@ describe('Month-End Close page', () => {
     expect(list.textContent).toContain('Late postings1');
     expect(list.textContent).toContain('September 2026');
     expect(screen.getByText('Open')).toBeTruthy();
+  });
+
+  it('refuses closing when readiness cannot be loaded', async () => {
+    summary.status = 'ready_for_approval';
+    readinessStatus = 503;
+    renderWithProviders(<MonthEndClosePage />, { user: CLOSER });
+    await screen.findByText('Closing checks unavailable');
+    expect(screen.getByRole('button', { name: 'Close period' })).toBeDisabled();
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('keeps a closing confirmation tied to its selected month', async () => {
+    renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
+    await userEvent.click(await screen.findByRole('button', { name: 'Submit for closing' }));
+    expect(screen.getByRole('combobox', { name: 'Month' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('combobox', { name: 'Month' })).toBeEnabled();
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
   });
 
   it('offers Submit only with create permission, never close/return', async () => {
@@ -121,6 +183,37 @@ describe('Month-End Close page', () => {
     await screen.findByText('Ready for approval');
     expect(screen.queryByRole('button', { name: 'Close period' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Return' })).toBeNull();
+  });
+
+  it('lists blockers and warnings and disables Submit with a reason', async () => {
+    readiness = {
+      period: '2026-10',
+      ready: false,
+      blockers: [{ code: 'UNVERIFIED', count: 2, message: 'Payments still await verification.' }],
+      warnings: [{ code: 'LATE', count: 1, message: 'One late posting.' }],
+    };
+    renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
+    const list = await screen.findByRole('list', { name: 'Readiness' });
+    expect(list.textContent).toContain('Blocker · 2');
+    expect(list.textContent).toContain('Payments still await verification.');
+    expect(list.textContent).toContain('Warning · 1');
+    const button = (await screen.findByRole('button', {
+      name: 'Submit for closing',
+    })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText('1 blocker to fix first.')).toBeTruthy();
+  });
+
+  it('shows the server message on PERIOD_HAS_BLOCKERS', async () => {
+    actionResponse = {
+      status: 409,
+      body: { error: { code: 'PERIOD_HAS_BLOCKERS', message: 'Resolve the blockers first.' } },
+    };
+    const user = userEvent.setup();
+    renderWithProviders(<MonthEndClosePage />, { user: SUBMITTER });
+    await user.click(await screen.findByRole('button', { name: 'Submit for closing' }));
+    await user.click(screen.getAllByRole('button', { name: 'Submit for closing' }).at(-1)!);
+    expect(await screen.findByText('Resolve the blockers first.')).toBeTruthy();
   });
 
   it('hides Submit without create permission', async () => {

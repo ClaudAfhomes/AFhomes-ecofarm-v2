@@ -23,7 +23,8 @@ const repairs = new Map([
 export function localMigrationManifest(files) {
   const groups = new Map();
   for (const file of [...files].sort()) {
-    assert.match(file, /^\d{14}_afhomes_.*\.sql$/);
+    // Historical thirteen-digit versions are preserved by the version-keyed runner.
+    assert.match(file, /^\d{13,14}_afhomes_.*\.sql$/);
     const version = file.split('_')[0];
     groups.set(version, [...(groups.get(version) ?? []), file]);
   }

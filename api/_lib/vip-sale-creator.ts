@@ -21,7 +21,7 @@ export function requireVipSaleCreator(
     fail(
       res,
       'FORBIDDEN',
-      'An OST or inactive account cannot create or submit a VIP sale, Customer Application or Reservation Agreement.',
+      'Only an active Sales Manager, Admin or Super Admin may create or submit an application and RA.',
       403,
     );
     return false;

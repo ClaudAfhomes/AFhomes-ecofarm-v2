@@ -77,7 +77,7 @@ export async function runPurchaseTierMatrixChecks(world: {
             [randomUUID(), purchase.reservationId, finance],
           )
         ).rows[0]!.id;
-      const initial = await record(terms.required_initial, `${label}-INITIAL`, 'contractual_down_payment');
+      const initial = await record(purchase.fee, `${label}-RESERVATION`, 'reservation_fee');
       const before = (
         await db.query<{ purchase_financial_summary: { verifiedTotal: string } }>(
           'select public.purchase_financial_summary($1)',
@@ -89,6 +89,8 @@ export async function runPurchaseTierMatrixChecks(world: {
         before.verifiedTotal === '0.00',
       );
       await verify(initial);
+      const down = (await db.query<{ amount: string }>('select private.money($1::numeric-$2::numeric) amount', [terms.required_initial, purchase.fee])).rows[0]!.amount;
+      if (down !== '0.00') await verify(await record(down, `${label}-INITIAL`, 'contractual_down_payment'));
       await db.query('savepoint partial_payment_gate');
       let prematureError = '';
       try {
@@ -158,11 +160,11 @@ export async function runPurchaseTierMatrixChecks(world: {
         )
       ).rows[0]!;
       check(
-        `${label}: exactly one active sale and membership with two verified payments`,
+        `${label}: exactly one active sale and membership with the required verified payment stages`,
         state.status === 'active' &&
           state.sale_count === 1 &&
           state.membership_count === 1 &&
-          state.payment_count === 2,
+          state.payment_count === (down === '0.00' ? 2 : 3),
       );
       // REBUILD: the membership TERM still matches the frozen sale, but points
       // are no longer allocated at activation - the member starts at zero and

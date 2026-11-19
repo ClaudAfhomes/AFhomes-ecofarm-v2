@@ -1,3 +1,4 @@
+import { MemberIdDocumentButton } from './MemberCreationParts';
 /**
  * One member's full record: read the profile once for the identification
  * fields, edit it through the SAME form creation uses (`MemberFormDialog`),
@@ -378,6 +379,7 @@ export function MemberDetailDialog({
           </DetailCard>
           <DetailCard>
             <DetailCardTitle>Work and IDs</DetailCardTitle>
+            {user && ['admin', 'super_admin'].includes(user.roleSlug ?? '') ? <MemberIdDocumentButton memberId={member.id} /> : null}
             <DetailFieldGrid>
               <DetailField label="Employer">{value(member, 'employerName')}</DetailField>
               <DetailField label="Employer address">{value(member, 'employerAddress')}</DetailField>

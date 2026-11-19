@@ -69,6 +69,7 @@ import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 import { createAndInstallDirectOst, ostDirectFailure } from '../_lib/ost-direct-create.js';
 import { serviceClient } from '../_lib/rest.js';
 import { getVisibleGenealogyIds, canAccessMemberDetail } from '../_lib/genealogy-visibility.js';
+import { decodeMemberIdentityDocument, saveMemberIdentityDocument, removeMemberIdentityDocument, memberIdentityDocumentLink } from '../_lib/member-identity-document.js';
 import { decodeProfilePhoto, saveProfilePhoto, removeProfilePhoto } from '../_lib/profile-photo.js';
 
 const MEMBER_ROLES: readonly MemberPosition[] = [
@@ -591,6 +592,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (!parsed.success)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
+    if (input.identityDocument && !decodeMemberIdentityDocument(input.identityDocument))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid JPEG, PNG or PDF ID document up to 2 MB.', 400);
     if (input.mode === 'complete' && !['admin', 'super_admin'].includes(auth.roleSlug))
       return fail(res, 'FORBIDDEN', 'Administrator approval is required.', 403);
     if (input.profilePhotoBase64 && !decodeProfilePhoto(input.profilePhotoBase64))
@@ -624,6 +627,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       throw submitted.error;
     }
     const applicationId = String(submitted.data);
+    if (input.identityDocument) {
+      try { await saveMemberIdentityDocument('ost_application', applicationId, input.identityDocument); }
+      catch { return fail(res, 'INTERNAL', 'Application saved, but the private ID upload failed. Retry this same form.', 503); }
+      await audit(db, auth.userId, 'MEMBER_ID_DOCUMENT_UPLOADED', 'ost_application', applicationId, null, { verified: false });
+    }
     if (input.mode === 'pending')
       return res
         .status(201)
@@ -769,6 +777,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const row = updated.find((r: Member) => r.id === id);
     if (!row) return fail(res, 'INTERNAL', 'Member was transferred but cannot be read', 500);
     return res.status(200).json(row);
+  }
+
+  const identityFile = route(req, 'GET', /^([0-9a-f-]+)\/identity-document$/);
+  if (identityFile) {
+    const auth = await authorizeAfHomes(req, 'network.members');
+    if ('error' in auth) return deny(res, auth);
+    if (!['admin', 'super_admin'].includes(auth.roleSlug))
+      return fail(res, 'FORBIDDEN', 'Only Admin or Super Admin may open identity documents.', 403);
+    const id = identityFile[1]!;
+    const staff = await db.from('staff_users').select('id').eq('id', id).maybeSingle();
+    if (staff.error) throw staff.error;
+    if (!staff.data) return fail(res, 'NOT_FOUND', 'Member not found', 404);
+    const ost = await db.from('ost_members').select('application_id').eq('id', id).maybeSingle();
+    if (ost.error) throw ost.error;
+    const link = await memberIdentityDocumentLink(ost.data?.application_id ? 'ost_application' : 'staff', String(ost.data?.application_id ?? id));
+    await audit(db, auth.userId, 'MEMBER_ID_DOCUMENT_VIEWED', 'network_member', id);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json(link);
   }
 
   const detail = route(req, 'GET', /^([0-9a-f-]+)$/);
@@ -1175,6 +1201,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (!parsed.success)
       return fail(res, 'VALIDATION_ERROR', 'Some fields need attention', 400, fieldDetails(parsed));
     const input = parsed.data;
+    if (input.identityDocument && !decodeMemberIdentityDocument(input.identityDocument))
+      return fail(res, 'VALIDATION_ERROR', 'Choose a valid JPEG, PNG or PDF ID document up to 2 MB.', 400);
     if (input.position === 'ost')
       return fail(
         res,
@@ -1316,12 +1344,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       await ignore(db.from('staff_users').delete().eq('id', id));
       await ignore(db.auth.admin.deleteUser(id));
       if (input.profilePhotoBase64) await ignore(removeProfilePhoto(id));
+      if (input.identityDocument) await ignore(removeMemberIdentityDocument(id));
     };
     const insertError = (label: string, error: { message?: string; code?: string } | null) =>
       new Error(
         `${label} insert failed [${error?.code ?? 'unknown'}]: ${error?.message ?? 'unknown'}`,
       );
     try {
+      if (input.identityDocument) await saveMemberIdentityDocument('staff', created.user.id, input.identityDocument);
       if (input.profilePhotoBase64) await saveProfilePhoto(created.user.id, input.profilePhotoBase64);
       const now = new Date().toISOString();
       const { error: staffError } = await db.from('staff_users').insert({
@@ -1396,6 +1426,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       // enter the audit trail.
       await audit(db, auth.userId, 'MEMBER_CREATED', 'network_member', created.user.id, null, {
         email,
+        hasIdentityDocument: Boolean(input.identityDocument),
         fullName: input.fullName,
         departmentId: input.departmentId,
         position: input.position,

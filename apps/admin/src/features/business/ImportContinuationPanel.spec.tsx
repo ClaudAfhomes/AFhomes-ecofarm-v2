@@ -103,6 +103,31 @@ describe('imported purchase continuation', () => {
     expect(screen.getByText(/separate payment verification/)).toBeInTheDocument();
     expect(screen.getByText('Review acknowledgement date')).toBeInTheDocument();
   });
+  it('keeps certified reservation claims awaiting combined approval', async () => {
+    vi.mocked(getImportContinuations).mockResolvedValue([
+      {
+        ...baseContinuation,
+        stage: 'application',
+        claimCount: 1,
+        externallyVerified: false,
+        missingRequirements: [
+          'Complete combined Application and RA approval before Finance reviews the imported payment claim.',
+        ],
+        nextAction: {
+          label: 'Review application',
+          path: '/admin/customers/applications/application',
+        },
+      },
+    ]);
+    renderWithProviders(<ImportContinuationPanel variant="page" />, { user });
+    expect(await screen.findByRole('link', { name: 'Review application' })).toHaveAttribute(
+      'href',
+      '/admin/customers/applications/application',
+    );
+    expect(screen.queryByText('External payments accepted')).not.toBeInTheDocument();
+    expect(screen.getByText('Finance review and verification required.')).toBeInTheDocument();
+  });
+
   it('does not request import evidence for a customer-only viewer', () => {
     vi.mocked(getImportContinuations).mockClear();
     renderWithProviders(<ImportContinuationPanel customerId="customer" />, {
@@ -146,9 +171,7 @@ describe('imported purchase continuation', () => {
       },
     ]);
     renderWithProviders(<ImportContinuationPanel variant="page" />, { user });
-    expect(
-      await screen.findByRole('heading', { name: 'Imported purchases' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Imported purchases' })).toBeInTheDocument();
     expect(await screen.findByText('MARIA SANTOS')).toBeInTheDocument();
     expect(screen.getByText('WB-0001')).toBeInTheDocument();
     expect(screen.getByText('Finance')).toBeInTheDocument();
@@ -159,9 +182,7 @@ describe('imported purchase continuation', () => {
     expect(screen.getByText('Paid ₱100,000.00')).toBeInTheDocument();
     expect(screen.getByText('Balance ₱212,000.00')).toBeInTheDocument();
     expect(screen.getByText('Review acknowledgement date')).toBeInTheDocument();
-    expect(
-      screen.getByText('Complete and review the application, including…'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Complete and review the application, including…')).toBeInTheDocument();
     expect(screen.queryByText(/actual acknowledgment date/)).not.toBeInTheDocument();
     expect(screen.getByText(/Contract date differs from the existing…/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Review payments' })).toHaveAttribute(
@@ -195,9 +216,7 @@ describe('imported purchase continuation', () => {
   it('offers a retry when the imported purchases tab cannot load', async () => {
     vi.mocked(getImportContinuations).mockRejectedValue(new Error('offline'));
     renderWithProviders(<ImportContinuationPanel variant="page" />, { user });
-    expect(
-      await screen.findByText('Imported purchases could not be loaded'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Imported purchases could not be loaded')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
@@ -214,8 +233,6 @@ describe('imported purchase continuation', () => {
     renderWithProviders(<ImportContinuationPanel variant="page" />, { user });
     await screen.findByText('Customer 0');
     await browser.click(screen.getByRole('button', { name: 'More' }));
-    await waitFor(() =>
-      expect(getImportContinuations).toHaveBeenLastCalledWith(undefined, 25),
-    );
+    await waitFor(() => expect(getImportContinuations).toHaveBeenLastCalledWith(undefined, 25));
   });
 });

@@ -1,4 +1,3 @@
-import { MyWorkToday } from './MyWorkToday';
 import { useState, lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
@@ -6,12 +5,12 @@ import { paymentSchemeLabel } from '@afhomes/contracts';
 import { compareMoney, formatCount, formatMoney } from '@afhomes/shared';
 import { formatDate } from '../../lib/format';
 import {
+  ChoiceChips,
   EmptyState,
   ErrorState,
   Icon,
   MetricCard,
   PageHeader,
-  Select,
   Skeleton,
   Table,
   TableBody,
@@ -26,6 +25,7 @@ import { getAnalyticsOverview } from './services';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
 import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
+import { PendingPayrollApprovalsCard } from './PendingPayrollApprovalsCard';
 import styles from './AfHomesDashboardPage.module.css';
 
 const PERIODS = [
@@ -35,6 +35,18 @@ const PERIODS = [
   { value: 'year', label: 'Year' },
 ] as const;
 type Metric = [label: string, value: string | number];
+
+/**
+ * The server window is a whole calendar period with an exclusive end
+ * (a week runs Monday up to, not including, next Monday). Show the last
+ * included day, never later than today, so the label reads as "so far".
+ */
+function windowLabel(from: string, to: string): string {
+  const lastDay = new Date(to).valueOf() - 86_400_000;
+  const end = formatDate(new Date(Math.min(lastDay, Date.now())).toISOString());
+  const start = formatDate(from);
+  return start === end ? start : `${start} to ${end}`;
+}
 
 /**
  * Plain-language name for each analytics scope.
@@ -112,7 +124,7 @@ const METRIC_PRESENTATION: Record<string, { icon: IconName; description: string 
   'Active memberships': { icon: 'users', description: 'Activated membership cards' },
   Customers: { icon: 'users', description: '' },
   'My customers': { icon: 'users', description: 'Customers attributed to you' },
-  'Total Customers': { icon: 'users', description: 'Customers in your authorized scope' },
+  'Total Customers': { icon: 'users', description: 'All time, in your authorized scope' },
   'New Applications': { icon: 'user-plus', description: 'New in the selected period' },
   'Card Sales': { icon: 'file-text', description: 'Sales in the selected period' },
   'Total Sales': { icon: 'wallet', description: 'Frozen sales in selected period.' },
@@ -352,29 +364,27 @@ export function AfHomesDashboardPage() {
           </div>
         )}
         {!query.isPending && !query.isError && query.data ? (
-          <div className={styles.heroMeta}>
+          // Scope first: every number below is bounded by it.
+          <div className={styles.heroMeta} role="group" aria-label="Data scope">
             <span className={styles.heroScope}>
               <Icon name="user" size={14} aria-hidden="true" />
               {SCOPE_LABEL[query.data.scope.kind]}
             </span>
             <span className={styles.heroWindow}>
-              {formatDate(query.data.window.from)} → {formatDate(query.data.window.to)}
+              {windowLabel(query.data.window.from, query.data.window.to)}
             </span>
+            <span className={styles.heroWindow}>As of today</span>
           </div>
         ) : null}
       </div>
-      <MyWorkToday />
       {['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'].includes(
         user?.roleSlug ?? '',
       ) ? (
         <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} />
       ) : null}
+      <PendingPayrollApprovalsCard />
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard" className={styles.loadingShell}>
-          <div className={styles.scopeBar} aria-hidden="true">
-            <Skeleton style={{ height: 22, width: 180 }} />
-            <Skeleton style={{ height: 22, width: 220 }} />
-          </div>
           <div className={styles.panel} aria-hidden="true">
             <Skeleton style={{ height: 22, width: 140 }} />
             <MetricCardSkeletons />
@@ -403,29 +413,16 @@ export function AfHomesDashboardPage() {
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
         <>
-          {/* Scope first: every number below is bounded by it. */}
-          <div className={styles.scopeBar} role="group" aria-label="Data scope">
-            <span className={`${styles.scopeChip} ${styles.scopeChipStrong}`}>
-              <Icon name="user" size={14} aria-hidden="true" />
-              {SCOPE_LABEL[query.data.scope.kind]}
-            </span>
-            <span className={styles.scopeDivider} aria-hidden="true" />
-            <span className={styles.scopeChip}>
-              {formatDate(query.data.window.from)} to {formatDate(query.data.window.to)}
-            </span>
-            <span className={styles.scopeDivider} aria-hidden="true" />
-            <span className={styles.scopeChip}>As of today</span>
-          </div>
 
           {/* Exactly four headline cards, then the graph, then two tables. */}
           <Panel
             icon="grid"
             title="Key metrics"
             aside={
-              <Select
-                aria-label="Analytics period"
+              <ChoiceChips
+                label="Analytics period"
                 value={period}
-                onChange={(event) => setPeriod(event.target.value as AnalyticsPeriod)}
+                onChange={(next) => setPeriod(next as AnalyticsPeriod)}
                 options={[...PERIODS]}
               />
             }

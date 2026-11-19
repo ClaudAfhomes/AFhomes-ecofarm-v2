@@ -9,6 +9,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  ChoiceChips,
   FilterBar,
   notifySuccess,
   PageHeader,
@@ -255,11 +256,11 @@ export function AfHomesStaffPage() {
                 ...assignableRoles.map((r) => ({ value: r.id, label: r.name })),
               ]}
             />
-            <Select
-              aria-label="Filter status"
+            <ChoiceChips
+              label="Filter status"
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
+              onChange={(next) => {
+                setStatus(next);
                 setPage(1);
               }}
               options={['all', 'active', 'suspended'].map((value) => ({

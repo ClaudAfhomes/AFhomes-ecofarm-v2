@@ -10,7 +10,13 @@ export function ScrollToTop() {
 
   useEffect(() => {
     if (hash) {
-      const target = document.querySelector(hash);
+      let id = hash.slice(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch {
+        // Malformed fragments remain literal IDs; never parse them as CSS.
+      }
+      const target = document.getElementById(id);
       if (target) {
         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;

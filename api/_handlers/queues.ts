@@ -1,5 +1,6 @@
 import { shape, type QueueRow } from '../_lib/queue-model.js';
 import { handleAccountingPeriods } from '../_lib/accounting-periods.js';
+import { handlePayroll } from '../_lib/payroll.js';
 import { matchesSearch, readBoundedRows, readSearchRows } from '../_lib/list-search.js';
 /**
  * AFHomes operational queues: Finance payment handling and activation readiness.
@@ -181,6 +182,7 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
     )
     .eq('origin', 'application')
     .eq('status', 'executed')
+    .eq('customer_applications.status', 'approved')
     .is('sale_id', null);
 
   // Order by the merge key (firstVerifiedPayment = spot_cash_started_at) so a
@@ -322,6 +324,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (await handleAccountingPeriods(req, res, db)) return;
+    if (await handlePayroll(req, res, db)) return;
     if (method(req) !== 'GET') return fail(res, 'NOT_FOUND', 'Queue endpoint not found', 404);
     const parsed = parseListQuery(req);
     if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'Invalid list query', 400);
@@ -433,9 +436,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Same reservation filter as the finance queue, so card and queue total agree.
         const reserving = await db
           .from('reservation_agreements')
-          .select('id', { count: 'exact', head: true })
+          .select('id, customer_applications!inner(status)', { count: 'exact', head: true })
           .eq('origin', 'application')
           .eq('status', 'executed')
+          .eq('customer_applications.status', 'approved')
           .is('sale_id', null);
         if (reserving.error) throw reserving.error;
         counts.paymentVerification = (verifying.count ?? 0) + (reserving.count ?? 0);

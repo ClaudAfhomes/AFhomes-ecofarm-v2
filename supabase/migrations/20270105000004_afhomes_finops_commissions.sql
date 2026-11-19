@@ -50,9 +50,12 @@ end $$;
 create table if not exists public.commission_payouts (
   id uuid primary key default gen_random_uuid(),
   commission_id uuid not null references public.commissions(id) on delete restrict,
-  amount text not null check (amount ~ '^[1-9][0-9]*(\.[0-9]{1,2})?$'),
+  amount text not null check (amount ~ '^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$'
+    and case when amount ~ '^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$' then amount::numeric > 0 else false end),
   status text not null check (status in ('paid','failed','reconciled')),
-  bank_reference text check (bank_reference is null or length(btrim(bank_reference)) between 1 and 100),
+  -- A reference must survive normalization (punctuation-only never matches the unique index).
+  bank_reference text check (bank_reference is null or (length(btrim(bank_reference)) between 1 and 100
+    and private.normalize_payment_key(bank_reference) is not null)),
   method text check (method is null or length(btrim(method)) between 1 and 40),
   paid_on date,
   failure_reason text,
@@ -83,12 +86,15 @@ begin
   if tg_op = 'DELETE' then
     raise exception 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE' using errcode = '55000';
   end if;
-  -- Identity and money never change; a failed attempt stays failed; only a paid
-  -- payout may gain a bank reference / date and become reconciled.
-  if (new.commission_id, new.amount, new.recorded_by, new.recorded_at) is distinct from
-     (old.commission_id, old.amount, old.recorded_by, old.recorded_at)
-     or old.status = 'failed' or old.status = 'reconciled'
-     or (old.status = 'paid' and new.status not in ('paid','reconciled')) then
+  -- A failed or reconciled row never changes. A paid row stays byte-identical while
+  -- paid; its only legal change is paid -> reconciled, which may set the confirmed
+  -- date, the reconciliation actor/time, and a bank reference only where none existed.
+  if old.status in ('failed','reconciled') or new.status not in ('paid','reconciled')
+     or new.status = 'paid' and new is distinct from old
+     or (new.id, new.commission_id, new.amount, new.method, new.failure_reason, new.recorded_by, new.recorded_at)
+        is distinct from
+        (old.id, old.commission_id, old.amount, old.method, old.failure_reason, old.recorded_by, old.recorded_at)
+     or (old.bank_reference is not null and new.bank_reference is distinct from old.bank_reference) then
     raise exception 'COMMISSION_PAYOUT_HISTORY_IMMUTABLE' using errcode = '55000';
   end if;
   return new;
@@ -110,7 +116,14 @@ begin
     if new.commission_type is distinct from old.commission_type then
       raise exception 'COMMISSION_TYPE_IMMUTABLE' using errcode = '55000';
     end if;
-    if new.status = 'paid' and old.status is distinct from 'paid' and new.withheld_at is not null then
+    -- A hold blocks payment, and it can be lifted only by set_commission_hold (which sets
+    -- the transaction-local flag), never inside the very statement that pays.
+    if new.status = 'paid' and old.status is distinct from 'paid'
+       and (new.withheld_at is not null or old.withheld_at is not null) then
+      raise exception 'COMMISSION_WITHHELD' using errcode = '55000';
+    end if;
+    if old.withheld_at is not null and new.withheld_at is null
+       and current_setting('afhomes.commission_hold', true) is distinct from 'on' then
       raise exception 'COMMISSION_WITHHELD' using errcode = '55000';
     end if;
   end if;
@@ -131,7 +144,9 @@ begin
      -- A zero commission (a legal frozen result) has nothing to disburse.
      and new.amount::numeric > 0 then
     insert into public.commission_payouts (commission_id, amount, status, bank_reference, paid_on, recorded_by)
-    values (new.id, new.amount, 'paid', nullif(btrim(coalesce(new.paid_reference, '')), ''),
+    values (new.id, new.amount, 'paid',
+            case when private.normalize_payment_key(new.paid_reference) is null then null
+                 else btrim(new.paid_reference) end,
             (coalesce(new.paid_at, now()) at time zone 'Asia/Manila')::date, new.paid_by);
   end if;
   return new;
@@ -163,8 +178,10 @@ begin
     update public.commissions set withheld_at = now(), withheld_by = p_actor_id, withheld_reason = v_reason
      where id = v.id;
   else
+    perform set_config('afhomes.commission_hold', 'on', true);
     update public.commissions set withheld_at = null, withheld_by = null, withheld_reason = null
      where id = v.id;
+    perform set_config('afhomes.commission_hold', 'off', true);
   end if;
   insert into public.audit_events (actor_id, action, entity_type, entity_id, before_data, after_data, reason)
   values (p_actor_id, case when p_hold then 'COMMISSION_WITHHELD' else 'COMMISSION_HOLD_RELEASED' end,
@@ -181,16 +198,28 @@ create or replace function public.record_commission_payout_failure(
 ) returns uuid language plpgsql security definer
 set search_path = pg_catalog, public, private, pg_temp as $$
 declare v public.commissions%rowtype; v_id uuid;
+  v_ref text := nullif(btrim(coalesce(p_bank_reference, '')), '');
 begin
   perform private.mutation_actor_role(p_actor_id, 'network.commissions', 'update');
   if length(btrim(coalesce(p_reason, ''))) < 5 then
     raise exception 'COMMISSION_PAYOUT_FAILURE_REASON_REQUIRED' using errcode = '22023';
   end if;
+  -- The reference is what makes a failure idempotent, so it is always required.
+  if private.normalize_payment_key(v_ref) is null then
+    raise exception 'PAYOUT_REFERENCE_REQUIRED' using errcode = '22023';
+  end if;
   select * into v from public.commissions where id = p_commission_id for update;
   if not found then raise exception 'COMMISSION_NOT_FOUND' using errcode = 'P0002'; end if;
+  -- Replay (decided before the lifecycle checks): the same failed attempt returns its row.
+  select o.id into v_id from public.commission_payouts o
+   where o.commission_id = v.id and o.status = 'failed'
+     and private.normalize_payment_key(o.bank_reference) = private.normalize_payment_key(v_ref)
+   order by o.recorded_at limit 1;
+  if v_id is not null then return v_id; end if;
   if v.status <> 'earned' then raise exception 'COMMISSION_NOT_PAYABLE' using errcode = '55000'; end if;
+  if v.withheld_at is not null then raise exception 'COMMISSION_WITHHELD' using errcode = '55000'; end if;
   insert into public.commission_payouts (commission_id, amount, status, bank_reference, failure_reason, recorded_by)
-  values (v.id, v.amount, 'failed', nullif(btrim(coalesce(p_bank_reference, '')), ''), btrim(p_reason), p_actor_id)
+  values (v.id, v.amount, 'failed', v_ref, btrim(p_reason), p_actor_id)
   returning id into v_id;
   insert into public.audit_events (actor_id, action, entity_type, entity_id, after_data, reason)
   values (p_actor_id, 'COMMISSION_PAYOUT_FAILED', 'commission_payout', v_id::text,
@@ -212,8 +241,15 @@ begin
   if not found then raise exception 'COMMISSION_PAYOUT_NOT_FOUND' using errcode = 'P0002'; end if;
   if v.status = 'reconciled' then return v.id; end if;  -- replay
   if v.status <> 'paid' then raise exception 'COMMISSION_PAYOUT_NOT_PAID' using errcode = '55000'; end if;
-  v_ref := coalesce(v_ref, v.bank_reference);
-  if v_ref is null or length(v_ref) < 3 then
+  -- A recorded reference is never rewritten; a supplied one must match it.
+  if v.bank_reference is not null then
+    if v_ref is not null and private.normalize_payment_key(v_ref) is distinct from
+       private.normalize_payment_key(v.bank_reference) then
+      raise exception 'PAYOUT_REFERENCE_MISMATCH' using errcode = '22023';
+    end if;
+    v_ref := v.bank_reference;
+  end if;
+  if v_ref is null or length(v_ref) < 3 or private.normalize_payment_key(v_ref) is null then
     raise exception 'PAYOUT_REFERENCE_REQUIRED' using errcode = '22023';
   end if;
   if p_paid_on is null or p_paid_on > (now() at time zone 'Asia/Manila')::date then
@@ -246,7 +282,8 @@ create table if not exists public.commission_recovery_cases (
   trigger_kind text not null check (trigger_kind in
     ('sale_cancellation','rescission','downgrade','payment_default','returned_check')),
   payment_adjustment_id uuid references public.payment_adjustments(id) on delete restrict,
-  proposed_amount text not null check (proposed_amount ~ '^[1-9][0-9]*(\.[0-9]{1,2})?$'),
+  proposed_amount text not null check (proposed_amount ~ '^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$'
+    and case when proposed_amount ~ '^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$' then proposed_amount::numeric > 0 else false end),
   -- No recovery path exists, so this can only ever be zero.
   recovered_amount text not null default '0.00' check (recovered_amount = '0.00'),
   reason text not null check (length(btrim(reason)) >= 5),
@@ -298,7 +335,10 @@ begin
   if p_trigger not in ('sale_cancellation','rescission','downgrade','payment_default','returned_check') then
     raise exception 'COMMISSION_RECOVERY_TRIGGER_INVALID' using errcode = '22023';
   end if;
-  if p_amount is null or p_amount !~ '^[1-9][0-9]*(\.[0-9]{1,2})?$' then
+  if p_amount is null or p_amount !~ '^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$' then
+    raise exception 'AMOUNT_MUST_BE_POSITIVE' using errcode = '22023';
+  end if;
+  if p_amount::numeric <= 0 then
     raise exception 'AMOUNT_MUST_BE_POSITIVE' using errcode = '22023';
   end if;
   if length(btrim(coalesce(p_reason, ''))) < 5 then

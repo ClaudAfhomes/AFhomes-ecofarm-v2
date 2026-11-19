@@ -4,9 +4,9 @@ import { nextPaymentStep } from './payment-purposes';
 
 describe('application next step', () => {
   it.each([
-    ['draft', 'Upload signed application', '/admin/customers/applications/a1'],
-    ['submitted', 'Review and approve', '/admin/customers/applications/a1'],
-    ['approved', 'Create reservation', '/admin/sales/reservations/new?application=a1'],
+    ['draft', 'Submit for Approval', '/admin/customers/applications/a1'],
+    ['submitted', 'Review Signed Documents', '/admin/customers/applications/a1'],
+    ['approved', 'Continue in Finance', '/admin/finance/payments'],
     ['rejected', 'No action due', null],
     ['cancelled', 'No action due', null],
   ])('%s -> %s', (status, label, to) => {
@@ -16,6 +16,13 @@ describe('application next step', () => {
 
 describe('reservation next step', () => {
   const base = { id: 'r1', reservationNumber: 'AF-RSV-1', saleId: null, fullyPaid: false };
+  it('keeps linked draft and submitted RAs in the coordinated application workflow', () => {
+    for (const status of ['draft', 'submitted'])
+      expect(reservationNextStep({ ...base, status, customerApplicationId: 'a1' })).toEqual({
+        label: 'Open Application & RA',
+        to: '/admin/customers/applications/a1',
+      });
+  });
   it('walks draft -> submitted -> executed -> paid -> finalized', () => {
     expect(reservationNextStep({ ...base, status: 'draft' }).label).toBe('Continue draft');
     expect(reservationNextStep({ ...base, status: 'submitted' }).label).toBe('Review and execute');
@@ -28,7 +35,7 @@ describe('reservation next step', () => {
     );
     expect(
       reservationNextStep({ ...base, status: 'executed', fullyPaid: true, saleId: 's1' }),
-    ).toEqual({ label: 'Activate', to: '/admin/finance/activation' });
+    ).toEqual({ label: 'Activate VIP Membership', to: '/admin/finance/activation' });
     expect(reservationNextStep({ ...base, status: 'cancelled' }).to).toBeNull();
   });
 });
@@ -60,7 +67,7 @@ describe('payment queue next step', () => {
         fullyPaid: true,
         activatable: true,
       }).label,
-    ).toBe('Activate');
+    ).toBe('Activate VIP Membership');
     expect(
       nextPaymentStep({
         ...terms,
@@ -69,9 +76,9 @@ describe('payment queue next step', () => {
         fullyPaid: true,
       }),
     ).toMatchObject({ key: 'none' });
-    expect(nextPaymentStep({ ...terms, monthlyAmount: null, verifiedTotal: '40000.00' }).label).toBe(
-      'Record full payment',
-    );
+    expect(
+      nextPaymentStep({ ...terms, monthlyAmount: null, verifiedTotal: '40000.00' }).label,
+    ).toBe('Record full payment');
     expect(
       nextPaymentStep({
         ...terms,

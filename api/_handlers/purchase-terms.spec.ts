@@ -35,8 +35,8 @@ vi.mock('../_lib/afhomes-access.js', () => ({
     if (token.includes('no-update') && (moduleKey !== 'sales.customers' || action !== 'view'))
       return denied(403, 'FORBIDDEN');
     if (token.includes('seller'))
-      return { userId: '11111111-1111-4111-8111-111111111111', roleSlug: 'sales_manager' };
-    return { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin' };
+      return { userId: '11111111-1111-4111-8111-111111111111', roleSlug: 'sales_manager', status: 'active' };
+    return { userId: '22222222-2222-4222-8222-222222222222', roleSlug: 'super_admin', status: 'active' };
   },
 }));
 
@@ -491,6 +491,7 @@ describe('application decisions are atomic transitions', () => {
     const response = await call({
       path: `customer-applications/${APP_ID}/decision`,
       method: 'POST',
+      token: 'super-admin-token',
       body: { requestId, decision: 'approved' },
     });
     expect(response.status).toBe(200);
@@ -507,6 +508,7 @@ describe('application decisions are atomic transitions', () => {
     const response = await call({
       path: `customer-applications/${APP_ID}/reopen`,
       method: 'POST',
+      token: 'super-admin-token',
       body: { requestId },
     });
     expect(response.status).toBe(200);
@@ -521,7 +523,8 @@ describe('application decisions are atomic transitions', () => {
       `customer-applications/${APP_ID}/decision`,
       `customer-applications/${APP_ID}/reopen`,
     ]) {
-      const response = await call({ path, method: 'POST', body: {} });
+      const response = await call({ path, method: 'POST',
+      token: 'super-admin-token', body: {} });
       expect(response.status).toBe(400);
     }
   });
@@ -538,6 +541,7 @@ describe('application decisions are atomic transitions', () => {
     const response = await call({
       path: `customer-applications/${APP_ID}/decision`,
       method: 'POST',
+      token: 'super-admin-token',
       body: { requestId, decision: 'approved' },
     });
     expect(response.status).toBe(409);
@@ -555,6 +559,7 @@ describe('application decisions are atomic transitions', () => {
     const response = await call({
       path: `customer-applications/${APP_ID}/decision`,
       method: 'POST',
+      token: 'super-admin-token',
       body: { requestId, decision: 'approved' },
     });
     expect(response.status).toBe(409);

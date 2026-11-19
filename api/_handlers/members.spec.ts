@@ -18,7 +18,7 @@ import { readWorkbook, readWorkbookParts } from '../_lib/customer-xlsx.js';
 import { zipStored } from '../_lib/report-export.js';
 
 const holder = vi.hoisted(() => ({ db: null as unknown as FakeSupabase }));
-const photos = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn() }));
+const photos = vi.hoisted(() => ({ upload: vi.fn(), remove: vi.fn(), createSignedUrl: vi.fn() }));
 vi.mock('../_lib/storage.js', () => ({ storageClient: () => ({ from: () => photos }) }));
 
 vi.mock('../_lib/rest.js', () => ({
@@ -1957,4 +1957,54 @@ describe('member workbook read-only endpoints', () => {
       ),
     ).toEqual([]);
   });
+});
+
+
+describe('onboarding identity files', () => {
+  const identityDocument = { mimeType: 'application/pdf', dataBase64: Buffer.from('%PDF-1.7 synthetic ID').toString('base64') };
+  it('saves an IST ID privately and keeps its bytes out of responses and audits', async () => {
+    install();
+    const result = await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ identityDocument }) });
+    expect(result.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith('member-identification/staff/55555555-5555-4555-8555-555555555555/identity', expect.any(Buffer), expect.objectContaining({ upsert: false }));
+    expect(JSON.stringify(result.body)).not.toContain(identityDocument.dataBase64);
+    expect(JSON.stringify(holder.db.rows('audit_events'))).not.toContain(identityDocument.dataBase64);
+  });
+  it('rejects forged identity files before provisioning either kind of account', async () => {
+    install();
+    const forged = { ...identityDocument, mimeType: 'image/png' };
+    expect((await call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ identityDocument: forged }) })).status).toBe(400);
+    installDirect();
+    expect((await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ identityDocument: forged }) })).status).toBe(400);
+    expect(rpcCalls('submit_ost_accreditation')).toHaveLength(0);
+    expect(photos.upload).not.toHaveBeenCalled();
+  });
+  it('saves an OST application ID before completing its accreditation', async () => {
+    installDirect();
+    const result = await call({ method: 'POST', familyPath: 'ost', token: ADMIN_TOKEN, body: directBody({ identityDocument }) });
+    expect(result.status).toBe(201);
+    expect(photos.upload).toHaveBeenCalledWith(`member-identification/ost_application/${DIRECT_APP_ID}/identity`, expect.any(Buffer), expect.objectContaining({ upsert: false }));
+  });
+  it('cleans a failed IST upload and refuses private ID reads by sellers or anonymous callers', async () => {
+    install();
+    photos.upload.mockResolvedValue({ error: { message: 'unavailable' } });
+    await expect(call({ method: 'POST', token: ADMIN_TOKEN, body: createBody({ identityDocument }) })).rejects.toThrow('Could not save the ID document');
+    expect(photos.remove).toHaveBeenCalledWith(['member-identification/staff/55555555-5555-4555-8555-555555555555/identity']);
+    expect(holder.db.rows('staff_users').some(row => row.id === '55555555-5555-4555-8555-555555555555')).toBe(false);
+    holder.db.rows('staff_role_assignments').find(row => row.staff_id === ADMIN_ID)!.role_id = ROLE_SM;
+    expect((await call({ familyPath: `${SM_ID}/identity-document`, token: ADMIN_TOKEN })).status).toBe(403);
+    expect((await call({ familyPath: `${SM_ID}/identity-document` })).status).toBe(401);
+  });
+});
+
+it('authorizes and audits an expiring ID read without returning member secrets', async () => {
+  install();
+  photos.createSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://private.test/temporary' }, error: null });
+  const result = await call({ familyPath: `${SM_ID}/identity-document`, token: ADMIN_TOKEN });
+  expect(result.status).toBe(200);
+  expect(photos.createSignedUrl).toHaveBeenCalledWith(`member-identification/staff/${SM_ID}/identity`, 60, { download: 'identity-document' });
+  expect(Object.keys(result.body as object).sort()).toEqual(['expiresAt', 'url']);
+  expect(holder.db.rows('audit_events').some(row => row.action === 'MEMBER_ID_DOCUMENT_VIEWED')).toBe(true);
+  holder.db.rows('staff_users').find(row => row.id === ADMIN_ID)!.status = 'inactive';
+  expect((await call({ familyPath: `${SM_ID}/identity-document`, token: ADMIN_TOKEN })).status).toBe(403);
 });

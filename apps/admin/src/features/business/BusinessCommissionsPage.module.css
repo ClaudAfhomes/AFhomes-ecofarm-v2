@@ -256,6 +256,24 @@
   white-space: nowrap;
 }
 
+/* The commission reference opens its detail view. */
+.recordRefButton {
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-body-s);
+  font-weight: 700;
+}
+
+.recordRefButton:hover {
+  background-color: color-mix(in srgb, var(--color-brand-primary) 14%, white);
+}
+
+.recordRefButton:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
 .recordRefDot {
   width: 8px;
   height: 8px;

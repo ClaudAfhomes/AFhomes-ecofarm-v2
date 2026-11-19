@@ -19,6 +19,7 @@ export const MODULE_KEYS = [
   'sales.card_sales',
   'sales.card_plans',
   'sales.customers',
+  'sales.application_approval',
   'sales.id_documents',
   'finance.payment_verification',
   'finance.card_activation',
@@ -208,11 +209,13 @@ export function rolePermissionsTable(): FakeRow[] {
       'organization.roles',
       'sales.card_sales',
       'sales.customers',
+      'sales.application_approval',
+      'finance.commission_payouts',
       'governance.audit',
     ],
     { can_create: true, can_update: true },
   );
-  grant(UUID.role.finance, ['dashboard.view', 'finance.payment_verification', 'finance.card_activation'], {
+  grant(UUID.role.finance, ['dashboard.view', 'finance.payment_verification', 'finance.card_activation', 'finance.commission_payouts'], {
     can_update: true,
   });
   grant(UUID.role.employee, ['dashboard.view']);

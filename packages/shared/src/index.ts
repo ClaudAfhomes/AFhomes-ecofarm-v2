@@ -26,8 +26,15 @@ export { withRequestDeadline } from './request-deadline.js';
 
 export { splitStayPoints } from './stay-points.js';
 export { FEATURE_FLAGS, isFeaturePathEnabled } from './features.js';
-export { CookieAuthError, createCookieAuthGateway, subscribeCookieAuth, notifyCookieAuth, pendingCookieMfa } from './cookie-auth.js';
+export {
+  CookieAuthError,
+  createCookieAuthGateway,
+  subscribeCookieAuth,
+  notifyCookieAuth,
+  pendingCookieMfa,
+} from './cookie-auth.js';
 export { calculateIstPayroll, creditedTotals, qualifyingPeriodEnd } from './ist-payroll.js';
+export { IST_POLICY_REFERENCE, IST_POLICY_TEMPLATES } from './ist-policy-templates.js';
 export type {
   IstRank,
   IstCompensationPolicy,

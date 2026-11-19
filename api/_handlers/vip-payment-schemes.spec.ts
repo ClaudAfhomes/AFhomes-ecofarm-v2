@@ -7,6 +7,8 @@
  * scripted; their SQL is proven by `pnpm test:db:local`.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { paymentSchemeSchema, type PaymentScheme } from '@afhomes/contracts';
+import { calculateCommission, resolveSchemeEconomics } from '../_lib/commerce.js';
 
 import {
   CUSTOMER,
@@ -191,52 +193,49 @@ const CUSTOMERS = [
 let customerCursor = 0;
 const nextCustomer = () => CUSTOMERS[customerCursor++ % CUSTOMERS.length]!;
 
-async function createSale(productId: string, paymentScheme?: string) {
-  const body: Record<string, string> = { customerId: nextCustomer(), productId };
-  if (paymentScheme) body.paymentScheme = paymentScheme;
-  return call('sales', { method: 'POST', path: '', token: TOKEN2.salesManager, body });
+function resolvePlan(productId: string, paymentScheme: PaymentScheme = 'spot_cash') {
+  const plan = VIP_PLANS.find((p) => p.id === productId)!;
+  return resolveSchemeEconomics({
+    cashPrice: plan.cash_price, installmentPrice: plan.installment_price,
+    reservationFee: plan.reservation_fee, spotCashDays: plan.spot_cash_days,
+    standardInstallmentMonths: plan.standard_installment_months, validityYears: plan.validity_years,
+    moveAEnabled: plan.move_a_enabled, moveB1Enabled: plan.move_b1_enabled, moveB2Enabled: plan.move_b2_enabled,
+  }, paymentScheme);
 }
 
-describe('VIP sale creation freezes scheme economics', () => {
+async function seedHistoricalSale(productId: string, scheme: PaymentScheme = 'spot_cash') {
+  const db = holder.db as FakeSupabase;
+  const plan = VIP_PLANS.find((p) => p.id === productId)!;
+  const result = resolvePlan(productId, scheme);
+  if ('error' in result) throw new Error(result.error);
+  const terms = result.economics;
+  const row = {
+    ...db.rows('card_sales')[0], id: 'bbbbbbbb-0000-4000-8000-000000009900',
+    sale_number: 'SALE-900900', customer_id: nextCustomer(), plan_id: productId,
+    payment_scheme: scheme, cash_price: terms.total, cash_price_snapshot: terms.total,
+    scheme_total_snapshot: terms.total, reservation_fee_snapshot: terms.reservationFee,
+    required_initial_snapshot: terms.requiredInitial, installment_months_snapshot: terms.installmentMonths,
+    monthly_amount_snapshot: terms.monthlyAmount, validity_months_snapshot: terms.validityMonths,
+    yearly_points_snapshot: plan.yearly_points, minimum_down_payment_snapshot: plan.minimum_down_payment,
+    commission_rate_snapshot: plan.commission_rate,
+    expected_commission_snapshot: calculateCommission(terms.total, plan.commission_rate),
+  };
+  db.rows('card_sales').push(row);
+  return call('sales', { path: row.id, token: TOKEN.admin });
+}
+describe('VIP purchase economics and historical frozen-sale readers', () => {
   beforeEach(() => {
     install();
     customerCursor = 0;
   });
 
-  it('defaults to Spot Cash with the spot total and reservation snapshots', async () => {
-    const db = install();
-    const state = await createSale(PRODUCT.gold);
-    expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({
-      paymentScheme: 'spot_cash',
-      cashPrice: '312000.00',
-      reservationFee: '10000.00',
-      requiredInitial: '10000.00',
-      installmentMonths: null,
-      monthlyAmount: null,
-      validityMonths: 264,
-      expectedCommission: '12480.00',
-      status: 'submitted',
-    });
-    const sale = db.rows('card_sales').find((r) => r.id === (state.body as { id: string }).id)!;
-    expect(sale).toMatchObject({
-      payment_scheme: 'spot_cash',
-      cash_price_snapshot: '312000.00',
-      reservation_fee_snapshot: '10000.00',
-      required_initial_snapshot: '10000.00',
-      installment_months_snapshot: null,
-      monthly_amount_snapshot: null,
-      validity_months_snapshot: 264,
-      expected_commission_snapshot: '12480.00',
-    });
-    const commission = db.rows('commissions').find((c) => c.sale_id === sale.id)!;
-    expect(commission).toMatchObject({
-      basis_amount_snapshot: '312000.00',
-      amount: '12480.00',
-      status: 'pending',
-    });
+  it('resolves Spot Cash from the approved plan economics', () => {
+    expect(resolvePlan(PRODUCT.gold)).toEqual({ economics: {
+      scheme: 'spot_cash', total: '312000.00', reservationFee: '10000.00',
+      requiredInitial: '10000.00', installmentMonths: null, monthlyAmount: null, validityMonths: 264,
+    } });
+    expect(calculateCommission('312000.00', '0.04')).toBe('12480.00');
   });
-
   it.each([
     [
       'Bronze Move A',
@@ -339,47 +338,38 @@ describe('VIP sale creation freezes scheme economics', () => {
     ],
   ])(
     '%s freezes total/initial/months/monthly/validity/commission',
-    async (_name, productId, scheme, total, initial, months, monthly, validity, commission) => {
-      install();
-      const state = await createSale(productId, scheme);
-      expect(state.status).toBe(201);
-      expect(state.body).toMatchObject({
-        paymentScheme: scheme,
-        cashPrice: total,
-        reservationFee: '10000.00',
-        requiredInitial: initial,
-        installmentMonths: months,
-        monthlyAmount: monthly,
-        validityMonths: validity,
-        expectedCommission: commission,
-      });
+    (_name, productId, scheme, total, initial, months, monthly, validity, commission) => {
+      expect(resolvePlan(productId, paymentSchemeSchema.parse(scheme))).toEqual({ economics: {
+        scheme, total, reservationFee: '10000.00', requiredInitial: initial,
+        installmentMonths: months, monthlyAmount: monthly, validityMonths: validity,
+      } });
+      expect(calculateCommission(total, '0.04')).toBe(commission);
     },
   );
+  it.each(['move_b1_40_12', 'move_b2_25_12'] as const)('rejects unsupported Bronze %s economics', (scheme) => {
+    expect(resolvePlan(PRODUCT.bronze, scheme)).toEqual({ error: 'SCHEME_NOT_ALLOWED_FOR_TIER' });
+  });
 
-  it('rejects Bronze B1 with a clear validation error and creates nothing', async () => {
-    const db = install();
+  it('rejects an unknown scheme code at the contract boundary', () => {
+    expect(paymentSchemeSchema.safeParse('move_c').success).toBe(false);
+  });
+
+  it('does not allow legacy POST /sales to bypass application approval for any scheme', async () => {
+    const db = holder.db as FakeSupabase;
     const before = db.rows('card_sales').length;
-    const state = await createSale(PRODUCT.bronze, 'move_b1_40_12');
-    expect(state.status).toBe(409);
-    expect(err(state.body).message).toMatch(/not available for the Bronze tier/i);
+    for (const paymentScheme of paymentSchemeSchema.options) {
+      const state = await call('sales', { method: 'POST', path: '', token: TOKEN2.salesManager,
+        body: { customerId: CUSTOMER.prospect, productId: PRODUCT.gold, paymentScheme } });
+      expect(state.status).toBe(409);
+      expect(err(state.body).code).toBe('PURCHASE_WORKFLOW_REQUIRED');
+    }
     expect(db.rows('card_sales')).toHaveLength(before);
+    expect(db.calls.some((c) => c.table === 'next_sale_number')).toBe(false);
   });
-
-  it('rejects Bronze B2 with a clear validation error', async () => {
-    const state = await createSale(PRODUCT.bronze, 'move_b2_25_12');
-    expect(state.status).toBe(409);
-    expect(err(state.body).message).toMatch(/not available for the Bronze tier/i);
-  });
-
-  it('rejects an unknown scheme code at the contract boundary', async () => {
-    const state = await createSale(PRODUCT.gold, 'move_c');
-    expect(state.status).toBe(400);
-  });
-
   it('a later plan price edit leaves the frozen sale unchanged', async () => {
     const db = install();
-    const created = await createSale(PRODUCT.silver, 'move_b1_40_12');
-    expect(created.status).toBe(201);
+    const created = await seedHistoricalSale(PRODUCT.silver, 'move_b1_40_12');
+    expect(created.status).toBe(200);
     const saleId = (created.body as { id: string }).id;
     const edit = await call('cards', {
       method: 'PATCH',
@@ -410,7 +400,7 @@ describe('VIP sale creation freezes scheme economics', () => {
   });
 
   it('exposes the frozen scheme on the finance queue', async () => {
-    await createSale(PRODUCT.gold, 'move_b2_25_12');
+    await seedHistoricalSale(PRODUCT.gold, 'move_b2_25_12');
     const queue = await call('queues', { path: 'finance', token: TOKEN.admin });
     expect(queue.status).toBe(200);
     const rows = (queue.body as { data: Record<string, unknown>[] }).data;
@@ -426,7 +416,7 @@ describe('VIP sale creation freezes scheme economics', () => {
   });
 
   it('shows the selected scheme label on the sales report', async () => {
-    await createSale(PRODUCT.silver, 'move_b1_40_12');
+    await seedHistoricalSale(PRODUCT.silver, 'move_b1_40_12');
     const report = await call('reports', {
       path: 'sales',
       token: TOKEN.superAdmin,
@@ -446,8 +436,8 @@ describe('VIP sale creation freezes scheme economics', () => {
   });
 
   it('keeps points exactly as the plan snapshot (never invented)', async () => {
-    const state = await createSale(PRODUCT.bronze, 'move_a');
-    expect(state.status).toBe(201);
+    const state = await seedHistoricalSale(PRODUCT.bronze, 'move_a');
+    expect(state.status).toBe(200);
     expect(state.body).toMatchObject({ yearlyPoints: 25000 });
   });
 });
