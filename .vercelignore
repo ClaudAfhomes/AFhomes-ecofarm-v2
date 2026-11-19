@@ -13,6 +13,9 @@ api/scripts/
 # Test-only harness (Supabase fake + fixtures). Never imported by production
 # code; excluded so it cannot reach a deployment snapshot.
 api/_lib/testing/
+# Operator/test rehearsal that imports the harness above (used only by api/scripts/
+# and a spec); shipping it without testing/ breaks the deploy typecheck.
+api/_lib/migration-document-rehearsal.ts
 
 # Secrets / local env — NEVER upload. The CLI uploads by .vercelignore (gitignore
 # is not consulted), so without these the root .env (service-role key, DATABASE_URL,
