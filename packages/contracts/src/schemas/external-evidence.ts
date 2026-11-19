@@ -25,10 +25,9 @@ export type ExternalEvidenceStatus = z.infer<typeof externalEvidenceStatusSchema
 const source = z.string().trim().min(2).max(120);
 const description = z.string().trim().min(1).max(500).optional();
 /** Amount on the bank statement / OR; every payment sharing the reference must fit in it. */
-const transferAmount = exactDecimalStringSchema.refine(
-  (v) => /[1-9]/.test(v),
-  'Must be more than zero',
-);
+const transferAmount = exactDecimalStringSchema
+  .regex(/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/, 'Enter the amount without leading zeros')
+  .refine((v) => /[1-9]/.test(v), 'Must be more than zero');
 
 export const recordExternalEvidenceSchema = z.discriminatedUnion('evidenceType', [
   z

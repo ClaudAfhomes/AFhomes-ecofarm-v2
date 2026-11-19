@@ -291,7 +291,7 @@ describe('commission operations', () => {
   });
 
   it('refuses a reference without a positive transfer amount, before any rpc', async () => {
-    for (const transferAmount of [undefined, '0.00', '12.345']) {
+    for (const transferAmount of [undefined, '0.00', '12.345', '0100.00']) {
       const out = await call({
         method: 'POST',
         path: `payouts/${P}/evidence`,

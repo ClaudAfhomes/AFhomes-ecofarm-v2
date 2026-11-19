@@ -64,10 +64,30 @@ function install(over: Record<string, RouteHandler> = {}) {
   routes.clear();
   routes.set('GET /ost/referrals/OST-ABCDEF-123456', ok(RESOLUTION));
   const reference = (data: unknown[]) => ok({ data, meta: { total: data.length } });
-  routes.set('GET /address/public/regions', reference([{ code: '0400000000', name: 'CALABARZON' }]));
-  routes.set('GET /address/public/regions/0400000000/provinces', reference([{ code: '0402100000', name: 'Cavite' }]));
-  routes.set('GET /address/public/provinces/0402100000/localities', reference([{ code: '0402120000', name: 'Tagaytay', type: 'city', provinceCode: '0402100000', postalCode: '4120' }]));
-  routes.set('GET /address/public/localities/0402120000/barangays', reference([{ code: '0402120001', name: 'SYNTHETIC BARANGAY', localityCode: '0402120000' }]));
+  routes.set(
+    'GET /address/public/regions',
+    reference([{ code: '0400000000', name: 'CALABARZON' }]),
+  );
+  routes.set(
+    'GET /address/public/regions/0400000000/provinces',
+    reference([{ code: '0402100000', name: 'Cavite' }]),
+  );
+  routes.set(
+    'GET /address/public/provinces/0402100000/localities',
+    reference([
+      {
+        code: '0402120000',
+        name: 'Tagaytay',
+        type: 'city',
+        provinceCode: '0402100000',
+        postalCode: '4120',
+      },
+    ]),
+  );
+  routes.set(
+    'GET /address/public/localities/0402120000/barangays',
+    reference([{ code: '0402120001', name: 'SYNTHETIC BARANGAY', localityCode: '0402120000' }]),
+  );
   routes.set('POST /ost-accreditation/public', () => ({
     status: 201,
     body: {
@@ -143,7 +163,12 @@ async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Phone'), '+639171234567');
   await user.type(screen.getByLabelText('Date of birth'), '1995-06-15');
   await user.type(screen.getByLabelText('Street address'), '1 Farm Road');
-  for (const [label, option] of [['Region', 'CALABARZON'], ['Province', 'Cavite'], ['City / municipality', 'Tagaytay'], ['Barangay', 'SYNTHETIC BARANGAY']]) {
+  for (const [label, option] of [
+    ['Region', 'CALABARZON'],
+    ['Province', 'Cavite'],
+    ['City / municipality', 'Tagaytay'],
+    ['Barangay', 'SYNTHETIC BARANGAY'],
+  ]) {
     await user.click(screen.getByRole('combobox', { name: new RegExp(`^${label}`) }));
     await user.click(await screen.findByRole('option', { name: new RegExp(`^${option}`) }));
   }
@@ -196,7 +221,8 @@ describe('public OST registration', () => {
     );
     expect(post?.body).toMatchObject({
       referralCode: 'OST-ABCDEF-123456',
-      identity: { firstName: 'Oscar', lastName: 'Trainee', email: 'oscar@example.invalid' },
+      // Names are submitted in canonical UPPERCASE (owner decision 2026-11-19).
+      identity: { firstName: 'OSCAR', lastName: 'TRAINEE', email: 'oscar@example.invalid' },
       form: { programCategory: 'non_vip', governmentIdType: 'philippine_id' },
     });
     expect(post?.body as Record<string, unknown>).not.toHaveProperty('sponsorStaffId');

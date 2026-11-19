@@ -152,8 +152,20 @@ const finance: SessionUser = {
   roleName: 'Finance',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'finance.commission_payouts', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'finance.commission_payouts',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -167,7 +179,13 @@ const seller: SessionUser = {
   roleName: 'Sales Manager',
   status: 'active',
   afHomesPermissions: [
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: false, canDelete: false },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: false,
+      canDelete: false,
+    },
   ],
 };
 
@@ -175,12 +193,24 @@ const seller: SessionUser = {
 const approver: SessionUser = {
   ...finance,
   afHomesPermissions: [
-    { moduleKey: 'finance.commission_payouts', canView: true, canCreate: false, canUpdate: true, canDelete: false },
-    { moduleKey: 'network.commissions', canView: true, canCreate: false, canUpdate: true, canDelete: false },
+    {
+      moduleKey: 'finance.commission_payouts',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'network.commissions',
+      canView: true,
+      canCreate: false,
+      canUpdate: true,
+      canDelete: false,
+    },
   ],
 };
 
-const asRows =(rows: object[]) => rows as unknown as Commission[];
+const asRows = (rows: object[]) => rows as unknown as Commission[];
 const valueOf = (dialog: HTMLElement, label: string) =>
   within(dialog).getByText(label).nextElementSibling;
 
@@ -193,7 +223,9 @@ describe('external commission payment', () => {
     const row = (await screen.findByText('ANA REYES')).closest('tr')!;
     await u.click(within(row).getByRole('button', { name: 'Record External Commission Payment' }));
     const dialog = await screen.findByRole('dialog');
-    const submit = within(dialog).getByRole('button', { name: 'Record External Commission Payment' });
+    const submit = within(dialog).getByRole('button', {
+      name: 'Record External Commission Payment',
+    });
     expect(submit).toBeDisabled();
     expect(within(dialog).getByLabelText('Payment method')).toHaveValue('Bank transfer');
     await u.type(within(dialog).getByLabelText(/external payment reference/i), 'BDO-7781');
@@ -221,7 +253,9 @@ describe('external commission payment', () => {
     const dialog = await screen.findByRole('dialog');
     await u.type(within(dialog).getByLabelText(/payment evidence reference/i), 'Deposit slip 7781');
     await u.type(within(dialog).getByLabelText(/external payment reference/i), '- / -');
-    const submit = within(dialog).getByRole('button', { name: 'Record External Commission Payment' });
+    const submit = within(dialog).getByRole('button', {
+      name: 'Record External Commission Payment',
+    });
     expect(submit).toBeDisabled();
     await u.type(within(dialog).getByLabelText(/external payment reference/i), '7');
     expect(submit).toBeEnabled();
@@ -297,7 +331,9 @@ describe('commission detail', () => {
     expect(within(dialog).getByText('Qualified after activation.')).toBeInTheDocument();
     expect(within(dialog).getAllByRole('listitem')).toHaveLength(2);
     expect(within(dialog).queryByRole('button', { name: 'Qualify Commission' })).toBeNull();
-    await u.click(within(dialog).getByRole('button', { name: 'Record External Commission Payment' }));
+    await u.click(
+      within(dialog).getByRole('button', { name: 'Record External Commission Payment' }),
+    );
     expect(await screen.findByLabelText(/external payment reference/i)).toBeInTheDocument();
   });
 
@@ -340,8 +376,7 @@ describe('commission detail', () => {
   });
 
   it('shows the recorded payment date as entered, whatever the viewer time zone', async () => {
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    process.env.TZ = 'America/Los_Angeles';
+    vi.stubEnv('TZ', 'America/Los_Angeles');
     try {
       const u = userEvent.setup();
       renderWithProviders(<BusinessCommissionsPage />, { user: finance });
@@ -354,7 +389,7 @@ describe('commission detail', () => {
       // 2026-11-02 is a calendar date: west of UTC it must not read as Nov 1.
       expect(within(dialog).getByText('Nov 2, 2026')).toBeInTheDocument();
     } finally {
-      process.env.TZ = zone;
+      vi.unstubAllEnvs();
     }
   });
 
@@ -418,7 +453,9 @@ describe('commission detail', () => {
   });
 
   it('says the collection figures are unavailable when the payments cannot load', async () => {
-    vi.mocked(services.getSalePayments).mockRejectedValueOnce(new Error('Payments are unavailable.'));
+    vi.mocked(services.getSalePayments).mockRejectedValueOnce(
+      new Error('Payments are unavailable.'),
+    );
     const u = userEvent.setup();
     renderWithProviders(<BusinessCommissionsPage />, { user: finance });
     await u.click(
@@ -437,7 +474,11 @@ describe('commission detail', () => {
     'tells a viewer the server does not show them the payments (%i), with no dead-end retry',
     async (status) => {
       vi.mocked(services.getSalePayments).mockRejectedValueOnce(
-        new ApiError({ code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND', message: 'Refused', status }),
+        new ApiError({
+          code: status === 403 ? 'FORBIDDEN' : 'NOT_FOUND',
+          message: 'Refused',
+          status,
+        }),
       );
       const u = userEvent.setup();
       renderWithProviders(<BusinessCommissionsPage />, { user: seller });
@@ -447,7 +488,9 @@ describe('commission detail', () => {
       const dialog = await screen.findByRole('dialog');
       // An answer about access, not a fault: retrying can never change it.
       expect(
-        await within(dialog).findByText(/payment records for this sale are not shown to your account/i),
+        await within(dialog).findByText(
+          /payment records for this sale are not shown to your account/i,
+        ),
       ).toBeInTheDocument();
       expect(within(dialog).queryByRole('alert')).toBeNull();
       expect(within(dialog).queryByRole('button', { name: 'Retry' })).toBeNull();
@@ -466,7 +509,9 @@ describe('commission detail', () => {
     await screen.findByRole('button', { name: 'Release hold' });
     await u.click(screen.getByRole('button', { name: 'Close' }));
     expect(within(row).getByText('On hold: Awaiting audit review')).toBeInTheDocument();
-    await u.click(screen.getByRole('button', { name: /view details for commission AF-COM-00001/i }));
+    await u.click(
+      screen.getByRole('button', { name: /view details for commission AF-COM-00001/i }),
+    );
     const dialog = await screen.findByRole('dialog');
     expect(valueOf(dialog, 'On hold')).toHaveTextContent('Awaiting audit review');
     expect(

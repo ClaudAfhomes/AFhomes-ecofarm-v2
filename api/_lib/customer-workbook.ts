@@ -274,6 +274,16 @@ export function withSourceNames(
   return out;
 }
 
+/**
+ * Compares one workbook field. Names compare in canonical form, so a record stored
+ * before the UPPERCASE decision ("Juan") still matches today's parse ("JUAN").
+ */
+export function sameWorkbookField(key: string, a = '', b = ''): boolean {
+  return WORKBOOK_NAME_FIELDS.includes(key)
+    ? normalizeWorkbookName(a) === normalizeWorkbookName(b)
+    : a === b;
+}
+
 export function sameWorkbookIdentity(
   a: Record<string, string>,
   b: Record<string, string>,
@@ -282,7 +292,7 @@ export function sameWorkbookIdentity(
   keys.delete(SOURCE_NAMES_KEY);
   return [...keys].every(
     (key) =>
-      (['tin', 'secondary_tin'].includes(key) && !a[key]) || (a[key] ?? '') === (b[key] ?? ''),
+      (['tin', 'secondary_tin'].includes(key) && !a[key]) || sameWorkbookField(key, a[key], b[key]),
   );
 }
 

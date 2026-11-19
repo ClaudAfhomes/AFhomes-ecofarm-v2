@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { CUSTOMER_WORKBOOK_HEADERS, normalizeWorkbookName, completedAge } from '@afhomes/contracts';
 import { zipStored } from './report-export.js';
-import { parseCustomerWorkbook, sameWorkbookIdentity, workbookDate } from './customer-workbook.js';
+import {
+  parseCustomerWorkbook,
+  sameWorkbookField,
+  sameWorkbookIdentity,
+  workbookDate,
+} from './customer-workbook.js';
 import {
   validateWorkbookFields,
   resolveWorkbookGeography,
@@ -112,6 +117,12 @@ describe('company workbook adapter', () => {
     expect(withoutSource(second.rows)).toEqual(withoutSource(first.rows));
     expect(second.rows[0]!.fields.source_names).toBeUndefined();
     expect(sameWorkbookIdentity(first.rows[0]!.fields, second.rows[0]!.fields)).toBe(true);
+    // A record imported before the UPPERCASE decision still matches today's parse.
+    const legacy = { ...first.rows[0]!.fields, first_name: 'Claud', last_name: 'Test' };
+    expect(sameWorkbookIdentity(legacy, second.rows[0]!.fields)).toBe(true);
+    expect(sameWorkbookField('first_name', 'Claud', 'CLAUD')).toBe(true);
+    expect(sameWorkbookField('first_name', 'Claud', 'CLAUDE')).toBe(false);
+    expect(sameWorkbookField('email', 'a@x.ph', 'A@X.PH')).toBe(false);
   }, 30000);
   it('accepts exactly 5,000 populated records within the archive budgets', () => {
     const rows = Array.from({ length: 5000 }, (_, i) => ({

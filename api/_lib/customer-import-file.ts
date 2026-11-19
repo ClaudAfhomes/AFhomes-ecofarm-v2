@@ -11,6 +11,7 @@ import {
   resolveWorkbookGeography,
   workbookApplicationPrefill,
   sameWorkbookIdentity,
+  sameWorkbookField,
   type WorkbookStaffMatch,
 } from './customer-workbook.js';
 import { buildImportedCustomerFacts, legacyPaymentClaims } from './customer-import-continuation.js';
@@ -340,8 +341,8 @@ export async function validateCustomerImportFile(
         const previous = ctx.companySnapshots?.get(v.customerId);
         const unchanged =
           previous &&
-          ['first_name', 'last_name', 'middle_name', 'birth_date'].every(
-            (key) => (previous.current[key] ?? '') === (r.fields[key] ?? ''),
+          ['first_name', 'last_name', 'middle_name', 'birth_date'].every((key) =>
+            sameWorkbookField(key, previous.current[key] ?? '', r.fields[key] ?? ''),
           ) &&
           previous.current.phone === r.fields.mobile;
         if (unchanged && sameWorkbookIdentity(r.fields, previous.fields)) v.action = 'SKIP';
