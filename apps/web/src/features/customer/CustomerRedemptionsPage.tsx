@@ -1,8 +1,10 @@
-import { Button, EmptyState, ErrorState, Skeleton } from '@afhomes/ui';
+import { Button, EmptyState, ErrorState } from '@afhomes/ui';
 
 import { useCustomerLedgerQuery } from './queries';
 import { isForbidden } from './http';
-import { Card, formatDate, styles } from './portal-ui';
+import { ActivityList, ActivityListSkeleton, ActivityRow, formatDate, ui } from './portal-ui';
+import { MoneyPanel } from './MoneyPanel';
+import money from './money.module.css';
 
 /**
  * Read-only redemption history, derived from the member's own points ledger:
@@ -16,10 +18,9 @@ export function CustomerRedemptionsPage() {
 
   if (ledger.isLoading)
     return (
-      <div role="status" aria-label="Loading your redemptions">
-        <Skeleton />
-        <Skeleton />
-      </div>
+      <MoneyPanel title="Redemption history">
+        <ActivityListSkeleton rows={2} />
+      </MoneyPanel>
     );
   if (ledger.isError) {
     return (
@@ -38,7 +39,7 @@ export function CustomerRedemptionsPage() {
   const rows = (ledger.data ?? []).filter((entry) => entry.entryType === 'redemption');
 
   return (
-    <Card title="Redemption history">
+    <MoneyPanel title="Redemption history">
       {rows.length === 0 ? (
         <EmptyState
           title="No redemptions yet."
@@ -46,46 +47,44 @@ export function CustomerRedemptionsPage() {
         />
       ) : (
         <>
-          <div className={styles.tableScroll}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Item</th>
-                  <th scope="col">Reference</th>
-                  <th scope="col" className={styles.numeric}>
-                    Points spent
-                  </th>
-                  <th scope="col" className={styles.numeric}>
-                    Balance after
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{formatDate(entry.occurredAt)}</td>
-                    <td>
-                      {entry.itemName ?? entry.reason ?? '—'}
-                      {entry.quantity && entry.quantity > 1 ? ` × ${entry.quantity}` : ''}
-                      {entry.itemCode ? ` (${entry.itemCode})` : ''}
-                    </td>
-                    <td className={styles.mono}>
-                      {entry.referenceNumber ?? entry.redemptionNumber ?? '—'}
-                    </td>
-                    <td className={styles.numeric}>
-                      {Math.abs(entry.amount).toLocaleString('en-PH')}
-                    </td>
-                    <td className={styles.numeric}>{entry.balanceAfter.toLocaleString('en-PH')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className={styles.notice}>Showing {rows.length} redemptions on this page.</p>
+          <ActivityList label="Redemption history">
+            {rows.map((entry) => {
+              const reference = entry.referenceNumber ?? entry.redemptionNumber;
+              return (
+                <ActivityRow
+                  key={entry.id}
+                  icon="card"
+                  title={`${entry.itemName ?? entry.reason ?? '—'}${
+                    entry.quantity && entry.quantity > 1 ? ` × ${entry.quantity}` : ''
+                  }${entry.itemCode ? ` (${entry.itemCode})` : ''}`}
+                  meta={
+                    <>
+                      <time dateTime={entry.occurredAt}>{formatDate(entry.occurredAt)}</time>
+                      {reference ? (
+                        <>
+                          {' · '}
+                          <span className={money.mono}>{reference}</span>
+                        </>
+                      ) : null}
+                    </>
+                  }
+                  amount={`${Math.abs(entry.amount).toLocaleString('en-PH')} pts`}
+                  direction="debit"
+                  status={
+                    <span className={money.balanceAfter}>
+                      Balance after {entry.balanceAfter.toLocaleString('en-PH')}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ActivityList>
+          <p className={`${ui.muted} ${money.footnote}`}>
+            Showing {rows.length} redemptions on this page.
+          </p>
         </>
       )}
-      <nav className={styles.pager} aria-label="Redemption history pages">
+      <nav className={money.pager} aria-label="Redemption history pages">
         <Button
           variant="secondary"
           disabled={!ledger.hasPrevious || ledger.isFetching}
@@ -101,6 +100,6 @@ export function CustomerRedemptionsPage() {
           Older redemptions
         </Button>
       </nav>
-    </Card>
+    </MoneyPanel>
   );
 }

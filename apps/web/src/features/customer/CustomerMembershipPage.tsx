@@ -1,5 +1,15 @@
 import { useState } from 'react';
-import { Button, Dialog, ErrorState, QrCode, StatusChip, type StatusTone } from '@afhomes/ui';
+import {
+  Button,
+  ConfirmDialog,
+  Dialog,
+  ErrorState,
+  Icon,
+  QrCode,
+  StatusChip,
+  tierArtwork,
+  tierLabel,
+} from '@afhomes/ui';
 import { paymentSchemeLabel } from '@afhomes/contracts';
 
 import {
@@ -8,9 +18,10 @@ import {
   useReissueCredentials,
 } from './queries';
 import { isForbidden, isNotFound } from './http';
-import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
-import { tierArtwork, tierLabel } from '@afhomes/ui';
+import { PortalSection, formatDate, isNoCard, statusTone, styles, ui } from './portal-ui';
+import { vipTier } from './vip-tier';
 import type { CustomerCredentials } from './services';
+import m from './membership.module.css';
 
 /**
  * Digital VIP card screen.
@@ -37,7 +48,8 @@ import type { CustomerCredentials } from './services';
  * Separate from the card are the ONE-TIME secrets minted at activation (QR
  * token + fallback member code). Only hashes are stored, so those can never
  * be displayed - only rotated via the request below, which invalidates the
- * previous pair immediately.
+ * previous pair immediately. Rotation is behind a confirmation so one stray
+ * tap can never replace the secret.
  */
 export function CustomerMembershipPage() {
   const membership = useCustomerMembershipQuery();
@@ -46,16 +58,21 @@ export function CustomerMembershipPage() {
   const [issued, setIssued] = useState<CustomerCredentials | null>(null);
   const [showQr, setShowQr] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (membership.isLoading) return <p role="status">Loading your card…</p>;
-  if (membership.isError) {
+  // A 404 means "no active membership": show that at once rather than a spinner for
+  // as long as the client keeps retrying a read whose answer will not change.
+  if (membership.isLoading && !isNoCard(membership)) {
+    return <p role="status">Loading your card…</p>;
+  }
+  if (membership.isError || isNoCard(membership)) {
     return (
       <ErrorState
         title="Card unavailable"
         message={
           isForbidden(membership.error)
             ? 'Your account is not active, so your card is not available. Contact AFhomes Ecofarm to restore access.'
-            : isNotFound(membership.error)
+            : isNotFound(membership.failureReason)
               ? 'You do not have an active membership yet.'
               : 'We could not load your card. Please try again in a moment.'
         }
@@ -75,67 +92,70 @@ export function CustomerMembershipPage() {
   };
 
   return (
-    <>
-      <Card title="My Digital VIP Card">
-        <div className={styles.digitalCard}>
-          <img
-            className={styles.digitalArt}
-            src={artwork.src}
-            alt={artwork.alt}
-            width={512}
-            height={320}
-          />
-          <dl className={styles.digitalDetails}>
-            <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Member</dt>
-              <dd className={styles.digitalValue}>
-                {profile.data?.fullName ?? '—'}
+    <div className={m.stack}>
+      <PortalSection title="My Digital VIP Card">
+        <div className={`${ui.surface} ${m.hero}`}>
+          <div className={`${m.stage} ${m[`tier_${vipTier(card.productCode)}`] ?? ''}`}>
+            <img
+              className={m.art}
+              src={artwork.src}
+              alt={artwork.alt}
+              width={2560}
+              height={1597}
+              decoding="async"
+            />
+          </div>
+          <dl className={m.facts}>
+            <div className={m.fact}>
+              <dt className={ui.sectionLabel}>Member</dt>
+              <dd className={m.factValue}>{profile.data?.fullName ?? '—'}</dd>
+            </div>
+            <div className={m.fact}>
+              <dt className={ui.sectionLabel}>Membership Code</dt>
+              <dd className={`${m.factValue} ${m.mono}`}>{card.membershipNumber}</dd>
+            </div>
+            <div className={m.fact}>
+              <dt className={ui.sectionLabel}>Tier</dt>
+              <dd className={m.factValue}>{tierLabel(card.productName, card.productCode)}</dd>
+            </div>
+            <div className={m.fact}>
+              <dt className={ui.sectionLabel}>Status</dt>
+              <dd className={m.factValue}>
+                <StatusChip label={card.status} tone={statusTone(card.status)} />
               </dd>
             </div>
-            <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Membership Code</dt>
-              <dd className={`${styles.digitalValue} ${styles.mono}`}>{card.membershipNumber}</dd>
-            </div>
-            <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Tier</dt>
-              <dd className={styles.digitalValue}>
-                {tierLabel(card.productName, card.productCode)}
-              </dd>
-            </div>
-            <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Status</dt>
-              <dd className={styles.digitalValue}>
-                <StatusChip label={card.status} tone={toneFor(card.status)} />
-              </dd>
-            </div>
-            <div className={styles.digitalRow}>
-              <dt className={styles.fieldLabel}>Valid until</dt>
-              <dd className={styles.digitalValue}>{formatDate(card.renewalDueAt)}</dd>
+            <div className={m.fact}>
+              <dt className={ui.sectionLabel}>Valid until</dt>
+              <dd className={m.factValue}>{formatDate(card.renewalDueAt)}</dd>
             </div>
           </dl>
         </div>
+      </PortalSection>
 
-        <div className={styles.credentialBox}>
-          {showQr ? (
-            <QrCode
-              value={card.qrPayload}
-              alt="Your AFhomes Ecofarm member QR code"
-              size={160}
-            />
-          ) : (
-            <p className={styles.notice} role="status">
-              QR hidden. Show it when a desk is ready to scan.
-            </p>
-          )}
-          <div className={styles.credentialText}>
+      <div className={m.pair}>
+        <PortalSection title="Scan at the desk">
+          <div className={`${ui.surface} ${m.panel}`}>
+            {showQr ? (
+              <div className={m.qrTile}>
+                <QrCode
+                  value={card.qrPayload}
+                  alt="Your AFhomes Ecofarm member QR code"
+                  size={160}
+                />
+              </div>
+            ) : (
+              <p className={m.qrHidden} role="status">
+                QR hidden. Show it when a desk is ready to scan.
+              </p>
+            )}
             {/* The Membership Code is shown ONCE, in the summary above as
                 "Membership Code". It used to be repeated here as "Member Code"
                 with the same value, which read as two different credentials. */}
-            <p className={styles.notice}>
-              Show this QR or code at any AFhomes Ecofarm desk. It never changes, and viewing
-              it never invalidates anything.
+            <p className={ui.muted}>
+              Show this QR or code at any AFhomes Ecofarm desk. It never changes, and viewing it
+              never invalidates anything.
             </p>
-            <div className={styles.digitalActions}>
+            <div className={m.actions}>
               <Button variant="secondary" onClick={() => setShowQr((visible) => !visible)}>
                 {showQr ? 'Hide QR' : 'Show QR'}
               </Button>
@@ -144,48 +164,84 @@ export function CustomerMembershipPage() {
               </Button>
             </div>
           </div>
+        </PortalSection>
+
+        <PortalSection title="Membership details">
+          <div className={`${ui.surface} ${m.panel}`}>
+            <dl className={m.defs}>
+              <DefRow term="Product" value={card.productName ?? 'AFhomes VIP Privilege Card'} />
+              {/* The member's OWN agreed scheme - never the internal move playbook. */}
+              <DefRow term="Payment scheme" value={paymentSchemeLabel(card.paymentScheme)} />
+              <DefRow term="Activated" value={formatDate(card.activatedAt)} />
+              {card.validityYears ? (
+                <DefRow
+                  term="Validity"
+                  value={`Valid for ${card.validityYears} year${card.validityYears === 1 ? '' : 's'}`}
+                />
+              ) : null}
+              <DefRow term="VIP Card ID" value={card.vipCardNumber ?? 'Not issued'} />
+              <DefRow
+                term="Annual points"
+                value={card.yearlyPointsAllocated.toLocaleString('en-PH')}
+              />
+              <DefRow
+                term="Points on your card"
+                value={card.pointsBalance.toLocaleString('en-PH')}
+                hint="Ledger balance on the card, not your available (spendable) points."
+              />
+            </dl>
+          </div>
+        </PortalSection>
+      </div>
+
+      <section className={m.security} aria-labelledby="card-security-title">
+        <div className={m.securityHead}>
+          <Icon name="shield-check" size={18} />
+          <h2 id="card-security-title" className={m.securityTitle}>
+            Card security
+          </h2>
         </div>
-      </Card>
-
-      <Card title="Membership details">
-        <FieldList>
-          <Field label="Product" value={card.productName ?? 'AFhomes VIP Privilege Card'} />
-          {/* The member's OWN agreed scheme - never the internal move playbook. */}
-          <Field label="Payment scheme" value={paymentSchemeLabel(card.paymentScheme)} />
-          <Field label="Activated" value={formatDate(card.activatedAt)} />
-          {card.validityYears ? (
-            <Field
-              label="Validity"
-              value={`Valid for ${card.validityYears} year${card.validityYears === 1 ? '' : 's'}`}
-            />
-          ) : null}
-          <Field label="Points balance" value={card.pointsBalance.toLocaleString('en-PH')} />
-        </FieldList>
-      </Card>
-
-      <Card title="Lost printed secret?">
-        <p className={styles.notice}>{card.credentialsNote}</p>
-        <p className={styles.notice}>
-          Requesting a new secret is free and replaces the previous secret immediately, so do
-          this only if the old printed secret is genuinely lost. Your member code and QR above
-          are unaffected.
-        </p>
-        <Button
-          onClick={() => {
-            reissue.mutate(undefined, {
-              onSuccess: (next) => setIssued(next),
-            });
-          }}
-          disabled={reissue.isPending}
-        >
-          {reissue.isPending ? 'Issuing a new secret…' : 'Request a new card secret'}
-        </Button>
+        <div className={m.securityBody}>
+          <p className={ui.muted}>{card.credentialsNote}</p>
+          <p className={ui.muted}>
+            Lost your printed secret? Requesting a new secret is free and replaces the previous
+            secret immediately, so do this only if the old printed secret is genuinely lost. Your
+            member code and QR above are unaffected.
+          </p>
+        </div>
+        <div className={m.securityAction}>
+          <Button
+            variant="secondary"
+            onClick={() => setConfirmOpen(true)}
+            disabled={reissue.isPending}
+          >
+            {reissue.isPending ? 'Issuing a new secret…' : 'Request a new card secret'}
+          </Button>
+        </div>
         {reissue.isError && (
-          <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
+          <p className={m.warning} role="alert">
             We could not issue a new secret. Your existing codes are unchanged. Please try again.
           </p>
         )}
-      </Card>
+      </section>
+
+      {/* A single stray tap must never rotate the secret: confirm first. Cancel
+          closes without calling the mutation. */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          reissue.mutate(undefined, {
+            onSuccess: (next) => setIssued(next),
+          });
+        }}
+        title="Replace your card secret?"
+        message="This replaces the previous secret immediately. The old printed secret and fallback code will stop working. Your member code and card QR are unaffected."
+        confirmLabel="Replace secret"
+        cancelLabel="Cancel"
+        danger
+      />
 
       <Dialog
         open={issued !== null}
@@ -195,7 +251,19 @@ export function CustomerMembershipPage() {
       >
         {issued && <IssuedCredentials credentials={issued} />}
       </Dialog>
-    </>
+    </div>
+  );
+}
+
+function DefRow({ term, value, hint }: { term: string; value: string; hint?: string }) {
+  return (
+    <div className={m.defRow}>
+      <dt className={m.defTerm}>{term}</dt>
+      <dd className={m.defValue}>
+        {value}
+        {hint ? <span className={m.defHint}>{hint}</span> : null}
+      </dd>
+    </div>
   );
 }
 
@@ -206,14 +274,14 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
       <QrCode value={credentials.qrToken} alt="Your AFhomes Ecofarm member QR code" size={160} />
       <div className={styles.credentialText}>
         <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-          Shown once. Close this and the secret cannot be displayed again — request a new pair
-          if you lose it. Your member code and card QR are unaffected.
+          Shown once. Close this and the secret cannot be displayed again — request a new pair if
+          you lose it. Your member code and card QR are unaffected.
         </p>
         <p className={styles.fieldLabel}>Fallback member code</p>
         <p className={styles.credentialCode}>{credentials.fallbackCode}</p>
         <p className={styles.notice}>
-          Show this at any AFhomes Ecofarm desk, in case the QR code cannot be scanned. Staff
-          enter it by hand.
+          Show this at any AFhomes Ecofarm desk, in case the QR code cannot be scanned. Staff enter
+          it by hand.
         </p>
         <p className={styles.notice}>
           Membership {credentials.membershipNumber}. Issued {formatDate(credentials.issuedAt)}.
@@ -222,6 +290,3 @@ function IssuedCredentials({ credentials }: { credentials: CustomerCredentials }
     </div>
   );
 }
-
-const toneFor = (status: string): StatusTone =>
-  status === 'active' ? 'success' : status === 'suspended' ? 'warning' : 'neutral';

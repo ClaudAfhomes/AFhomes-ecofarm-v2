@@ -1,6 +1,6 @@
 import { useAnnouncementsQuery } from './engagement';
-import { Card } from './portal-ui';
-import styles from './engagement.module.css';
+import { PortalSection, ui } from './portal-ui';
+import styles from './dashboard.module.css';
 
 /** Compact announcement feed (server returns pinned first). Renders nothing when empty. */
 export function DashboardAnnouncements() {
@@ -8,18 +8,18 @@ export function DashboardAnnouncements() {
   const items = query.data ?? [];
   if (items.length === 0) return null;
   return (
-    <Card title="Announcements">
-      <ul className={styles.list}>
+    <PortalSection title="Announcements">
+      <ul className={`${ui.surface} ${styles.panelPad} ${styles.news}`}>
         {items.map((a) => (
-          <li key={a.id} className={styles.item}>
-            <p className={styles.itemTitle}>
-              {a.pinned ? 'Pinned: ' : ''}
-              {a.title}
-            </p>
-            <p className={styles.body}>{a.body}</p>
+          <li key={a.id} className={styles.newsItem}>
+            <div className={styles.newsHead}>
+              {a.pinned ? <span className={styles.pinned}>Pinned</span> : null}
+              <p className={styles.newsTitle}>{a.title}</p>
+            </div>
+            <p className={styles.newsBody}>{a.body}</p>
           </li>
         ))}
       </ul>
-    </Card>
+    </PortalSection>
   );
 }

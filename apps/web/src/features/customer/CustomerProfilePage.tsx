@@ -1,10 +1,19 @@
-import { ErrorState, StatusChip, type StatusTone, Button } from '@afhomes/ui';
+import { ErrorState, StatusChip, Button } from '@afhomes/ui';
 import { useState } from 'react';
 
 import { useCustomerProfileQuery } from './queries';
 import { isForbidden } from './http';
-import { Card, Field, FieldList, formatDate, styles } from './portal-ui';
+import {
+  Field,
+  FieldList,
+  PortalSection,
+  formatDate,
+  humanStatus,
+  statusTone,
+  ui,
+} from './portal-ui';
 import { ProfilePhotoCard } from './ProfilePhotoCard';
+import styles from './profile.module.css';
 
 /**
  * The member's own profile.
@@ -38,7 +47,13 @@ export function CustomerProfilePage() {
     }
   };
 
-  if (profile.isLoading) return <p role="status">Loading your profile…</p>;
+  if (profile.isLoading) {
+    return (
+      <p role="status" className={styles.status}>
+        Loading your profile…
+      </p>
+    );
+  }
   if (profile.isError) {
     return (
       <ErrorState
@@ -63,71 +78,83 @@ export function CustomerProfilePage() {
     .join('\n');
 
   return (
-    <>
-      <ProfilePhotoCard />
-      <Card title="Your details">
-        <FieldList>
-          <Field label="Customer ID" value={customer.customerNumber} />
-          {customer.customerCode ? (
+    <div className={styles.page}>
+      <div className={styles.top}>
+        <div className={`${ui.surface} ${styles.identity}`}>
+          <p className={ui.sectionLabel}>Member</p>
+          <p className={styles.name}>{customer.fullName}</p>
+          <div className={styles.metaRow}>
+            <span className={styles.number}>{customer.customerNumber}</span>
+            <StatusChip label={humanStatus(customer.status)} tone={statusTone(customer.status)} />
+          </div>
+          <p className={styles.managed}>
+            To correct any of the details below, contact AFhomes Ecofarm. Your account details are
+            maintained by the branch that registered you.
+          </p>
+        </div>
+        <ProfilePhotoCard />
+      </div>
+
+      <PortalSection title="Personal details" description="Managed by AF Homes.">
+        <div className={`${ui.surface} ${styles.panel}`}>
+          <FieldList>
+            <Field label="Customer ID" value={customer.customerNumber} />
+            {customer.customerCode ? (
+              <Field
+                label="Customer Code"
+                value={
+                  <span className={styles.codeRow} aria-live="polite">
+                    <code className={styles.code}>{customer.customerCode}</code>
+                    <Button
+                      variant="secondary"
+                      className={styles.tap}
+                      onClick={() => void copyCustomerCode(customer.customerCode!)}
+                    >
+                      {codeCopied ? 'Copied' : 'Copy Customer Code'}
+                    </Button>
+                  </span>
+                }
+              />
+            ) : null}
+            <Field label="Full name" value={customer.fullName} />
+            <Field label="First name" value={customer.firstName} />
+            <Field label="Middle name" value={customer.middleName ?? '—'} />
+            <Field label="Last name" value={customer.lastName} />
+            <Field label="Suffix" value={customer.suffix ?? '—'} />
+            <Field label="Date of birth" value={formatDate(customer.dateOfBirth)} />
+          </FieldList>
+        </div>
+      </PortalSection>
+
+      <PortalSection title="Contact information" description="Managed by AF Homes.">
+        <div className={`${ui.surface} ${styles.panel}`}>
+          <FieldList>
+            <Field label="Email" value={customer.email} />
+            <Field label="Phone" value={customer.phone} />
+            {address ? (
+              <Field label="Address" value={<p className={styles.address}>{address}</p>} />
+            ) : null}
+          </FieldList>
+        </div>
+      </PortalSection>
+
+      <PortalSection title="Account">
+        <div className={`${ui.surface} ${styles.panel}`}>
+          <FieldList>
             <Field
-              label="Customer Code"
+              label="Status"
               value={
-                <>
-                  <code>{customer.customerCode}</code>{' '}
-                  <Button
-                    variant="secondary"
-                    onClick={() => void copyCustomerCode(customer.customerCode!)}
-                  >
-                    {codeCopied ? 'Copied' : 'Copy Customer Code'}
-                  </Button>
-                </>
+                <StatusChip
+                  label={humanStatus(customer.status)}
+                  tone={statusTone(customer.status)}
+                />
               }
             />
-          ) : null}
-          <Field label="Full name" value={customer.fullName} />
-          <Field label="First name" value={customer.firstName} />
-          <Field label="Middle name" value={customer.middleName ?? '—'} />
-          <Field label="Last name" value={customer.lastName} />
-          <Field label="Suffix" value={customer.suffix ?? '—'} />
-        </FieldList>
-      </Card>
-
-      <Card title="Contact">
-        <FieldList>
-          <Field label="Email" value={customer.email} />
-          <Field label="Phone" value={customer.phone} />
-          <Field label="Date of birth" value={formatDate(customer.dateOfBirth)} />
-          <Field
-            label="Status"
-            value={<StatusChip label={customer.status} tone={toneFor(customer.status)} />}
-          />
-        </FieldList>
-        <p className={styles.notice}>
-          To correct any of these, contact AFhomes Ecofarm. Your account details are maintained by
-          the branch that registered you.
-        </p>
-      </Card>
-
-      {address && (
-        <Card title="Address">
-          <p className={styles.fieldValue} style={{ whiteSpace: 'pre-line' }}>
-            {address}
-          </p>
-        </Card>
-      )}
-
-      <Card title="Account">
-        <FieldList>
-          <Field label="Account created" value={formatDate(customer.updatedAt)} />
-          <Field
-            label="Portal access"
-            value={customer.status === 'active' ? 'Active' : customer.status}
-          />
-        </FieldList>
-      </Card>
-    </>
+            <Field label="Portal access" value={humanStatus(customer.status)} />
+            <Field label="Record updated" value={formatDate(customer.updatedAt)} />
+          </FieldList>
+        </div>
+      </PortalSection>
+    </div>
   );
 }
-
-const toneFor = (status: string): StatusTone =>
-  status === 'active' ? 'success' : status === 'suspended' ? 'warning' : 'neutral';

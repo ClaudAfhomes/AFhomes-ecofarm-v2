@@ -1,0 +1,193 @@
+/*
+ * Points, redemptions and payments (presentation only). Tokens from @afhomes/ui;
+ * the surface itself comes from customer-ui.module.css (`ui.surface`).
+ * Motion: none beyond what the shared primitives already declare.
+ */
+
+.panel {
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.panel > section {
+  margin: 0;
+}
+
+@media (min-width: 48rem) {
+  .panel {
+    padding: var(--space-5);
+  }
+}
+
+/* ---- Points hero ------------------------------------------------------- */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.heroValue {
+  margin: 0;
+  font-size: var(--text-metric);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--color-brand-primary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.heroCaption {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+/* ---- Label / value rows (dl) ------------------------------------------- */
+
+.rows {
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.rowLabel {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.rowValue {
+  margin: 0;
+  flex-shrink: 0;
+  max-width: 60%;
+  text-align: right;
+  font-size: var(--text-body-m);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.rowValueStrong {
+  color: var(--color-brand-primary);
+}
+
+.groupLabel {
+  margin: var(--space-5) 0 var(--space-1);
+}
+
+.notice {
+  margin: var(--space-4) 0 0;
+}
+
+/* ---- Claim flow -------------------------------------------------------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+/* Element selectors raise specificity so the shared margins do not stack on the gap. */
+.stack > :is(label, input, p, nav, section, div, video) {
+  margin: 0;
+}
+
+.stack > button {
+  align-self: flex-start;
+}
+
+/* Announced politely; the button already shows the same wording visually. */
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  max-width: 30rem;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-sunken);
+}
+
+.reviewed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.reviewed > :is(p, dl) {
+  margin: 0;
+}
+
+.reviewed > button {
+  align-self: flex-start;
+}
+
+/* ---- Records ------------------------------------------------------------ */
+
+.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.balanceAfter {
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.footnote {
+  margin: var(--space-3) 0 0;
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+@media (max-width: 40rem) {
+  .pager > button {
+    flex: 1 1 10rem;
+    min-height: var(--control-lg);
+  }
+}
+
+@media (max-width: 40rem) {
+  .stack > button,
+  .reviewed > button {
+    align-self: stretch;
+    min-height: var(--control-lg);
+  }
+}

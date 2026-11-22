@@ -157,7 +157,9 @@ describe('customer points position', () => {
     expect(screen.getByRole('button', { name: /scan claim qr/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/claim code/i)).toBeInTheDocument();
     // And no figure is invented: zero balances would be a lie about the card.
-    expect(screen.queryByText('points accumulated on your card')).toBeNull();
+    expect(screen.queryByText('Available points')).toBeNull();
+    expect(screen.queryByText('points you can spend right now')).toBeNull();
+    expect(screen.queryByText('60,000')).toBeNull();
   });
   it('warns about outstanding reversal debt and what it leaves spendable', async () => {
     installRoutes({
@@ -187,8 +189,10 @@ describe('customer points position', () => {
     renderWithProviders(<CustomerPointsPage />);
     expect(await screen.findByText('Can still earn this year')).toBeTruthy();
     expect(screen.getByText('40,000')).toBeTruthy();
-    // The headline figure is the spendable one.
-    expect(screen.getByText('points accumulated on your card')).toBeTruthy();
+    // The headline figure is the spendable one (the hero holds label, value, caption).
+    const hero = screen.getByText('Available points').parentElement!;
+    expect(hero).toHaveTextContent('60,000');
+    expect(hero).toHaveTextContent('points you can spend right now');
   });
 });
 

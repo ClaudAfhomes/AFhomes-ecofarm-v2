@@ -1,0 +1,256 @@
+/*
+ * Membership screen (presentation only). @afhomes/ui tokens only; no motion.
+ * The gold accent appears only as a restrained halo behind Gold artwork.
+ */
+
+.stack {
+  display: grid;
+  gap: var(--space-6);
+}
+
+/* ---- Hero --------------------------------------------------------------- */
+
+.hero {
+  overflow: hidden;
+  min-width: 0;
+}
+
+.stage {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) var(--space-5);
+  background:
+    radial-gradient(90% 100% at 50% 0%, rgba(255, 255, 255, 0.1), transparent 70%),
+    linear-gradient(160deg, var(--color-brand-deep), var(--color-brand-primary));
+}
+
+.tier_gold {
+  background:
+    radial-gradient(
+      90% 100% at 50% 0%,
+      color-mix(in srgb, var(--color-accent-light) 32%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(160deg, var(--color-brand-deep), var(--color-brand-primary));
+}
+
+.tier_bronze {
+  background:
+    radial-gradient(
+      90% 100% at 50% 0%,
+      color-mix(in srgb, var(--color-accent) 26%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(160deg, var(--color-brand-deep), var(--color-brand-primary));
+}
+
+.art {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+  height: auto;
+  aspect-ratio: 2560 / 1597;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--space-4) var(--space-5);
+  margin: 0;
+  padding: var(--space-5);
+}
+
+.fact {
+  min-width: 0;
+}
+
+.factValue {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-body-l);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* ---- Two-up: QR + details ----------------------------------------------- */
+
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+}
+
+@media (min-width: 48rem) {
+  .pair {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.qrTile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  max-width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
+.qrTile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.qrHidden {
+  margin: 0;
+  padding: var(--space-5) 0;
+  text-align: center;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.actions > button {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 430px) {
+  .actions {
+    flex-direction: column;
+  }
+
+  .actions > button {
+    width: 100%;
+  }
+}
+
+/* ---- Details (definition list) ------------------------------------------ */
+
+.defs {
+  display: grid;
+  margin: 0;
+}
+
+.defRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.defRow:first-child {
+  border-top: 0;
+}
+
+.defTerm {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.defValue {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.defHint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-caption);
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 22.5rem) {
+  .defValue {
+    text-align: left;
+  }
+}
+
+/* ---- Card security: calmer, separated ----------------------------------- */
+
+.security {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5) 0 0;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.securityHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+.securityTitle {
+  margin: 0;
+  font-size: var(--text-body-l);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.securityBody {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 44rem;
+}
+
+.securityAction {
+  justify-self: start;
+}
+
+@media (max-width: 430px) {
+  .securityAction {
+    justify-self: stretch;
+  }
+
+  .securityAction > button {
+    width: 100%;
+  }
+}
+
+.warning {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-warning-strong);
+  font-size: var(--text-body-s);
+}

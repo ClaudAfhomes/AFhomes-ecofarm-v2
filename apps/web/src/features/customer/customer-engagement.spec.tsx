@@ -2,7 +2,7 @@
  * Member engagement screens (notifications, bookings, messages, announcements),
  * rendered through the real routes with only the network stubbed.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -187,7 +187,96 @@ describe('notifications bell', () => {
   });
 });
 
+describe('notifications page', () => {
+  const notice = (over: Record<string, unknown> = {}) => ({
+    id: ID(31),
+    kind: 'booking',
+    title: 'Booking confirmed',
+    body: 'See you soon.',
+    link: null,
+    readAt: null,
+    createdAt: '2026-11-20T01:00:00.000Z',
+    ...over,
+  });
+
+  it('has exactly one h1 and tells unread from read with text', async () => {
+    install({
+      '/portal/notifications': list(
+        [notice(), notice({ id: ID(32), title: 'Welcome', readAt: '2026-11-19T01:00:00.000Z' })],
+        { unreadCount: 1 },
+      ),
+    });
+    render('/customer/notifications');
+    await screen.findByRole('button', { name: /Booking confirmed/ }, FIRST_PAINT);
+    const headings = screen.getAllByRole('heading', { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent('Notifications');
+    // Unread is a text label tied to the row's button, not colour alone.
+    expect(screen.getByRole('button', { name: /Booking confirmed/ })).toHaveAccessibleDescription(
+      'Unread',
+    );
+    expect(screen.getAllByText('Unread')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Welcome' })).not.toHaveAccessibleDescription();
+  });
+
+  it('explains the empty state and disables Mark all as read', async () => {
+    render('/customer/notifications');
+    expect(await screen.findByText('No notifications', undefined, FIRST_PAINT)).toBeInTheDocument();
+    expect(screen.getByText(/inside the portal/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark all as read' })).toBeDisabled();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('keeps one h1 when the list cannot load', async () => {
+    install({
+      '/portal/notifications': ok({ error: { code: 'INTERNAL', message: 'boom' } }, 500),
+    });
+    render('/customer/notifications');
+    expect(
+      await screen.findByText('Notifications unavailable', undefined, FIRST_PAINT),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+});
+
 describe('bookings', () => {
+  it('shows status as text, the date range, guests and the staff response', async () => {
+    install({
+      '/portal/services': list([SERVICE]),
+      '/portal/bookings': list([
+        booking({
+          id: ID(24),
+          reference: 'BKG-OK',
+          status: 'confirmed',
+          startDate: '2999-01-01',
+          endDate: '2999-01-03',
+          guests: 1,
+          responseNote: 'Welcome aboard.',
+        }),
+        booking({ id: ID(25), reference: 'BKG-NO', status: 'declined', responseNote: '' }),
+      ]),
+    });
+    render('/customer/bookings');
+    await screen.findByText(/BKG-OK/, undefined, FIRST_PAINT);
+    expect(screen.getByText('Confirmed')).toBeInTheDocument();
+    expect(screen.getByText('Declined')).toBeInTheDocument();
+    expect(screen.getByText(/to .*2999/)).toBeInTheDocument();
+    expect(screen.getByText('1 guest')).toBeInTheDocument();
+    expect(screen.getByText('Welcome aboard.')).toBeInTheDocument();
+  });
+
+  it('flags an end date before the start date on the field and blocks the request', async () => {
+    install({ '/portal/services': list([SERVICE]), '/portal/bookings': list([]) });
+    render('/customer/bookings');
+    await screen.findByText(/per night/, undefined, FIRST_PAINT);
+    await userEvent.type(screen.getByLabelText('Start date'), '2999-02-01');
+    await userEvent.type(screen.getByLabelText(/End date/), '2999-01-01');
+    const end = screen.getByLabelText(/End date/);
+    expect(end).toBeInvalid();
+    expect(end).toHaveAccessibleDescription('The end date cannot be before the start date.');
+    expect(screen.getByRole('button', { name: 'Request booking' })).toBeDisabled();
+  });
+
   it('submits the right body, prefilled for a single service', async () => {
     install({
       '/portal/services': list([SERVICE]),
@@ -308,6 +397,52 @@ describe('messages', () => {
         body: 'Thanks',
       }),
     );
+  });
+
+  it('names the sender of every message in text and lists them in order', async () => {
+    const convo = {
+      id: ID(43),
+      subject: 'Stay question',
+      status: 'open',
+      lastMessageAt: '2026-11-20T03:00:00.000Z',
+      lastSenderKind: 'customer',
+      unread: false,
+      createdAt: '2026-11-19T01:00:00.000Z',
+      customerId: null,
+      customerName: null,
+      customerNumber: null,
+    };
+    const msg = (n: number, kind: string, name: string | null, body: string) => ({
+      id: ID(n),
+      senderKind: kind,
+      senderName: name,
+      body,
+      createdAt: `2026-11-20T0${n - 44}:00:00.000Z`,
+    });
+    install({
+      '/portal/conversations': list([convo]),
+      [`/portal/conversations/${ID(43)}`]: ok({
+        ...convo,
+        messages: [
+          msg(44, 'customer', null, 'Is the villa free?'),
+          msg(45, 'staff', 'Mia Staff', 'Yes it is.'),
+        ],
+      }),
+    });
+    render('/customer/messages');
+    const open = await screen.findByRole('button', { name: 'Stay question' }, FIRST_PAINT);
+    // Read thread: no unread label.
+    expect(screen.queryByText('New reply from AF Homes')).not.toBeInTheDocument();
+    await userEvent.click(open);
+    const items = within(await screen.findByRole('list', { name: 'Conversation' })).getAllByRole(
+      'listitem',
+    );
+    expect(items).toHaveLength(2);
+    expect(within(items[0]!).getByText('You')).toBeInTheDocument();
+    expect(within(items[0]!).getByText('Is the villa free?')).toBeInTheDocument();
+    expect(within(items[1]!).getByText('Mia Staff')).toBeInTheDocument();
+    expect(within(items[1]!).getByText('AF Homes staff')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reply')).toBeInTheDocument();
   });
 });
 

@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { Button, EmptyState, ErrorState } from '@afhomes/ui';
+import { useId, useState, type FormEvent } from 'react';
+import { Button, EmptyState, ErrorState, Icon } from '@afhomes/ui';
 
 import {
   useConversationQuery,
@@ -8,7 +8,7 @@ import {
   useStartConversation,
 } from './engagement';
 import { formatDateTime } from './CustomerNotificationsPage';
-import { Card } from './portal-ui';
+import { ActivityListSkeleton, PortalSection, ui } from './portal-ui';
 import styles from './engagement.module.css';
 
 const errorText = (error: unknown): string =>
@@ -33,49 +33,96 @@ export function CustomerMessagesPage() {
   return <ThreadList onOpen={setOpenId} onCompose={() => setComposing(true)} />;
 }
 
-function ThreadList({ onOpen, onCompose }: { onOpen: (id: string) => void; onCompose: () => void }) {
+function ThreadList({
+  onOpen,
+  onCompose,
+}: {
+  onOpen: (id: string) => void;
+  onCompose: () => void;
+}) {
   const query = useConversationsQuery();
+  const uid = useId();
+  const conversations = query.data ?? [];
   return (
-    <Card title="Messages" actions={<Button onClick={onCompose}>New message</Button>}>
-      {query.isLoading ? (
-        <p role="status">Loading your messages…</p>
-      ) : query.isError ? (
-        <ErrorState
-          title="Messages unavailable"
-          message="We could not load your messages. Please try again in a moment."
-        />
-      ) : (query.data ?? []).length === 0 ? (
-        <EmptyState
-          title="No messages yet."
-          description="Use New message to write to AF Homes."
-        />
-      ) : (
-        <ul className={styles.list}>
-          {(query.data ?? []).map((c) => (
-            <li key={c.id} className={`${styles.item} ${c.unread ? styles.itemUnread : ''}`}>
-              <div className={styles.itemHead}>
-                <button type="button" className={styles.linkButton} onClick={() => onOpen(c.id)}>
-                  <strong>{c.subject}</strong>
-                </button>
-                <span className={styles.meta}>{formatDateTime(c.lastMessageAt)}</span>
-              </div>
-              {c.unread && <p className={styles.meta}>New reply from AF Homes</p>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
+    <div className={styles.page}>
+      <PortalSection
+        title="Messages"
+        description="Your conversations with AF Homes."
+        action={
+          <Button size="lg" onClick={onCompose}>
+            New message
+          </Button>
+        }
+      >
+        {query.isLoading ? (
+          <div className={`${ui.surface} ${styles.panel}`}>
+            <p role="status" className="sr-only">
+              Loading your messages…
+            </p>
+            <div aria-hidden="true">
+              <ActivityListSkeleton rows={3} />
+            </div>
+          </div>
+        ) : query.isError ? (
+          <ErrorState
+            title="Messages unavailable"
+            message="We could not load your messages. Please try again in a moment."
+          />
+        ) : conversations.length === 0 ? (
+          <div className={`${ui.surface} ${styles.panel}`}>
+            <EmptyState
+              title="No messages yet."
+              description="Use New message to write to AF Homes."
+            />
+          </div>
+        ) : (
+          <ul className={`${ui.surface} ${styles.rows}`} aria-label="Conversations">
+            {conversations.map((c) => {
+              const tagId = `${uid}-${c.id}-unread`;
+              return (
+                <li
+                  key={c.id}
+                  className={`${styles.rowItem} ${c.unread ? styles.rowItemUnread : ''}`}
+                >
+                  <span className={styles.dotSlot} aria-hidden="true">
+                    {c.unread ? <span className={styles.unreadDot} /> : null}
+                  </span>
+                  <div className={styles.rowMain}>
+                    <div className={styles.rowHead}>
+                      <button
+                        type="button"
+                        className={`${styles.rowButton} ${c.unread ? styles.rowButtonUnread : ''}`}
+                        aria-describedby={c.unread ? tagId : undefined}
+                        onClick={() => onOpen(c.id)}
+                      >
+                        {c.subject}
+                      </button>
+                      <time className={styles.rowTime} dateTime={c.lastMessageAt}>
+                        {formatDateTime(c.lastMessageAt)}
+                      </time>
+                    </div>
+                    {c.unread && (
+                      <span id={tagId} className={styles.unreadTag}>
+                        New reply from AF Homes
+                      </span>
+                    )}
+                  </div>
+                  <span className={styles.chev} aria-hidden="true">
+                    <Icon name="chevron-right" size={18} />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </PortalSection>
+    </div>
   );
 }
 
-function NewMessage({
-  onCancel,
-  onSent,
-}: {
-  onCancel: () => void;
-  onSent: (id: string) => void;
-}) {
+function NewMessage({ onCancel, onSent }: { onCancel: () => void; onSent: (id: string) => void }) {
   const start = useStartConversation();
+  const uid = useId();
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   // One id per composed message; reused if the member retries after a failure.
@@ -92,49 +139,84 @@ function NewMessage({
   };
 
   return (
-    <Card title="New message">
-      <form className={styles.form} onSubmit={submit}>
-        <label className={styles.label}>
-          Subject
-          <input
-            className={styles.control}
-            value={subject}
-            maxLength={150}
-            onChange={(e) => setSubject(e.target.value)}
-          />
-        </label>
-        <label className={styles.label}>
-          Message
-          <textarea
-            className={styles.control}
-            rows={5}
-            maxLength={5000}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-        </label>
-        {start.isError && (
-          <p className={styles.error} role="alert">
-            {errorText(start.error)}
-          </p>
-        )}
-        <div className={styles.actions}>
-          <Button type="submit" disabled={!ready || start.isPending}>
-            Send
-          </Button>
-          <Button type="button" variant="secondary" onClick={onCancel}>
-            Back
-          </Button>
+    <div className={styles.page}>
+      <PortalSection
+        title="New message"
+        description="Write to AF Homes. Replies appear in your messages."
+      >
+        <div className={`${ui.surface} ${styles.panel}`}>
+          <form className={styles.form} onSubmit={submit}>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor={`${uid}-subject`}>
+                Subject
+              </label>
+              <input
+                id={`${uid}-subject`}
+                className={styles.control}
+                value={subject}
+                maxLength={150}
+                onChange={(e) => setSubject(e.target.value)}
+              />
+            </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor={`${uid}-body`}>
+                Message
+              </label>
+              <textarea
+                id={`${uid}-body`}
+                className={styles.control}
+                rows={6}
+                maxLength={5000}
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+              />
+            </div>
+            {start.isError && (
+              <p className={styles.error} role="alert">
+                <Icon name="alert" size={16} />
+                <span>{errorText(start.error)}</span>
+              </p>
+            )}
+            <div className={styles.submitRow}>
+              <div className={styles.actions}>
+                <Button
+                  type="submit"
+                  size="lg"
+                  className={styles.fullMobile}
+                  disabled={!ready}
+                  loading={start.isPending}
+                  loadingLabel="Sending…"
+                  aria-describedby={!ready ? `${uid}-hint` : undefined}
+                >
+                  Send
+                </Button>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="secondary"
+                  className={styles.fullMobile}
+                  onClick={onCancel}
+                >
+                  Back
+                </Button>
+              </div>
+              {!ready && (
+                <p id={`${uid}-hint`} className={styles.hint}>
+                  Add a subject (3+ characters) and a message.
+                </p>
+              )}
+            </div>
+          </form>
         </div>
-        {!ready && <p className={styles.hint}>Add a subject (3+ characters) and a message.</p>}
-      </form>
-    </Card>
+      </PortalSection>
+    </div>
   );
 }
 
 function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   const query = useConversationQuery(id);
   const post = usePostMessage(id);
+  const uid = useId();
   const [body, setBody] = useState('');
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
@@ -153,62 +235,97 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   };
 
   return (
-    <Card
-      title={query.data?.subject ?? 'Message'}
-      actions={
-        <Button variant="secondary" onClick={onBack}>
-          All messages
-        </Button>
-      }
-    >
-      {query.isLoading ? (
-        <p role="status">Loading the conversation…</p>
-      ) : query.isError || !query.data ? (
-        <ErrorState
-          title="Conversation unavailable"
-          message="We could not load this conversation. Please try again in a moment."
-        />
-      ) : (
-        <>
-          <div className={styles.thread}>
-            {query.data.messages.map((m) => (
-              <div
-                key={m.id}
-                className={`${styles.bubble} ${m.senderKind === 'customer' ? styles.bubbleMine : styles.bubbleStaff}`}
-              >
-                <p className={styles.sender}>
-                  {m.senderKind === 'customer' ? 'You' : (m.senderName ?? 'AF Homes')} ·{' '}
-                  {formatDateTime(m.createdAt)}
-                </p>
-                <p className={styles.body}>{m.body}</p>
-              </div>
-            ))}
+    <div className={styles.page}>
+      <PortalSection
+        title={query.data?.subject ?? 'Message'}
+        action={
+          <Button variant="secondary" size="lg" onClick={onBack}>
+            All messages
+          </Button>
+        }
+      >
+        {query.isLoading ? (
+          <div className={`${ui.surface} ${styles.panel}`}>
+            <p role="status" className="sr-only">
+              Loading the conversation…
+            </p>
+            <div aria-hidden="true">
+              <ActivityListSkeleton rows={3} />
+            </div>
           </div>
-          <form className={styles.form} onSubmit={send}>
-            <label className={styles.label}>
-              Reply
+        ) : query.isError || !query.data ? (
+          <ErrorState
+            title="Conversation unavailable"
+            message="We could not load this conversation. Please try again in a moment."
+          />
+        ) : (
+          <>
+            <ol className={styles.convo} aria-label="Conversation">
+              {query.data.messages.map((m) => {
+                const mine = m.senderKind === 'customer';
+                return (
+                  <li
+                    key={m.id}
+                    className={`${styles.msg} ${mine ? styles.msgMine : styles.msgStaff}`}
+                  >
+                    <p className={styles.msgMeta}>
+                      <span className={styles.msgName}>
+                        {mine ? 'You' : (m.senderName ?? 'AF Homes')}
+                      </span>
+                      {!mine && m.senderName ? (
+                        <span className={styles.roleTag}>AF Homes staff</span>
+                      ) : null}
+                      <time dateTime={m.createdAt} className={ui.numeric}>
+                        {formatDateTime(m.createdAt)}
+                      </time>
+                    </p>
+                    <p className={styles.msgBubble}>{m.body}</p>
+                  </li>
+                );
+              })}
+            </ol>
+            <form className={styles.composer} onSubmit={send}>
+              <label className={styles.label} htmlFor={`${uid}-reply`}>
+                Reply
+              </label>
               <textarea
+                id={`${uid}-reply`}
                 className={styles.control}
                 rows={3}
                 maxLength={5000}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
               />
-            </label>
-            {post.isError && (
-              <p className={styles.error} role="alert">
-                {errorText(post.error)}
-              </p>
-            )}
-            <div>
-              <Button type="submit" disabled={!body.trim() || post.isPending}>
-                Send
-              </Button>
-              {!body.trim() && <p className={styles.hint}>Write a reply to send it.</p>}
-            </div>
-          </form>
-        </>
-      )}
-    </Card>
+              {post.isError && (
+                <p className={styles.error} role="alert">
+                  <Icon name="alert" size={16} />
+                  <span>{errorText(post.error)}</span>
+                </p>
+              )}
+              <div className={styles.composerFoot}>
+                {!body.trim() ? (
+                  <p id={`${uid}-hint`} className={styles.hint}>
+                    Write a reply to send it.
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <Button
+                  type="submit"
+                  size="lg"
+                  className={styles.fullMobile}
+                  disabled={!body.trim()}
+                  loading={post.isPending}
+                  loadingLabel="Sending…"
+                  aria-describedby={!body.trim() ? `${uid}-hint` : undefined}
+                >
+                  Send
+                </Button>
+              </div>
+            </form>
+          </>
+        )}
+      </PortalSection>
+    </div>
   );
 }

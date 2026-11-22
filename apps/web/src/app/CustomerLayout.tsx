@@ -1,6 +1,16 @@
+import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { isFeaturePathEnabled } from '@afhomes/shared';
-import { Button, ErrorState, Icon, IconButton, Spinner, type IconName } from '@afhomes/ui';
+import {
+  BottomNav,
+  Button,
+  Dialog,
+  ErrorState,
+  Icon,
+  IconButton,
+  Spinner,
+  type IconName,
+} from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { CustomerGuard } from './CustomerGuard';
@@ -31,16 +41,35 @@ function NotificationBell() {
 
 const NAV_ITEMS = [
   { to: '/customer', label: 'Dashboard', icon: 'home' as IconName, end: true },
-  { to: '/customer/membership', label: 'My card', icon: 'grid' as IconName, end: false },
-  { to: '/customer/points', label: 'Points', icon: 'wallet' as IconName, end: false },
+  { to: '/customer/membership', label: 'My card', icon: 'card' as IconName, end: false },
+  { to: '/customer/points', label: 'Points', icon: 'star' as IconName, end: false },
   { to: '/customer/redemptions', label: 'Redemptions', icon: 'list' as IconName, end: false },
-  { to: '/customer/payments', label: 'Payments', icon: 'dollar-sign' as IconName, end: false },
-  { to: '/customer/bookings', label: 'Bookings', icon: 'clock' as IconName, end: false },
+  { to: '/customer/payments', label: 'Payments', icon: 'receipt' as IconName, end: false },
+  { to: '/customer/bookings', label: 'Bookings', icon: 'calendar' as IconName, end: false },
   { to: '/customer/messages', label: 'Messages', icon: 'message' as IconName, end: false },
   { to: '/customer/profile', label: 'Profile', icon: 'user' as IconName, end: false },
 ];
 /** Read at render: module switches load at startup and may change. */
 const navItems = () => NAV_ITEMS.filter((item) => isFeaturePathEnabled(item.to));
+
+/** Mobile bottom bar: the five everyday destinations; everything else lives under "More". */
+const BOTTOM_ITEMS = [
+  { to: '/customer', label: 'Home', icon: 'home' as IconName, end: true },
+  { to: '/customer/membership', label: 'My card', icon: 'card' as IconName },
+  { to: '/customer/points', label: 'Points', icon: 'star' as IconName },
+  { to: '/customer/payments', label: 'Payments', icon: 'receipt' as IconName },
+  { to: '/customer/profile', label: 'Profile', icon: 'user' as IconName },
+];
+const bottomItems = () => BOTTOM_ITEMS.filter((item) => isFeaturePathEnabled(item.to));
+
+/** Routes reachable only through "More" on mobile (never dropped, only moved). */
+const MORE_ITEMS = [
+  { to: '/customer/redemptions', label: 'Redemptions', icon: 'list' as IconName },
+  { to: '/customer/bookings', label: 'Bookings', icon: 'calendar' as IconName },
+  { to: '/customer/messages', label: 'Messages', icon: 'message' as IconName },
+  { to: '/customer/notifications', label: 'Notifications', icon: 'bell' as IconName },
+];
+const moreItems = () => MORE_ITEMS.filter((item) => isFeaturePathEnabled(item.to));
 
 /**
  * The customer portal shell.
@@ -69,6 +98,7 @@ function CustomerShell() {
   const { signOut } = useCustomerSession();
   const profile = useCustomerProfileQuery();
   const { pathname } = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   if (profile.isLoading) {
     return (
@@ -172,6 +202,41 @@ function CustomerShell() {
           </NavLink>
         ))}
       </nav>
+
+      <div className={styles.mobileNav}>
+        <BottomNav
+          label="Customer portal mobile"
+          items={bottomItems()}
+          moreItem={{ label: 'More', onClick: () => setMoreOpen(true) }}
+        />
+      </div>
+
+      <Dialog open={moreOpen} onClose={() => setMoreOpen(false)} title="More" closeLabel="Close">
+        <nav aria-label="More destinations">
+          <ul className={styles.sheetList}>
+            {moreItems().map((item) => (
+              <li key={item.to}>
+                <Link to={item.to} className={styles.sheetLink} onClick={() => setMoreOpen(false)}>
+                  <Icon name={item.icon} size={20} />
+                  <span>{item.label}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <hr className={styles.sheetDivider} />
+        <button
+          type="button"
+          className={styles.sheetLink}
+          onClick={() => {
+            setMoreOpen(false);
+            void signOut();
+          }}
+        >
+          <Icon name="logout" size={20} />
+          <span>Sign out</span>
+        </button>
+      </Dialog>
 
       <main className={`${styles.main} afh-route`}>
         {tab ? <h1 className="sr-only">{tab.label}</h1> : null}

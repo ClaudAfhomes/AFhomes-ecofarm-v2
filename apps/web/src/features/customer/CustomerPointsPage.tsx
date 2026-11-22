@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 
 import {
   Button,
+  EmptyState,
   ErrorState,
   Skeleton,
   Select,
@@ -20,7 +21,59 @@ import {
   useCustomerPointsPositionQuery,
 } from './queries';
 import { claimErrorMessage, isForbidden } from './http';
-import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './portal-ui';
+import {
+  ActivityList,
+  ActivityRow,
+  Field,
+  FieldList,
+  formatDate,
+  humanEntryType,
+  isNoCard,
+  styles,
+  ui,
+  type ActivityRowProps,
+} from './portal-ui';
+import { MoneyPanel } from './MoneyPanel';
+import money from './money.module.css';
+
+const num = (value: number) => value.toLocaleString('en-PH');
+
+/** Icon and tint for a ledger entry type. Display only. */
+function entryVisual(entryType: string): Pick<ActivityRowProps, 'icon' | 'tone'> {
+  switch (entryType) {
+    case 'earned':
+    case 'promotional_bonus':
+      return { icon: 'star', tone: 'success' };
+    case 'annual_allocation':
+    case 'annual_reset':
+    case 'cutover_baseline':
+      return { icon: 'calendar', tone: 'neutral' };
+    case 'redemption':
+      return { icon: 'card', tone: 'neutral' };
+    case 'reversal':
+    case 'expiration':
+      return { icon: 'alert', tone: 'warning' };
+    default:
+      return { icon: 'pencil', tone: 'neutral' };
+  }
+}
+
+function Row({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: React.ReactNode;
+  strong?: boolean;
+}) {
+  return (
+    <div className={money.row}>
+      <dt className={money.rowLabel}>{label}</dt>
+      <dd className={`${money.rowValue} ${strong ? money.rowValueStrong : ''}`}>{value}</dd>
+    </div>
+  );
+}
 
 /**
  * A scanned claim lands here as `/customer/points?c=<credential>`.
@@ -110,16 +163,19 @@ export function CustomerPointsPage() {
     }
   };
 
-  const entries = ledger.data ?? [];
-  const hasReferences = entries.some(
-    (entry) => entry.referenceNumber || entry.redemptionNumber || entry.entryType === 'redemption',
-  );
   const position = !summary.isLoading && !summary.isError ? summary.data : undefined;
 
   return (
     <>
-      <Card title="Your points">
-        {summary.isLoading ? (
+      <MoneyPanel title="Your points">
+        {isNoCard(summary) ? (
+          // A 404 is the normal "no active membership" answer, not a failure: no
+          // retry button and no error wording, and shown without waiting on retries.
+          <EmptyState
+            title="No active card yet"
+            description="Your points appear here once you have an active membership."
+          />
+        ) : summary.isLoading ? (
           <div role="status" aria-label="Loading your points" aria-busy="true">
             <Skeleton />
             <Skeleton />
@@ -137,279 +193,302 @@ export function CustomerPointsPage() {
           />
         ) : (
           <>
-            <p className={styles.balance}>{position.balance.toLocaleString('en-PH')}</p>
-            <p className={styles.balanceCaption}>points accumulated on your card</p>
-            <FieldList>
-              {/* THREE different numbers. Spending capacity is a ceiling on future
-                  earnings, not money: a member who has reached their annual limit sees
-                  0 here while their spendable balance stays healthy. */}
-              <Field label="Points on your card" value={position.balance.toLocaleString('en-PH')} />
-                <Field label="Weekday points (Monday–Friday)" value={position.weekdaySpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
-                <Field label="Weekend points (Saturday–Sunday)" value={position.weekendSpendable?.toLocaleString('en-PH') ?? 'Unavailable'} />
-              <Field
-                label="Can still earn this year"
-                value={position.remainingEarningCapacity.toLocaleString('en-PH')}
-              />
-              <Field label="Annual limit" value={position.annualCap.toLocaleString('en-PH')} />
-              <Field
-                label="Tier"
-                value={position.tier.charAt(0) + position.tier.slice(1).toLowerCase()}
-              />
-              <Field
-                label="Year"
-                value={`${formatDate(position.periodStart)} to ${formatDate(position.periodEnd)}`}
-              />
-            </FieldList>
+            <div className={money.hero}>
+              <p className={ui.sectionLabel}>Available points</p>
+              <p className={money.heroValue}>{num(position.spendable)}</p>
+              <p className={money.heroCaption}>points you can spend right now</p>
+            </div>
+
+            {/* The measures stay separate: what is on the card, what is held against a
+                reversal, and what can be spent. Never merged into one total. */}
+            <dl className={money.rows}>
+              <Row label="On your card" value={num(position.balance)} />
+              {position.reversalDebt > 0 && (
+                <Row label="Held for a reversal" value={num(position.reversalDebt)} />
+              )}
+              <Row label="Available to spend" value={num(position.spendable)} strong />
+            </dl>
 
             {position.reversalDebt > 0 && (
-              <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-                {position.reversalDebt.toLocaleString('en-PH')} points are held against a reversed
-                purchase, so{' '}
-                {Math.max(position.balance - position.reversalDebt, 0).toLocaleString('en-PH')}{' '}
-                points remain after that correction. Future earnings repay any outstanding reversal
-                debt first.
+              <p
+                className={`${styles.notice} ${styles.noticeWarning} ${money.notice}`}
+                role="alert"
+              >
+                {num(position.reversalDebt)} points are held against a reversed purchase, so{' '}
+                {num(Math.max(position.balance - position.reversalDebt, 0))} points remain after
+                that correction. Future earnings repay any outstanding reversal debt first.
               </p>
             )}
 
-            <p className={styles.notice}>
+            {/* Spending capacity is a ceiling on future earnings, not money: a member
+                who has reached their annual limit sees 0 here while their spendable
+                balance stays healthy. */}
+            <p className={`${ui.sectionLabel} ${money.groupLabel}`}>Spendable by day</p>
+            <dl className={money.rows}>
+              <Row
+                label="Weekday points (Monday–Friday)"
+                value={position.weekdaySpendable?.toLocaleString('en-PH') ?? 'Unavailable'}
+              />
+              <Row
+                label="Weekend points (Saturday–Sunday)"
+                value={position.weekendSpendable?.toLocaleString('en-PH') ?? 'Unavailable'}
+              />
+            </dl>
+
+            <p className={`${ui.sectionLabel} ${money.groupLabel}`}>This year</p>
+            <dl className={money.rows}>
+              <Row
+                label="Can still earn this year"
+                value={num(position.remainingEarningCapacity)}
+              />
+              <Row label="Annual limit" value={num(position.annualCap)} />
+              <Row
+                label="Tier"
+                value={position.tier.charAt(0) + position.tier.slice(1).toLowerCase()}
+              />
+              <Row
+                label="Year"
+                value={`${formatDate(position.periodStart)} to ${formatDate(position.periodEnd)}`}
+              />
+            </dl>
+
+            <p className={`${ui.muted} ${money.notice}`}>
               Points accumulate from eligible paid purchases. Claim each purchase code in your own
               account.
             </p>
           </>
         )}
-      </Card>
+      </MoneyPanel>
 
-      <Card title="Claim points from a purchase">
-        <p className={styles.notice}>
-          When AFhomes Ecofarm records a purchase for you, you get a claim code. Enter it here or
-          scan its QR, review the purchase, then confirm to add the points to your card.
-        </p>
-        <label className={styles.selectLabel}>
-          Camera
-          <Select
-            value={camera}
-            onChange={(event) => {
-              stopScan();
-              setCamera(event.target.value === 'user' ? 'user' : 'environment');
-            }}
-            options={[
-              { value: 'environment', label: 'Rear camera' },
-              { value: 'user', label: 'Front camera' },
-            ]}
-          />
-        </label>
-        {/*
+      <MoneyPanel title="Claim points from a purchase">
+        <div className={money.stack}>
+          <p className={ui.muted}>
+            When AFhomes Ecofarm records a purchase for you, you get a claim code. Enter it here or
+            scan its QR, review the purchase, then confirm to add the points to your card.
+          </p>
+          <label className={styles.selectLabel}>
+            Camera
+            <Select
+              value={camera}
+              onChange={(event) => {
+                stopScan();
+                setCamera(event.target.value === 'user' ? 'user' : 'environment');
+              }}
+              options={[
+                { value: 'environment', label: 'Rear camera' },
+                { value: 'user', label: 'Front camera' },
+              ]}
+            />
+          </label>
+          {/*
           Camera states are named out loud rather than implied by a video element.
           A member who cannot tell "the camera never opened" from "it is working"
           either waits forever or gives up, so each state gets its own sentence:
           opening, ready, detected, denied, unavailable, failed.
         */}
-        <Button
-          variant="secondary"
-          loading={scanStatus === 'requesting'}
-          loadingLabel="Opening the camera…"
-          disabled={busy || preview.isPending}
-          onClick={() => startScan(camera)}
-        >
-          Scan claim QR
-        </Button>
-        {['requesting', 'scanning'].includes(scanStatus) && (
-          <>
-            <video
-              ref={scanVideoRef}
-              autoPlay
-              muted
-              playsInline
-              aria-label="Claim QR camera preview"
-              style={{ width: '100%', maxWidth: 480 }}
-            />
-            <Button variant="secondary" onClick={stopScan}>
-              Cancel camera
-            </Button>
-          </>
-        )}
-        {scanStatus === 'scanning' && (
-          <p role="status">Camera ready. Point it at the claim QR shown by AFhomes.</p>
-        )}
-        {scanMessage && <p role="status">{scanMessage}</p>}
-        <label className={`${styles.fieldLabel} ${styles.claimLabel}`} htmlFor="claim-credential">
-          Claim code
-        </label>
-        <input
-          id="claim-credential"
-          className={styles.claimInput}
-          value={credential}
-          onChange={(event) => {
-            setCredential(event.target.value);
-            preview.reset();
-            claim.reset();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && credential.trim() && !busy && !preview.isPending)
+          <Button
+            variant="secondary"
+            loading={scanStatus === 'requesting'}
+            loadingLabel="Opening the camera…"
+            disabled={busy || preview.isPending}
+            onClick={() => startScan(camera)}
+          >
+            Scan claim QR
+          </Button>
+          {['requesting', 'scanning'].includes(scanStatus) && (
+            <>
+              <video
+                ref={scanVideoRef}
+                autoPlay
+                muted
+                playsInline
+                aria-label="Claim QR camera preview"
+                className={money.video}
+              />
+              <Button variant="secondary" onClick={stopScan}>
+                Cancel camera
+              </Button>
+            </>
+          )}
+          {scanStatus === 'scanning' && (
+            <p role="status">Camera ready. Point it at the claim QR shown by AFhomes.</p>
+          )}
+          {scanMessage && <p role="status">{scanMessage}</p>}
+          <label className={ui.sectionLabel} htmlFor="claim-credential">
+            Claim code
+          </label>
+          <input
+            id="claim-credential"
+            className={styles.claimInput}
+            value={credential}
+            onChange={(event) => {
+              setCredential(event.target.value);
+              preview.reset();
+              claim.reset();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && credential.trim() && !busy && !preview.isPending)
+                preview.mutate({ token: credential.trim() });
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+          />
+          <Button
+            onClick={() => {
+              stopScan();
               preview.mutate({ token: credential.trim() });
-          }}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={busy}
-        />
-        <Button
-          onClick={() => {
-            stopScan();
-            preview.mutate({ token: credential.trim() });
-          }}
-          loading={preview.isPending}
-          disabled={busy || !credential.trim()}
-        >
-          Review claim
-        </Button>
-        {preview.isError && <p role="alert">{claimErrorMessage(preview.error)}</p>}
-        {reviewed && (
-          <section aria-label="Review purchase claim">
-            {/* "Scan detected" is its own state: a member must be able to tell a
+            }}
+            loading={preview.isPending}
+            disabled={busy || !credential.trim()}
+          >
+            Review claim
+          </Button>
+          {preview.isError && <p role="alert">{claimErrorMessage(preview.error)}</p>}
+          {reviewed && (
+            <section aria-label="Review purchase claim" className={money.reviewed}>
+              {/* "Scan detected" is its own state: a member must be able to tell a
                 decoded QR from a typed code, and must know the scan alone credited
                 nothing. */}
-            <p role="status">
-              Claim code read. Review the purchase below, then confirm to add the points.
-            </p>
-            <FieldList>
-              <Field label="Claim" value={reviewed.claimNumber} />
-              <Field label="Purchase" value={reviewed.purchaseNumber ?? 'Service purchase'} />
-              <Field label="Service" value={reviewed.serviceName ?? 'Eligible service'} />
-              <Field
-                label="Requested points"
-                value={reviewed.pointsRequested.toLocaleString('en-PH')}
-              />
-              <Field
-                label="Reserved points"
-                value={reviewed.pointsReserved.toLocaleString('en-PH')}
-              />
-              <Field label="Capped points" value={reviewed.pointsCapped.toLocaleString('en-PH')} />
-              <Field label="Expires" value={formatDate(reviewed.expiresAt)} />
-            </FieldList>
-            <p>
-              The final award is checked when you confirm. Scanning and reviewing do not credit
-              points.
-            </p>
-            {/* `loading` covers the whole confirm-to-credit sequence: the
+              <p role="status">
+                Claim code read. Review the purchase below, then confirm to add the points.
+              </p>
+              <FieldList>
+                <Field label="Claim" value={reviewed.claimNumber} />
+                <Field label="Purchase" value={reviewed.purchaseNumber ?? 'Service purchase'} />
+                <Field label="Service" value={reviewed.serviceName ?? 'Eligible service'} />
+                <Field
+                  label="Requested points"
+                  value={reviewed.pointsRequested.toLocaleString('en-PH')}
+                />
+                <Field
+                  label="Reserved points"
+                  value={reviewed.pointsReserved.toLocaleString('en-PH')}
+                />
+                <Field
+                  label="Capped points"
+                  value={reviewed.pointsCapped.toLocaleString('en-PH')}
+                />
+                <Field label="Expires" value={formatDate(reviewed.expiresAt)} />
+              </FieldList>
+              <p>
+                The final award is checked when you confirm. Scanning and reviewing do not credit
+                points.
+              </p>
+              {/* `loading` covers the whole confirm-to-credit sequence: the
                 confirmation dialog, the request, and the wait. The label names the
                 action so the member is not left guessing whether it worked. */}
-            <Button
-              onClick={() => void submit()}
-              loading={busy}
-              loadingLabel="Claiming your points…"
-              disabled={preview.isPending}
-            >
-              Claim my points
-            </Button>
-          </section>
-        )}
-        {/* The pending state is announced, not just drawn: a screen-reader user
+              <Button
+                onClick={() => void submit()}
+                loading={busy}
+                loadingLabel="Claiming your points…"
+                disabled={preview.isPending}
+              >
+                Claim my points
+              </Button>
+            </section>
+          )}
+          {/* The pending state is announced, not just drawn: a screen-reader user
             otherwise gets silence for the length of the request. */}
-        {/* A code that arrived by scan is prefilled; saying so explains why the
+          {/* A code that arrived by scan is prefilled; saying so explains why the
             field already has something in it. */}
-        {credential && !claim.isSuccess && (
-          <p className={styles.notice} role="status">
-            Review your claim code before confirming the points.
+          {credential && !claim.isSuccess && (
+            <p className={styles.notice} role="status">
+              Review your claim code before confirming the points.
+            </p>
+          )}
+          <p role="status" aria-live="polite" className={money.live}>
+            {claim.isPending ? 'Claiming your points…' : ''}
           </p>
-        )}
-        <p role="status" aria-live="polite">
-          {claim.isPending ? 'Claiming your points…' : ''}
-        </p>
-        {claim.isError && (
-          <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
-            {claimErrorMessage(claim.error)}
-          </p>
-        )}
-        {claim.isSuccess && (
-          <p className={styles.notice} role="status">
-            {claim.data.pointsAwarded.toLocaleString('en-PH')} points added. Your balance is now{' '}
-            {claim.data.balanceAfter.toLocaleString('en-PH')}
-            {claim.data.pointsCapped > 0
-              ? `. ${claim.data.pointsCapped.toLocaleString('en-PH')} points were not added because you reached this year's earning limit for your tier.`
-              : '.'}
-          </p>
-        )}
-      </Card>
+          {claim.isError && (
+            <p className={`${styles.notice} ${styles.noticeWarning}`} role="alert">
+              {claimErrorMessage(claim.error)}
+            </p>
+          )}
+          {claim.isSuccess && (
+            <p className={styles.notice} role="status">
+              {claim.data.pointsAwarded.toLocaleString('en-PH')} points added. Your balance is now{' '}
+              {claim.data.balanceAfter.toLocaleString('en-PH')}
+              {claim.data.pointsCapped > 0
+                ? `. ${claim.data.pointsCapped.toLocaleString('en-PH')} points were not added because you reached this year's earning limit for your tier.`
+                : '.'}
+            </p>
+          )}
+        </div>
+      </MoneyPanel>
 
       <PointRedemptionApprovals />
       <CustomerRefundHistory />
-      <Card title="Points activity">
-        {/* A Skeleton rather than a sentence: it reserves roughly the height the
-            table will occupy, so the card does not jump when the rows arrive.
-            The Skeleton is aria-hidden, so the region carries the announcement. */}
-        {ledger.isLoading && (
+      <MoneyPanel title="Points activity">
+        {/* A skeleton reserves roughly the height the rows will occupy, so the card
+            does not jump when they arrive. */}
+        {ledger.isLoading && !isNoCard(ledger) && (
           <div role="status" aria-label="Loading your points activity" aria-busy="true">
             <Skeleton />
             <Skeleton />
             <Skeleton />
           </div>
         )}
-        {ledger.isError && (
+        {isNoCard(ledger) && (
+          <p className={styles.notice}>
+            Points activity appears here once your membership is active.
+          </p>
+        )}
+        {ledger.isError && !isNoCard(ledger) && (
           <p className={styles.notice}>Your points activity is not available right now.</p>
         )}
         {ledger.data && ledger.data.length === 0 && (
           <p className={styles.notice}>No points activity yet.</p>
         )}
         {ledger.data && ledger.data.length > 0 && (
-          // The same scroller the payments and redemptions tables use: the ledger
-          // is five columns wide, which does not fit a 360px phone, and the
-          // region is focusable so the overflow is reachable by keyboard.
-          <div
-            role="region"
-            aria-label="Scrollable points activity"
-            tabIndex={0}
-            className={styles.tableScroll}
-          >
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Description</th>
-                  {hasReferences && <th scope="col">Reference</th>}
-                  <th scope="col" className={styles.numeric}>
-                    Points
-                  </th>
-                  <th scope="col" className={styles.numeric}>
-                    Balance
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.data.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{formatDate(entry.occurredAt)}</td>
-                    <td>{humanEntryType(entry.entryType)}</td>
-                    {/* For a redemption the member sees WHAT they spent points on,
-                        which is the joined item name, not an internal reason string. */}
-                    <td>
-                      {entry.itemName ??
-                        (entry.quantity && entry.quantity > 1
-                          ? `${entry.reason ?? humanEntryType(entry.entryType)}`
-                          : (entry.reason ?? '—'))}
-                    </td>
-                    {hasReferences && (
-                      <td className={styles.mono}>
-                        {entry.referenceNumber ?? entry.redemptionNumber ?? '—'}
-                      </td>
-                    )}
-                    <td
-                      className={`${styles.numeric} ${entry.amount >= 0 ? styles.positive : styles.negative}`}
-                    >
-                      {entry.amount >= 0 ? '+' : ''}
-                      {entry.amount.toLocaleString('en-PH')}
-                    </td>
-                    <td className={styles.numeric}>{entry.balanceAfter.toLocaleString('en-PH')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ActivityList label="Points activity">
+            {ledger.data.map((entry) => {
+              const typeLabel = humanEntryType(entry.entryType);
+              // For a redemption the member sees WHAT they spent points on (the joined
+              // item name), not an internal reason string. With no description the
+              // type label leads the row instead.
+              const description = entry.itemName ?? entry.reason ?? null;
+              const reference = entry.referenceNumber ?? entry.redemptionNumber;
+              return (
+                <ActivityRow
+                  key={entry.id}
+                  {...entryVisual(entry.entryType)}
+                  title={description ?? typeLabel}
+                  meta={
+                    <>
+                      {description ? (
+                        <>
+                          <span>{typeLabel}</span>
+                          {' · '}
+                        </>
+                      ) : null}
+                      <time dateTime={entry.occurredAt}>{formatDate(entry.occurredAt)}</time>
+                      {reference ? (
+                        <>
+                          {' · '}
+                          <span className={money.mono}>{reference}</span>
+                        </>
+                      ) : null}
+                    </>
+                  }
+                  amount={num(Math.abs(entry.amount))}
+                  direction={entry.amount >= 0 ? 'credit' : 'debit'}
+                  status={
+                    <span className={money.balanceAfter}>
+                      Balance after {num(entry.balanceAfter)}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ActivityList>
         )}
         {ledger.data && ledger.data.length > 0 && (
-          <p className={styles.notice}>Showing {ledger.data.length} entries on this page.</p>
+          <p className={`${ui.muted} ${money.footnote}`}>
+            Showing {ledger.data.length} entries on this page.
+          </p>
         )}
-        <nav className={styles.pager} aria-label="Points history pages">
+        <nav className={money.pager} aria-label="Points history pages">
           <Button
             variant="secondary"
             disabled={!ledger.hasPrevious || ledger.isFetching}
@@ -425,7 +504,7 @@ export function CustomerPointsPage() {
             Older activity
           </Button>
         </nav>
-      </Card>
+      </MoneyPanel>
     </>
   );
 }

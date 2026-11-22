@@ -11,8 +11,10 @@
  * which is what a `fetch` mock that returns `{}` would do.
  */
 import { screen, within } from '@testing-library/react';
+import { formatMoneyOrDash, formatUTCDate, isFeaturePathEnabled } from '@afhomes/shared';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '../../test/utils';
 import App from '../../app/App';
@@ -324,8 +326,14 @@ describe('customer dashboard', () => {
   it('shows the member their own card and points, and nothing else', async () => {
     render('/customer');
     expect(await screen.findByText('MBS-000777')).toBeInTheDocument();
-    expect(screen.getAllByText('Gold')).toHaveLength(2);
+    // The tier label now appears once, on the VIP card preview (the old
+    // duplicate lived in the removed "Membership" KPI tile).
+    expect(screen.getByText('Gold')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /gold vip privilege card/i })).toBeInTheDocument();
     expect(screen.getAllByText('60,000').length).toBeGreaterThan(0);
+    // The dashboard shows the artwork only: never the scannable QR or its payload.
+    expect(screen.queryByRole('img', { name: /member QR code/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/AFHOMES:/)).not.toBeInTheDocument();
     // Card details, not staff or finance information - and no payment figures
     // leak onto the dashboard (amounts live on the Payments screen only).
     expect(screen.queryByText(/commission/i)).not.toBeInTheDocument();
@@ -340,29 +348,57 @@ describe('customer dashboard', () => {
     expect(screen.getByText('Annual Allocation')).toBeInTheDocument();
   });
 
-  it('renders an activation and valid-until date', async () => {
-    render('/customer');
-    const card = (await screen.findByText('MBS-000777')).closest('section')!;
-    const activated = within(card).getByText('Activated').closest('div')!;
-    expect(activated).toHaveTextContent('Jan 5, 2026');
-    const until = within(card).getByText('Valid until').closest('div')!;
-    expect(until).toHaveTextContent('Jan 5, 2027');
-  });
-
-  it('summarizes the account in MetricCard KPIs that link to their screens', async () => {
+  it('renders the valid-until date, status and scheme in the membership summary', async () => {
     render('/customer');
     await screen.findByText('MBS-000777');
-    expect(screen.getByRole('link', { name: /Membership: Gold/ })).toHaveAttribute(
+    const summary = screen.getByRole('heading', { name: 'Available Points' }).closest('section')!;
+    expect(within(summary).getByText('Valid until').closest('div')).toHaveTextContent(
+      'Jan 5, 2027',
+    );
+    expect(within(summary).getByText('Status').closest('div')).toHaveTextContent('active');
+    expect(within(summary).getByText('Payment scheme').closest('div')).toHaveTextContent(
+      'Spot Cash',
+    );
+    // Available Points is SPENDABLE; the card ledger balance stays a separate, labelled line.
+    expect(within(summary).getByText('60,000')).toBeInTheDocument();
+    expect(within(summary).getByText('60,000 on your card')).toBeInTheDocument();
+  });
+
+  it('keeps the card preview and quick actions pointing at their screens', async () => {
+    render('/customer');
+    await screen.findByText('MBS-000777');
+    expect(screen.getByRole('link', { name: 'View My Card' })).toHaveAttribute(
       'href',
       '/customer/membership',
     );
-    expect(screen.getByRole('link', { name: /Points balance: 60,000/ })).toHaveAttribute(
-      'href',
-      '/customer/points',
-    );
-    expect(screen.getByRole('link', { name: /Valid until:/ })).toHaveAttribute(
+    const quick = within(screen.getByRole('navigation', { name: 'Quick actions' }));
+    expect(quick.getByRole('link', { name: 'My Card' })).toHaveAttribute(
       'href',
       '/customer/membership',
+    );
+    expect(quick.getByRole('link', { name: 'Points' })).toHaveAttribute('href', '/customer/points');
+  });
+
+  it('explains a missing membership instead of showing a zero balance', async () => {
+    const notFound = () => ({
+      status: 404,
+      body: { error: { code: 'NOT_FOUND', message: 'none' } },
+    });
+    installRoutes({
+      '/customer/membership': notFound,
+      '/customer/points/position': notFound,
+    });
+    render('/customer');
+    expect(
+      await screen.findByText('You do not have an active membership yet.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Available Points' })).not.toBeInTheDocument();
+    // The account status and a valid next step remain.
+    const account = screen.getByRole('heading', { name: 'Your account' }).closest('section')!;
+    expect(within(account).getByText('active')).toBeInTheDocument();
+    expect(within(account).getByRole('link', { name: 'Open Messages' })).toHaveAttribute(
+      'href',
+      '/customer/messages',
     );
   });
 
@@ -381,16 +417,31 @@ describe('customer profile', () => {
   it('shows the safe profile fields', async () => {
     render('/customer/profile');
     // The customer number appears in the shell header too, so scope to the card.
-    const card = (await screen.findByRole('heading', { name: 'Your details' })).closest('section')!;
+    // Sections were regrouped: "Your details" -> Personal details (now also holds the date of
+    // birth); "Contact" + "Address" -> Contact information.
+    const card = (await screen.findByRole('heading', { name: 'Personal details' })).closest(
+      'section',
+    )!;
     expect(within(card).getByText('CUS-000777')).toBeInTheDocument();
     expect(within(card).getByText('Ana R Buyer')).toBeInTheDocument();
 
-    const contact = screen.getByRole('heading', { name: 'Contact' }).closest('section')!;
+    const contact = screen
+      .getByRole('heading', { name: 'Contact information' })
+      .closest('section')!;
     expect(within(contact).getByText('ana.buyer@example.invalid')).toBeInTheDocument();
     expect(within(contact).getByText('09185550000')).toBeInTheDocument();
+    expect(within(contact).getByText(/77 Katipunan/)).toBeInTheDocument();
+  });
 
-    const address = screen.getByRole('heading', { name: 'Address' }).closest('section')!;
-    expect(within(address).getByText(/77 Katipunan/)).toBeInTheDocument();
+  it('keeps the profile read-only, with an account section and a status label', async () => {
+    render('/customer/profile');
+    const account = (await screen.findByRole('heading', { name: 'Account' })).closest('section')!;
+    expect(within(account).getByText('Portal access')).toBeInTheDocument();
+    expect(within(account).getAllByText('Active').length).toBeGreaterThan(0);
+    // No edit form: nothing on this page can write to the customer record.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Managed by AF Homes/).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
   it('never renders a government ID, document path or staff identifier', async () => {
@@ -404,7 +455,7 @@ describe('customer profile', () => {
       }),
     });
     const { container } = render('/customer/profile');
-    await screen.findByRole('heading', { name: 'Your details' });
+    await screen.findByRole('heading', { name: 'Personal details' });
     const html = container.innerHTML;
     expect(html).not.toContain('7788-9900-1122');
     expect(html).not.toContain('id.pdf');
@@ -457,6 +508,13 @@ describe('membership screen', () => {
     const user = userEvent.setup();
     render('/customer/membership');
     await user.click(await screen.findByRole('button', { name: /request a new card secret/i }));
+    // Rotation is behind a confirmation: nothing is requested until it is accepted.
+    expect(requests).not.toContain('/customer/membership/credentials');
+    const confirm = await screen.findByRole('dialog', { name: /replace your card secret/i });
+    expect(
+      within(confirm).getByText(/replaces the previous secret immediately/i),
+    ).toBeInTheDocument();
+    await user.click(within(confirm).getByRole('button', { name: 'Replace secret' }));
 
     expect(await screen.findByText('AFH-NEWW-WWWW')).toBeInTheDocument();
     // The issued secret renders inside the dialog; the persistent card QR
@@ -464,6 +522,46 @@ describe('membership screen', () => {
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('img', { name: /member QR code/i })).toBeInTheDocument();
     expect(screen.getAllByText(/cannot be displayed again/i).length).toBeGreaterThan(0);
+  });
+
+  it('does not rotate the secret when the confirmation is cancelled', async () => {
+    installRoutes({
+      '/customer/membership/credentials': () => ({
+        status: 201,
+        body: {
+          membershipId: MEMBERSHIP.id,
+          membershipNumber: 'MBS-000777',
+          fallbackCode: 'AFH-NEWW-WWWW',
+          qrToken: 'opaque-rotated-qr-token',
+          issuedAt: '2026-03-01T02:00:00.000Z',
+          previousCodesInvalidated: true,
+        },
+      }),
+    });
+    const user = userEvent.setup();
+    render('/customer/membership');
+    await user.click(await screen.findByRole('button', { name: /request a new card secret/i }));
+    const confirm = await screen.findByRole('dialog', { name: /replace your card secret/i });
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests).not.toContain('/customer/membership/credentials');
+    expect(screen.queryByText('AFH-NEWW-WWWW')).not.toBeInTheDocument();
+  });
+
+  it('lists the full membership details, with the card ledger balance labelled as such', async () => {
+    render('/customer/membership');
+    await screen.findByRole('heading', { name: /my digital vip card/i });
+    const details = screen.getByRole('heading', { name: 'Membership details' }).closest('section')!;
+    const row = (term: string) => within(details).getByText(term).closest('div')!;
+    expect(row('Activated')).toHaveTextContent('Jan 5, 2026');
+    expect(row('VIP Card ID')).toHaveTextContent('Not issued');
+    expect(row('Annual points')).toHaveTextContent('60,000');
+    expect(row('Points on your card')).toHaveTextContent(
+      /not your available \(spendable\) points/i,
+    );
+    expect(screen.getByRole('heading', { name: 'Scan at the desk' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Card security' })).toBeInTheDocument();
   });
 
   it('never renders a stored credential hash', async () => {
@@ -555,6 +653,11 @@ describe('points position vs legacy summary', () => {
     // The headline is spendable, so a member in debt is not told they hold the
     // full balance as usable.
     expect(await screen.findByText(/15,000 points are held/i)).toBeTruthy();
+    // Hero is spendable (45,000); the card balance and the hold stay separate.
+    expect(screen.getByText('Available points').nextElementSibling).toHaveTextContent('45,000');
+    expect(screen.getByText('On your card').nextElementSibling).toHaveTextContent('60,000');
+    expect(screen.getByText('Held for a reversal').nextElementSibling).toHaveTextContent('15,000');
+    expect(screen.getByText('Available to spend').nextElementSibling).toHaveTextContent('45,000');
   });
 
   it('a member at their earning cap still sees a healthy spendable balance', async () => {
@@ -570,8 +673,8 @@ describe('points position vs legacy summary', () => {
     // Capacity 0 must not read as "no points": the balance is untouched. Await
     // the loaded balance card: the shell renders while loading, so the heading
     // alone does not prove the figures arrived.
-    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
-    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(await within(card).findByText('Available points')).toBeInTheDocument();
+    expect(within(card).getByText('On your card')).toBeInTheDocument();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
   });
 });
@@ -593,9 +696,12 @@ describe('points screen', () => {
     render('/customer/points');
     const card = (await screen.findByRole('heading', { name: 'Your points' })).closest('section')!;
     // Await the loaded figures: the card shell renders while loading.
-    expect(await within(card).findByText('points accumulated on your card')).toBeInTheDocument();
+    expect(await within(card).findByText('Available points')).toBeInTheDocument();
     // The three figures are labelled separately so none can be read as another.
-    expect(within(card).getByText('Points on your card')).toBeInTheDocument();
+    expect(within(card).getByText('On your card')).toBeInTheDocument();
+    expect(within(card).getByText('Available to spend')).toBeInTheDocument();
+    // No reversal is outstanding, so no "held" measure is shown.
+    expect(within(card).queryByText('Held for a reversal')).toBeNull();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
     expect(within(card).getByText('Annual limit')).toBeInTheDocument();
     // 40,000 of capacity is NOT spendable and must not be presented as money.
@@ -603,6 +709,42 @@ describe('points screen', () => {
     const history = screen.getByRole('heading', { name: 'Points activity' }).closest('section')!;
     expect(within(history).getByText('Goodwill adjustment')).toBeInTheDocument();
     expect(within(history).getByText('Annual points allocation on activation')).toBeInTheDocument();
+  });
+
+  it('lists the ledger as records with a signed amount, type label and balance after', async () => {
+    installRoutes({
+      '/customer/points/ledger': list([
+        {
+          id: '11',
+          entryType: 'earned',
+          amount: 500,
+          balanceAfter: 1500,
+          reason: 'Spa purchase',
+          occurredAt: '2026-10-01T00:00:00.000Z',
+        },
+        {
+          id: '12',
+          entryType: 'redemption',
+          amount: -200,
+          balanceAfter: 1300,
+          reason: null,
+          occurredAt: '2026-10-02T00:00:00.000Z',
+        },
+      ]),
+    });
+    render('/customer/points');
+    const history = (await screen.findByRole('heading', { name: 'Points activity' })).closest(
+      'section',
+    )!;
+    const earned = (await within(history).findByText('Spa purchase')).closest('li')!;
+    expect(within(earned).getByText('Earned')).toBeInTheDocument();
+    expect(within(earned).getByText('+500')).toBeInTheDocument();
+    expect(within(earned).getByText('Balance after 1,500')).toBeInTheDocument();
+    // No description: the type label leads the row, and the debit carries a minus sign.
+    const spent = within(history).getByText('Redemption').closest('li')!;
+    expect(within(spent).getByText('−200')).toBeInTheDocument();
+    expect(within(spent).getByText('Balance after 1,300')).toBeInTheDocument();
+    expect(within(history).queryByRole('table')).toBeNull();
   });
 
   it('offers no redemption control and mutates nothing', async () => {
@@ -795,12 +937,31 @@ describe('customer payments screen', () => {
     render('/customer/payments');
     expect(await screen.findByText('TRF-9001')).toBeInTheDocument();
     // Method codes are shown as words; the stored code is never rendered raw.
-    expect(screen.getByText('bank transfer')).toBeInTheDocument();
+    expect(screen.getByText('Bank transfer')).toBeInTheDocument();
     expect(screen.queryByText('bank_transfer')).not.toBeInTheDocument();
-    expect(screen.getByText('verified')).toBeInTheDocument();
-    for (const heading of ['Date', 'Type', 'Method', 'Reference', 'Status', 'Amount']) {
-      expect(screen.getByRole('columnheader', { name: heading })).toBeInTheDocument();
-    }
+    // Status is text; amount, type and date are visible on the same record.
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    const record = screen.getByText('TRF-9001').closest('li')!;
+    expect(within(record).getByText('Installment')).toBeInTheDocument();
+    expect(within(record).getByText(formatMoneyOrDash('20000.00'))).toBeInTheDocument();
+    expect(within(record).getByText(formatUTCDate('2026-02-01T02:00:00.000Z'))).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('never words a recorded payment as verified', async () => {
+    installRoutes({
+      '/customer/payments': list([
+        { ...PAYMENTS.data[0], id: 'cccccccc-0000-4000-8000-000000000002', status: 'recorded' },
+        { ...PAYMENTS.data[0], id: 'cccccccc-0000-4000-8000-000000000003', status: 'voided' },
+        { ...PAYMENTS.data[0], id: 'cccccccc-0000-4000-8000-000000000004', status: 'rejected' },
+      ]),
+    });
+    render('/customer/payments');
+    expect(await screen.findByText('Recorded, not yet verified')).toBeInTheDocument();
+    expect(screen.getByText('Voided')).toBeInTheDocument();
+    expect(screen.getByText('Rejected')).toBeInTheDocument();
+    expect(screen.queryByText('Verified')).toBeNull();
+    expect(screen.getByText('Showing the most recent 3 payments.')).toBeInTheDocument();
     const html = document.body.innerHTML;
     expect(html).not.toMatch(/recorded_by|verified_by|receipt|rejection|staff/i);
   });
@@ -892,19 +1053,107 @@ describe('portal navigation', () => {
     );
   });
 
+  describe('mobile navigation', () => {
+    afterEach(() => {
+      vi.mocked(isFeaturePathEnabled).mockImplementation(() => true);
+    });
+
+    const MOBILE = { name: 'Customer portal mobile' };
+
+    it('shows the five everyday destinations and a More button', async () => {
+      render('/customer');
+      const nav = await screen.findByRole('navigation', MOBILE);
+      const links = within(nav)
+        .getAllByRole('link')
+        .map((link) => [link.textContent, link.getAttribute('href')]);
+      expect(links).toEqual([
+        ['Home', '/customer'],
+        ['My card', '/customer/membership'],
+        ['Points', '/customer/points'],
+        ['Payments', '/customer/payments'],
+        ['Profile', '/customer/profile'],
+      ]);
+      expect(within(nav).getByRole('button', { name: 'More' })).toHaveAttribute(
+        'aria-haspopup',
+        'dialog',
+      );
+    });
+
+    it('opens a sheet with the remaining routes and Sign out', async () => {
+      const user = userEvent.setup();
+      render('/customer');
+      const nav = await screen.findByRole('navigation', MOBILE);
+      await user.click(within(nav).getByRole('button', { name: 'More' }));
+      const sheet = await screen.findByRole('dialog', { name: 'More' });
+      const links = within(sheet)
+        .getAllByRole('link')
+        .map((link) => [link.textContent, link.getAttribute('href')]);
+      expect(links).toEqual([
+        ['Redemptions', '/customer/redemptions'],
+        ['Bookings', '/customer/bookings'],
+        ['Messages', '/customer/messages'],
+        ['Notifications', '/customer/notifications'],
+      ]);
+      expect(within(sheet).getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    });
+
+    it('closes the sheet with Escape and returns focus to More', async () => {
+      const user = userEvent.setup();
+      render('/customer');
+      const nav = await screen.findByRole('navigation', MOBILE);
+      const more = within(nav).getByRole('button', { name: 'More' });
+      await user.click(more);
+      await screen.findByRole('dialog', { name: 'More' });
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'More' })).not.toBeInTheDocument();
+      expect(more).toHaveFocus();
+    });
+
+    it('closes the sheet when a destination is chosen', async () => {
+      const user = userEvent.setup();
+      render('/customer');
+      const nav = await screen.findByRole('navigation', MOBILE);
+      await user.click(within(nav).getByRole('button', { name: 'More' }));
+      const sheet = await screen.findByRole('dialog', { name: 'More' });
+      await user.click(within(sheet).getByRole('link', { name: 'Bookings' }));
+      expect(screen.queryByRole('dialog', { name: 'More' })).not.toBeInTheDocument();
+    });
+
+    it('omits disabled module routes from both navs and the sheet', async () => {
+      vi.mocked(isFeaturePathEnabled).mockImplementation(
+        (path) => !path.startsWith('/customer/redemptions') && !path.startsWith('/customer/points'),
+      );
+      const user = userEvent.setup();
+      render('/customer');
+      const desktop = await screen.findByRole('navigation', { name: 'Customer portal' });
+      const mobile = screen.getByRole('navigation', MOBILE);
+      for (const nav of [desktop, mobile]) {
+        expect(within(nav).queryByRole('link', { name: 'Points' })).not.toBeInTheDocument();
+        expect(within(nav).queryByRole('link', { name: 'Redemptions' })).not.toBeInTheDocument();
+        expect(within(nav).getByRole('link', { name: 'Payments' })).toBeInTheDocument();
+      }
+      await user.click(within(mobile).getByRole('button', { name: 'More' }));
+      const sheet = await screen.findByRole('dialog', { name: 'More' });
+      expect(within(sheet).queryByRole('link', { name: 'Redemptions' })).not.toBeInTheDocument();
+      expect(within(sheet).getByRole('link', { name: 'Bookings' })).toBeInTheDocument();
+    });
+  });
+
   it('links profile, redemptions and payments from the dashboard', async () => {
     render('/customer');
-    // The section links render once the membership they depend on resolves.
+    // The quick actions replaced the old text links ("Your profile", "Redemption
+    // history", "Payment history"); the same targets stay reachable from the dashboard.
     await screen.findByText('MBS-000777');
-    expect(screen.getByRole('link', { name: 'Your profile' })).toHaveAttribute(
+    const quick = within(screen.getByRole('navigation', { name: 'Quick actions' }));
+    expect(quick.getByRole('link', { name: 'Profile' })).toHaveAttribute(
       'href',
       '/customer/profile',
     );
-    expect(screen.getByRole('link', { name: 'Redemption history' })).toHaveAttribute(
+    expect(quick.getByRole('link', { name: 'Redemptions' })).toHaveAttribute(
       'href',
       '/customer/redemptions',
     );
-    expect(screen.getByRole('link', { name: 'Payment history' })).toHaveAttribute(
+    expect(quick.getByRole('link', { name: 'Payments' })).toHaveAttribute(
       'href',
       '/customer/payments',
     );
@@ -1114,8 +1363,78 @@ describe('points history pagination', () => {
   });
 });
 
+/* ================================================================== */
+/* A member without a card: a normal state, not a failure              */
+/* ================================================================== */
+
+describe('member without an active membership', () => {
+  const notFound = () => ({
+    status: 404,
+    body: { error: { code: 'NOT_FOUND', message: 'none' } },
+  });
+  // The production client retries reads. A long delay keeps the retry window open for the
+  // whole test, so these assertions prove the answer is shown DURING the retries.
+  const retrying = () =>
+    new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 60_000 } } });
+  const renderRetrying = (route: string) =>
+    renderWithProviders(<App />, { route, sessionUser: SIGNED_IN, queryClient: retrying() });
+
+  beforeEach(() => {
+    installRoutes({
+      '/customer/membership': notFound,
+      '/customer/points/position': notFound,
+      '/customer/points/ledger': notFound,
+    });
+  });
+
+  it('explains the missing card on the card screen without waiting for retries', async () => {
+    renderRetrying('/customer/membership');
+    expect(
+      await screen.findByText('You do not have an active membership yet.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Loading your card…')).not.toBeInTheDocument();
+  });
+
+  it('does not word the points screen as a failure', async () => {
+    renderRetrying('/customer/points');
+    expect(await screen.findByText('No active card yet')).toBeInTheDocument();
+    expect(screen.queryByText('Points unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Your points activity is not available right now.')).toBeNull();
+    expect(
+      await screen.findByText('Points activity appears here once your membership is active.'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not word the dashboard points activity as a failure', async () => {
+    renderRetrying('/customer');
+    expect(
+      await screen.findByText('Points activity appears here once your membership is active.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Your points activity is not available right now.')).toBeNull();
+    expect(screen.getByText('You do not have an active membership yet.')).toBeInTheDocument();
+  });
+
+  it('still words a genuine server failure as a failure', async () => {
+    installRoutes({
+      '/customer/points/ledger': () => ({
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'boom' } },
+      }),
+    });
+    render('/customer');
+    expect(
+      await screen.findByText('Your points activity is not available right now.'),
+    ).toBeInTheDocument();
+  });
+});
+
 // Preserve source-module behavior tests with explicit feature-on fixtures.
 vi.mock('@afhomes/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@afhomes/shared')>();
-  return { ...actual, FEATURE_FLAGS: { redemption: true, services: true }, isFeaturePathEnabled: () => true };
+  return {
+    ...actual,
+    FEATURE_FLAGS: { redemption: true, services: true },
+    isFeaturePathEnabled: vi.fn(() => true),
+  };
 });

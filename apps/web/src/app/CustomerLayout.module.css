@@ -4,22 +4,28 @@
   padding: var(--space-6) var(--space-4) var(--space-10);
 }
 
+/* Calm, compact brand header: deep forest, hairline gold edge. */
 .header {
   margin: calc(var(--space-6) * -1) 0 0;
-  padding: var(--space-4);
-  border-radius: 0 0 var(--radius-lg, 12px) var(--radius-lg, 12px);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   background:
-    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-brand-secondary) 35%, transparent), transparent 70%),
+    radial-gradient(
+      120% 160% at 0% 0%,
+      color-mix(in srgb, var(--color-brand-secondary) 30%, transparent),
+      transparent 70%
+    ),
     var(--color-brand-deep);
   color: var(--color-on-dark);
-  border-bottom: 2px solid var(--color-accent);
+  border-bottom: 1px solid var(--color-accent);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .headerInner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .brand {
@@ -30,7 +36,7 @@
 }
 
 .brandLogo {
-  height: 44px;
+  height: 40px;
   width: auto;
   flex-shrink: 0;
 }
@@ -42,22 +48,24 @@
 .eyebrow {
   margin: 0;
   font-size: var(--text-caption);
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-accent);
+  color: var(--color-accent-light);
 }
 
 .customerName {
-  margin: 2px 0 0;
-  font-size: var(--text-h3);
+  margin: 0;
+  font-size: var(--text-body);
   font-weight: 600;
+  line-height: 1.3;
   color: var(--color-on-dark);
   overflow-wrap: anywhere;
 }
 
 .customerNumber {
-  margin: 2px 0 0;
-  font-size: var(--text-body-s);
+  margin: 0;
+  font-size: var(--text-caption);
   color: var(--color-on-dark-faint);
   font-variant-numeric: tabular-nums;
 }
@@ -74,21 +82,21 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: var(--radius-control);
-  border: 1px solid color-mix(in srgb, var(--color-on-dark) 18%, transparent);
-  background: color-mix(in srgb, var(--color-on-dark) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-on-dark) 16%, transparent);
+  background: color-mix(in srgb, var(--color-on-dark) 6%, transparent);
   color: var(--color-on-dark);
   cursor: pointer;
   text-decoration: none;
   transition:
     background-color var(--motion-150) var(--ease-out),
-    transform var(--motion-150) var(--ease-out);
+    transform var(--motion-100) var(--ease-out);
 }
 
 .iconAction:hover {
-  background: color-mix(in srgb, var(--color-on-dark) 16%, transparent);
+  background: color-mix(in srgb, var(--color-on-dark) 14%, transparent);
   color: var(--color-on-dark);
 }
 
@@ -97,7 +105,7 @@
 }
 
 .iconAction:focus-visible {
-  outline: 3px solid var(--color-accent);
+  outline: 3px solid var(--color-accent-light);
   outline-offset: 2px;
 }
 
@@ -107,33 +115,36 @@
   right: -6px;
   min-width: 1.25rem;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-accent);
   color: var(--color-brand-deep);
   font-size: var(--text-caption);
   font-weight: 700;
   line-height: 1.25rem;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .restricted {
   margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius-md);
   background: var(--color-accent-soft);
   border: 1px solid var(--color-accent-light);
   color: var(--color-accent-strong);
   font-size: var(--text-body-s);
 }
 
+/* Desktop tab strip: quiet, comfortable, no underlines. */
 .nav {
   display: flex;
   gap: var(--space-1);
   margin: var(--space-4) 0 var(--space-6);
   padding: var(--space-1);
-  border-radius: var(--radius-lg, 12px);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-surface-raised);
   border: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-xs);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -148,13 +159,14 @@
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
+  min-height: 2.5rem;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-body-s);
   font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
-  color: var(--color-text-muted);
-  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
   transition:
     background-color var(--motion-150) var(--ease-out),
     color var(--motion-150) var(--ease-out);
@@ -172,13 +184,18 @@
 }
 
 .navLinkActive {
-  background: var(--color-brand-deep);
-  color: var(--color-on-dark);
+  background: var(--color-brand-soft);
+  color: var(--color-brand-primary);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-brand-primary) 18%, transparent);
 }
 
 .main {
   display: block;
+}
+
+.centered {
+  padding: var(--space-8) var(--space-4);
 }
 
 .centeredActions {
@@ -187,22 +204,119 @@
   margin-top: var(--space-4);
 }
 
-/* Small screens: tighter shell padding and a wrapping nav that stays tappable. */
+/* Mobile bottom bar wrapper: hidden above the shell breakpoint. */
+.mobileNav {
+  display: none;
+}
+
+/* "More" sheet rows */
+.sheetList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sheetLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 3rem;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-body);
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background-color var(--motion-150) var(--ease-out);
+}
+
+.sheetLink:hover {
+  background: var(--color-state-hover);
+  color: var(--color-text-primary);
+}
+
+.sheetLink:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
+}
+
+.sheetDivider {
+  height: 0;
+  margin: var(--space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* Mobile: slim single-row header, bottom bar replaces the tab strip. */
 @media (max-width: 48rem) {
   .shell {
-    padding: var(--space-4) var(--space-3) var(--space-8);
+    padding: var(--space-4) var(--space-3)
+      calc(4.5rem + env(safe-area-inset-bottom, 0px) + var(--space-4));
   }
 
   .header {
     margin: calc(var(--space-4) * -1) 0 0;
-    padding: var(--space-3);
+    padding: var(--space-2) var(--space-3);
   }
 
   .brandLogo {
-    height: 36px;
+    height: 32px;
+  }
+
+  .eyebrow {
+    display: none;
   }
 
   .customerName {
-    font-size: var(--text-body);
+    font-size: var(--text-body-s);
+  }
+
+  .brand {
+    gap: var(--space-2);
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .mobileNav {
+    display: block;
+  }
+
+  /*
+   * The ui BottomNav hides itself from 640px; the shell switches at 48rem, so
+   * keep it visible across that gap.
+   */
+  .mobileNav > nav {
+    display: block;
+  }
+}
+
+/* Six slots at 320px: keep every label whole. */
+@media (max-width: 23rem) {
+  .mobileNav a,
+  .mobileNav button {
+    font-size: calc(var(--text-caption) - 1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconAction,
+  .navLink,
+  .navLinkActive,
+  .sheetLink {
+    transition: none;
+  }
+
+  .iconAction:active {
+    transform: none;
   }
 }
