@@ -54,8 +54,14 @@ describe('admin authentication routes', () => {
     expect(await screen.findByTestId('location')).toHaveTextContent('/admin');
   });
 
-  it('keeps unknown admin routes as not found', () => {
+  it('keeps unknown admin routes as not found for a signed-in user', async () => {
+    renderWithProviders(<App />, { route: '/admin/not-a-route', user: superAdmin });
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+  });
+
+  it('sends a signed-out visitor on an unknown admin route to sign in, not an empty shell', async () => {
     renderWithProviders(<App />, { route: '/admin/not-a-route' });
-    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin Login' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
   });
 });

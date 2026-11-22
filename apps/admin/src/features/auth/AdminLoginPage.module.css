@@ -24,6 +24,8 @@
   color: var(--color-brand-primary);
   font-weight: 600;
   text-decoration: none;
+  display: inline-block;
+  padding-block: 8px;
 }
 
 .textLink:hover {

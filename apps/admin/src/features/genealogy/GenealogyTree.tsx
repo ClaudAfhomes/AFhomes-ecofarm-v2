@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type KeyboardEvent } from 'react';
 import { Icon, StatusChip } from '@afhomes/ui';
 import { humanizeCode } from '../business/format';
 import { getGenealogyDownline, getGenealogyNode } from './services';
@@ -86,7 +86,22 @@ export function GenealogyTree({ rootStaffId, viewerRole, viewerId, onMemberClick
           <span className={styles.avatar} aria-hidden="true">
             {node.fullName.trim().charAt(0).toUpperCase() || '•'}
           </span>
-          <span className={styles.body}>
+          <span
+            className={styles.body}
+            {...(clickable
+              ? {
+                  tabIndex: 0,
+                  role: 'button',
+                  'aria-label': `View ${node.fullName}`,
+                  onKeyDown: (e: KeyboardEvent<HTMLSpanElement>) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onMemberClick?.(node);
+                    }
+                  },
+                }
+              : {})}
+          >
             <span className={styles.name}>{node.fullName}</span>
             <span className={styles.chips}>
               <StatusChip label={humanizeCode(node.role)} tone="neutral" />
@@ -101,10 +116,25 @@ export function GenealogyTree({ rootStaffId, viewerRole, viewerId, onMemberClick
     );
   };
 
-  if (rootQuery.isPending || downlineQuery.isPending) return <div className={styles.loading}>Loading team…</div>;
-  if (rootQuery.isError || downlineQuery.isError) return <div className={styles.error}>Failed to load team</div>;
+  if (rootQuery.isPending || downlineQuery.isPending)
+    return (
+      <div className={styles.loading} role="status">
+        Loading team…
+      </div>
+    );
+  if (rootQuery.isError || downlineQuery.isError)
+    return (
+      <div className={styles.error} role="alert">
+        Could not load the team. Refresh the page or try again shortly.
+      </div>
+    );
 
-  if (!rootNode) return <div className={styles.error}>Root member not found</div>;
+  if (!rootNode)
+    return (
+      <div className={styles.error} role="alert">
+        Root member not found
+      </div>
+    );
 
   // If no descendants, show root with empty state
   if (descendants.length === 0) {

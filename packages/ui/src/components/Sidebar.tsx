@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from 'react-router';
 import type { ReactNode } from 'react';
 
 import { Icon, type IconName } from './Icon';
+import { Skeleton } from './Skeleton';
 import styles from './Sidebar.module.css';
 
 /** A decorative divider inside a dropdown (renders as a horizontal rule). */
@@ -42,6 +43,8 @@ export interface SidebarProps {
   ariaLabel?: string;
   collapsed?: boolean;
   onExpand?: () => void;
+  /** Show placeholder rows while the navigation (permissions) is still resolving. */
+  loading?: boolean;
 }
 
 /** Primary navigation rail (desktop persistent, reused inside the mobile drawer). */
@@ -52,6 +55,7 @@ export function Sidebar({
   ariaLabel = 'Primary',
   collapsed,
   onExpand,
+  loading,
 }: SidebarProps) {
   const location = useLocation();
   const isItemActive = (item: SidebarItem) =>
@@ -72,7 +76,14 @@ export function Sidebar({
       aria-label={ariaLabel}
     >
       {brand ? <div className={styles.brand}>{brand}</div> : null}
-      <nav className={styles.nav}>
+      <nav className={styles.nav} aria-busy={loading && items.length === 0 ? true : undefined}>
+        {loading && items.length === 0 ? (
+          <div className={styles.navLoading}>
+            {[0, 1, 2, 3, 4].map((row) => (
+              <Skeleton key={row} className={styles.navLoadingRow} />
+            ))}
+          </div>
+        ) : null}
         <ul className={styles.list}>
           {items.map((item) => {
             if (item.dropdown && item.dropdown.length > 0) {

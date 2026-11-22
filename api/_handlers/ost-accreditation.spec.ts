@@ -269,7 +269,7 @@ describe('official OST handler boundary', () => {
     ).toBe(409);
     expect(holder.db?.calls.some((c) => c.table === 'submit_ost_accreditation')).toBe(false);
   });
-  it('rejects malformed manual sponsor before any RPC', async () => {
+  it('rejects malformed manual sponsor before any business write', async () => {
     expect(
       (
         await call(
@@ -280,7 +280,12 @@ describe('official OST handler boundary', () => {
       ).status,
     ).toBe(400);
     expect(
-      holder.db?.calls.some((c) => c.op === 'rpc' && c.table !== 'afhomes_admin_mfa_required'),
+      holder.db?.calls.some(
+        (c) =>
+          ['insert', 'update', 'delete', 'upsert'].includes(c.op) ||
+          (c.op === 'rpc' &&
+            !['afhomes_admin_mfa_required', 'afhomes_self_session'].includes(c.table)),
+      ),
     ).toBe(false);
   });
   it('uses the pending atomic registration RPC for authorized manual entry', async () => {

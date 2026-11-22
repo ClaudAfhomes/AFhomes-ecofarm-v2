@@ -28,6 +28,8 @@ export interface ContactSubmitResult {
   ok: boolean;
   message: string;
   reference?: string;
+  /** True when the server was unreachable and the email-app fallback ran instead. */
+  offline?: boolean;
 }
 
 export interface OfficeInfo {

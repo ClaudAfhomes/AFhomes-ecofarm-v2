@@ -7,7 +7,8 @@
  * are narrower (VD/SSM/SM/OST/finance report grants), and each extension is
  * labelled so a drift from `role-baseline.ts` is visible here.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 import { reportExportSchema, reportResponseSchema } from '@afhomes/contracts';
 
 import {
@@ -316,6 +317,45 @@ async function get(path: string, token?: string, query: Record<string, string> =
 }
 
 beforeEach(() => install());
+
+it('resolves staff authorization once when a report accepts an alternative module', async () => {
+  const db = holder.db as FakeSupabase;
+  grant(ROLE2.salesManager, 'sales.customers');
+  for (const key of ['finance.card_activation', 'operations.redemption']) {
+    db.rows('staff_permission_restrictions').push({
+      staff_id: STAFF2.salesManager,
+      module_id: moduleId(key),
+      deny_view: true,
+    });
+  }
+  const getUser = vi.spyOn(db.auth, 'getUser');
+  expect((await get('memberships', TOKEN2.salesManager)).status).toBe(200);
+  expect(getUser).toHaveBeenCalledTimes(1);
+});
+
+it.each([TOKEN.superAdmin, TOKEN2.ost])(
+  'resolves OST report authorization once for %s',
+  async (token) => {
+    const db = holder.db as FakeSupabase;
+    const getUser = vi.spyOn(db.auth, 'getUser');
+    expect((await get('ost', token)).status).toBe(200);
+    expect(getUser).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('does not grant OST review reports through dashboard access alone', async () => {
+  const db = holder.db as FakeSupabase;
+  for (const key of ['network.ost_registrations', 'network.ost_members']) {
+    db.rows('staff_permission_restrictions').push({
+      staff_id: STAFF2.finance,
+      module_id: moduleId(key),
+      deny_view: true,
+    });
+  }
+  const getUser = vi.spyOn(db.auth, 'getUser');
+  expect((await get('ost', TOKEN2.finance)).status).toBe(403);
+  expect(getUser).toHaveBeenCalledTimes(1);
+});
 
 describe('sales report', () => {
   it('excludes imported history from operational sales and payment totals', async () => {
@@ -700,6 +740,32 @@ describe('audit center', () => {
     expect((byEntity.body as { meta: { total: number } }).meta.total).toBe(1);
   });
 
+  it('filters by role category, the IST group and department', async () => {
+    type Body = {
+      meta: { total: number };
+      data: Array<{ actorDepartment?: string | null; before?: unknown }>;
+      options?: { roles: Array<{ slug: string }>; departments: Array<{ name: string }> };
+    };
+    const total = async (query: Record<string, string>) =>
+      ((await get('audit', TOKEN.superAdmin, query)).body as Body).meta.total;
+    expect(await total({ role: 'super_admin' })).toBe(1);
+    expect(await total({ role: 'admin' })).toBe(1);
+    // No IST actor wrote these events: the group filter reads empty, not "everything".
+    expect(await total({ role: 'ist' })).toBe(0);
+    expect(await total({ role: 'no_such_role' })).toBe(0);
+    expect(await total({ departmentId: UUID.department.admins })).toBe(2);
+    expect(await total({ departmentId: UUID.department.sales })).toBe(0);
+    expect(await total({ role: 'admin', departmentId: UUID.department.sales })).toBe(0);
+    expect((await get('audit', TOKEN.superAdmin, { role: 'Bad Role!' })).status).toBe(400);
+
+    const body = (await get('audit', TOKEN.superAdmin, { action: 'COMMISSION_QUALIFIED' }))
+      .body as Body;
+    expect(body.data[0]?.actorDepartment).toBe('Admins');
+    expect(body.data[0]?.before).toEqual({ status: 'final_qualification_pending' });
+    expect(body.options?.roles.map((r) => r.slug)).toContain('super_admin');
+    expect(body.options?.departments.map((d) => d.name)).toContain('Admins');
+  });
+
   it('redacts sensitive metadata keys in list and export', async () => {
     const state = await get('audit', TOKEN.superAdmin, { action: 'COMMISSION_QUALIFIED' });
     const text = JSON.stringify(state.body);
@@ -725,9 +791,13 @@ describe('safety and wiring', () => {
     expect(JSON.stringify(state.body)).not.toContain('secret database detail');
   });
 
-  it('keeps Reports disabled through the real router even for Super Admin', async () => {
+  afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
+
+  it('keeps Reports disabled through the real router when the module is switched off', async () => {
+    setFeatureFlags({ reports: false });
     expect(selectHandler('/api/v1/reports/sales', {})).toBeNull();
-    expect(selectHandler('/api/v1/reports/audit', {})).toBeNull();
+    // The audit log is governance and is never switched off (owner 2026-11-21).
+    expect(selectHandler('/api/v1/reports/audit', {})).not.toBeNull();
     const { res, state } = makeRes();
     const handled = await routeRequest(
       {
@@ -932,9 +1002,12 @@ describe('Payments report with reservation-origin rows', () => {
 
   it('finds the official annual RA number in a pre-sale payment report', async () => {
     seedReservationPayment();
-    const db=holder.db as FakeSupabase;
-    db.rows('reservation_agreements').find(r=>r.id===RESERVATION)!.reservation_number='2026-0001';
-    const report=reportResponseSchema.parse((await get('payments',TOKEN.superAdmin,{search:'2026-0001'})).body);
+    const db = holder.db as FakeSupabase;
+    db.rows('reservation_agreements').find((r) => r.id === RESERVATION)!.reservation_number =
+      '2026-0001';
+    const report = reportResponseSchema.parse(
+      (await get('payments', TOKEN.superAdmin, { search: '2026-0001' })).body,
+    );
     expect(report.data).toHaveLength(1);
     expect(report.data[0]!.reservationNumber).toBe('2026-0001');
   });

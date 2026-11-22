@@ -638,8 +638,8 @@ export function IdentifiersDialog({
         ) : null}
         {!result.alreadyActive && result.onboarding.status === 'manual_required' ? (
           <p role="alert">
-            <strong>Membership activation succeeded, but email delivery failed.</strong> Give the
-            customer the one-time activation code or secure link below now.
+            <strong>Membership is active.</strong> Give the customer the one-time activation code
+            or secure link below now. AF Homes does not email it.
           </p>
         ) : null}
         {!result.alreadyActive && result.onboarding.status === 'not_issued' ? (

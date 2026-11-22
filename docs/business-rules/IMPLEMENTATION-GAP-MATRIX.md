@@ -1,5 +1,11 @@
 # Implementation Gap Matrix
 
+> **SNAPSHOT NOTICE (2026-11-21).** This matrix is a 2026-10-14 snapshot and has **not** been re-verified. Later work
+> (migrations `20270105000004`-`000024`, coordinated application workflow, IST payroll, commission operations) changed the
+> "Current behavior" and "Gap" columns for many rows; "NOT_IMPLEMENTED" here does not mean absent today. For current
+> behavior read `END_TO_END_WORKFLOW.md`, `FINANCIAL_OPERATIONS_QA_2026-11-18.md` and `OPEN_QUESTIONS.md`, then verify in
+> source. Do not plan work from the counts below.
+
 - Created: 2026-10-14 (Phase 2B). Documentation/analysis only — no behavior changed.
 - One row per documented rule (54). Gap classes: `MATCH` (none — no rule fully implemented), `PARTIAL`, `MISMATCH`, `NOT_IMPLEMENTED`, `NOT_VERIFIED` (code cited but behavior not confirmed against the rule), `BLOCKED_BY_MISSING_SOURCE`. OUT_OF_SCOPE rows marked `—` with rationale pointer.
 - "Current behavior" is observed code, never policy. Phase keys: `M` = mismatch resolution, `D1` = decide-then-build (principle match exists), `X` = cross-model build (payroll capability absent), `B` = blocked by missing source, `—` = out of scope.

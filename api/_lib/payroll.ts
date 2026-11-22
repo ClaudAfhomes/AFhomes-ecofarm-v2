@@ -17,13 +17,13 @@ import {
 } from '@afhomes/contracts';
 import {
   calculateIstPayroll,
+  manilaMonthOf,
   type IstCompensationPolicy,
   type IstPayrollResult,
 } from '@afhomes/shared';
 
 import { authorizeAfHomes } from './afhomes-access.js';
 import { storedAccreditationNumbers } from './accreditation-numbers.js';
-import { manilaMonth } from './commission-ops.js';
 import { evidenceStatusFor, handleExternalEvidence } from './external-evidence.js';
 import {
   describeBlockers,
@@ -32,6 +32,8 @@ import {
   type StretchOutcome,
 } from './payroll-ist.js';
 import {
+  UUID_GROUP as ID,
+  strOrNull as str,
   deny,
   fail,
   isoOrNull,
@@ -81,7 +83,6 @@ import type { VercelRequest, VercelResponse } from './http.js';
  * engine; the actor is always the session principal. No transfer, deduction,
  * clawback or termination exists here.
  */
-const ID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 const GATE_KEY = 'Q1_GOVERNING_COMPENSATION_MODEL';
 
 /**
@@ -96,7 +97,6 @@ const RANK_BY_ROLE: Record<string, PayrollRank> = {
 };
 const RANK_ORDER: Record<PayrollRank, number> = { SM: 0, SSM: 1, SVD: 2 };
 
-const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const row = (v: unknown) => v as Record<string, unknown>;
 
 /**
@@ -175,7 +175,7 @@ const toDisbursement = (d: Record<string, unknown>, simulation: boolean) => ({
     ? {}
     : {
         evidenceStatus: d.evidence_status === 'SUPPORTED' ? ('SUPPORTED' as const) : ('EVIDENCE_EXCEPTION' as const),
-        postingPeriod: str(d.posting_period) ?? manilaMonth(d.recorded_at),
+        postingPeriod: str(d.posting_period) ?? manilaMonthOf(isoOrNull(d.recorded_at)),
       }),
   simulation,
 });

@@ -28,6 +28,18 @@
   scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
 }
 
+.navLoading {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-2);
+}
+
+.navLoadingRow {
+  height: 20px;
+  border-radius: var(--radius-sm);
+  opacity: 0.35;
+}
+
 .nav::-webkit-scrollbar {
   width: 8px;
 }

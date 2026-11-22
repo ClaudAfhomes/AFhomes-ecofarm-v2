@@ -129,7 +129,10 @@ export async function resolveAfHomesPrincipal(
   if (authError || !user?.id)
     return { error: toErrorEnvelope('UNAUTHORIZED', 'Invalid session', 401) };
   const policyClient = svc ?? userClient(token);
-  const policy = await policyClient?.rpc('afhomes_admin_mfa_required', {});
+  const [policy, scopedSession] = await Promise.all([
+    policyClient?.rpc('afhomes_admin_mfa_required', {}),
+    svc ? svc.rpc('afhomes_self_session', {}).setHeader('Authorization', `Bearer ${token}`) : null,
+  ]);
   if (
     !policy ||
     policy.error ||
@@ -139,13 +142,22 @@ export async function resolveAfHomesPrincipal(
     return {
       error: toErrorEnvelope('INTERNAL', 'Staff security policy verification unavailable', 503),
     };
+  let ownSession = scopedSession;
+  if (svc && ownSession?.error && ownSession.error.code !== 'PGRST202')
+    return {
+      error: toErrorEnvelope('INTERNAL', 'Secure staff session verification is unavailable.', 503),
+    };
   if (!svc) {
     const caller = userClient(token);
     if (!caller)
       return {
         error: toErrorEnvelope('INTERNAL', 'Supabase authentication is not configured', 500),
       };
-    const result = await caller.rpc('afhomes_self_session', {});
+    ownSession = await caller.rpc('afhomes_self_session', {});
+  }
+  // A null self-session falls through for invitation activation; older schemas keep the table path.
+  if (!svc || ownSession?.data != null) {
+    const result = ownSession;
     if (result.error)
       return {
         error: toErrorEnvelope(
@@ -182,15 +194,18 @@ export async function resolveAfHomesPrincipal(
         (await verifiedAssuranceLevel(anon.auth, token, user.id)) !== 'aal2',
     };
   }
-  const { data: staff, error: staffError } = await svc
-    .from('staff_users')
-    .select('id,email,full_name,status,must_change_password')
-    .eq('id', user.id)
-    .maybeSingle();
+  const [staffResult, roleResolution] = await Promise.all([
+    svc
+      .from('staff_users')
+      .select('id,email,full_name,status,must_change_password')
+      .eq('id', user.id)
+      .maybeSingle(),
+    assignedRole(svc, user.id),
+  ]);
+  const { data: staff, error: staffError } = staffResult;
   if (staffError)
     return { error: toErrorEnvelope('INTERNAL', 'Staff verification unavailable', 503) };
   if (!staff) return { error: toErrorEnvelope('FORBIDDEN', 'Staff access required', 403) };
-  const roleResolution = await assignedRole(svc, user.id);
   if (roleResolution.reason === 'unavailable')
     return { error: toErrorEnvelope('INTERNAL', 'Staff role verification unavailable', 503) };
   const role = roleResolution.role;
@@ -349,6 +364,14 @@ export async function authorizeAfHomes(
   moduleKey: AfHomesModuleKey,
   action: AfHomesAction = 'view',
 ) {
+  return authorizeAnyAfHomes(req, [moduleKey], action);
+}
+
+export async function authorizeAnyAfHomes(
+  req: VercelRequest,
+  moduleKeys: readonly AfHomesModuleKey[],
+  action: AfHomesAction = 'view',
+) {
   const principal = await resolveAfHomesPrincipal(req);
   if ('error' in principal) return principal;
   if (principal.mfaRequired)
@@ -365,9 +388,11 @@ export async function authorizeAfHomes(
     };
   }
   if (
-    !actionAllowed(
-      principal.permissions.find((permission) => permission.moduleKey === moduleKey),
-      action,
+    !moduleKeys.some((key) =>
+      actionAllowed(
+        principal.permissions.find((permission) => permission.moduleKey === key),
+        action,
+      ),
     )
   ) {
     return { error: toErrorEnvelope('FORBIDDEN', 'Insufficient permission', 403) };

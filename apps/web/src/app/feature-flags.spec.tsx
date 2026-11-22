@@ -1,6 +1,7 @@
 import { renderHook, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 import App from './App';
 import { renderWithProviders } from '../test/utils';
 import { usePublishedServices } from '../marketing/lib/services';
@@ -13,7 +14,10 @@ vi.mock('../features/customer/queries', async (original) => ({
   useCustomerProfileQuery: () => ({ data: { fullName: 'Synthetic customer', status: 'active' }, isLoading: false, isError: false }),
 }));
 
-it('does not request the operational service catalog with the default flags', () => {
+afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
+
+it('does not request the operational service catalog while Services is switched off', () => {
+  setFeatureFlags({ services: false });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const { result } = renderHook(() => usePublishedServices(), {
     wrapper: ({ children }) => (
@@ -25,8 +29,9 @@ it('does not request the operational service catalog with the default flags', ()
 });
 
 it.each(['/customer/redemptions', '/customer/points'])(
-  'refuses direct access to disabled workflow %s',
+  'refuses direct access to switched-off workflow %s',
   async (route) => {
+    setFeatureFlags({ services: false, redemption: false });
     renderWithProviders(<App />, {
       route,
       sessionUser: {

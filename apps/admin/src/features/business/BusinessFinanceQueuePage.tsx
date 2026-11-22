@@ -1064,6 +1064,8 @@ export function RecordPaymentDialog({
       }
       let fullyPaid: boolean;
       let vipCardNumber: string | null = null;
+      // Set when the server finalized the purchase in the same step as the last verification.
+      let finalizedSaleId: string | null = null;
       try {
         if (input.note) await saveDuplicateReview(paymentId, input.note);
         if (origin === 'reservation') {
@@ -1073,6 +1075,7 @@ export function RecordPaymentDialog({
           });
           fullyPaid = outcome.fullyPaid;
           vipCardNumber = outcome.vipCardNumber ?? null;
+          finalizedSaleId = outcome.saleId ?? null;
         } else {
           const outcome = await verifyPayment(paymentId, { decision: 'verified' });
           fullyPaid = outcome.fullyPaid;
@@ -1085,10 +1088,10 @@ export function RecordPaymentDialog({
           isDuplicateHold(error) || Boolean(input.note),
         );
       }
-      return { paymentId, fullyPaid, vipCardNumber };
+      return { paymentId, fullyPaid, vipCardNumber, finalizedSaleId };
     },
     // The alert reports the SERVER's stored row, never the browser's optimism.
-    onSuccess: async ({ paymentId, fullyPaid, vipCardNumber }) => {
+    onSuccess: async ({ paymentId, fullyPaid, vipCardNumber, finalizedSaleId }) => {
       await onDone();
       paymentRequest.complete();
       verifyRequest.complete();
@@ -1121,14 +1124,17 @@ export function RecordPaymentDialog({
         .filter((line): line is string => line !== null)
         .join('\n');
       // The final payment made the purchase fully paid: offer the (still manual)
-      // activation. A sale activates directly; a reservation is finalized first.
-      if (fullyPaid && origin === 'sale' && canActivate) {
+      // activation. A sale activates directly; a reservation is finalized by the server
+      // in the same step, so it offers activation once the sale exists.
+      const activatableSaleId = origin === 'sale' ? saleId : finalizedSaleId;
+      if (fullyPaid && activatableSaleId && canActivate) {
         const activateNow = await notifyConfirm({
           title: 'Payment Recorded and Verified',
           message: `${detail}\n\nThis purchase is now fully paid. Activate the membership now?`,
           confirmButtonText: 'Activate VIP Membership',
         });
-        if (activateNow) navigate(`/admin/finance/activation?sale=${encodeURIComponent(saleId)}`);
+        if (activateNow)
+          navigate(`/admin/finance/activation?sale=${encodeURIComponent(activatableSaleId)}`);
         return;
       }
       notifySuccess({

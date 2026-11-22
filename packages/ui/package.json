@@ -2,6 +2,9 @@
   "name": "@afhomes/ui",
   "version": "0.0.0",
   "private": true,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "type": "module",
   "description": "Shared design-system primitives for the AFHomes Ecofarm apps. Consumed by apps/web and apps/admin; token/base CSS ships from here so both apps share a single source.",
   "main": "./src/index.ts",

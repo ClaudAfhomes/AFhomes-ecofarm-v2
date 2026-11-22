@@ -581,8 +581,12 @@ function PurchasePaymentRow({
                   {/* Two DIFFERENT attributed acts. Recording and verifying are never
                     collapsed into one column, because "who took the money" and
                     "who confirmed it" are separate questions. */}
-                  <TableCell label="Recorded by">{receipt.recordedBy ?? '—'}</TableCell>
-                  <TableCell label="Verified by">{receipt.verifiedBy ?? '—'}</TableCell>
+                  <TableCell label="Recorded by">
+                    {receipt.recordedByName ?? (receipt.recordedBy ? 'Staff account' : '—')}
+                  </TableCell>
+                  <TableCell label="Verified by">
+                    {receipt.verifiedByName ?? (receipt.verifiedBy ? 'Staff account' : '—')}
+                  </TableCell>
                   <TableCell label="Actions">
                     {receipt.status === 'recorded' && mayVerify && (
                       <VerifyActions paymentId={receipt.id} onDone={refresh} />

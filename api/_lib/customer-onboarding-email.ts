@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport/index.js';
 import { z } from 'zod';
 
-type MailEnv = {
+export type MailEnv = {
   SMTP_HOST?: string;
   SMTP_PORT?: string;
   SMTP_USER?: string;
@@ -28,9 +28,9 @@ type MailTransport = {
   sendMail(message: Record<string, unknown>): Promise<unknown>;
 };
 
-type TransportFactory = (options: SMTPTransport.Options) => MailTransport;
+export type TransportFactory = (options: SMTPTransport.Options) => MailTransport;
 
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value.replace(/[&<>'"]/g, (character) => {
     const escaped: Record<string, string> = {
       '&': '&amp;',
@@ -42,7 +42,7 @@ const escapeHtml = (value: string) =>
     return escaped[character] ?? character;
   });
 
-function smtpConfig(env: MailEnv): { options: SMTPTransport.Options; from: string } | null {
+export function smtpConfig(env: MailEnv): { options: SMTPTransport.Options; from: string } | null {
   const host = env.SMTP_HOST?.trim();
   const user = env.SMTP_USER?.trim();
   const pass = env.SMTP_PASSWORD;

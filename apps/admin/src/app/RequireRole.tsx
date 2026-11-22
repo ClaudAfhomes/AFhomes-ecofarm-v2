@@ -21,7 +21,14 @@ function Loading() {
   );
 }
 
-export function RequireRole({ children }: { children: ReactNode }) {
+export function RequireRole({
+  children,
+  unknownRoute = false,
+}: {
+  children: ReactNode;
+  /** Unknown URL: needs a session, but no module permission (there is no module to check). */
+  unknownRoute?: boolean;
+}) {
   const { status, user, sessionError, revalidate } = useSession();
   const location = useLocation();
   if (status === 'loading') return <Loading />;
@@ -56,7 +63,10 @@ export function RequireRole({ children }: { children: ReactNode }) {
     ['admin', 'super_admin'].includes(user?.roleSlug ?? '')
   )
     return <>{children}</>;
-  if (!canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname)))
+  if (
+    !unknownRoute &&
+    !canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname))
+  )
     return (
       <Forbidden
         action={sessionError ? <Button onClick={() => void revalidate()}>Retry</Button> : undefined}

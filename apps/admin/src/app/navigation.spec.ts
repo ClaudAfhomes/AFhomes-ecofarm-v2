@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 import type { AfHomesPermission } from '@afhomes/contracts';
 import { breadcrumbItems, canAccessNavTarget, navItemsForPermissions, istNavItemsForPermissions } from './navigation';
 
@@ -11,9 +12,14 @@ const permission = (moduleKey: AfHomesPermission['moduleKey']): AfHomesPermissio
 });
 
 describe('AFHomes navigation', () => {
-  it('hides disabled Reports/CMS and removes Accreditation from IST navigation',()=>{
+  afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
+  it('hides switched-off Reports/CMS and removes Accreditation from IST navigation',()=>{
+    setFeatureFlags({ reports: false, cms: false });
     const grants=[permission('dashboard.view'),permission('sales.card_sales'),permission('governance.audit'),permission('cms.pages')];
-    expect(navItemsForPermissions(grants).some(item=>['Reports','Website CMS'].includes(item.label))).toBe(false);
+    const nav = navItemsForPermissions(grants);
+    expect(nav.some(item=>item.label==='Website CMS')).toBe(false);
+    // Reports is off, but the audit log is never switched off: the group shows only it.
+    expect(nav.find(item=>item.label==='Reports')?.dropdown?.map(child=>('to' in child ? child.to : null))).toEqual(['/admin/audit']);
     expect(canAccessNavTarget(grants,'/admin/reports')).toBe(false);
     expect(canAccessNavTarget(grants,'/admin/cms/pages')).toBe(false);
     expect(istNavItemsForPermissions(grants).some(item=>item.label==='Accreditation')).toBe(false);
@@ -102,12 +108,19 @@ describe('AFHomes navigation', () => {
       'Staff',
     ]);
   });
-  it('keeps Reports hidden while its feature flag is disabled, even with governance access', () => {
+  it('keeps Reports hidden while its module is switched off, leaving only the audit log', () => {
+    setFeatureFlags({ reports: false });
     const items = navItemsForPermissions([
       permission('dashboard.view'),
       permission('governance.audit'),
     ]);
-    expect(items.map((item) => item.label)).toEqual(['Dashboard']);
+    expect(items.map((item) => item.label)).toEqual(['Dashboard', 'Reports']);
+    expect(items[1]?.to).toBe('/admin/audit');
+    expect(items[1]?.dropdown?.map((child) => ('to' in child ? child.to : null))).toEqual(['/admin/audit']);
+    // Without the audit grant, nothing in the group is left to show.
+    expect(navItemsForPermissions([permission('dashboard.view')]).map((i) => i.label)).toEqual([
+      'Dashboard',
+    ]);
   });
   it('hides every destination when the server grants nothing', () =>
     expect(navItemsForPermissions([])).toEqual([]));

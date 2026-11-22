@@ -2,6 +2,7 @@
   "name": "@afhomes/contracts",
   "version": "0.0.0",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "description": "Shared Zod request/response contracts and the API error envelope. Single source of truth for DTOs exchanged between apps and api.",
   "main": "./src/index.ts",

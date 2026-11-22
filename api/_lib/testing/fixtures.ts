@@ -37,6 +37,10 @@ export const MODULE_KEYS = [
   'operations.customer_lookup',
   'governance.audit',
   'governance.config',
+  'sales.inquiries',
+  'operations.bookings',
+  'communication.announcements',
+  'communication.messages',
 ] as const satisfies readonly AfHomesPermission['moduleKey'][];
 
 export const UUID = {
@@ -212,6 +216,10 @@ export function rolePermissionsTable(): FakeRow[] {
       'sales.application_approval',
       'finance.commission_payouts',
       'governance.audit',
+      'sales.inquiries',
+      'operations.bookings',
+      'communication.announcements',
+      'communication.messages',
     ],
     { can_create: true, can_update: true },
   );

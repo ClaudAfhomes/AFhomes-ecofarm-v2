@@ -18,7 +18,7 @@
  */
 import { render, screen } from '@testing-library/react';
 import { Children, isValidElement, type ReactNode } from 'react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import {
   MemoryRouter,
   Navigate,
@@ -35,7 +35,7 @@ import {
   type AfHomesModuleKey,
   type AfHomesPermission,
 } from '@afhomes/contracts';
-import { isFeaturePathEnabled } from '@afhomes/shared';
+import { DEFAULT_FEATURE_FLAGS, isFeaturePathEnabled, setFeatureFlags } from '@afhomes/shared';
 
 // Only the Supabase client is replaced: the real SessionProvider, the real API
 // client and the real RequireRole run in the session-resolution tests below.
@@ -414,7 +414,9 @@ describe('Invariant E - a direct URL cannot bypass navigation permission filteri
    * must therefore SEE the sale screen while being denied the two screens that
    * would let them administer pricing or verify their own money.
    */
-  it('hides disabled Services even when the GSD has effective permissions', () => {
+  it('hides switched-off Services even when the GSD has effective permissions', () => {
+    setFeatureFlags({ services: false, redemption: false });
+    onTestFinished(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
     const gsd: AfHomesPermission[] = [
       view('dashboard.view'),
       { ...view('operations.sales'), canCreate: true },

@@ -1,5 +1,6 @@
 import { commissionRoster } from '../_lib/commission-roster.js';
 import { commissionRosterQuerySchema } from '@afhomes/contracts';
+import { manilaToday } from '@afhomes/shared';
 import { toCommission, toRule, commissionListQuerySchema } from '../_lib/commission-model.js';
 import { matchesSearch, readSearchRows } from '../_lib/list-search.js';
 import { handleCommissionOps } from '../_lib/commission-ops.js';
@@ -517,8 +518,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           400,
         );
       // Asia/Manila (UTC+8, no DST): an external payment cannot be dated in the future.
-      const manilaToday = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
-      if (parsed.data.paidOn > manilaToday)
+      const today = manilaToday();
+      if (parsed.data.paidOn > today)
         return fail(res, 'VALIDATION_ERROR', 'The payment date cannot be in the future.', 400);
 
       const now = new Date().toISOString();

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import App from './app/App';
+import { loadFeatureFlags } from './lib/feature-flags';
 import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
 
@@ -16,14 +17,17 @@ if (!rootElement) {
   throw new Error('Root element #root not found');
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <CustomerSessionProvider>
-          <App />
-        </CustomerSessionProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
-  </StrictMode>,
+// Module switches decide which routes and links exist, so they load first.
+void loadFeatureFlags().then(() =>
+  createRoot(rootElement).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <CustomerSessionProvider>
+            <App />
+          </CustomerSessionProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </StrictMode>,
+  ),
 );

@@ -10,6 +10,7 @@ import { MembershipDetailPage } from './MembershipDetailPage';
 import { MembershipsPage } from './MembershipsPage';
 import { getMembershipCard, getMemberships } from './services';
 import { getAudit } from '../reports/services';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 
 const reportFeature = vi.hoisted(() => ({ enabled: false }));
 vi.mock('@afhomes/shared', async (importOriginal) => {
@@ -133,7 +134,10 @@ const STAFF: SessionUser = {
   ],
 };
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  setFeatureFlags(DEFAULT_FEATURE_FLAGS);
+});
 
 beforeEach(() => {
   reportFeature.enabled = false;
@@ -236,13 +240,17 @@ describe('Membership detail', () => {
     expect(mockedGetAudit).not.toHaveBeenCalled();
   });
 
-  it('does not render or request disabled history even with the audit grant', async () => {
+  it('keeps audit-backed card history with the Reports module switched off', async () => {
+    // The audit log is never switched off (owner 2026-11-21); only its grant gates it.
+    setFeatureFlags({ reports: false });
     mockedGetMembershipCard.mockResolvedValue(CARD);
+    mockedGetAudit.mockResolvedValue(HISTORY);
     renderDetail(STAFF);
     await screen.findByText('Pedro Reyes');
-    expect(screen.queryByRole('region', { name: 'Card history' })).not.toBeInTheDocument();
-    expect(screen.queryByText('History')).not.toBeInTheDocument();
-    expect(mockedGetAudit).not.toHaveBeenCalled();
+    expect(await screen.findByText('History')).toBeInTheDocument();
+    expect(mockedGetAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: 'membership', entityId: MEMBER_ID }),
+    );
     expect(screen.getByRole('button', { name: /Record a print/ })).toBeInTheDocument();
   });
 

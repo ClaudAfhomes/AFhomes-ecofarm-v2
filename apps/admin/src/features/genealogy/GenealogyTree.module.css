@@ -63,6 +63,7 @@
   background: var(--color-state-hover);
 }
 
+.body:focus-visible,
 .expandBtn:focus-visible {
   outline: 2px solid var(--color-state-focus);
   outline-offset: 1px;

@@ -28,9 +28,15 @@ import {
   reportResponseSchema,
   reportTypeSchema,
   type ReportType,
+  type AfHomesModuleKey,
 } from '@afhomes/contracts';
 
-import { authorizeAfHomes, type AfHomesPrincipal } from '../_lib/afhomes-access.js';
+import {
+  authorizeAfHomes,
+  authorizeAnyAfHomes,
+  actionAllowed,
+  type AfHomesPrincipal,
+} from '../_lib/afhomes-access.js';
 import { auditSummary, maskEmail, maskPhone, sanitizeAuditValue } from '../_lib/audit-sanitize.js';
 import { deny, fail, isoOrNull, type Db, method, subPath } from '../_lib/handler-kit.js';
 import { PDF_MAX_ROWS, toCsv, toPdf, toXlsx, type XlsxColumn } from '../_lib/report-export.js';
@@ -90,7 +96,7 @@ const pickDate = (row: Row, ...cols: string[]): string | null => {
 /* Authorization: which module key guards which report                 */
 /* ------------------------------------------------------------------ */
 
-const REPORT_MODULES: Record<ReportType, { keys: string[]; action?: 'view' }> = {
+const REPORT_MODULES: Record<ReportType, { keys: AfHomesModuleKey[]; action?: 'view' }> = {
   sales: { keys: ['sales.card_sales'] },
   customers: { keys: ['sales.customers'] },
   payments: { keys: ['finance.payment_verification'] },
@@ -109,30 +115,20 @@ async function authorizeReport(
 ): Promise<
   AfHomesPrincipal | { error: { error: { code: string; message: string }; status: number } }
 > {
-  let last:
-    | AfHomesPrincipal
-    | { error: { error: { code: string; message: string }; status: number } }
-    | null = null;
-  for (const key of REPORT_MODULES[report].keys) {
-    // Sequential attempts, never `a ?? b`: both results are truthy objects,
-    // so `??` would keep only the first module and silently deny the rest.
-    const result = await authorizeAfHomes(req, key as never);
-    if (!('error' in result)) {
-      if (result.roleSlug === 'employee' && report !== 'redemptions')
-        return {
+  const result = await authorizeAnyAfHomes(req, REPORT_MODULES[report].keys);
+  if (!('error' in result)) {
+    if (result.roleSlug === 'employee' && report !== 'redemptions')
+      return {
+        error: {
+          status: 403,
           error: {
-            status: 403,
-            error: {
-              code: 'FORBIDDEN',
-              message: 'Employees may only access their handled redemption report',
-            },
+            code: 'FORBIDDEN',
+            message: 'Employees may only access their handled redemption report',
           },
-        };
-      return result;
-    }
-    last = result;
+        },
+      };
   }
-  return last!;
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1484,6 +1480,11 @@ const BUILDERS: Record<ReportType, (ctx: Ctx) => Promise<ReportData>> = {
 /* Audit Center                                                        */
 /* ------------------------------------------------------------------ */
 
+/** Audit category for the IST group (Sales Manager, Senior Sales Manager, Vice Director). */
+const AUDIT_IST_CATEGORY = 'ist';
+const AUDIT_IST_ROLE_SLUGS = ['sales_manager', 'senior_sales_manager', 'vice_director'];
+const NO_MATCH_UUID = '00000000-0000-0000-0000-000000000000';
+
 async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Promise<void> {
   const auth = await authorizeAfHomes(req, 'governance.audit');
   if ('error' in auth) return deny(res, auth);
@@ -1498,6 +1499,41 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
   }
   try {
     let query = db.from('audit_events').select('*', { count: 'exact' });
+    // Categories: roles and departments are dynamic (an admin creates GSD, Finance,
+    // etc.), so the filter options come from the live tables. `ist` is the fixed
+    // IST group (SM, SSM, VD). A role/department filter narrows by the actor's
+    // CURRENT role assignment.
+    const [rolesRead, departmentsRead] = await Promise.all([
+      db.from('roles').select('id,name,slug,department_id,is_active'),
+      db.from('departments').select('id,name'),
+    ]);
+    if (rolesRead.error) throw rolesRead.error;
+    if (departmentsRead.error) throw departmentsRead.error;
+    const roleRows = (rolesRead.data ?? []) as Row[];
+    const departmentRows = (departmentsRead.data ?? []) as Row[];
+    const departmentName = new Map(departmentRows.map((d) => [String(d.id), String(d.name ?? '')]));
+    const roleById = new Map(roleRows.map((r) => [String(r.id), r]));
+    if (input.role || input.departmentId) {
+      const roleIds = roleRows
+        .filter((r) =>
+          input.role === AUDIT_IST_CATEGORY
+            ? AUDIT_IST_ROLE_SLUGS.includes(String(r.slug))
+            : input.role
+              ? String(r.slug) === input.role
+              : true,
+        )
+        .filter((r) => !input.departmentId || String(r.department_id) === input.departmentId)
+        .map((r) => String(r.id));
+      const assignments = roleIds.length
+        ? await db.from('staff_role_assignments').select('staff_id').in('role_id', roleIds)
+        : { data: [], error: null };
+      if (assignments.error) throw assignments.error;
+      const staffIds = [
+        ...new Set(((assignments.data ?? []) as Row[]).map((a) => String(a.staff_id))),
+      ];
+      // No matching staff -> an id that can never exist, so the page reads empty.
+      query = query.in('actor_id', staffIds.length ? staffIds : [NO_MATCH_UUID]);
+    }
     if (input.actor) query = query.eq('actor_id', input.actor);
     if (input.action) query = query.eq('action', input.action);
     if (input.entityType) query = query.eq('entity_type', input.entityType);
@@ -1525,7 +1561,17 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
             .in('id', actorIds)
         : { data: [], error: null };
       if (actors.error) throw actors.error;
-      const actorNames = new Map<string, { name: string; role: string | null }>();
+      const actorAssignments = actorIds.length
+        ? await db.from('staff_role_assignments').select('staff_id,role_id').in('staff_id', actorIds)
+        : { data: [], error: null };
+      if (actorAssignments.error) throw actorAssignments.error;
+      const actorRoleId = new Map(
+        ((actorAssignments.data ?? []) as Row[]).map((a) => [String(a.staff_id), String(a.role_id)]),
+      );
+      const actorNames = new Map<
+        string,
+        { name: string; role: string | null; department: string | null }
+      >();
       for (const person of (actors.data ?? []) as Row[]) {
         const assignments = Array.isArray(person.staff_role_assignments)
           ? person.staff_role_assignments
@@ -1537,9 +1583,12 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
           assignment && typeof assignment === 'object' && 'roles' in assignment
             ? assignment.roles
             : null;
+        const roleId = actorRoleId.get(String(person.id)) ?? null;
+        const departmentId = roleId ? roleById.get(roleId)?.department_id : null;
         actorNames.set(String(person.id), {
           name: String(person.full_name ?? 'Staff account'),
           role: role && typeof role === 'object' && 'name' in role ? String(role.name) : null,
+          department: departmentId ? (departmentName.get(String(departmentId)) ?? null) : null,
         });
       }
       const events = ((data ?? []) as Row[]).map((row) => ({
@@ -1548,6 +1597,7 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
         actorId: isoOrNull(row.actor_id),
         actorName: actorNames.get(String(row.actor_id))?.name ?? null,
         actorRole: actorNames.get(String(row.actor_id))?.role ?? null,
+        actorDepartment: actorNames.get(String(row.actor_id))?.department ?? null,
         action: String(row.action ?? ''),
         entityType: String(row.entity_type ?? ''),
         entityId:
@@ -1561,6 +1611,10 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
           ...((row.after_data as Row | null) ?? {}),
           ...(row.reason ? { reason: row.reason } : {}),
         }) as Record<string, unknown>,
+        before:
+          row.before_data && typeof row.before_data === 'object' && !Array.isArray(row.before_data)
+            ? (sanitizeAuditValue(row.before_data) as Record<string, unknown>)
+            : null,
       }));
       return res.status(200).json({
         report: 'audit',
@@ -1571,6 +1625,17 @@ async function serveAudit(req: VercelRequest, res: VercelResponse, db: Db): Prom
           actor: input.actor ?? null,
           action: input.action ?? null,
           entityType: input.entityType ?? null,
+          role: input.role ?? null,
+          departmentId: input.departmentId ?? null,
+        },
+        options: {
+          roles: roleRows
+            .filter((r) => r.is_active !== false)
+            .map((r) => ({ slug: String(r.slug), name: String(r.name ?? r.slug) }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+          departments: departmentRows
+            .map((d) => ({ id: String(d.id), name: String(d.name ?? '') }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
         },
         summary: { events: count ?? events.length },
         data: events,
@@ -1742,9 +1807,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   let auth:
     AfHomesPrincipal | { error: { error: { code: string; message: string }; status: number } };
   if (report === 'ost') {
-    const self = await authorizeAfHomes(req, 'dashboard.view');
-    if (!('error' in self) && reportScopeKind(self) === 'self') auth = self;
-    else auth = await authorizeReport(req, report);
+    const keys = REPORT_MODULES.ost.keys;
+    const result = await authorizeAnyAfHomes(req, ['dashboard.view', ...keys]);
+    if (
+      !('error' in result) &&
+      reportScopeKind(result) !== 'self' &&
+      !keys.some((key) =>
+        actionAllowed(
+          result.permissions.find((permission) => permission.moduleKey === key),
+          'view',
+        ),
+      )
+    )
+      return fail(res, 'FORBIDDEN', 'Insufficient permission', 403);
+    auth = result;
   } else {
     auth = await authorizeReport(req, report);
   }

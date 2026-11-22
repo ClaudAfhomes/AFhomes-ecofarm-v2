@@ -95,6 +95,28 @@ export function consumePrivateDownloadAttempt(
   return consume(req, 'private-files', 10_000);
 }
 
+/**
+ * Public website inquiry form. A person sends one message, maybe a retry; this
+ * bounds one script per IP and instance. Spam that gets through is marked by
+ * staff; nothing it writes is trusted or acted on automatically.
+ */
+/**
+ * Member portal writes (booking requests, cancellations, messages): 20 a minute
+ * per member and connection. Generous for a person, a brake on a runaway client.
+ */
+export function consumeMemberWriteAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+  customerId: string,
+): RateVerdict {
+  return consume(req, `member-write:${customerId}`, 20);
+}
+
+export function consumePublicInquiryAttempt(
+  req: { headers?: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } },
+): RateVerdict {
+  return consume(req, 'public-inquiry', 5);
+}
+
 /** Test seam. */
 export function resetIdentifierRateLimit(): void {
   windows.clear();

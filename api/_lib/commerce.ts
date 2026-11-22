@@ -514,17 +514,3 @@ export function toSummaryResponse(
     spotCashState: totals.spotCashState,
   };
 }
-
-/**
- * Check if cumulative verified payments reach 40% of the frozen contract total.
- * Used for commission eligibility determination.
- */
-export function checkCommission40pctEligibility(
-  cumulativeVerified: string,
-  basisAmount: string,
-): boolean {
-  const verified = BigInt(cumulativeVerified.replace('.', ''));
-  const basis = BigInt(basisAmount.replace('.', ''));
-  // 40% = 2/5, so verified * 5 >= basis * 2
-  return verified * 5n >= basis * 2n;
-}

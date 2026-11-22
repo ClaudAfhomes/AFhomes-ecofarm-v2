@@ -11,29 +11,92 @@ import { queryClient } from './query';
 import { SessionProvider, useSession } from './session';
 
 const principal = (id: string) => ({
-  id, fullName: id, email: `${id}@afhomes-local.test`, roleId: 'role', roleSlug: 'sales_manager',
-  roleName: 'Sales Manager', permissions: [], status: 'active',
+  id,
+  fullName: id,
+  email: `${id}@afhomes-local.test`,
+  roleId: 'role',
+  roleSlug: 'sales_manager',
+  roleName: 'Sales Manager',
+  permissions: [],
+  status: 'active',
 });
 function Probe() {
   const { user, status } = useSession();
-  return <p>{status}:{user?.id ?? 'none'}</p>;
+  return (
+    <p>
+      {status}:{user?.id ?? 'none'}
+    </p>
+  );
 }
 beforeEach(() => {
   vi.clearAllMocks();
   queryClient.clear();
-  mocks.client.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'manager' } } } });
-  mocks.client.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe() {} } } });
+  mocks.client.auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: 'manager' } } },
+  });
+  mocks.client.auth.onAuthStateChange.mockReturnValue({
+    data: { subscription: { unsubscribe() {} } },
+  });
   mocks.request.mockResolvedValue(principal('manager'));
   vi.stubGlobal('cookieStore', new EventTarget());
 });
 afterEach(() => vi.unstubAllGlobals());
+it('does not reload the staff principal when INITIAL_SESSION follows the startup fallback', async () => {
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
+  await screen.findByText('authenticated:manager');
+  const onChange = mocks.client.auth.onAuthStateChange.mock.calls[0]![0];
+  await act(async () => onChange('INITIAL_SESSION'));
+  expect(mocks.request).toHaveBeenCalledTimes(1);
+});
+
+it('does not reload the staff principal when INITIAL_SESSION precedes the startup fallback', async () => {
+  mocks.client.auth.onAuthStateChange.mockImplementationOnce((onChange) => {
+    onChange('INITIAL_SESSION');
+    return { data: { subscription: { unsubscribe() {} } } };
+  });
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
+  await screen.findByText('authenticated:manager');
+  expect(mocks.request).toHaveBeenCalledTimes(1);
+});
+
+it('still resolves a changed identity after the initial session event', async () => {
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
+  await screen.findByText('authenticated:manager');
+  const onChange = mocks.client.auth.onAuthStateChange.mock.calls[0]![0];
+  mocks.client.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'ost' } } } });
+  mocks.request.mockResolvedValue(principal('ost'));
+  await act(async () => onChange('SIGNED_IN'));
+  await screen.findByText('authenticated:ost');
+  expect(mocks.request).toHaveBeenCalledTimes(2);
+});
 it('drops the previous principal and cache when a shared-cookie account changes in another portal', async () => {
-  render(<SessionProvider><Probe /></SessionProvider>);
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
   await screen.findByText('authenticated:manager');
   queryClient.setQueryData(['genealogy'], ['manager-only-record']);
   mocks.client.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'ost' } } } });
   let finish!: (value: ReturnType<typeof principal>) => void;
-  mocks.request.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  mocks.request.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
   act(() => window.dispatchEvent(new Event('focus')));
   await screen.findByText('loading:none');
   expect(queryClient.getQueryData(['genealogy'])).toBeUndefined();
@@ -41,7 +104,11 @@ it('drops the previous principal and cache when a shared-cookie account changes 
   await screen.findByText('authenticated:ost');
 });
 it('preserves the cache when focus returns with the same identity', async () => {
-  render(<SessionProvider><Probe /></SessionProvider>);
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
   await screen.findByText('authenticated:manager');
   queryClient.setQueryData(['genealogy'], ['manager-only-record']);
   act(() => window.dispatchEvent(new Event('focus')));
@@ -49,14 +116,23 @@ it('preserves the cache when focus returns with the same identity', async () => 
   expect(queryClient.getQueryData(['genealogy'])).toEqual(['manager-only-record']);
 });
 it('detects a cross-port sign-in cookie change without waiting for a focus event', async () => {
-  render(<SessionProvider><Probe /></SessionProvider>);
+  render(
+    <SessionProvider>
+      <Probe />
+    </SessionProvider>,
+  );
   await screen.findByText('authenticated:manager');
   queryClient.setQueryData(['genealogy'], ['manager-only-record']);
   mocks.client.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'ost' } } } });
   mocks.request.mockResolvedValue(principal('ost'));
-  act(() => window.cookieStore.dispatchEvent(Object.assign(new Event('change'), {
-    changed: [{ name: 'sb-local-auth-token' }], deleted: [],
-  })));
+  act(() =>
+    window.cookieStore.dispatchEvent(
+      Object.assign(new Event('change'), {
+        changed: [{ name: 'sb-local-auth-token' }],
+        deleted: [],
+      }),
+    ),
+  );
   await screen.findByText('authenticated:ost');
   expect(queryClient.getQueryData(['genealogy'])).toBeUndefined();
 });

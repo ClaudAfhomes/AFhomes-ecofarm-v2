@@ -13,6 +13,7 @@
  */
 import { toErrorEnvelope } from './envelope.js';
 import { isFeaturePathEnabled } from '@afhomes/shared';
+import { refreshFeatureFlags } from './feature-flags.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 
 type HandlerFn = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
@@ -122,6 +123,42 @@ export const BUSINESS_FAMILIES = [
   // identity on its own.
   { prefix: 'documents', module: 'documents', load: () => import('../_handlers/documents.js') },
   { prefix: 'queues', module: 'queues', load: () => import('../_handlers/queues.js') },
+  // Website inquiries inbox (20270105000027): the public contact form POSTs with
+  // no session; the staff list and update authorize `sales.inquiries` per route.
+  {
+    prefix: 'inquiries',
+    module: 'sales.inquiries',
+    load: () => import('../_handlers/inquiries.js'),
+  },
+  // Member engagement (20270105000028-31). Staff families authorize their own
+  // module per route; `staff-alerts` counts only modules the caller can view.
+  // `portal` is the member side: ownership only (customer-access.ts), never the
+  // staff permission model.
+  {
+    prefix: 'bookings',
+    module: 'operations.bookings',
+    load: () => import('../_handlers/bookings.js'),
+  },
+  {
+    prefix: 'announcements',
+    module: 'communication.announcements',
+    load: () => import('../_handlers/announcements.js'),
+  },
+  {
+    prefix: 'conversations',
+    module: 'communication.messages',
+    load: () => import('../_handlers/conversations.js'),
+  },
+  {
+    prefix: 'staff-alerts',
+    module: 'dashboard.view',
+    load: () => import('../_handlers/staff-alerts.js'),
+  },
+  {
+    prefix: 'portal',
+    module: 'customer',
+    load: () => import('../_handlers/member-engagement.js'),
+  },
   // Customer portal. Neither family consults the staff permission model - see
   // api/_lib/customer-access.ts, which resolves a customer from ownership alone.
   //
@@ -176,6 +213,12 @@ export const BUSINESS_FAMILIES = [
     prefix: 'redemptions',
     module: 'operations.redemption',
     load: () => import('../_handlers/redemptions.js'),
+  },
+  // Module switches (Admin > Settings > Modules). Never gated by a switch itself.
+  {
+    prefix: 'settings',
+    module: 'governance.config',
+    load: () => import('../_handlers/settings.js'),
   },
   {
     prefix: 'cms',
@@ -259,6 +302,7 @@ export async function routeRequest(
 ): Promise<boolean> {
   if (req.headers.authorization) res.setHeader('Cache-Control', 'private, no-store');
   const pathname = resolveRequestUrl(req).split('?')[0] ?? '/';
+  await refreshFeatureFlags();
   const match = selectHandler(pathname, req.query);
   if (!match) return false;
   try {

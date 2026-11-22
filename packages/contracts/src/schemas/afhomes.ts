@@ -23,6 +23,9 @@ export const afHomesModuleKeySchema = z.enum([
   'sales.card_plans',
   'sales.customers',
   'sales.application_approval',
+  // Website contact/reservation inquiries (20270105000027). Its own key so
+  // working leads never rides on the customer record (`sales.customers`).
+  'sales.inquiries',
   'sales.id_documents',
   'sales.uplines',
   'finance.payment_verification',
@@ -60,6 +63,13 @@ export const afHomesModuleKeySchema = z.enum([
   // customer-search screen, so the permission now names the capability:
   // holding the till key no longer opens the lookup, and vice versa.
   'operations.customer_lookup',
+  // Member service bookings (20270105000029): a request to use a published
+  // service on a date. Never a payment and never moves points.
+  'operations.bookings',
+  // Member communication (20270105000030 / 31): staff announcements and the
+  // member-staff message threads.
+  'communication.announcements',
+  'communication.messages',
   'governance.audit',
   'governance.customer_import',
   'governance.config',
@@ -121,6 +131,7 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
     sortOrder: 34,
   },
   { key: 'sales.application_approval', label: 'Application & RA Approval', group: 'Sales & Customers', sortOrder: 35 },
+  { key: 'sales.inquiries', label: 'Website Inquiries', group: 'Sales & Customers', sortOrder: 36 },
   {
     key: 'finance.payment_verification',
     label: 'Payment Verification',
@@ -221,6 +232,7 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
     group: 'Operations',
     sortOrder: 64,
   },
+  { key: 'operations.bookings', label: 'Service Bookings', group: 'Operations', sortOrder: 65 },
   { key: 'governance.audit', label: 'Audit Log', group: 'Governance', sortOrder: 70 },
   { key: 'governance.config', label: 'System Configuration', group: 'Governance', sortOrder: 71 },
   {
@@ -229,6 +241,13 @@ export const MODULE_CATALOG: readonly AfHomesModuleDescriptor[] = [
     group: 'Governance',
     sortOrder: 72,
   },
+  {
+    key: 'communication.announcements',
+    label: 'Announcements',
+    group: 'Communication',
+    sortOrder: 80,
+  },
+  { key: 'communication.messages', label: 'Member Messages', group: 'Communication', sortOrder: 81 },
   { key: 'cms.pages', label: 'Website Pages and Content', group: 'Website', sortOrder: 100 },
   { key: 'cms.media', label: 'Website Media', group: 'Website', sortOrder: 101 },
   { key: 'cms.settings', label: 'Website Settings and SEO', group: 'Website', sortOrder: 102 },

@@ -191,9 +191,8 @@ function install() {
   // inactive items and short balances with the real refusal codes, debits
   // exactly once per idempotency key, and freezes snapshots on the row.
   const base = db.rpc.bind(db);
-  db.rpc = async (fn: string, args: Record<string, unknown> = {}) => {
+  const redeem = async (fn: string, args: Record<string, unknown> = {}) => {
     db.calls.push({ op: 'rpc', table: fn, arg: args });
-    if (fn !== 'redeem_membership_points') return base(fn, args);
     const key = String(args.p_idempotency_key);
     const actor = String(args.p_actor_id);
     const existing = db
@@ -303,6 +302,9 @@ function install() {
       error: null,
     };
   };
+
+  db.rpc = (fn, args = {}) =>
+    fn === 'redeem_membership_points' ? redeem(fn, args) : base(fn, args);
 
   holder.db = db;
   return db;

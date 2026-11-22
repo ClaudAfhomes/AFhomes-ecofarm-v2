@@ -19,6 +19,7 @@
     "check:env": "node scripts/check-env-isolation.mjs",
     "seed": "tsx supabase/seed.ts",
     "seed:demo": "tsx supabase/seed-demo.ts",
+    "seed:services": "tsx supabase/seed-services.mts",
     "db:migrate": "tsx supabase/apply-migrations.ts",
     "db:prepare:local": "node packages/db-testing/scripts/prepare-local-supabase-migrations.mjs",
     "bootstrap:superadmin": "tsx supabase/invite-superadmin.ts",

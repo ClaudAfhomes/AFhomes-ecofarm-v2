@@ -5,10 +5,13 @@ import {
   reconcileCommissionPayoutSchema,
   setCommissionHoldSchema,
 } from '@afhomes/contracts';
+import { manilaMonthOf } from '@afhomes/shared';
 
 import { authorizeAfHomes } from './afhomes-access.js';
 import { evidenceStatusFor, handleExternalEvidence } from './external-evidence.js';
 import {
+  UUID_GROUP as ID,
+  strOrNull as str,
   deny,
   fail,
   isoOrNull,
@@ -37,9 +40,7 @@ import type { VercelRequest, VercelResponse } from './http.js';
  * Reads and writes both need network.commissions update (finance), never the
  * seller view scope. Returns true when handled.
  */
-const ID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 
-const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
 function toPayout(r: Record<string, unknown>) {
   return {
@@ -55,15 +56,8 @@ function toPayout(r: Record<string, unknown>) {
     recordedAt: isoOrNull(r.recorded_at) ?? '',
     reconciledBy: str(r.reconciled_by),
     reconciledAt: isoOrNull(r.reconciled_at),
-    postingPeriod: str(r.posting_period) ?? manilaMonth(r.recorded_at),
+    postingPeriod: str(r.posting_period) ?? manilaMonthOf(isoOrNull(r.recorded_at)),
   };
-}
-
-/** Older rows have no posting_period; their month is derived from recorded_at in Asia/Manila. */
-export function manilaMonth(v: unknown): string | null {
-  const iso = isoOrNull(v);
-  if (!iso) return null;
-  return new Date(new Date(iso).getTime() + 8 * 3600 * 1000).toISOString().slice(0, 7);
 }
 
 function toRecovery(r: Record<string, unknown>) {

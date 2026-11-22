@@ -103,7 +103,7 @@
   gap: 3px;
 }
 .application .menu .caption {
-  font-size: 10px;
+  font-size: 12px;
   color: #86aa99;
   letter-spacing: 1px;
   margin: 14px 12px 3px;
@@ -312,7 +312,7 @@
   font-size: 16px;
 }
 .application .planmeta .tag {
-  font-size: 10px;
+  font-size: 12px;
   border-radius: 30px;
   border: 1px solid #e3bf65;
   color: #a87616;
@@ -358,7 +358,7 @@
   padding: 9px 11px;
   border-radius: 8px;
   background: #f4f8f5;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   color: #657b6f;
 }
@@ -384,18 +384,22 @@
   max-width: 480px;
 }
 .application .bar {
-  height: 5px;
+  /* 5px visible bar inside a 24px-tall, 24px-wide tap target. */
+  height: 24px;
+  min-width: 24px;
   flex: 1;
   border-radius: 8px;
   background: #e4ebe6;
+  background-clip: content-box;
   border: 0;
-  padding: 0;
+  padding: 9.5px 0;
+  box-sizing: border-box;
 }
 .application .bar.past {
-  background: #75b393;
+  background-color: #75b393;
 }
 .application .bar.now {
-  background: #176b49;
+  background-color: #176b49;
 }
 .application .stepnav {
   border: 1px solid transparent;
@@ -425,7 +429,7 @@
   border-radius: 8px;
   padding: 8px 3px;
   color: #71867a;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .stepmenu button.sel {
   border-color: #83b69a;
@@ -455,7 +459,7 @@
 .application .eyebrow {
   font-weight: 750;
   color: #24704c;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
@@ -485,7 +489,7 @@
   padding: 17px 30px;
 }
 .application .footnote {
-  font-size: 11px;
+  font-size: 12px;
   color: #819087;
   line-height: 1.5;
 }
@@ -566,7 +570,7 @@
   color: #67796d;
 }
 .application .helper {
-  font-size: 11px;
+  font-size: 12px;
   color: #83938a;
   margin: 5px 0 0;
   line-height: 1.45;
@@ -618,7 +622,7 @@
   display: block;
   color: #8b998f;
   margin-top: 3px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .tile.sel {
   border: 1.5px solid #1b8058;
@@ -683,7 +687,7 @@
   background: #eef6f0;
   padding: 5px 10px;
   color: #226644;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
 }
 .application .choiceRow {
@@ -738,12 +742,12 @@
 .application .filebox small {
   display: block;
   color: #809082;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 4px;
 }
 .application .filebox input {
   max-width: 210px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .minihead {
   display: flex;
@@ -757,7 +761,7 @@
 }
 .application .tiny {
   color: #85958a;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .choiceToggle {
   display: flex;
@@ -794,7 +798,7 @@
   font-size: 13px;
 }
 .application .resolved .quiet {
-  font-size: 11px;
+  font-size: 12px;
   color: #678572;
   line-height: 1.6;
 }
@@ -814,7 +818,7 @@
 .application .chain small {
   display: block;
   color: #758b7c;
-  font-size: 10px;
+  font-size: 12px;
   margin-bottom: 5px;
 }
 .application .chain b {
@@ -869,13 +873,13 @@
   border: 0;
   color: #146d47;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .reviewbox dl {
   margin: 0;
 }
 .application .reviewbox dt {
-  font-size: 10px;
+  font-size: 12px;
   color: #839487;
   margin-top: 8px;
 }
@@ -897,7 +901,7 @@
   padding: 13px 4px;
   background: #fff;
   color: #7d8e83;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .flowbox.done {
   background: #e8f6ed;
@@ -945,7 +949,7 @@
   color: #697e70;
   padding: 10px 15px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 16px;
   display: flex;
   align-items: center;
@@ -956,12 +960,12 @@
   background: transparent;
   border: 0;
   color: #1b714b;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 .application .statusNote {
   color: #63796b;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 10px;
 }
 .application .hidden {
@@ -1103,7 +1107,7 @@
     gap: 4px;
   }
   .application .stepnav {
-    font-size: 11px;
+    font-size: 12px;
   }
   .application .panelHead {
     padding: 20px 18px 0;
@@ -1324,7 +1328,7 @@
 }
 .application .uploadEmpty small,
 .application .fileicon small {
-  font-size: 11px;
+  font-size: 12px;
   color: #81938a;
 }
 .application .uploadActions {
@@ -1335,13 +1339,13 @@
   margin-top: 11px;
 }
 .application .uploadActions .btn {
-  font-size: 11px;
+  font-size: 12px;
   padding: 10px 11px;
 }
 .application .uploadHint {
   display: block;
   color: #778d81;
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 7px;
   overflow-wrap: anywhere;
 }
@@ -1401,7 +1405,7 @@
 }
 .application .previewToolbar small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: #75847f;
   margin-top: 5px;
 }
@@ -1455,7 +1459,7 @@
     gap: 8px;
   }
   .application .crumb {
-    font-size: 10px;
+    font-size: 12px;
   }
   .application .civilChoices {
     grid-template-columns: repeat(2, 1fr);
@@ -1484,7 +1488,7 @@
 }
 .application .networkBrief {
   margin: 10px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: #84958d;
 }
@@ -1524,7 +1528,7 @@
   color: #205a3c;
 }
 .application .networkContactBadge {
-  font-size: 10px;
+  font-size: 12px;
   color: #28734e;
   background: #e8f5eb;
   border-radius: 40px;
@@ -1549,7 +1553,7 @@
 }
 .application .networkContactDetails small {
   color: #7a8d80;
-  font-size: 10px;
+  font-size: 12px;
 }
 .application .networkContactDetails b {
   color: #264237;
@@ -1578,7 +1582,7 @@
 .application .sharedTeamHead p {
   margin: 0;
   color: #83938b;
-  font-size: 11px;
+  font-size: 12px;
 }
 .application .sharedTeamChain {
   display: grid;
@@ -1594,7 +1598,7 @@
   min-width: 0;
 }
 .application .sharedTeamChain small {
-  font-size: 10px;
+  font-size: 12px;
   color: #758779;
   display: block;
   margin-bottom: 4px;
@@ -1722,7 +1726,7 @@
   line-height: normal;
 }
 .application .choiceGroup .tile small {
-  font-size: 11px;
+  font-size: 12px;
   line-height: normal;
 }
 .application .choiceGroup .tileicon {
@@ -1821,7 +1825,7 @@
   color: #304039;
 }
 .application .field small {
-  font-size: 11px;
+  font-size: 12px;
   color: #83938a;
   font-weight: 400;
 }
@@ -1892,7 +1896,7 @@
   border-radius: 9px;
   background: #fff;
   color: #2b4435;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 .application .uploadPreview {

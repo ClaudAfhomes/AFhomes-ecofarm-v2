@@ -1392,6 +1392,36 @@ describe('points: cash receipts', () => {
       amount: '4000.00',
     });
   });
+
+  it('names who recorded and verified a receipt, and null when the account has no name', async () => {
+    const tables = baseTables();
+    (tables.staff_users as Row[])[0].full_name = 'MARIA SANTOS';
+    tables.purchase_payments = [
+      {
+        id: PAYMENT_ID,
+        purchase_id: PURCHASE_ID,
+        payment_number: 'AF-PAY-000001',
+        amount: '4000.00',
+        method: 'cash',
+        reference: null,
+        status: 'verified',
+        recorded_by: STAFF_ID,
+        verified_by: OTHER_STAFF_ID,
+        recorded_at: ago(5),
+        verified_at: ago(4),
+        rejection_reason: null,
+      },
+    ];
+    install({ tables });
+    const s = await call({ familyPath: `purchases/${PURCHASE_ID}/payments` });
+    expect(s.status).toBe(200);
+    expect(((body(s).data ?? []) as Row[])[0]).toMatchObject({
+      recordedBy: STAFF_ID,
+      recordedByName: 'MARIA SANTOS',
+      verifiedBy: OTHER_STAFF_ID,
+      verifiedByName: null,
+    });
+  });
 });
 
 /* ================================================================== */

@@ -178,3 +178,9 @@
   background: var(--color-warning-surface, #fffbeb);
   color: var(--color-warning, #b45309);
 }
+
+/* Stand-alone checklist links: keep the tap target at least 24px tall. */
+.metricLabel a {
+  display: inline-block;
+  padding-block: 4px;
+}

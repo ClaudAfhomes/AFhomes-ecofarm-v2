@@ -20,7 +20,6 @@ import {
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { isSellingRole } from '../_lib/commerce.js';
 import { DEFAULT_ONBOARDING_TOKEN_VALID_HOURS } from '../_lib/constants.js';
-import * as onboardingEmail from '../_lib/customer-onboarding-email.js';
 import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
 import {
   audit,
@@ -639,23 +638,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const activationUrl = customerActivationUrl(rawToken);
       if (!activationUrl) return fail(res, 'INTERNAL', 'Activation link generation failed', 500);
 
-      const customerName = [
-        customer.first_name,
-        customer.middle_name,
-        customer.last_name,
-        customer.suffix,
-      ]
-        .filter((part): part is string => typeof part === 'string' && part.length > 0)
-        .join(' ');
-      const delivery = await onboardingEmail.sendCustomerOnboardingEmail({
-        to: String(customer.email ?? ''),
-        customerName,
-        membershipNumber: String(membership.membership_number ?? ''),
-        activationUrl,
-        expiresAt,
-      });
-      const emailStatus = delivery.status === 'sent' ? 'sent' : 'failed';
-      const status = delivery.status === 'sent' ? 'email_sent' : 'manual_required';
+      // In-system only (owner 2026-11-22): the link is never emailed. Staff hand
+      // the one-time link to the customer from this response.
+      const emailStatus = 'not_attempted';
+      const status = 'manual_required';
 
       // Token issuance is already committed. Audit failure must not discard the
       // sole authorized response containing the one-time activation link.
@@ -667,17 +653,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           expiresAt,
           deliveryStatus: emailStatus,
         });
-        await audit(
-          db,
-          auth.userId,
-          emailStatus === 'sent'
-            ? 'CUSTOMER_ACTIVATION_EMAIL_SENT'
-            : 'CUSTOMER_ACTIVATION_EMAIL_FAILED',
-          'customer',
-          id,
-          null,
-          { customerId: id, purpose: 'account_activation', expiresAt, deliveryStatus: emailStatus },
-        );
       } catch {
         console.error('[api] customers: onboarding audit write failed');
       }

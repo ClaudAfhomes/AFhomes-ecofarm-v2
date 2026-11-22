@@ -14,7 +14,34 @@ import styles from './AdminForbiddenPage.module.css';
  * path. `RequireRole` remains the server-boundary guard; this is the
  * professional full-page surface for that denial.
  */
-export function AdminForbiddenPage({ retry }: { retry?: () => void }) {
+const COPY = {
+  role: {
+    code: 'Error 403',
+    title: 'Access denied',
+    text: 'Your role cannot open this section. Contact your administrator for access.',
+  },
+  'switched-off': {
+    code: 'Module off',
+    title: 'This module is switched off',
+    text: 'An administrator has turned this module off for everyone. It will be back when it is switched on again under Organization → Modules.',
+  },
+  session: {
+    code: 'Not loaded',
+    title: 'We could not check your access',
+    text: 'Your account details did not load, so this page cannot open yet. Check your connection and try again.',
+  },
+} as const;
+
+export type ForbiddenReason = keyof typeof COPY;
+
+export function AdminForbiddenPage({
+  retry,
+  reason = 'role',
+}: {
+  retry?: () => void;
+  reason?: ForbiddenReason;
+}) {
+  const copy = COPY[reason];
   const { user, logout } = useSession();
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
@@ -26,13 +53,11 @@ export function AdminForbiddenPage({ retry }: { retry?: () => void }) {
         <span className={styles.deniedShield} aria-hidden="true">
           <Icon name="alert" size={28} />
         </span>
-        <p className={styles.deniedCode}>Error 403</p>
+        <p className={styles.deniedCode}>{copy.code}</p>
         <h1 id="denied-title" className={styles.deniedTitle}>
-          Access denied
+          {copy.title}
         </h1>
-        <p className={styles.deniedText}>
-          Your role cannot open this section. Contact your administrator for access.
-        </p>
+        <p className={styles.deniedText}>{copy.text}</p>
         <div className={styles.deniedActions}>
           <Button variant="secondary" onClick={() => navigate(-1)}>
             Go back

@@ -26,6 +26,7 @@ import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
 import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
 import { PendingPayrollApprovalsCard } from './PendingPayrollApprovalsCard';
+import { AnnouncementsFeedCard } from '../engagement/AnnouncementsFeedCard';
 import styles from './AfHomesDashboardPage.module.css';
 
 const PERIODS = [
@@ -383,6 +384,7 @@ export function AfHomesDashboardPage() {
         <SaleTeamAccreditationCard kind={user?.roleSlug === 'ost' ? 'OST' : 'IST'} />
       ) : null}
       <PendingPayrollApprovalsCard />
+      <AnnouncementsFeedCard />
       {query.isPending ? (
         <div role="status" aria-label="Loading dashboard" className={styles.loadingShell}>
           <div className={styles.panel} aria-hidden="true">

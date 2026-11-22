@@ -375,11 +375,10 @@ function install(options: Setup = {}) {
   // contract: it re-reads the price, refuses an inactive item, refuses an
   // insufficient balance, and is idempotent per (actor, key).
   const base = db.rpc.bind(db);
-  db.rpc = async (fn: string, args: Record<string, unknown> = {}) => {
+  const redeem = async (fn: string, args: Record<string, unknown> = {}) => {
     // The base implementation records the call; the override must too, or a
     // test asserting on the exact RPC arguments would silently find nothing.
     db.calls.push({ op: 'rpc', table: fn, arg: args });
-    if (fn !== 'redeem_membership_points') return base(fn, args);
     if (options.redeemImpl) return { data: options.redeemImpl(args), error: null };
     if (options.rpcErrors?.[fn]) return { data: null, error: { ...options.rpcErrors[fn] } };
 
@@ -499,6 +498,9 @@ function install(options: Setup = {}) {
       error: null,
     };
   };
+
+  db.rpc = (fn, args = {}) =>
+    fn === 'redeem_membership_points' ? redeem(fn, args) : base(fn, args);
 
   holder.db = db;
   return db;

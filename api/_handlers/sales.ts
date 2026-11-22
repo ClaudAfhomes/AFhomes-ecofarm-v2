@@ -49,8 +49,8 @@ import {
   subPath,
 } from '../_lib/handler-kit.js';
 import { DEFAULT_ONBOARDING_TOKEN_VALID_HOURS } from '../_lib/constants.js';
-import { sendCustomerOnboardingEmail } from '../_lib/customer-onboarding-email.js';
 import { customerActivationUrl } from '../_lib/customer-onboarding-url.js';
+import { notifyCustomer } from '../_lib/notify.js';
 import { serviceClient } from '../_lib/rest.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -509,6 +509,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return mapRpcError(res, error);
       }
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+      // Tell the member once, on the first decision only (retries returned above).
+      // No amounts and no rejection reason: the reason is written for staff.
+      if (row?.sale_id) {
+        const { data: decided } = await db
+          .from('card_sales')
+          .select('customer_id')
+          .eq('id', String(row.sale_id))
+          .maybeSingle();
+        const customerId = (decided as { customer_id?: string } | null)?.customer_id;
+        if (customerId)
+          await notifyCustomer(
+            db,
+            customerId,
+            decision === 'verified'
+              ? {
+                  kind: 'account',
+                  title: 'Payment verified',
+                  body: 'AF Homes has verified a payment on your card purchase. Thank you.',
+                  link: '/customer',
+                }
+              : {
+                  kind: 'account',
+                  title: 'A payment could not be verified',
+                  body: 'AF Homes could not verify a payment on your card purchase. Please contact AF Homes for details.',
+                  link: '/customer',
+                },
+          );
+      }
       return res.status(200).json({
         saleId: row?.sale_id,
         status: row?.status,
@@ -569,7 +597,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Customer onboarding is deliberately outside the financial transaction:
       // membership/points/commission activation must remain successful even if
-      // token issuance or SMTP delivery fails. A fresh activation issues once;
+      // token issuance fails. A fresh activation issues once;
       // an idempotent retry never silently rotates or replaces a credential.
       if (row.already_active !== true) {
         const customerId = String((sale as Record<string, unknown>).customer_id ?? '');
@@ -589,35 +617,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           typeof expiresAt === 'string'
         ) {
           const activationUrl = customerActivationUrl(rawToken);
-          const { data: customer, error: customerError } = await db
-            .from('customers')
-            .select('email, first_name, middle_name, last_name, suffix')
-            .eq('id', customerId)
-            .maybeSingle();
-          const customerRecord = (customer ?? {}) as Record<string, unknown>;
-          const customerName = [
-            customerRecord.first_name,
-            customerRecord.middle_name,
-            customerRecord.last_name,
-            customerRecord.suffix,
-          ]
-            .filter((part): part is string => typeof part === 'string' && part.length > 0)
-            .join(' ');
-          const email = typeof customerRecord.email === 'string' ? customerRecord.email : '';
-          const delivery =
-            !customerError && email && activationUrl
-              ? await sendCustomerOnboardingEmail({
-                  to: email,
-                  customerName,
-                  membershipNumber: String(row.membership_number ?? ''),
-                  activationUrl,
-                  expiresAt,
-                })
-              : { status: 'failed' as const, reason: 'not_configured' as const };
-
+          // In-system only (owner 2026-11-22): the link is never emailed. Finance
+          // hands the one-time code or link to the member from this response.
           onboarding = {
-            status: delivery.status === 'sent' ? 'email_sent' : 'manual_required',
-            emailStatus: delivery.status === 'sent' ? 'sent' : 'failed',
+            status: 'manual_required',
+            emailStatus: 'not_attempted',
             token: rawToken,
             activationUrl,
             expiresAt,
@@ -638,20 +642,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 validHours: DEFAULT_ONBOARDING_TOKEN_VALID_HOURS,
                 expiresAt,
                 emailStatus: onboarding.emailStatus,
-              },
-            );
-            await audit(
-              db,
-              auth.userId,
-              onboarding.emailStatus === 'sent'
-                ? 'CUSTOMER_ACTIVATION_EMAIL_SENT'
-                : 'CUSTOMER_ACTIVATION_EMAIL_FAILED',
-              'customer',
-              customerId,
-              null,
-              {
-                membershipId: row.membership_id,
-                deliveryStatus: onboarding.emailStatus,
               },
             );
           } catch {
@@ -683,6 +673,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
         }
       }
+
+      // In-app notice for the member (no email is sent from notifications).
+      if (row.already_active !== true)
+        await notifyCustomer(db, String((sale as Record<string, unknown>).customer_id ?? ''), {
+          kind: 'account',
+          title: 'Your AF Homes card is active',
+          body: 'Your membership is now active. Your card and points are ready in your account.',
+          link: '/customer',
+        });
 
       return res.status(200).json({
         membershipId: row.membership_id,

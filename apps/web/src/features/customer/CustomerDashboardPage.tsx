@@ -17,6 +17,7 @@ import {
   useCustomerPointsPositionQuery,
   useCustomerProfileQuery,
 } from './queries';
+import { DashboardAnnouncements } from './DashboardAnnouncements';
 import { isForbidden, isNotFound } from './http';
 import { Card, Field, FieldList, formatDate, humanEntryType, styles } from './portal-ui';
 
@@ -120,6 +121,8 @@ export function CustomerDashboardPage() {
           </li>
         </ul>
       )}
+
+      <DashboardAnnouncements />
 
       <Card title="Your card">
         {membership.isLoading && <p role="status">Loading your card…</p>}

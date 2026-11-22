@@ -840,6 +840,14 @@ export function isoOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** Regex source for a lowercase UUID capture group, for building route patterns. */
+export const UUID_GROUP = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
+
+/** The string itself, or null for anything else. */
+export function strOrNull(v: unknown): string | null {
+  return typeof v === 'string' ? v : null;
+}
+
 export function requireString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }

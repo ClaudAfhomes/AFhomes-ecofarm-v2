@@ -100,10 +100,12 @@ async function call(test: (typeof cases)[number], body: unknown, token: string =
 }
 for (const test of cases)
   describe(`${test.name} durable request boundary`, () => {
-    it('requires a UUID before calling the database', async () => {
+    it('requires a UUID before invoking business writes', async () => {
       expect((await call(test, { ...test.body, requestId: undefined })).status).toBe(400);
       expect(
-        holder.db!.calls.some((c) => c.op === 'rpc' && c.table !== 'afhomes_admin_mfa_required'),
+        holder.db!.calls.some((c) =>
+          ['insert', 'update', 'delete', 'upsert'].includes(c.op) ||
+          (c.op === 'rpc' && !['afhomes_admin_mfa_required', 'afhomes_self_session'].includes(c.table))),
       ).toBe(false);
     });
     it('rejects malformed request identity', async () => {

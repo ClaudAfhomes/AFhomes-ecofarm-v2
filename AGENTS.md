@@ -353,7 +353,8 @@ Server-only: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` (use
 the transaction pooler, `:6543`), `AFHOMES_TARGET_PROJECT_REF`,
 `AFHOMES_SUPERADMIN_EMAIL`, `AFHOMES_WEB_URL`, `AFHOMES_ADMIN_URL`,
 `EMAIL_FROM`, `RESEND_API_KEY`, `DOCUMENT_HASH_PEPPER`, optional
-`OCR_PROVIDER_URL` / `OCR_PROVIDER_API_KEY`.
+`OCR_PROVIDER_URL` / `OCR_PROVIDER_API_KEY`. Member notifications and staff
+alerts are in-system only (portal bell, admin header bell); they send no email.
 
 Never commit `.env*`. Copy `.env.example` to `.env.local` for overrides.
 

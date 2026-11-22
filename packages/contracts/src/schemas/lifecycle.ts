@@ -56,6 +56,26 @@ export const commissionStatusSchema = z.enum([
 export type CommissionStatus = z.infer<typeof commissionStatusSchema>;
 
 /* ------------------------------------------------------------------ */
+/* Member engagement (bookings, messages, announcements)               */
+/* ------------------------------------------------------------------ */
+// A booking is a member's request to use a published service on a date. It
+// holds no money and moves no points; payment and points stay in their own flows.
+export const bookingStatusSchema = z.enum([
+  'requested',
+  'confirmed',
+  'declined',
+  'cancelled',
+  'completed',
+]);
+export type BookingStatus = z.infer<typeof bookingStatusSchema>;
+
+export const conversationStatusSchema = z.enum(['open', 'closed']);
+export type ConversationStatus = z.infer<typeof conversationStatusSchema>;
+
+export const announcementStatusSchema = z.enum(['draft', 'published', 'archived']);
+export type AnnouncementStatus = z.infer<typeof announcementStatusSchema>;
+
+/* ------------------------------------------------------------------ */
 /* Official paper-form transaction lifecycles (single source)          */
 /* ------------------------------------------------------------------ */
 
@@ -266,10 +286,30 @@ const RESERVATION_AGREEMENT_TRANSITIONS: Record<
   cancelled: [],
 };
 
+// Staff decide a request (confirm/decline) and close a confirmed booking
+// (completed/cancelled); the member may cancel while it is requested or confirmed.
+const BOOKING_TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
+  requested: ['confirmed', 'declined', 'cancelled'],
+  confirmed: ['completed', 'cancelled'],
+  declined: [],
+  cancelled: [],
+  completed: [],
+};
+
+const ANNOUNCEMENT_TRANSITIONS: Record<AnnouncementStatus, readonly AnnouncementStatus[]> = {
+  draft: ['published', 'archived'],
+  published: ['archived'],
+  archived: ['published'],
+};
+
 function canTransition<T extends string>(table: Record<T, readonly T[]>, from: T, to: T): boolean {
   return (table[from] ?? []).includes(to);
 }
 
+export const canTransitionBooking = (f: BookingStatus, t: BookingStatus) =>
+  canTransition(BOOKING_TRANSITIONS, f, t);
+export const canTransitionAnnouncement = (f: AnnouncementStatus, t: AnnouncementStatus) =>
+  canTransition(ANNOUNCEMENT_TRANSITIONS, f, t);
 export const canTransitionCustomer = (f: CustomerStatus, t: CustomerStatus) =>
   canTransition(CUSTOMER_TRANSITIONS, f, t);
 export const canTransitionSale = (f: SaleStatus, t: SaleStatus) =>
@@ -376,6 +416,20 @@ export const MEMBERSHIP_STATUS_LABELS: Record<MembershipStatus, string> = {
   expired: 'Expired',
   suspended: 'Suspended',
   cancelled: 'Cancelled',
+};
+
+export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
+  requested: 'Requested',
+  confirmed: 'Confirmed',
+  declined: 'Declined',
+  cancelled: 'Cancelled',
+  completed: 'Completed',
+};
+
+export const ANNOUNCEMENT_STATUS_LABELS: Record<AnnouncementStatus, string> = {
+  draft: 'Draft',
+  published: 'Published',
+  archived: 'Archived',
 };
 
 export const ACTIVATION_BLOCKER_LABELS: Record<ActivationBlocker, string> = {

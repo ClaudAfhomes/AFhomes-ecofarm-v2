@@ -55,6 +55,7 @@ export function ContactForm() {
   const [errors, setErrors] = useState<Errors>({});
   const [status, setStatus] = useState<SubmitStatus>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
 
   const update = <K extends keyof ContactFormValues>(key: K, value: ContactFormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }));
@@ -89,6 +90,7 @@ export function ContactForm() {
     try {
       const result = await contactService.submitInquiry(payload);
       if (result.ok) {
+        setOffline(result.offline === true);
         setStatus('success');
         setNotice(`${result.message} Reference: ${result.reference}`);
       } else {
@@ -111,7 +113,7 @@ export function ContactForm() {
         aria-live="polite"
       >
         <p className="font-display text-4xl font-medium text-navy-900 text-balance">
-          {hasInquiryBackend ? 'Message sent.' : 'Request saved locally.'}
+          {offline || !hasInquiryBackend ? 'Almost done.' : 'Message sent.'}
         </p>
         <p className="mx-auto mt-4 max-w-xl leading-relaxed text-ink-600">{notice}</p>
         <Button

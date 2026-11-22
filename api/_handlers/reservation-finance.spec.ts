@@ -601,7 +601,7 @@ it('returns Finance read and record responses accepted by the browser contract',
   expect(reservationFinanceSummarySchema.safeParse(recorded.body).error).toBeUndefined();
 });
 
-it('returns a reservation Finance queue row accepted by the browser contract', async () => {
+it('loads Finance payment and seller details concurrently and preserves the browser contract', async () => {
   install({
     rows: [reservationRow({ required_initial_snapshot: '10000.00', validity_months_snapshot: 84 })],
   });
@@ -613,7 +613,24 @@ it('returns a reservation Finance queue row accepted by the browser contract', a
   db.rows('reservation_agreements')[0]!.customers = { first_name: 'ANA', last_name: 'CRUZ' };
   const queues = (await import('./queues.js')).default;
   const { res, state } = makeRes();
-  await queues(
+  const from = db.from.bind(db);
+  const started = new Set<string>();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const spy = vi.spyOn(db, 'from').mockImplementation((table) => {
+    const query = from(table);
+    if (['payments', 'staff_users'].includes(table)) {
+      const then = query.then.bind(query);
+      query.then = (onFulfilled, onRejected) => {
+        started.add(table);
+        return gate.then(() => then(onFulfilled, onRejected));
+      };
+    }
+    return query;
+  });
+  const pending = queues(
     makeReq({
       method: 'GET',
       familyPath: 'finance',
@@ -621,6 +638,15 @@ it('returns a reservation Finance queue row accepted by the browser contract', a
     }),
     res,
   );
+  try {
+    await vi.waitFor(() => expect([...started].sort()).toEqual(['payments', 'staff_users']), {
+      timeout: 300,
+    });
+  } finally {
+    release();
+    await pending;
+    spy.mockRestore();
+  }
   expect(state.status).toBe(200);
   const rows = (state.body as { data: unknown[] }).data;
   expect(rows).toHaveLength(1);
@@ -630,8 +656,44 @@ it('returns a reservation Finance queue row accepted by the browser contract', a
   expect(
     (selection?.arg as { cols: string }).cols.split(',').map((column) => column.trim()),
   ).toContain('purchase_terms_id');
-  expect(rows[0]).toMatchObject({ sellerName: 'Ana Seller' });
+  expect(rows[0]).toMatchObject({
+    sellerName: 'Ana Seller',
+    verifiedTotal: '0.00',
+    remainingBalance: '54000.00',
+  });
   expect(financeCollectionQueueItemSchema.safeParse(rows[0]).error).toBeUndefined();
+});
+
+it.each(['payments', 'staff_users'])('refuses partial Finance details when %s fails', async (table) => {
+  const db = install({
+    rows: [
+      reservationRow({
+        required_initial_snapshot: '10000.00',
+        validity_months_snapshot: 84,
+        customer_applications: { application_number: 'AF-APP-00000001', status: 'approved' },
+        customers: { first_name: 'ANA', last_name: 'CRUZ' },
+      }),
+    ],
+  });
+  db.errors[table] = { message: 'PRIVATE database failure' };
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const queues = (await import('./queues.js')).default;
+  const { res, state } = makeRes();
+  try {
+    await queues(
+      makeReq({
+        method: 'GET',
+        familyPath: 'finance',
+        headers: { authorization: 'Bearer finance-token' },
+      }),
+      res,
+    );
+    expect(state.status).toBe(500);
+    expect(JSON.stringify(state.body)).not.toContain('PRIVATE');
+    expect(state.body).not.toHaveProperty('data');
+  } finally {
+    log.mockRestore();
+  }
 });
 
 it('carries the issued VIP Card ID and the 40% eligibility time on the Finance queue row', async () => {
@@ -654,7 +716,11 @@ it('carries the issued VIP Card ID and the 40% eligibility time on the Finance q
   const queues = (await import('./queues.js')).default;
   const { res, state } = makeRes();
   await queues(
-    makeReq({ method: 'GET', familyPath: 'finance', headers: { authorization: 'Bearer finance-token' } }),
+    makeReq({
+      method: 'GET',
+      familyPath: 'finance',
+      headers: { authorization: 'Bearer finance-token' },
+    }),
     res,
   );
   expect(state.status).toBe(200);
@@ -686,6 +752,71 @@ it('verifies a reservation payment through the source-aware transaction', async 
       p_actor_id: '22222222-2222-4222-8222-222222222222',
     },
   );
+});
+
+describe('auto-finalize after the last verification', () => {
+  const SALE_ID = 'cccccccc-0000-4000-8000-0000000000aa';
+  const verifyCall = (decision: 'verified' | 'rejected' = 'verified') =>
+    call({
+      path: `reservations/${RES_ID}/payments/${PAYMENT_ID}/verify`,
+      method: 'POST',
+      body: {
+        requestId: REQUEST_ID,
+        decision,
+        ...(decision === 'rejected' ? { reason: 'Blurry' } : {}),
+      },
+    });
+  const finalizeCalls = () =>
+    rpcCalls(holder.db as FakeSupabase, 'finalize_reservation_purchase_once');
+
+  it('finalizes once when the verification completes full settlement', async () => {
+    install({
+      rpcs: [
+        { fn: 'verify_purchase_payment_once', result: { paymentId: PAYMENT_ID } },
+        { fn: 'purchase_financial_summary', result: { ...summary, fullyPaid: true, saleId: null } },
+        { fn: 'finalize_reservation_purchase_once', result: SALE_ID },
+      ],
+    });
+    expect((await verifyCall()).status).toBe(200);
+    expect(finalizeCalls()).toHaveLength(1);
+    expect(finalizeCalls()[0]?.arg).toMatchObject({
+      p_reservation_id: RES_ID,
+      p_actor_id: '22222222-2222-4222-8222-222222222222',
+    });
+  });
+
+  it('does not finalize a partly settled purchase, a finalized one, or a rejection', async () => {
+    for (const [decision, over] of [
+      ['verified', { fullyPaid: false }],
+      ['verified', { fullyPaid: true, saleId: SALE_ID }],
+      ['rejected', { fullyPaid: true, saleId: null }],
+    ] as const) {
+      install({
+        rpcs: [
+          { fn: 'verify_purchase_payment_once', result: { paymentId: PAYMENT_ID } },
+          { fn: 'purchase_financial_summary', result: { ...summary, ...over } },
+          { fn: 'finalize_reservation_purchase_once', result: SALE_ID },
+        ],
+      });
+      expect((await verifyCall(decision)).status).toBe(200);
+      expect(finalizeCalls()).toHaveLength(0);
+    }
+  });
+
+  it('keeps the verification when finalization is refused', async () => {
+    install({
+      rpcs: [
+        { fn: 'verify_purchase_payment_once', result: { paymentId: PAYMENT_ID } },
+        { fn: 'purchase_financial_summary', result: { ...summary, fullyPaid: true, saleId: null } },
+      ],
+      rpcErrors: {
+        finalize_reservation_purchase_once: { code: '55000', message: 'UNRESOLVED_RECEIPTS' },
+      },
+    });
+    const result = await verifyCall();
+    expect(result.status).toBe(200);
+    expect(finalizeCalls()).toHaveLength(1);
+  });
 });
 
 describe('persisted reservation activation summary', () => {

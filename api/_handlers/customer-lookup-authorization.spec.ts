@@ -121,8 +121,8 @@ describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () =
     const db = install({ allowed: false });
     let called = false;
     const original = db.rpc.bind(db);
-    db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
-      if (args[0] !== 'afhomes_admin_mfa_required') called = true;
+    db.rpc = (...args: Parameters<FakeSupabase['rpc']>) => {
+      if (args[0] === 'customer_directory') called = true;
       return original(...args);
     };
     const s = await lookup(TOKEN.unassigned);
@@ -142,8 +142,8 @@ describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () =
     });
     let called = false;
     const original = db.rpc.bind(db);
-    db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
-      if (args[0] !== 'afhomes_admin_mfa_required') called = true;
+    db.rpc = (...args: Parameters<FakeSupabase['rpc']>) => {
+      if (args[0] === 'customer_directory') called = true;
       return original(...args);
     };
     const s = await lookup(TOKEN.viewer);
@@ -187,8 +187,8 @@ describe('Customer Lookup (GSD) is read-only and returns only active VIPs', () =
     const db = install();
     const seen: Array<Record<string, unknown>> = [];
     const original = db.rpc.bind(db);
-    db.rpc = async (...args: Parameters<FakeSupabase['rpc']>) => {
-      if (args[0] !== 'afhomes_admin_mfa_required')
+    db.rpc = (...args: Parameters<FakeSupabase['rpc']>) => {
+      if (args[0] === 'customer_directory')
         seen.push((args[1] as { p_filters: Record<string, unknown> })?.p_filters ?? {});
       return original(...args);
     };

@@ -47,7 +47,7 @@ export function StoryCard({ story }: StoryCardProps) {
         <p className="mt-3 flex-1 text-sm leading-relaxed text-ink-600">{story.excerpt}</p>
         <Link
           to={`/stories/${story.slug}`}
-          className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-navy-900 transition-colors group-hover:text-leaf-700"
+          className="mt-4 inline-flex items-center gap-2 py-2 text-sm font-semibold text-navy-900 transition-colors group-hover:text-leaf-700"
         >
           Read the story
           <ArrowRight className="h-4 w-4 text-coral-500 transition-transform duration-300 group-hover:translate-x-1" />

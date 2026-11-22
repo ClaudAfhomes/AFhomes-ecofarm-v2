@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 import { membershipSchema, pointsAccountSchema, type AfHomesPermission } from '@afhomes/contracts';
 import { renderWithProviders } from '../../test/utils';
 import { MembershipActivity } from './MembershipActivity';
@@ -57,7 +58,10 @@ it('toggles a group and queries only after it opens', async () => {
   expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await waitFor(() => expect(getMembershipPoints).toHaveBeenCalled());
 });
-it('hides disabled transaction reports even with a grant and keeps active activity available', () => {
+afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
+
+it('hides switched-off transaction reports even with a grant and keeps active activity available', () => {
+  setFeatureFlags({ reports: false });
   renderWithProviders(
     <MembershipActivity
       id={id}

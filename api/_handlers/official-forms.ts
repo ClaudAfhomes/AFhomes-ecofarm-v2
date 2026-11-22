@@ -1475,7 +1475,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
       const before = await getApplication(db, appSubmit[1]!);
       if (!before) return fail(res, 'NOT_FOUND', 'Customer application not found', 404);
-      if (!requireVipSaleCreator(auth, res, parsed.data.sellerCandidateId ?? before.smStaffId)) return;
+      if (!requireVipSaleCreator(auth, res, parsed.data.sellerCandidateId ?? before.smStaffId))
+        return;
       if (typeof before.customerId !== 'string')
         return fail(res, 'VALIDATION_ERROR', 'Application customer is missing', 400);
       const currentId = await currentIdForSubject(db, auth, 'customer', before.customerId);
@@ -1521,7 +1522,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'sales.application_approval', 'update');
       if ('error' in auth) return deny(res, auth);
       if (!['admin', 'super_admin'].includes(auth.roleSlug))
-        return fail(res, 'FORBIDDEN', 'Only Admin or Super Admin may decide an application and RA.', 403);
+        return fail(
+          res,
+          'FORBIDDEN',
+          'Only Admin or Super Admin may decide an application and RA.',
+          403,
+        );
       const parsed = customerApplicationDecisionSchema
         .safeExtend({ requestId: z.string().uuid() })
         .safeParse(jsonBody(req));
@@ -1541,7 +1547,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const auth = await authorizeAfHomes(req, 'sales.application_approval', 'update');
       if ('error' in auth) return deny(res, auth);
       if (!['admin', 'super_admin'].includes(auth.roleSlug))
-        return fail(res, 'FORBIDDEN', 'Only Admin or Super Admin may return an application and RA for corrections.', 403);
+        return fail(
+          res,
+          'FORBIDDEN',
+          'Only Admin or Super Admin may return an application and RA for corrections.',
+          403,
+        );
       const parsed = z.object({ requestId: z.string().uuid() }).safeParse(jsonBody(req));
       if (!parsed.success) return fail(res, 'VALIDATION_ERROR', 'A request id is required', 400);
       const { error } = await db.rpc('decide_purchase_application_once', {
@@ -1910,7 +1921,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         p_actor_id: auth.userId,
       });
       if (error) return mapRpcError(res, error);
-      return res.status(200).json(await agreementFinanceSummary(db, paymentVerify[1]!));
+      let summary = await agreementFinanceSummary(db, paymentVerify[1]!);
+      // The verifier holds the same permission as finalization, and finalization is a
+      // mechanical consequence of full verified settlement (SQL re-derives every
+      // precondition). Do it in the same step so Finance has one fewer click. Activation
+      // stays a separate manual action. A refusal here never fails the verification:
+      // the purchase simply stays in the queue with its manual "Finalize purchase" step.
+      if (parsed.data.decision === 'verified' && summary.fullyPaid === true && !summary.saleId) {
+        try {
+          const agreement = await getAgreement(db, paymentVerify[1]!);
+          if (agreement?.origin === 'application') {
+            const { error: finalizeError } = await db.rpc('finalize_reservation_purchase_once', {
+              p_request_id: randomUUID(),
+              p_reservation_id: paymentVerify[1],
+              p_actor_id: auth.userId,
+            });
+            if (finalizeError)
+              console.error('[api] auto-finalize skipped:', finalizeError.message ?? finalizeError);
+            else summary = await agreementFinanceSummary(db, paymentVerify[1]!);
+          }
+        } catch (autoError) {
+          console.error(
+            '[api] auto-finalize skipped:',
+            autoError instanceof Error ? autoError.message : autoError,
+          );
+        }
+      }
+      return res.status(200).json(summary);
     }
     const agreementFinalize = route(req, 'POST', /^reservations\/([0-9a-f-]+)\/finalize$/);
     if (agreementFinalize) {

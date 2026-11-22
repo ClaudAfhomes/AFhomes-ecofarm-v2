@@ -109,6 +109,42 @@ describe('GET /queues/dashboard (AFHomes queue-card pattern)', () => {
     );
   });
 
+  it.each([
+    {
+      path: 'dashboard',
+      tables: ['ost_members', 'ost_applications', 'card_sales', 'reservation_agreements'],
+    },
+    { path: 'finance', tables: ['card_sales', 'reservation_agreements'] },
+  ])('starts independent authorized reads concurrently for $path', async ({ path, tables }) => {
+    const db = install();
+    const from = db.from.bind(db);
+    const countTables = new Set(tables);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (countTables.has(table)) {
+        const then = query.then.bind(query);
+        query.then = (onFulfilled, onRejected) => {
+          started.add(table);
+          return gate.then(() => then(onFulfilled, onRejected));
+        };
+      }
+      return query;
+    });
+    const pending = call(TOKEN.superAdmin, path);
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(countTables.size), { timeout: 300 });
+    } finally {
+      release();
+      expect((await pending).status).toBe(200);
+      vi.restoreAllMocks();
+    }
+  });
+
   it('counts executed application reservations awaiting payment, like the finance queue', async () => {
     const base = dashboardQueuesSchema.parse(
       (await call(TOKEN2.finance)).body,
@@ -147,6 +183,20 @@ describe('GET /queues/dashboard (AFHomes queue-card pattern)', () => {
     });
   });
 
+  it('never reads queues that the caller cannot view', async () => {
+    const db = install();
+    db.errors.ost_members = { message: 'must not query unauthorized members' };
+    db.errors.ost_applications = { message: 'must not query unauthorized applications' };
+    expect((await call(TOKEN2.finance)).status).toBe(200);
+    db.errors.card_sales = { message: 'must not query unauthorized sales' };
+    db.errors.reservation_agreements = { message: 'must not query unauthorized reservations' };
+    expect(dashboardQueuesSchema.parse((await call(TOKEN2.salesManager)).body)).toEqual({
+      ostMembers: null,
+      ostApplications: null,
+      paymentVerification: null,
+    });
+  });
+
   it('denies unauthenticated callers and staff without dashboard.view', async () => {
     expect((await call()).status).toBe(401);
     const db = holder.db as FakeSupabase;
@@ -163,14 +213,17 @@ describe('GET /queues/dashboard (AFHomes queue-card pattern)', () => {
     expect((await call(TOKEN2.ost)).status).toBe(403);
   });
 
-  it('does not leak database internals on failure', async () => {
-    holder.db = new FakeSupabase({
-      tables: phase2World({ card_sale_hierarchy_snapshots: [], redemptions: [] }),
-      tokens: phase2WorldTokens(),
-      errors: { card_sales: { message: 'secret database detail' } },
-    });
-    const state = await call(TOKEN.superAdmin);
-    expect(state.status).toBe(500);
-    expect(JSON.stringify(state.body)).not.toContain('secret database detail');
-  });
+  it.each(['ost_members', 'ost_applications', 'card_sales', 'reservation_agreements'])(
+    'fails closed without leaking database internals when %s fails',
+    async (table) => {
+      holder.db = new FakeSupabase({
+        tables: phase2World({ card_sale_hierarchy_snapshots: [], redemptions: [] }),
+        tokens: phase2WorldTokens(),
+        errors: { [table]: { message: 'secret database detail' } },
+      });
+      const state = await call(TOKEN.superAdmin);
+      expect(state.status).toBe(500);
+      expect(JSON.stringify(state.body)).not.toContain('secret database detail');
+    },
+  );
 });

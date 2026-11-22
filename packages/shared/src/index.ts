@@ -10,7 +10,7 @@ export {
   divideMoneyExact,
 } from './money.js';
 export { formatCount, formatCountOrDash, formatCompactMoney } from './numbers.js';
-export { formatUTCDate, formatUTCDateTime } from './dates.js';
+export { formatUTCDate, formatUTCDateTime, manilaMonthOf, manilaToday } from './dates.js';
 export {
   RECOVERY_PASSWORD_MIN_LENGTH,
   RECOVERY_SENT_MESSAGE,
@@ -25,7 +25,14 @@ export type { PasswordRuleId, PasswordRuleState, RecoveryRequestOutcome } from '
 export { withRequestDeadline } from './request-deadline.js';
 
 export { splitStayPoints } from './stay-points.js';
-export { FEATURE_FLAGS, isFeaturePathEnabled } from './features.js';
+export {
+  DEFAULT_FEATURE_FLAGS,
+  FEATURE_FLAG_KEYS,
+  FEATURE_FLAGS,
+  isFeaturePathEnabled,
+  setFeatureFlags,
+} from './features.js';
+export type { FeatureFlagKey, FeatureFlags } from './features.js';
 export {
   CookieAuthError,
   createCookieAuthGateway,

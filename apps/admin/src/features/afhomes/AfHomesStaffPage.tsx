@@ -123,6 +123,18 @@ export function AfHomesStaffPage() {
     roleId.length > 0 &&
     temporaryPassword.length >= 8 &&
     temporaryPassword === confirmPassword;
+  // A disabled Create button always says what is still missing (first unmet requirement).
+  const createBlockedWhy = createValid
+    ? null
+    : !fullName.trim() || createErrors.fullName
+      ? 'Enter the full name to continue.'
+      : !email.trim() || createErrors.email
+        ? 'Enter a valid email address to continue.'
+        : !roleId
+          ? 'Choose a role to continue.'
+          : temporaryPassword.length < 8
+            ? 'Set a temporary password of at least 8 characters.'
+            : 'Re-enter the same password to confirm it.';
 
   const create = useBusinessMutation({
     mutationFn: () =>
@@ -397,6 +409,11 @@ export function AfHomesStaffPage() {
         title="New staff member"
         footer={
           <>
+            {createBlockedWhy && !create.isPending ? (
+              <p className={styles.footerHint} role="status">
+                {createBlockedWhy}
+              </p>
+            ) : null}
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>
               Cancel
             </Button>

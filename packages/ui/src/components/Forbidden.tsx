@@ -23,7 +23,7 @@ export function Forbidden({
       <span className={styles.icon} aria-hidden="true">
         <Icon name="alert" size={24} />
       </span>
-      <h2 className={styles.title}>{title}</h2>
+      <h1 className={styles.title}>{title}</h1>
       <p className={styles.message}>{message}</p>
       {action ? <div className={styles.action}>{action}</div> : null}
     </div>

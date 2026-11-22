@@ -182,6 +182,7 @@
   font-weight: 600;
   cursor: pointer;
   padding: 2px var(--space-2);
+  min-height: 32px;
 }
 
 .hint {

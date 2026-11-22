@@ -16,6 +16,8 @@ const holder = vi.hoisted(() => ({
   uploadError: false,
   signError: false,
   unavailable: false,
+  listCalls: 0,
+  signCalls: 0,
 }));
 vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
 vi.mock('../_lib/storage.js', () => ({
@@ -33,12 +35,20 @@ vi.mock('../_lib/storage.js', () => ({
                 holder.objects.set(path, Uint8Array.from(bytes));
                 return { data: { path }, error: null };
               },
-              list: async (folder: string) => ({
-                data: holder.objects.has(`${folder}/profile.jpg`) ? [{ name: 'profile.jpg' }] : [],
-                error: null,
-              }),
+              list: async (folder: string) => {
+                holder.listCalls++;
+                return {
+                  data: holder.objects.has(`${folder}/profile.jpg`)
+                    ? [{ name: 'profile.jpg' }]
+                    : [],
+                  error: null,
+                };
+              },
               createSignedUrl: async (path: string, ttl: number) => {
+                holder.signCalls++;
                 expect(ttl).toBe(300);
+                if (!holder.signError && !holder.objects.has(path))
+                  return { data: null, error: { code: 'NoSuchKey', message: 'Object not found' } };
                 return holder.signError
                   ? { data: null, error: { message: 'private signing failure' } }
                   : {
@@ -96,6 +106,8 @@ const jpeg = (size = 39, width = 1) => {
   return Buffer.concat([header, Buffer.alloc(size - header.length - 2), Buffer.from([255, 217])]);
 };
 beforeEach(() => {
+  holder.listCalls = 0;
+  holder.signCalls = 0;
   resetIdentifierRateLimit();
   holder.objects.clear();
   holder.uploads = [];
@@ -135,6 +147,19 @@ const put = (token: string = TOKEN.superAdmin, scope = 'staff', bytes = jpeg()) 
     },
   });
 describe('private profile photos', () => {
+  it('reads an existing owner photo without a preliminary bucket listing', async () => {
+    await put();
+    holder.listCalls = 0;
+    holder.signCalls = 0;
+    expect((await call()).status).toBe(200);
+    expect(holder.listCalls).toBe(0);
+    expect(holder.signCalls).toBe(1);
+  });
+
+  it('does not treat a generic signing failure as an absent photo', async () => {
+    holder.signError = true;
+    expect((await call()).status).toBe(503);
+  });
   it('requires authentication before accessing storage', async () => {
     expect((await call('staff', { token: undefined })).status).toBe(401);
     expect(holder.uploads).toHaveLength(0);

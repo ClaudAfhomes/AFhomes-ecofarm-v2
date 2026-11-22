@@ -22,11 +22,13 @@ import {
 } from '@afhomes/ui';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import {
+  createEarningRule,
   createService,
   updateService,
   uploadServicePhoto,
   manageServicePhoto,
 } from './points-services';
+import { defaultRuleWindow, normalizePrice } from './rule-dates';
 import { useSession } from '../../lib/session';
 import { formatCountOrDash, formatMoneyOrDash } from '@afhomes/shared';
 import styles from './services.module.css';
@@ -241,6 +243,9 @@ export function ServiceCatalogEditor({
         <ServiceEditor
           key={editing === 'new' ? 'new' : editing.id}
           service={editing === 'new' ? null : editing}
+          categories={[
+            ...new Set(services.map((s) => s.category).filter((c): c is string => Boolean(c))),
+          ].sort()}
           mayUpload={permission?.canUpdate === true}
           onSaved={onSaved}
           onClose={() => setEditing(null)}
@@ -254,18 +259,34 @@ function capitalizeStatus(value: string): string {
   return value.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
+const UNIT_WORDS: Record<Service['pricingUnit'], string> = {
+  unit: 'unit',
+  person: 'person',
+  session: 'session',
+  night: 'night',
+  booking: 'booking',
+};
+const ALL_TIERS = ['BRONZE', 'SILVER', 'GOLD'] as const;
+type Tier = (typeof ALL_TIERS)[number];
+
 function ServiceEditor({
   service,
+  categories,
   mayUpload,
   onSaved,
   onClose,
 }: {
   service: Service | null;
+  categories: string[];
   mayUpload: boolean;
   onSaved: () => void;
   onClose: () => void;
 }) {
   const [current, setCurrent] = useState(service);
+  const [attempted, setAttempted] = useState(false);
+  const [points, setPoints] = useState('');
+  const [tiers, setTiers] = useState<Tier[]>([...ALL_TIERS]);
+  const [created, setCreated] = useState<{ ruleNote: string | null } | null>(null);
   const [name, setName] = useState(service?.name ?? '');
   const [description, setDescription] = useState(service?.description ?? '');
   const [summary, setSummary] = useState(service?.summary ?? '');
@@ -335,8 +356,30 @@ function ServiceEditor({
     setValidation(null);
     onSaved();
   };
+  const normalizedPrice = normalizePrice(price);
+  const trimmedPoints = points.trim();
+  const errors = {
+    name: name.trim() ? undefined : 'Enter the service name.',
+    price:
+      normalizedPrice === null
+        ? 'Enter the price in pesos, for example 1500 or 1,500.00.'
+        : undefined,
+    points:
+      trimmedPoints === '' || /^[1-9]\d{0,8}$/.test(trimmedPoints)
+        ? undefined
+        : 'Enter a whole number of points, or leave it blank.',
+    tiers:
+      trimmedPoints !== '' && tiers.length === 0 ? 'Choose at least one card tier.' : undefined,
+  };
+  const hasErrors = Object.values(errors).some(Boolean);
+  const shown = (message: string | undefined) => (attempted ? message : undefined);
+  const pricePreview =
+    normalizedPrice === null
+      ? null
+      : `${formatMoneyOrDash(normalizedPrice)} per ${UNIT_WORDS[pricingUnit]}`;
   const save = useBusinessMutation({
     mutationFn: async () => {
+      if (hasErrors) throw new Error('Check the highlighted fields.');
       const parsed = serviceCatalogItemInputSchema.safeParse({
         name,
         summary: summary || null,
@@ -348,20 +391,49 @@ function ServiceEditor({
           .map((value) => value.trim())
           .filter(Boolean),
         description: description || null,
-        basePrice: price,
+        basePrice: normalizedPrice,
         isActive: active,
         isStaycationEligible: staycationEligible,
         published,
         availability,
       });
-      if (!parsed.success)
-        throw new Error('Enter a service name and an exact price, for example 1500.00.');
-      return current ? updateService(current.id, parsed.data) : createService(parsed.data);
+      if (!parsed.success) throw new Error('Check the highlighted fields.');
+      if (current) return { data: await updateService(current.id, parsed.data), ruleNote: null };
+      const data = await createService(parsed.data);
+      if (trimmedPoints === '') return { data, ruleNote: null };
+      // The service is already saved; a failed earning rule must not hide that.
+      const window = defaultRuleWindow();
+      try {
+        await createEarningRule({
+          serviceId: data.id,
+          pointsAmount: Number(trimmedPoints),
+          eligibleTiers: tiers,
+          effectiveStart: window.start,
+          effectiveEnd: window.end,
+          isActive: true,
+          minQuantity: 1,
+          maxAward: null,
+          promotionReference: null,
+        });
+        return {
+          data,
+          ruleNote: `Customers earn ${trimmedPoints} points per ${UNIT_WORDS[pricingUnit]} until ${window.end}.`,
+        };
+      } catch (error) {
+        return {
+          data,
+          ruleNote: `The service was saved, but the points rule was not: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }. Add it under Earning rules.`,
+        };
+      }
     },
     retry: false,
-    onSuccess: (data) => {
+    onSuccess: ({ data, ruleNote }) => {
       saved(data);
       notifySuccess({ title: 'Service saved' });
+      if (service) onClose();
+      else setCreated({ ruleNote });
     },
   });
   const upload = useBusinessMutation({
@@ -432,27 +504,25 @@ function ServiceEditor({
         className={styles.form}
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy) save.mutate();
+          setAttempted(true);
+          if (!busy && !hasErrors) save.mutate();
         }}
+        hidden={created !== null}
+        noValidate
       >
+        <section className={styles.step} aria-label="Basics">
+        <h3 className={styles.stepTitle}>
+          <span aria-hidden="true">1</span> Basics
+        </h3>
         <TextField
           id="service-name"
           name="serviceName"
           label="Service name"
+          placeholder="Teppanyaki dinner"
           value={name}
           onChange={setName}
           maxLength={120}
-          disabled={busy}
-        />
-        <TextAreaField
-          id="service-summary"
-          name="summary"
-          label="Short summary"
-          optional
-          value={summary}
-          onChange={setSummary}
-          maxLength={300}
-          rows={2}
+          error={shown(errors.name)}
           disabled={busy}
         />
         <TextField
@@ -460,19 +530,24 @@ function ServiceEditor({
           name="category"
           label="Category"
           optional
+          placeholder={categories.length ? `For example ${categories.slice(0, 3).join(', ')}` : 'Dining'}
+          hint={categories.length ? `Existing: ${categories.join(', ')}` : undefined}
           value={category}
           onChange={setCategory}
           maxLength={80}
           disabled={busy}
         />
+        <div className={styles.row2}>
         <TextField
-          id="service-location"
-          name="location"
-          label="Location"
-          optional
-          value={location}
-          onChange={setLocation}
-          maxLength={160}
+          id="service-base-price"
+          name="basePrice"
+          label="Base price"
+          inputMode="decimal"
+          placeholder="1500.00"
+          value={price}
+          onChange={setPrice}
+          error={shown(errors.price)}
+          hint={pricePreview ?? 'In pesos. Commas and ₱ are fine.'}
           disabled={busy}
         />
         <label>
@@ -500,37 +575,54 @@ function ServiceEditor({
             ]}
           />
         </label>
-        <TextAreaField
-          id="service-highlights"
-          name="highlights"
-          label="Features / highlights (one per line)"
-          optional
-          value={highlights}
-          onChange={setHighlights}
-          rows={4}
-          disabled={busy}
-        />
-        <TextAreaField
-          id="service-description"
-          name="description"
-          label="Description"
-          optional
-          value={description}
-          onChange={setDescription}
-          maxLength={5000}
-          rows={5}
-          disabled={busy}
-        />
-        <TextField
-          id="service-base-price"
-          name="basePrice"
-          label="Base price"
-          inputMode="decimal"
-          placeholder="1500.00"
-          value={price}
-          onChange={setPrice}
-          disabled={busy}
-        />
+        </div>
+        </section>
+        {!service && (
+          <section className={styles.step} aria-label="Points customers earn">
+            <h3 className={styles.stepTitle}>
+              <span aria-hidden="true">2</span> Points customers earn
+            </h3>
+            <TextField
+              id="service-points"
+              name="pointsPerUnit"
+              label={`Points per ${UNIT_WORDS[pricingUnit]}`}
+              optional
+              inputMode="numeric"
+              placeholder="200"
+              value={points}
+              onChange={setPoints}
+              error={shown(errors.points)}
+              hint="Leave blank to set up points later. Starts today for one year; editable under Earning rules."
+              disabled={busy}
+            />
+            {trimmedPoints !== '' && (
+              <fieldset disabled={busy} className={styles.tiers}>
+                <legend>Card tiers that earn</legend>
+                {ALL_TIERS.map((tier) => (
+                  <label key={tier} className={styles.chip}>
+                    <input
+                      type="checkbox"
+                      checked={tiers.includes(tier)}
+                      onChange={(event) =>
+                        setTiers((list) =>
+                          event.target.checked
+                            ? ALL_TIERS.filter((t) => t === tier || list.includes(t))
+                            : list.filter((t) => t !== tier),
+                        )
+                      }
+                    />
+                    {tier.charAt(0) + tier.slice(1).toLowerCase()}
+                  </label>
+                ))}
+                {shown(errors.tiers) && <p role="alert">{errors.tiers}</p>}
+              </fieldset>
+            )}
+          </section>
+        )}
+        <section className={styles.step} aria-label="Status">
+        <h3 className={styles.stepTitle}>
+          <span aria-hidden="true">{service ? '2' : '3'}</span> Status
+        </h3>
         <label>
           Availability
           <Select
@@ -552,7 +644,7 @@ function ServiceEditor({
             ]}
           />
         </label>
-        <label>
+        <label className={styles.check}>
           <input
             type="checkbox"
             checked={active}
@@ -561,27 +653,77 @@ function ServiceEditor({
           />
           Active service
         </label>
-        <label>
+        <label className={styles.check}>
           <input
             type="checkbox"
             checked={staycationEligible}
             onChange={(event) => setStaycationEligible(event.target.checked)}
             disabled={busy}
           />
-          Staycation or hotel accommodation — usable with VIP points without a promotion
+          Staycation or hotel accommodation — VIP points can be spent here through an
+          accommodation conversion rule (no promotion needed)
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={published}
-            onChange={(event) => setPublished(event.target.checked)}
+        </section>
+        <details
+          className={styles.listing}
+          open={Boolean(service?.published || service?.summary || service?.description)}
+        >
+          <summary>Website listing (optional)</summary>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={published}
+              onChange={(event) => setPublished(event.target.checked)}
+              disabled={busy}
+            />
+            Publish on Experiences
+          </label>
+          <TextAreaField
+            id="service-summary"
+            name="summary"
+            label="Short summary"
+            optional
+            value={summary}
+            onChange={setSummary}
+            maxLength={300}
+            rows={2}
             disabled={busy}
           />
-          Publish on Experiences
-        </label>
-        <p>
-          VIP discounts and earning rules are configured below the service catalog. Internal
-          services stay private.
+          <TextAreaField
+            id="service-description"
+            name="description"
+            label="Description"
+            optional
+            value={description}
+            onChange={setDescription}
+            maxLength={5000}
+            rows={5}
+            disabled={busy}
+          />
+          <TextAreaField
+            id="service-highlights"
+            name="highlights"
+            label="Features / highlights (one per line)"
+            optional
+            value={highlights}
+            onChange={setHighlights}
+            rows={4}
+            disabled={busy}
+          />
+          <TextField
+            id="service-location"
+            name="location"
+            label="Location"
+            optional
+            value={location}
+            onChange={setLocation}
+            maxLength={160}
+            disabled={busy}
+          />
+        </details>
+        <p className={styles.note}>
+          VIP discounts and further earning rules are configured below the service catalog.
+          Unpublished services stay internal.
         </p>
         {save.isError && <p role="alert">{save.error.message}</p>}
         <Button
@@ -593,6 +735,16 @@ function ServiceEditor({
           Save service
         </Button>
       </form>
+      {created && current && (
+        <section className={styles.form} aria-label="Service created">
+          <Alert variant="success" title={`${current.name} created`}>
+            {pricePreview ?? formatMoneyOrDash(current.basePrice)}
+            {created.ruleNote ? ` — ${created.ruleNote}` : ''}
+          </Alert>
+          {mayUpload && <p>Optional: add photos below. You can also add them later.</p>}
+          <Button onClick={onClose}>Done</Button>
+        </section>
+      )}
       {current && mayUpload && (
         <section className={styles.form} aria-label="Service photos">
           <h3>Photos</h3>

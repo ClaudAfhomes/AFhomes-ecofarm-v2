@@ -20,6 +20,8 @@
   font-weight: 600;
   color: var(--color-text-secondary);
   text-decoration: none;
+  display: inline-block;
+  padding-block: 6px;
 }
 
 .crumbLink:hover {

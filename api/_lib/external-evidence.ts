@@ -9,7 +9,17 @@ import {
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from './afhomes-access.js';
-import { deny, fail, isoOrNull, jsonBody, mapRpcError, route, type Db } from './handler-kit.js';
+import {
+  UUID_GROUP as ID,
+  deny,
+  fail,
+  isoOrNull,
+  jsonBody,
+  mapRpcError,
+  route,
+  strOrNull as str,
+  type Db,
+} from './handler-kit.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 import { PAYMENT_RECEIPT_BUCKET } from './payment-receipts.js';
 import { createUploadGrant, storageClient } from './storage.js';
@@ -29,7 +39,6 @@ import { createUploadGrant, storageClient } from './storage.js';
  *
  * Nothing here verifies a transaction or creates a document. Returns true when handled.
  */
-const ID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 const EXTENSION = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' } as const;
 
 const SUBJECTS: Record<
@@ -51,7 +60,6 @@ const SUBJECTS: Record<
   },
 };
 
-const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
 /** Folder an upload grant issues for one external payment; SQL enforces the same prefix. */
 export function externalEvidencePrefix(subject: ExternalPaymentSubject, id: string): string {

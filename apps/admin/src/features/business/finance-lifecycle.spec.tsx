@@ -630,7 +630,7 @@ describe('Phase 26 activation queue', () => {
     await user.click(within(confirmation).getByRole('button', { name: 'Activate VIP Membership' }));
 
     expect(
-      await screen.findByText(/membership activation succeeded, but email delivery failed/i),
+      await screen.findByText(/membership is active\./i),
     ).toBeInTheDocument();
     const code = screen.getByLabelText('Customer activation code') as HTMLInputElement;
     const link = screen.getByLabelText('Customer activation link') as HTMLInputElement;

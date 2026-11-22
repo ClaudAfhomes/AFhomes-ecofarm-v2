@@ -833,6 +833,7 @@ describe('payments', () => {
   });
 
   it('verifies a payment and returns the recomputed totals', async () => {
+    const db = install();
     const state = await call('sales', {
       method: 'POST',
       path: `${PAYMENT.second}/verify`,
@@ -846,6 +847,11 @@ describe('payments', () => {
       remainingBalance: '20000.00',
       fullyPaid: false,
     });
+    // The member is told once, without amounts.
+    const notices = db.rows('customer_notifications');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: 'account', title: 'Payment verified' });
+    expect(JSON.stringify(notices)).not.toContain('20000');
   });
 
   it('requires a reason to reject a payment', async () => {
@@ -931,7 +937,7 @@ describe('activation requires confirmed full payment', () => {
       alreadyActive: false,
       onboarding: {
         status: 'manual_required',
-        emailStatus: 'failed',
+        emailStatus: 'not_attempted',
         token: 'raw-once-onboarding-token-0001',
         expiresAt: '2026-10-01T00:00:00.000Z',
       },
@@ -949,15 +955,21 @@ describe('activation requires confirmed full payment', () => {
     const onboardingAudit = db
       .rows('audit_events')
       .find((entry) => entry.action === 'CUSTOMER_ONBOARDING_TOKEN_ISSUED');
+    // In-system only: no email is attempted, so there is no delivery audit.
     const deliveryAudit = db
       .rows('audit_events')
-      .find((entry) => entry.action === 'CUSTOMER_ACTIVATION_EMAIL_FAILED');
+      .find((entry) => String(entry.action).startsWith('CUSTOMER_ACTIVATION_EMAIL'));
     expect(onboardingAudit).toBeDefined();
-    expect(deliveryAudit).toBeDefined();
+    expect(deliveryAudit).toBeUndefined();
     expect(JSON.stringify([onboardingAudit, deliveryAudit])).not.toContain(
       'raw-once-onboarding-token-0001',
     );
     expect(JSON.stringify([onboardingAudit, deliveryAudit])).not.toContain('/customer/activate');
+    // One in-app notice, no second email (the onboarding email covers it).
+    const notices = db.rows('customer_notifications');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ customer_id: CUSTOMER.active, kind: 'account' });
+    expect(JSON.stringify(notices)).not.toContain('raw-once-onboarding-token-0001');
   });
 
   it('refuses to activate an unpaid sale', async () => {
@@ -1451,7 +1463,7 @@ describe('customer account onboarding', () => {
     expect(state.status).toBe(201);
     expect(state.body).toMatchObject({
       status: 'manual_required',
-      emailStatus: 'failed',
+      emailStatus: 'not_attempted',
       email: 'pedro@example.com',
       expiresAt: '2026-10-01T00:00:00.000Z',
     });
@@ -1472,10 +1484,7 @@ describe('customer account onboarding', () => {
     const audits = db
       .rows('audit_events')
       .filter((entry) => String(entry.action).startsWith('CUSTOMER_'));
-    expect(audits.map((entry) => entry.action)).toEqual([
-      'CUSTOMER_ONBOARDING_TOKEN_ISSUED',
-      'CUSTOMER_ACTIVATION_EMAIL_FAILED',
-    ]);
+    expect(audits.map((entry) => entry.action)).toEqual(['CUSTOMER_ONBOARDING_TOKEN_ISSUED']);
     expect(JSON.stringify(audits)).not.toContain('raw-once-onboarding-token-0001');
     expect(JSON.stringify(audits)).not.toContain('/customer/activate');
   });
@@ -1490,10 +1499,10 @@ describe('customer account onboarding', () => {
     expect(state.status).toBe(403);
   });
 
-  it('allows Super Admin and reports successful email separately from token issuance', async () => {
-    vi.spyOn(onboardingEmail, 'sendCustomerOnboardingEmail').mockResolvedValueOnce({
-      status: 'sent',
-    });
+  it('allows Super Admin and never emails the link, even when mail would work', async () => {
+    const send = vi
+      .spyOn(onboardingEmail, 'sendCustomerOnboardingEmail')
+      .mockResolvedValue({ status: 'sent' });
     const db = install();
     const state = await call('customers', {
       method: 'POST',
@@ -1502,10 +1511,20 @@ describe('customer account onboarding', () => {
       body: {},
     });
     expect(state.status).toBe(201);
-    expect(state.body).toMatchObject({ status: 'email_sent', emailStatus: 'sent' });
+    expect(state.body).toMatchObject({ status: 'manual_required', emailStatus: 'not_attempted' });
+    expect(send).not.toHaveBeenCalled();
+    // Card activation does not email it either.
+    const activated = await call('sales', {
+      method: 'POST',
+      path: `${SALE.fullyPaid}/activate`,
+      token: TOKEN.superAdmin,
+      body: { validityMonths: 12 },
+    });
+    expect(activated.status).toBe(200);
+    expect(send).not.toHaveBeenCalled();
     expect(
-      db.rows('audit_events').some((entry) => entry.action === 'CUSTOMER_ACTIVATION_EMAIL_SENT'),
-    ).toBe(true);
+      db.rows('audit_events').some((entry) => String(entry.action).startsWith('CUSTOMER_ACTIVATION_EMAIL')),
+    ).toBe(false);
   });
 
   it('returns 404 for an unknown customer without issuing a token', async () => {

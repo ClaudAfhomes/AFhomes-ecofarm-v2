@@ -203,19 +203,6 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
   // issuing one of each per row (N+1). A page of reservations now costs 2
   // queries total instead of 2N.
   const reservationIds = rows.map((raw) => String((raw as Record<string, unknown>).id));
-  const paymentsByReservation = new Map<string, { amount: string; status: string }[]>();
-  if (reservationIds.length > 0) {
-    const { data: allPayments, error: paymentsError } = await db
-      .from('payments')
-      .select('reservation_id, amount, status')
-      .in('reservation_id', reservationIds);
-    if (paymentsError) throw paymentsError;
-    for (const payment of (allPayments ?? []) as Record<string, unknown>[]) {
-      const bucket = paymentsByReservation.get(String(payment.reservation_id)) ?? [];
-      bucket.push({ amount: String(payment.amount), status: String(payment.status) });
-      paymentsByReservation.set(String(payment.reservation_id), bucket);
-    }
-  }
   const sellerIds = [
     ...new Set(
       rows
@@ -223,16 +210,25 @@ async function buildReservationQueue(db: Db, limit: number, offset: number, sear
         .filter(Boolean),
     ),
   ];
+  const [paymentResult, sellerResult] = await Promise.all([
+    reservationIds.length > 0
+      ? db.from('payments').select('reservation_id, amount, status').in('reservation_id', reservationIds)
+      : { data: [], error: null },
+    sellerIds.length > 0
+      ? db.from('staff_users').select('id, full_name').in('id', sellerIds)
+      : { data: [], error: null },
+  ]);
+  if (paymentResult.error) throw paymentResult.error;
+  if (sellerResult.error) throw sellerResult.error;
+  const paymentsByReservation = new Map<string, { amount: string; status: string }[]>();
+  for (const payment of (paymentResult.data ?? []) as Record<string, unknown>[]) {
+    const bucket = paymentsByReservation.get(String(payment.reservation_id)) ?? [];
+    bucket.push({ amount: String(payment.amount), status: String(payment.status) });
+    paymentsByReservation.set(String(payment.reservation_id), bucket);
+  }
   const sellersById = new Map<string, string>();
-  if (sellerIds.length > 0) {
-    const { data: sellers, error: sellersError } = await db
-      .from('staff_users')
-      .select('id, full_name')
-      .in('id', sellerIds);
-    if (sellersError) throw sellersError;
-    for (const seller of (sellers ?? []) as Record<string, unknown>[]) {
-      sellersById.set(String(seller.id), String(seller.full_name ?? ''));
-    }
+  for (const seller of (sellerResult.data ?? []) as Record<string, unknown>[]) {
+    sellersById.set(String(seller.id), String(seller.full_name ?? ''));
   }
   const filtered = (
     await Promise.all(
@@ -346,10 +342,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // `limit + offset` rows from each source is enough to produce the correct
       // page. `loadAll` is false so the no-search path bounds the read.
       const windowSize = limit + offset;
-      const sales = await buildQueue(db, PAYMENT_VERIFICATION_STATUSES, windowSize, 0, search, {
-        loadAll: false,
-      });
-      const reservations = await buildReservationQueue(db, windowSize, 0, search);
+      const [sales, reservations] = await Promise.all([
+        buildQueue(db, PAYMENT_VERIFICATION_STATUSES, windowSize, 0, search, { loadAll: false }),
+        buildReservationQueue(db, windowSize, 0, search),
+      ]);
       // One combined page, ordered by readiness then origin/UUID so the order is
       // total and stable across the two sources.
       const merged = [...sales.data, ...reservations.data]
@@ -418,36 +414,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ostApplications: null,
         paymentVerification: null,
       };
-      if (canView('network.ost_members')) {
-        const members = await db.from('ost_members').select('id', { count: 'exact', head: true });
-        if (members.error) throw members.error;
-        counts.ostMembers = members.count ?? 0;
-      }
-      if (canView('network.ost_registrations')) {
-        const applications = await db
-          .from('ost_applications')
-          .select('id', { count: 'exact', head: true })
-          .in('status', [...OST_REVIEWABLE_STATUSES]);
-        if (applications.error) throw applications.error;
-        counts.ostApplications = applications.count ?? 0;
-      }
-      if (canView('finance.payment_verification')) {
-        const verifying = await db
-          .from('card_sales')
-          .select('id', { count: 'exact', head: true })
-          .in('status', PAYMENT_VERIFICATION_STATUSES);
-        if (verifying.error) throw verifying.error;
-        // Same reservation filter as the finance queue, so card and queue total agree.
-        const reserving = await db
-          .from('reservation_agreements')
-          .select('id, customer_applications!inner(status)', { count: 'exact', head: true })
-          .eq('origin', 'application')
-          .eq('status', 'executed')
-          .eq('customer_applications.status', 'approved')
-          .is('sale_id', null);
-        if (reserving.error) throw reserving.error;
-        counts.paymentVerification = (verifying.count ?? 0) + (reserving.count ?? 0);
-      }
+      await Promise.all([
+        (async () => {
+          if (canView('network.ost_members')) {
+            const members = await db
+              .from('ost_members')
+              .select('id', { count: 'exact', head: true });
+            if (members.error) throw members.error;
+            counts.ostMembers = members.count ?? 0;
+          }
+        })(),
+        (async () => {
+          if (canView('network.ost_registrations')) {
+            const applications = await db
+              .from('ost_applications')
+              .select('id', { count: 'exact', head: true })
+              .in('status', [...OST_REVIEWABLE_STATUSES]);
+            if (applications.error) throw applications.error;
+            counts.ostApplications = applications.count ?? 0;
+          }
+        })(),
+        (async () => {
+          if (canView('finance.payment_verification')) {
+            // Independent counts share the same authorization and filters as the queue.
+            const [verifying, reserving] = await Promise.all([
+              db
+                .from('card_sales')
+                .select('id', { count: 'exact', head: true })
+                .in('status', PAYMENT_VERIFICATION_STATUSES),
+              // Same reservation filter as the finance queue, so card and queue total agree.
+              db
+                .from('reservation_agreements')
+                .select('id, customer_applications!inner(status)', { count: 'exact', head: true })
+                .eq('origin', 'application')
+                .eq('status', 'executed')
+                .eq('customer_applications.status', 'approved')
+                .is('sale_id', null),
+            ]);
+            if (verifying.error) throw verifying.error;
+            if (reserving.error) throw reserving.error;
+            counts.paymentVerification = (verifying.count ?? 0) + (reserving.count ?? 0);
+          }
+        })(),
+      ]);
       const parsed = dashboardQueuesSchema.safeParse(counts);
       if (!parsed.success) return fail(res, 'INTERNAL', 'Internal server error', 500);
       return res.status(200).json(parsed.data);

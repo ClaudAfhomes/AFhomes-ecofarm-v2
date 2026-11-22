@@ -747,11 +747,21 @@ describe('OST approval state guards', () => {
   it('creates an OST with a temporary password without sending an invitation', async () => {
     const db = install();
     const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
-    const profilePhotoBase64 = Buffer.from([255,216,255,192,0,17,8,0,1,0,1,3,1,17,0,2,17,1,3,17,0,255,218,0,12,3,1,0,2,17,3,17,0,63,0,0,0,255,217]).toString('base64');
-    const result = await approve(appId, ADMIN_TOKEN, { temporaryPassword: 'TempPass123', profilePhotoBase64 });
+    const profilePhotoBase64 = Buffer.from([
+      255, 216, 255, 192, 0, 17, 8, 0, 1, 0, 1, 3, 1, 17, 0, 2, 17, 1, 3, 17, 0, 255, 218, 0, 12, 3,
+      1, 0, 2, 17, 3, 17, 0, 63, 0, 0, 0, 255, 217,
+    ]).toString('base64');
+    const result = await approve(appId, ADMIN_TOKEN, {
+      temporaryPassword: 'TempPass123',
+      profilePhotoBase64,
+    });
     expect(result.status).toBe(201);
     const created = db.createdAuthUsers[0]!;
-    expect(photos.upload).toHaveBeenCalledWith(`${created.id}/profile.jpg`, expect.any(Buffer), expect.objectContaining({ upsert: true }));
+    expect(photos.upload).toHaveBeenCalledWith(
+      `${created.id}/profile.jpg`,
+      expect.any(Buffer),
+      expect.objectContaining({ upsert: true }),
+    );
     expect(db.passwordsSeen).toEqual(['TempPass123']);
     expect(db.rows('staff_users').find((r) => r.id === created.id)).toMatchObject({
       status: 'active',
@@ -991,10 +1001,12 @@ describe('OST approval state guards', () => {
     const db = install();
     const appId = ((await submit(db, applicant)).body as { applicationId: string }).applicationId;
     const originalRpc = db.rpc.bind(db);
-    vi.spyOn(db, 'rpc').mockImplementation(async (name, args) => {
-      const result = await originalRpc(name, args);
+    vi.spyOn(db, 'rpc').mockImplementation((name, args) => {
+      const result = originalRpc(name, args);
       if (name === 'install_legacy_ost_identity')
-        throw new Error('PRIVATE response lost after commit');
+        return result.then(() => {
+          throw new Error('PRIVATE response lost after commit');
+        });
       return result;
     });
     expect((await approve(appId)).status).toBe(500);

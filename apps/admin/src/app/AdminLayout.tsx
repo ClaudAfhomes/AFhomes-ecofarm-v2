@@ -12,12 +12,14 @@ import {
 import { AdminForbiddenPage } from './AdminForbiddenPage';
 import styles from './AdminLayout.module.css';
 import { staffPortalPath, operationsPath, isIstRole } from '@afhomes/contracts';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 import { useProfilePhoto } from '../features/account/profile-photo';
+import { StaffAlertsBell } from '../features/engagement/StaffAlertsBell';
 import logo from '../assets/logo.png';
 
 export function AdminLayout() {
   const photo = useProfilePhoto();
-  const { user, logout, sessionError, revalidate } = useSession();
+  const { user, logout, sessionError, revalidate, status } = useSession();
   const location = useLocation();
   const applicationWorkspace = [
     '/admin/customers/new',
@@ -52,7 +54,19 @@ export function AdminLayout() {
     !gated &&
     !canAccessNavTarget(user?.afHomesPermissions, operationsPath(location.pathname));
   if (denied) {
-    return <AdminForbiddenPage retry={sessionError ? () => void revalidate() : undefined} />;
+    // Say WHY: a module switched off by an administrator is not a role problem,
+    // and a session that failed to load may simply need a retry.
+    const reason = !isFeaturePathEnabled(operationsPath(location.pathname))
+      ? 'switched-off'
+      : sessionError
+        ? 'session'
+        : 'role';
+    return (
+      <AdminForbiddenPage
+        reason={reason}
+        retry={sessionError ? () => void revalidate() : undefined}
+      />
+    );
   }
   return (
     <>
@@ -61,7 +75,9 @@ export function AdminLayout() {
         topbarContext={
           applicationWorkspace ? (
             <span className={styles.workspaceCrumbs}>
-              Sales <span aria-hidden="true">›</span> Customers <span aria-hidden="true">›</span>{' '}
+              <span className={styles.crumbPrefix}>
+                Sales <span aria-hidden="true">›</span> Customers <span aria-hidden="true">›</span>{' '}
+              </span>
               <strong>Create Application &amp; RA</strong>
             </span>
           ) : undefined
@@ -79,6 +95,7 @@ export function AdminLayout() {
             </div>
           )
         }
+        navLoading={status === 'loading'}
         navItems={
           gated
             ? []
@@ -122,6 +139,7 @@ export function AdminLayout() {
         }
         topbarActions={
           <>
+            {gated || ist ? null : <StaffAlertsBell />}
             <UserMenu
               photoUrl={photo.photo.data?.url}
               name={user?.name}

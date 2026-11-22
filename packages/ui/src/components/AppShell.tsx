@@ -9,6 +9,8 @@ import styles from './AppShell.module.css';
 
 export interface AppShellProps {
   navItems: SidebarItem[];
+  /** Sidebar placeholder while navigation permissions are resolving. */
+  navLoading?: boolean;
   navLabel?: string;
   brand?: ReactNode;
   sidebarFooter?: ReactNode;
@@ -48,6 +50,7 @@ export interface AppShellProps {
  */
 export function AppShell({
   navItems,
+  navLoading,
   navLabel,
   brand,
   sidebarFooter,
@@ -105,6 +108,7 @@ export function AppShell({
     <Sidebar
       brand={brand}
       items={navItems}
+      loading={navLoading}
       footer={sidebarFooter}
       ariaLabel={navLabel}
       onExpand={() => setSidebarCollapsed(false)}

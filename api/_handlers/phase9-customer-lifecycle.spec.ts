@@ -428,7 +428,7 @@ describe('activation and customer onboarding', () => {
     expect(state.status).toBe(201);
     expect(state.body).toMatchObject({
       status: 'manual_required',
-      emailStatus: 'failed',
+      emailStatus: 'not_attempted',
       activationUrl: 'https://afhomes.test/customer/activate#token=raw-once-onboarding-token-0001',
     });
     const audits = db

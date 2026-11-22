@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import {
-  PROFILE_PHOTO_MAX_EDGE,
-  profilePhotoInputSchema,
-} from '@afhomes/contracts';
+import { PROFILE_PHOTO_MAX_EDGE, profilePhotoInputSchema } from '@afhomes/contracts';
 import { resolveAfHomesPrincipal } from '../_lib/afhomes-access.js';
 import { resolveCustomerPrincipal } from '../_lib/customer-access.js';
 import { deny, fail, jsonBody, method, subPath } from '../_lib/handler-kit.js';
 import { storageClient } from '../_lib/storage.js';
-import { PROFILE_PHOTO_BUCKET, profilePhotoPath, decodeProfilePhoto } from '../_lib/profile-photo.js';
+import {
+  PROFILE_PHOTO_BUCKET,
+  profilePhotoPath,
+  decodeProfilePhoto,
+} from '../_lib/profile-photo.js';
 import { consumeIdentifierAttempt } from '../_lib/rate-limit.js';
 import type { VercelRequest, VercelResponse } from '../_lib/http.js';
 
@@ -76,14 +77,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           503,
         );
       saved = true;
-    } else {
-      const result = await bucket.list(principal.userId, { limit: 1, search: 'profile.jpg' });
-      if (result.error)
-        return fail(res, 'INTERNAL', 'Profile photos are unavailable. Please retry.', 503);
-      if (!result.data.some((object) => object.name === 'profile.jpg'))
-        return res.status(200).json({ url: null, expiresAt: null, canUpload, notice: null });
     }
     const signed = await bucket.createSignedUrl(path, 300);
+    if (!saved && signed.error && 'code' in signed.error && signed.error.code === 'NoSuchKey')
+      return res.status(200).json({ url: null, expiresAt: null, canUpload, notice: null });
     if (signed.error || !signed.data?.signedUrl) {
       if (!saved) return fail(res, 'INTERNAL', 'Could not load your photo. Please retry.', 503);
       return res.status(200).json({

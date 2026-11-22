@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { isFeaturePathEnabled } from '@afhomes/shared';
 import { Button, ErrorState, Spinner } from '@afhomes/ui';
 
@@ -6,16 +6,41 @@ import { useCustomerSession } from '../lib/customer-session';
 import { CustomerGuard } from './CustomerGuard';
 import { useCustomerProfileQuery } from '../features/customer/queries';
 import { isForbidden, isUnauthorized } from '../features/customer/http';
+import { useNotificationsQuery } from '../features/customer/engagement';
+import engagement from '../features/customer/engagement.module.css';
 import styles from './CustomerLayout.module.css';
 
-const NAV = [
+/** Header bell: unread count from the server, refreshed every 30s. */
+function NotificationBell() {
+  const unread = useNotificationsQuery().data?.meta.unreadCount ?? 0;
+  return (
+    <Link
+      to="/customer/notifications"
+      className={engagement.bell}
+      aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+    >
+      <span aria-hidden="true">Notifications</span>
+      {unread > 0 && (
+        <span className={engagement.badge} aria-hidden="true">
+          {unread}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+const NAV_ITEMS = [
   { to: '/customer', label: 'Dashboard', end: true },
   { to: '/customer/membership', label: 'My card', end: false },
   { to: '/customer/points', label: 'Points', end: false },
   { to: '/customer/redemptions', label: 'Redemptions', end: false },
   { to: '/customer/payments', label: 'Payments', end: false },
+  { to: '/customer/bookings', label: 'Bookings', end: false },
+  { to: '/customer/messages', label: 'Messages', end: false },
   { to: '/customer/profile', label: 'Profile', end: false },
-].filter((item) => isFeaturePathEnabled(item.to));
+];
+/** Read at render: module switches load at startup and may change. */
+const navItems = () => NAV_ITEMS.filter((item) => isFeaturePathEnabled(item.to));
 
 /**
  * The customer portal shell.
@@ -43,6 +68,7 @@ export function CustomerLayout() {
 function CustomerShell() {
   const { signOut } = useCustomerSession();
   const profile = useCustomerProfileQuery();
+  const { pathname } = useLocation();
 
   if (profile.isLoading) {
     return (
@@ -92,6 +118,9 @@ function CustomerShell() {
 
   const customer = profile.data;
   const restricted = customer.status !== 'active';
+  // Every page needs one h1. The dashboard draws its own; the other tabs get the tab name
+  // as a screen-reader heading so the page is not heading-less.
+  const tab = navItems().find((item) => !item.end && pathname.startsWith(item.to));
 
   return (
     <div className={styles.shell}>
@@ -101,20 +130,28 @@ function CustomerShell() {
           <p className={styles.customerName}>{customer.fullName}</p>
           <p className={styles.customerNumber}>{customer.customerNumber}</p>
         </div>
-        <Button variant="secondary" onClick={() => void signOut()}>
-          Sign out
-        </Button>
+        <div>
+          <NotificationBell />
+          <Button variant="secondary" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+        </div>
       </header>
 
       {restricted && (
         <div className={styles.restricted} role="alert">
-          <strong>Your account is {customer.status}.</strong> Your card and points are not available
-          while this is in effect. Contact AFhomes Ecofarm to restore access.
+          <strong>
+            {customer.status === 'prospect'
+              ? 'Your account is not active yet.'
+              : `Your account is ${customer.status}.`}
+          </strong>{' '}
+          Your card and points are not available while this is in effect. Contact AFhomes Ecofarm to
+          restore access.
         </div>
       )}
 
       <nav className={styles.nav} aria-label="Customer portal">
-        {NAV.map((item) => (
+        {navItems().map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -127,6 +164,7 @@ function CustomerShell() {
       </nav>
 
       <main className={styles.main}>
+        {tab ? <h1 className="sr-only">{tab.label}</h1> : null}
         <Outlet />
       </main>
     </div>

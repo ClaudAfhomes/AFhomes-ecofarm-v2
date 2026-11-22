@@ -39,6 +39,25 @@ const modalBehavior = {
 } as const;
 
 /**
+ * SweetAlert marks the page (`#root`) `aria-hidden` while a modal is open. If the
+ * button that triggered it still holds focus, browsers block that and warn that
+ * focus is hidden from assistive technology. So focus moves into the popup BEFORE
+ * the page is hidden (`willOpen` runs first), and goes back to the trigger on
+ * close, when it is still on the page. Built per call: each popup has its own
+ * trigger.
+ */
+function focusBehavior() {
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  return {
+    willOpen: (popup: HTMLElement) => popup.focus({ preventScroll: true }),
+    returnFocus: false,
+    didClose: () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    },
+  };
+}
+
+/**
  * SweetAlert's `html` is raw markup, so anything interpolated into it must be
  * escaped. Detail lines carry server-returned values (a customer name, a payment
  * reference), so they are never trusted as markup.
@@ -67,6 +86,7 @@ export function notifyConfirm(input: NotifyInput & { confirmButtonText: string }
     cancelButtonText: 'Cancel',
     showCancelButton: true,
     ...modalBehavior,
+    ...focusBehavior(),
     customClass: { ...baseClasses },
   }).then((result) => result.isConfirmed === true);
 }
@@ -89,6 +109,7 @@ export function notifySuccess(input: NotifyInput): void {
     timerProgressBar: true,
     showConfirmButton: false,
     ...modalBehavior,
+    ...focusBehavior(),
     customClass: { ...baseClasses },
   });
 }
@@ -107,6 +128,7 @@ export function notifyError(input: NotifyInput): void {
       : { text: input.message }),
     confirmButtonText: 'OK',
     ...modalBehavior,
+    ...focusBehavior(),
     customClass: { ...baseClasses },
   });
 }
@@ -119,6 +141,7 @@ export function notifyWarning(input: NotifyInput): void {
     text: input.message,
     confirmButtonText: 'OK',
     ...modalBehavior,
+    ...focusBehavior(),
     customClass: { ...baseClasses },
   });
 }

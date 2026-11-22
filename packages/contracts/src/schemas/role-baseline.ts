@@ -159,6 +159,16 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   // through the transfer function, and no SM edits a registration directly. The
   // matrix above is not rewritten because the grant arrived after review.
   { moduleKey: 'network.ost_registrations', roles: ['senior_sales_manager'] },
+  // Website inquiries inbox, seeded by 20270105000027. `admin` views and works
+  // the inbox (view/update). Nobody creates or deletes through staff
+  // permissions: rows come only from the public form, and nothing is deleted.
+  // Other roles get it only when an administrator grants it on the Roles screen.
+  { moduleKey: 'sales.inquiries', roles: ['admin'] },
+  // Bookings, announcements and member messages (20270105000029-31): Admin only
+  // by default; other roles get them when an administrator grants them.
+  { moduleKey: 'operations.bookings', roles: ['admin'] },
+  { moduleKey: 'communication.announcements', roles: ['admin'] },
+  { moduleKey: 'communication.messages', roles: ['admin'] },
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

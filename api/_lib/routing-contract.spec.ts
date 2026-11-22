@@ -14,7 +14,10 @@
  * anything else means a HANDLER branch answered (including a handler 404,
  * 401 or 403, each asserted explicitly).
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
+
+afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
 
 import {
   CUSTOMER,
@@ -273,7 +276,8 @@ describe('router -> handler contract matrix', () => {
     expect((r.body as { scope?: { kind?: string } }).scope?.kind).toBe('global');
   });
 
-  it('keeps redemption, reports and cms disabled at the router', async () => {
+  it('keeps redemption, reports and cms out of the router when switched off', async () => {
+    setFeatureFlags({ redemption: false, reports: false, cms: false });
     let r = await dispatch('/api/v1/redemptions/resolve?identifier=x');
     expect(r.handled).toBe(false);
 
@@ -497,7 +501,8 @@ describe('authorization across the repaired routes', () => {
   });
 
   it('finance and employee boundaries hold on the repaired routes', async () => {
-    // Phase 1 disables catalog access for every principal before authorization.
+    // A switched-off module refuses catalog access for every principal before authorization.
+    setFeatureFlags({ redemption: false });
     let r = await dispatch('/api/v1/redemptions/items', {
       method: 'POST',
       token: TOKEN2.finance,

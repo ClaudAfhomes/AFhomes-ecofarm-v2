@@ -279,21 +279,65 @@ describe('contact and inquiry form', () => {
     expect(screen.getByText('Please choose an inquiry type.')).toBeInTheDocument();
   });
 
-  it('saves a valid inquiry to the browser outbox and opens the mail app', async () => {
+  /** Answer only `POST /inquiries`; every other request keeps the real fetch. */
+  const stubInquiryEndpoint = (answer: () => Promise<Response>) => {
+    const realFetch = globalThis.fetch;
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.endsWith('/inquiries')) return realFetch(input, init);
+      calls.push({ url, body: JSON.parse(String(init?.body ?? 'null')) });
+      return answer();
+    });
+    return { calls, restore: () => vi.stubGlobal('fetch', realFetch) };
+  };
+
+  const fillAndSend = async (user: ReturnType<typeof userEvent.setup>) => {
+    renderWithProviders(<App />, { route: '/contact' });
+    await chrome();
+    await user.type(screen.getByLabelText(/Name/), 'Juan Dela Cruz');
+    await user.type(screen.getByLabelText(/Email/), 'juan@example.com');
+    await user.type(screen.getByLabelText(/Contact Number/), '+639171234567');
+    await user.selectOptions(screen.getByLabelText(/Inquiry Type/), 'General Inquiry');
+    await user.type(screen.getByLabelText(/Message/), 'We would like to visit the resort soon.');
+    await user.click(screen.getByRole('button', { name: /Send message/ }));
+  };
+
+  it('sends a valid inquiry to the AF Homes inbox and shows its reference', async () => {
     const user = userEvent.setup();
+    const endpoint = stubInquiryEndpoint(async () =>
+      new Response(JSON.stringify({ reference: 'INQ-000042' }), { status: 201 }),
+    );
     const originalLocation = window.location;
     Object.defineProperty(window, 'location', { configurable: true, value: { href: '' } });
     try {
-      renderWithProviders(<App />, { route: '/contact' });
-      await chrome();
-      await user.type(screen.getByLabelText(/Name/), 'Juan Dela Cruz');
-      await user.type(screen.getByLabelText(/Email/), 'juan@example.com');
-      await user.type(screen.getByLabelText(/Contact Number/), '+639171234567');
-      await user.selectOptions(screen.getByLabelText(/Inquiry Type/), 'General Inquiry');
-      await user.type(screen.getByLabelText(/Message/), 'We would like to visit the resort soon.');
-      await user.click(screen.getByRole('button', { name: /Send message/ }));
+      await fillAndSend(user);
+      expect(await screen.findByText('Message sent.')).toBeInTheDocument();
+      expect(screen.getByText(/Reference: INQ-000042/)).toBeInTheDocument();
+      expect(endpoint.calls).toHaveLength(1);
+      expect(endpoint.calls[0]!.body).toMatchObject({
+        name: 'Juan Dela Cruz',
+        email: 'juan@example.com',
+        inquiryType: 'General Inquiry',
+        kind: 'inquiry',
+      });
+      // Delivered to the server: no email app, nothing parked in the browser.
+      expect((window.location as unknown as { href: string }).href).toBe('');
+      expect(localStorage.getItem('afhomes.inquiries.v1')).toBeNull();
+    } finally {
+      endpoint.restore();
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    }
+  });
 
-      expect(await screen.findByText('Request saved locally.')).toBeInTheDocument();
+  it('falls back to the browser outbox and the mail app when the server is unreachable', async () => {
+    const user = userEvent.setup();
+    const endpoint = stubInquiryEndpoint(() => Promise.reject(new TypeError('Failed to fetch')));
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { href: '' } });
+    try {
+      await fillAndSend(user);
+      expect(await screen.findByText('Almost done.')).toBeInTheDocument();
       expect((window.location as unknown as { href: string }).href).toMatch(
         /^mailto:info@afhomes\.com\.ph\?/,
       );
@@ -303,7 +347,27 @@ describe('contact and inquiry form', () => {
       expect(outbox).toHaveLength(1);
       expect(outbox[0]?.name).toBe('Juan Dela Cruz');
     } finally {
+      endpoint.restore();
       Object.defineProperty(window, 'location', { configurable: true, value: originalLocation });
+    }
+  });
+
+  it('shows a server refusal instead of emailing it', async () => {
+    const user = userEvent.setup();
+    const endpoint = stubInquiryEndpoint(async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: 'VALIDATION_ERROR', message: 'Use letters, spaces, apostrophes and hyphens only - no numbers' },
+        }),
+        { status: 400 },
+      ),
+    );
+    try {
+      await fillAndSend(user);
+      expect(await screen.findByText(/no numbers/)).toBeInTheDocument();
+      expect(localStorage.getItem('afhomes.inquiries.v1')).toBeNull();
+    } finally {
+      endpoint.restore();
     }
   });
 });

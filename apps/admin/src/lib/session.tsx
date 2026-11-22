@@ -149,8 +149,22 @@ function LegacySessionProvider({
   }, [client]);
 
   useEffect(() => {
-    const initialResolve = window.setTimeout(() => void resolve(), 0);
-    const subscription = client?.auth.onAuthStateChange(() => void resolve()).data.subscription;
+    // Supabase's initial event and the fallback share one startup resolution.
+    let initialized = false;
+    const initialize = () => {
+      if (initialized) return;
+      initialized = true;
+      void resolve();
+    };
+    const initialResolve = window.setTimeout(initialize, 0);
+    const subscription = client?.auth.onAuthStateChange((event) => {
+      window.clearTimeout(initialResolve);
+      if (event === 'INITIAL_SESSION') initialize();
+      else {
+        initialized = true;
+        void resolve();
+      }
+    }).data.subscription;
     const onFocus = () => void resolve();
     window.addEventListener('focus', onFocus);
     const cookies = import.meta.env.DEV ? window.cookieStore : undefined;

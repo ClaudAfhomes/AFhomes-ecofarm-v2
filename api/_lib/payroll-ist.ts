@@ -19,6 +19,8 @@ import type { ZodType } from 'zod';
 
 import { authorizeAfHomes } from './afhomes-access.js';
 import {
+  UUID_GROUP as ID,
+  strOrNull as str,
   deny,
   fail,
   isoOrNull,
@@ -47,9 +49,7 @@ import type { VercelRequest, VercelResponse } from './http.js';
  * The actor is always the session principal; no body field can name one. SQL re-checks the
  * module, the lifecycle, separation of duties and the Q1 gate.
  */
-const ID = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 
-const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const dateOrNull = (v: unknown): string | null => (v == null ? null : String(v));
 
 type Row = Record<string, unknown>;

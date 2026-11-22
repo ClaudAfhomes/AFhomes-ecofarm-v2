@@ -286,6 +286,22 @@ describe('customer guard', () => {
     expect(await screen.findByText(/not available while this is in effect/i)).toBeInTheDocument();
   });
 
+  it('words a prospect banner in plain language and gives the tab one h1', async () => {
+    installRoutes({
+      '/customer': ok({ ...CUSTOMER, status: 'prospect' }),
+      '/customer/membership': () => ({
+        status: 403,
+        body: { error: { code: 'FORBIDDEN', message: 'Your account is not active.' } },
+      }),
+    });
+    render('/customer/membership');
+    expect(await screen.findByText(/Your account is not active yet\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Your account is prospect/i)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([
+      'My card',
+    ]);
+  });
+
   it('does not render the shell before the session resolves', async () => {
     // No `initialUser` => the provider runs its real resolve path, which with no
     // Supabase client configured lands on "unauthenticated" without flashing.

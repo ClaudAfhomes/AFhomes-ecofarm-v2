@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 
 import { BUSINESS_FAMILIES, resolveRequestUrl, selectHandler } from './router.js';
+
+afterEach(() => setFeatureFlags(DEFAULT_FEATURE_FLAGS));
 
 describe('business family prefixes', () => {
   /**
@@ -45,6 +48,7 @@ describe('business family prefixes', () => {
   });
 
   it('keeps Services earning routes disabled while preserving manual point recording', () => {
+    setFeatureFlags({ services: false });
     // The bare prefix and each sub-path must all reach points.js. A shadow would
     // show up here as a different routeKey.
     for (const path of [
@@ -121,6 +125,7 @@ describe('selectHandler', () => {
   });
 
   it('does not route CMS endpoints while its feature flag is disabled', () => {
+    setFeatureFlags({ cms: false });
     const q: Record<string, string | undefined> = {};
     for (const path of [
       'public',
@@ -132,6 +137,16 @@ describe('selectHandler', () => {
     ]) {
       expect(selectHandler(`/api/v1/cms/${path}`, q)).toBeNull();
     }
+  });
+
+  it('routes CMS endpoints once the module is switched on', () => {
+    setFeatureFlags({ cms: true });
+    expect(selectHandler('/api/v1/cms/pages', {})).not.toBeNull();
+  });
+
+  it('never gates the module-switch endpoint itself', () => {
+    setFeatureFlags({ services: false, redemption: false, reports: false, cms: false });
+    expect(selectHandler('/api/v1/settings/features', {})).not.toBeNull();
   });
 
   it('serves the bare /api prefix used by the local dev server', () => {

@@ -42,6 +42,7 @@ import {
   updateRedemptionRule,
 } from './points-services';
 import { earningKeys } from './queryKeys';
+import { defaultRuleWindow } from './rule-dates';
 
 /** The three VIP tiers. Narrow, not `string`, so a typo cannot reach the API. */
 type Tier = 'BRONZE' | 'SILVER' | 'GOLD';
@@ -400,14 +401,18 @@ export function PointsRulesPage() {
       </section>
 
       <section aria-label="Points spending promotions" className={styles.section}>
-        <h2 className={styles.sectionTitle}>Points spending promotions</h2>
+        <h2 className={styles.sectionTitle}>Points spending rules</h2>
         <p className={styles.hint}>
-          What makes a NON-staycation service discountable by points, and at what conversion. A
-          staycation or hotel service needs no promotion. Every other service refuses points
-          spending unless an active promotion names it, covers the member&apos;s tier, and is inside
-          its effective window. Both dates are mandatory: a promotion that never expires cannot be
-          created. There is no cap exemption and no applies-to-everything option.
+          Points can be spent on a service only while an active rule names it, covers the
+          member&apos;s tier and is inside its dates. The rule sets how many pesos one point is worth.
+          Use an <strong>accommodation conversion rule</strong> for staycation or hotel services, and
+          a <strong>service spending promotion</strong> to open any other service for a limited
+          time. Without a rule, the Use Points screen refuses the purchase. Both dates are
+          mandatory; there is no cap exemption and no applies-to-everything option.
         </p>
+        {mayUpdate && promotions.data && (
+          <PointValueControl rules={promotions.data} onSaved={invalidate} />
+        )}
         {promotions.isLoading && (
           <div role="status" aria-label="Loading spending promotions" aria-busy="true">
             <Skeleton />
@@ -424,7 +429,7 @@ export function PointsRulesPage() {
         {promotions.data?.length === 0 && (
           <EmptyState
             title="No spending promotions"
-            description="Staycation purchases work without one. Add a promotion to open another service to points spending."
+            description="No service accepts points yet. Add an accommodation conversion rule for staycation services, or a promotion for any other service."
           />
         )}
         {promotions.data && promotions.data.length > 0 && (
@@ -577,8 +582,8 @@ function NewTierDiscountForm({
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [tier, setTier] = useState<'BRONZE' | 'SILVER' | 'GOLD'>('GOLD');
   const [rate, setRate] = useState('25');
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const [start, setStart] = useState(() => defaultRuleWindow().start);
+  const [end, setEnd] = useState(() => defaultRuleWindow().end);
   const [error, setError] = useState<string | null>(null);
 
   const save = useBusinessMutation({
@@ -598,8 +603,8 @@ function NewTierDiscountForm({
     retry: false,
     onSuccess: () => {
       setRate('25');
-      setStart('');
-      setEnd('');
+      setStart(defaultRuleWindow().start);
+      setEnd(defaultRuleWindow().end);
       setError(null);
       notifySuccess({ title: 'Tier discount added' });
       onSaved();
@@ -709,8 +714,9 @@ function NewRuleForm({
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [pointsAmount, setPointsAmount] = useState('');
   const [tiers, setTiers] = useState<Tier[]>(['GOLD']);
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  // Prefilled with today for one year; the admin only changes it for a campaign.
+  const [start, setStart] = useState(() => defaultRuleWindow().start);
+  const [end, setEnd] = useState(() => defaultRuleWindow().end);
   const [minimum, setMinimum] = useState('1');
   const [maximum, setMaximum] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -922,11 +928,12 @@ function NewPromotionForm({
   const [tiers, setTiers] = useState<Tier[]>(['GOLD']);
   const [minimum, setMinimum] = useState('1');
   const [maximum, setMaximum] = useState('');
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const [start, setStart] = useState(() => defaultRuleWindow().start);
+  const [end, setEnd] = useState(() => defaultRuleWindow().end);
   const [reference, setReference] = useState('');
   const [stacking, setStacking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const accommodation = ruleKind === 'accommodation';
 
   const save = useBusinessMutation({
     mutationFn: async () => {
@@ -943,7 +950,8 @@ function NewPromotionForm({
           effectiveEnd: end,
           isActive: true,
           promotionReference: reference.trim(),
-          allowDiscountStacking: stacking,
+          // The database honours stacking only on promotions; never send it otherwise.
+          allowDiscountStacking: accommodation ? false : stacking,
         });
         setServiceIds((current) => current.filter((id) => id !== serviceId));
         onSaved();
@@ -952,7 +960,9 @@ function NewPromotionForm({
     retry: false,
     onSuccess: () => {
       setError(null);
-      notifySuccess({ title: 'Spending promotion added' });
+      notifySuccess({
+        title: accommodation ? 'Accommodation conversion rule added' : 'Spending promotion added',
+      });
       onSaved();
     },
     onError: (cause: unknown) =>
@@ -966,11 +976,16 @@ function NewPromotionForm({
 
   return (
     <div aria-busy={save.isPending}>
-      <h3>Add a spending promotion</h3>
-      <p>Select one or more services; each receives its own promotion or conversion rule.</p>
+      <h3>Add a spending rule</h3>
       <p>
-        Selected services, both dates, and a named reference are all mandatory: a promotion that
-        never expires, names nothing, or cannot be reviewed cannot be created.
+        {accommodation
+          ? 'Sets what one point is worth on staycation or hotel services. Only services marked as staycation are listed.'
+          : 'Opens a non-staycation service to points spending for a limited time.'}{' '}
+        Each selected service receives its own rule.
+      </p>
+      <p>
+        Services, pesos per point, both dates and a named reference are all required, so every rule
+        expires and can be reviewed later.
       </p>
       <label htmlFor="promo-kind">Redemption rule type</label>
       <Select
@@ -1013,7 +1028,6 @@ function NewPromotionForm({
         id="promo-rate"
         name="promoRate"
         label="Pesos per point (for example 1, or 0.5)"
-        optional
         inputMode="decimal"
         value={rate}
         onChange={setRate}
@@ -1055,7 +1069,6 @@ function NewPromotionForm({
         id="promo-start"
         name="promoStart"
         label="Effective from"
-        optional
         value={start}
         onChange={setStart}
       />
@@ -1063,30 +1076,31 @@ function NewPromotionForm({
         id="promo-end"
         name="promoEnd"
         label="Effective to (exclusive)"
-        optional
         value={end}
         onChange={setEnd}
       />
       <TextField
         id="promo-reference"
         name="promoReference"
-        label="Promotion reference"
+        label={accommodation ? 'Rule reference' : 'Promotion reference'}
         value={reference}
         onChange={setReference}
         maxLength={200}
-        placeholder="e.g. TEP-VALENTINES-2026"
+        placeholder={accommodation ? 'e.g. STAYCATION-RATE-2027' : 'e.g. TEP-VALENTINES-2026'}
       />
       <label>
         <input
           type="checkbox"
-          checked={stacking}
+          checked={accommodation ? false : stacking}
+          disabled={accommodation}
           onChange={(event) => setStacking(event.target.checked)}
         />
         Permit combining with the VIP tier discount
       </label>
       <p>
-        Off by default. When on, this promotion authorizes a points discount on a purchase that
-        already carries a tier discount, for this service, tier and window only.
+        {accommodation
+          ? 'Not available for conversion rules: only a promotion can combine points with the tier discount.'
+          : 'Off by default. When on, this promotion authorizes a points discount on a purchase that already carries a tier discount, for this service, tier and window only.'}
       </p>
 
       <Button
@@ -1113,9 +1127,97 @@ function NewPromotionForm({
             save.mutate();
         }}
       >
-        Add promotion
+        {accommodation ? 'Add conversion rule' : 'Add promotion'}
       </Button>
       {error && <ErrorState title="Not saved" message={error} />}
+    </div>
+  );
+}
+
+/**
+ * One place to set what a point is worth. Each spending rule keeps its own rate
+ * (the database reads it per service and tier), so this applies the new value to
+ * every ACTIVE rule through the same audited PATCH as a single edit. Purchases
+ * already quoted keep their snapshot; only new spending uses the new value.
+ */
+function PointValueControl({
+  rules,
+  onSaved,
+}: {
+  rules: { id: string; pesoValuePerPoint: string; isActive: boolean }[];
+  onSaved: () => void;
+}) {
+  const active = rules.filter((rule) => rule.isActive);
+  const rates = [...new Set(active.map((rule) => rule.pesoValuePerPoint))];
+  const [value, setValue] = useState('');
+  const [failed, setFailed] = useState<string[]>([]);
+  const valid = /^(0|[1-9][0-9]*)(\.[0-9]{1,4})?$/.test(value) && Number(value) > 0;
+  const unchanged = rates.length === 1 && valid && Number(rates[0]) === Number(value);
+
+  const save = useBusinessMutation({
+    mutationFn: async () => {
+      const errors: string[] = [];
+      for (const rule of active) {
+        if (Number(rule.pesoValuePerPoint) === Number(value)) continue;
+        try {
+          await updateRedemptionRule(rule.id, { pesoValuePerPoint: value });
+        } catch (cause) {
+          errors.push(cause instanceof Error ? cause.message : 'Could not update a rule.');
+        }
+      }
+      setFailed(errors);
+      onSaved();
+      if (errors.length) throw new Error(`${errors.length} rule(s) were not updated.`);
+    },
+    retry: false,
+    onSuccess: () => {
+      setValue('');
+      notifySuccess({ title: `One point is now worth ₱${value} on every active spending rule` });
+    },
+  });
+
+  if (active.length === 0) return null;
+  return (
+    <div aria-busy={save.isPending} className={styles.hint}>
+      <p>
+        <strong>Value of one point:</strong>{' '}
+        {rates.length === 1
+          ? `${formatMoneyOrDash(rates[0])} on all ${active.length} active rules.`
+          : `differs by service (${rates.map((rate) => formatMoneyOrDash(rate)).join(', ')}).`}
+      </p>
+      <TextField
+        id="point-value"
+        name="pointValue"
+        label="New value of one point, in pesos (for example 1, or 0.5)"
+        inputMode="decimal"
+        value={value}
+        onChange={setValue}
+        error={value && !valid ? 'Enter a peso amount greater than zero.' : undefined}
+      />
+      <Button
+        loading={save.isPending}
+        loadingLabel="Updating…"
+        disabled={!valid || unchanged}
+        onClick={async () => {
+          if (
+            await notifyConfirm({
+              title: `Set one point to ₱${value}?`,
+              message: `Updates ${active.length} active spending rule(s). Purchases already quoted keep their value; only new spending uses ₱${value} per point.`,
+              confirmButtonText: 'Update all',
+            })
+          )
+            save.mutate();
+        }}
+      >
+        Update all active rules
+      </Button>
+      {unchanged && <p>Every active rule already uses this value.</p>}
+      {save.isError && (
+        <ErrorState
+          title="Not every rule was updated"
+          message={[save.error.message, ...failed].join(' ')}
+        />
+      )}
     </div>
   );
 }

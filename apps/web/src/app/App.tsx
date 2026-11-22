@@ -5,24 +5,11 @@ import { NotFound, ScrollToTop } from '@afhomes/ui';
 import { FEATURE_FLAGS } from '@afhomes/shared';
 
 import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
-import { CustomerDashboardPage } from '../features/customer/CustomerDashboardPage';
 import { CustomerForgotPasswordPage } from '../features/customer/CustomerForgotPasswordPage';
 import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
 import { CustomerResetPasswordPage } from '../features/customer/CustomerResetPasswordPage';
-import { CustomerMembershipPage } from '../features/customer/CustomerMembershipPage';
-import { CustomerPaymentsPage } from '../features/customer/CustomerPaymentsPage';
-import { CustomerPointsPage } from '../features/customer/CustomerPointsPage';
-import { CustomerProfilePage } from '../features/customer/CustomerProfilePage';
-import { CustomerRedemptionsPage } from '../features/customer/CustomerRedemptionsPage';
 import { AdminEntryPage, StaffLoginEntryPage } from '../features/staff/StaffEntryPage';
-import { OstRegisterPage } from '../features/ost/OstRegisterPage';
 import { OstLoginPage } from '../features/ost/OstLoginPage';
-import { OstDashboardPage } from '../features/ost/OstDashboardPage';
-import { OstSalesPage } from '../features/ost/OstSalesPage';
-import { OstCommissionsPage } from '../features/ost/OstCommissionsPage';
-import { OstAccreditationPage } from '../features/ost/OstAccreditationPage';
-import { OstProfilePage } from '../features/ost/OstProfilePage';
-import { OstRenewalPage } from '../features/ost/OstRenewalPage';
 import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
 import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
@@ -30,6 +17,56 @@ import { MarketingLayout } from '../marketing/MarketingLayout';
 import { CustomerLayout } from './CustomerLayout';
 import { OstLayout } from './OstLayout';
 import { OstGuard } from './OstGuard';
+
+// Portal screens load only when opened, like the marketing routes below.
+const CustomerDashboardPage = lazy(() =>
+  import('../features/customer/CustomerDashboardPage').then((m) => ({ default: m.CustomerDashboardPage })),
+);
+const CustomerMembershipPage = lazy(() =>
+  import('../features/customer/CustomerMembershipPage').then((m) => ({ default: m.CustomerMembershipPage })),
+);
+const CustomerPaymentsPage = lazy(() =>
+  import('../features/customer/CustomerPaymentsPage').then((m) => ({ default: m.CustomerPaymentsPage })),
+);
+const CustomerPointsPage = lazy(() =>
+  import('../features/customer/CustomerPointsPage').then((m) => ({ default: m.CustomerPointsPage })),
+);
+const CustomerProfilePage = lazy(() =>
+  import('../features/customer/CustomerProfilePage').then((m) => ({ default: m.CustomerProfilePage })),
+);
+const CustomerRedemptionsPage = lazy(() =>
+  import('../features/customer/CustomerRedemptionsPage').then((m) => ({ default: m.CustomerRedemptionsPage })),
+);
+const CustomerBookingsPage = lazy(() =>
+  import('../features/customer/CustomerBookingsPage').then((m) => ({ default: m.CustomerBookingsPage })),
+);
+const CustomerMessagesPage = lazy(() =>
+  import('../features/customer/CustomerMessagesPage').then((m) => ({ default: m.CustomerMessagesPage })),
+);
+const CustomerNotificationsPage = lazy(() =>
+  import('../features/customer/CustomerNotificationsPage').then((m) => ({ default: m.CustomerNotificationsPage })),
+);
+const OstRegisterPage = lazy(() =>
+  import('../features/ost/OstRegisterPage').then((m) => ({ default: m.OstRegisterPage })),
+);
+const OstDashboardPage = lazy(() =>
+  import('../features/ost/OstDashboardPage').then((m) => ({ default: m.OstDashboardPage })),
+);
+const OstSalesPage = lazy(() =>
+  import('../features/ost/OstSalesPage').then((m) => ({ default: m.OstSalesPage })),
+);
+const OstCommissionsPage = lazy(() =>
+  import('../features/ost/OstCommissionsPage').then((m) => ({ default: m.OstCommissionsPage })),
+);
+const OstAccreditationPage = lazy(() =>
+  import('../features/ost/OstAccreditationPage').then((m) => ({ default: m.OstAccreditationPage })),
+);
+const OstProfilePage = lazy(() =>
+  import('../features/ost/OstProfilePage').then((m) => ({ default: m.OstProfilePage })),
+);
+const OstRenewalPage = lazy(() =>
+  import('../features/ost/OstRenewalPage').then((m) => ({ default: m.OstRenewalPage })),
+);
 
 const HomePage = lazy(() =>
   import('../features/customer/HomeLoginPage').then((m) => ({ default: m.HomeLoginPage })),
@@ -68,6 +105,7 @@ export default function App() {
   return (
     <>
     <ScrollToTop />
+    <Suspense fallback={<LoadingState />}>
     <Routes>
       <Route
         element={
@@ -143,12 +181,16 @@ export default function App() {
         <Route path="points" element={FEATURE_FLAGS.services ? <CustomerPointsPage /> : <NotFound />} />
         <Route path="redemptions" element={FEATURE_FLAGS.redemption ? <CustomerRedemptionsPage /> : <NotFound />} />
         <Route path="payments" element={<CustomerPaymentsPage />} />
+        <Route path="bookings" element={<CustomerBookingsPage />} />
+        <Route path="messages" element={<CustomerMessagesPage />} />
+        <Route path="notifications" element={<CustomerNotificationsPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
 
       <Route path="*" element={<MarketingNotFoundPage />} />
     </Routes>
+    </Suspense>
     </>
   );
 }

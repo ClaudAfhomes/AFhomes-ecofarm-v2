@@ -123,15 +123,16 @@ const authError = (message: string, code = 'PGRST301') => ({ code, message });
 function parseOrFilter(filter: string): { col: string; op: string; value: unknown }[] {
   return filter.split(',').map((clause) => {
     const [col, op, ...rest] = clause.split('.');
-    let value: unknown = rest.join('.');
-    if (typeof value === 'string' && value.startsWith('%') && value.endsWith('%')) {
-      value = value.slice(1, -1);
-    }
-    return { col: col!, op: op!, value };
+    // Wildcards stay in the value; `compareOp` gives them their Postgres meaning.
+    // (Stripping `%term%` to `term` and then anchoring made every search exact.)
+    return { col: col!.trim(), op: op!, value: rest.join('.') };
   });
 }
 
 function compareOp(op: string, actual: unknown, expected: unknown): boolean {
+  // `is.null` must be decided before the null short-circuit below, or an
+  // `or(col.is.null, ...)` branch could never match a null column.
+  if (op === 'is' && String(expected) === 'null') return actual === null || actual === undefined;
   if (actual === undefined || actual === null) return false;
   const a = String(actual);
   const b = String(expected);
@@ -139,11 +140,26 @@ function compareOp(op: string, actual: unknown, expected: unknown): boolean {
     case 'eq':
       return a === b;
     case 'ilike': {
-      const pattern = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`^${pattern}$`, 'i').test(a);
+      // PostgREST `*` and SQL `%` are any run, `_` any single character, as in
+      // Postgres. (They used to be escaped as literals, so `%term%` never matched.)
+      const pattern = b
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/[*%]/g, '.*')
+        .replace(/_/g, '.');
+      return new RegExp(`^${pattern}$`, 'is').test(a);
     }
     case 'is':
-      return b === 'null' ? actual === null : a === b;
+      return a === b;
+    // Ordered comparisons, as PostgREST: numbers numerically, else as text
+    // (ISO dates and timestamps sort correctly as text).
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      const numeric = typeof actual === 'number' && b !== '' && !Number.isNaN(Number(b));
+      const cmp = numeric ? (actual as number) - Number(b) : a < b ? -1 : a > b ? 1 : 0;
+      return op === 'gt' ? cmp > 0 : op === 'gte' ? cmp >= 0 : op === 'lt' ? cmp < 0 : cmp <= 0;
+    }
     default:
       return false;
   }
@@ -885,7 +901,17 @@ export class FakeSupabase {
    * test can script a transactional function's return value and its side
    * effects.
    */
-  async rpc(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  rpc(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    // Header chaining is request-local; scripted RPC fixtures own their response.
+    const request = this.rpcResult(fn, args);
+    return Object.assign(request, {
+      setHeader(_name: string, _value: string) {
+        return request;
+      },
+    });
+  }
+
+  private async rpcResult(fn: string, args: Record<string, unknown> = {}): Promise<unknown> {
     const entry = (this.rpcs ?? []).find((r) => r.fn === fn);
     this.calls.push({ op: 'rpc', table: fn, arg: args });
     if (this.rpcErrors[fn]) return { data: null, error: { ...this.rpcErrors[fn] } };
@@ -1304,14 +1330,19 @@ export class FakeSupabase {
         (r) => r.customer_id !== id,
       );
       this.tables.purchases = this.rows('purchases').filter((r) => r.customer_id !== id);
-      this.tables.earning_claims = this.rows('earning_claims').filter(
-        (r) => r.customer_id !== id,
-      );
+      this.tables.earning_claims = this.rows('earning_claims').filter((r) => r.customer_id !== id);
       this.tables.card_sales = this.rows('card_sales').filter((r) => r.customer_id !== id);
       this.tables.customers = this.rows('customers').filter((r) => r.id !== id);
       return { data: null, error: null };
     }
-    if (!entry) return { data: null, error: { code: '42883', message: `${fn} does not exist` } };
+    if (!entry)
+      return {
+        data: null,
+        error: {
+          code: fn === 'afhomes_self_session' ? 'PGRST202' : '42883',
+          message: `${fn} does not exist`,
+        },
+      };
     return {
       data: typeof entry.result === 'function' ? entry.result(args) : entry.result,
       error: null,

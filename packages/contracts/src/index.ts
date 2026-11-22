@@ -256,6 +256,18 @@ export {
   canTransitionCustomerApplication,
   canTransitionReservationAgreement,
   hierarchyAllowsUpline,
+  bookingStatusSchema,
+  conversationStatusSchema,
+  announcementStatusSchema,
+  BOOKING_STATUS_LABELS,
+  ANNOUNCEMENT_STATUS_LABELS,
+  canTransitionBooking,
+  canTransitionAnnouncement,
+} from './schemas/lifecycle.js';
+export type {
+  BookingStatus,
+  ConversationStatus,
+  AnnouncementStatus,
 } from './schemas/lifecycle.js';
 export type {
   CustomerStatus,
@@ -843,6 +855,7 @@ export {
 } from './schemas/official-forms.js';
 
 export * from './schemas/purchase-flow.js';
+export * from './schemas/feature-flags.js';
 export * from './schemas/signed-documents.js';
 
 export { purchaseRowSchema, servicePolicyStatusSchema } from './schemas/points.js';
@@ -865,6 +878,8 @@ export * from './schemas/payroll.js';
 export * from './schemas/external-evidence.js';
 export * from './schemas/cms-content.js';
 export * from './schemas/media.js';
+export * from './schemas/inquiries.js';
+export * from './schemas/engagement.js';
 
 export { applicationRaDraftSchema, type ApplicationRaDraft } from './schemas/official-forms.js';
 

@@ -98,6 +98,14 @@ export const auditQuerySchema = z.object({
   action: z.string().trim().max(80).optional(),
   entityType: z.string().trim().max(60).optional(),
   entityId: z.string().trim().max(100).optional(),
+  /** Role slug of the actor, or `ist` for the IST group (SM / SSM / VD). */
+  role: z
+    .string()
+    .trim()
+    .max(60)
+    .regex(/^[a-z0-9_]+$/)
+    .optional(),
+  departmentId: z.string().uuid().optional(),
   from: z.string().trim().max(30).optional(),
   to: z.string().trim().max(30).optional(),
   format: reportFormatSchema.default('json'),
@@ -112,11 +120,14 @@ export const auditEventSchema = z.object({
   actorId: z.string().nullable(),
   actorName: z.string().nullable().optional(),
   actorRole: z.string().nullable().optional(),
+  actorDepartment: z.string().nullable().optional(),
   action: z.string(),
   entityType: z.string(),
   entityId: z.string().nullable(),
   summary: z.string(),
   metadata: z.record(z.string(), z.unknown()),
+  /** Redacted values before the change (null when the action created something). */
+  before: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 export type AuditEvent = z.infer<typeof auditEventSchema>;
 
@@ -128,6 +139,12 @@ export const auditResponseSchema = z.object({
   filters: z.record(z.string(), z.unknown()),
   summary: z.record(z.string(), z.unknown()),
   data: z.array(auditEventSchema),
+  options: z
+    .object({
+      roles: z.array(z.object({ slug: z.string(), name: z.string() })),
+      departments: z.array(z.object({ id: z.string(), name: z.string() })),
+    })
+    .optional(),
   meta: z.object({
     total: z.number().int().nonnegative(),
     limit: z.number().int().nonnegative(),

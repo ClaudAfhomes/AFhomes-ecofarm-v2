@@ -1,6 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
 
 import { AdminLayout } from './AdminLayout';
 import type { SessionUser } from '../lib/session';
@@ -72,5 +73,40 @@ describe('AdminLayout sidebar sign-out', () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Go back' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  });
+
+  it('says a switched-off module is switched off, not a role problem', () => {
+    setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, network: false });
+    try {
+      renderWithProviders(
+        <Routes>
+          <Route path="/admin/genealogy" element={<AdminLayout />}>
+            <Route index element={<p>Page content</p>} />
+          </Route>
+        </Routes>,
+        {
+          route: '/admin/genealogy',
+          user: {
+            ...USER,
+            afHomesPermissions: [
+              ...USER.afHomesPermissions!,
+              {
+                moduleKey: 'network.genealogy',
+                canView: true,
+                canCreate: false,
+                canUpdate: false,
+                canDelete: false,
+              },
+            ],
+          },
+        },
+      );
+      expect(
+        screen.getByRole('heading', { name: 'This module is switched off' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/your role cannot/i)).toBeNull();
+    } finally {
+      setFeatureFlags(DEFAULT_FEATURE_FLAGS);
+    }
   });
 });

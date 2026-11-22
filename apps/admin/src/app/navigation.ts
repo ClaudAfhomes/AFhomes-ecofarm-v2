@@ -50,6 +50,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       // active and the breadcrumb would name the wrong page.
       { to: '/admin/customers/applications', label: 'Applications', module: 'sales.customers' },
       { to: '/admin/sales/reservations', label: 'Reservation', module: 'sales.card_sales' },
+      // Website contact and reservation-request form inbox (own key, 20270105000027).
+      { to: '/admin/sales/inquiries', label: 'Website Inquiries', module: 'sales.inquiries' },
       { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
       {
         to: '/admin/sales/payment-scheme-guide',
@@ -161,6 +163,34 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/network/members', label: 'Members', module: 'network.members' },
     ],
   },
+  // Member engagement: service bookings and the member-facing notice and
+  // message desks. Each child keeps its own module key, so a role sees only
+  // the screens it was granted; the parent opens on its first visible child.
+  {
+    to: '/admin/bookings',
+    label: 'Bookings',
+    icon: 'clock',
+    module: 'operations.bookings',
+    // A group with one child (not a bare link): a bare top-level link resolves
+    // to the Dashboard in `findNavItem`, which would gate it on the wrong module.
+    dropdown: [
+      { to: '/admin/bookings', label: 'Service Bookings', module: 'operations.bookings' },
+    ],
+  },
+  {
+    to: '/admin/messages',
+    label: 'Communication',
+    icon: 'message',
+    module: 'communication.messages',
+    dropdown: [
+      { to: '/admin/messages', label: 'Member Messages', module: 'communication.messages' },
+      {
+        to: '/admin/announcements',
+        label: 'Announcements',
+        module: 'communication.announcements',
+      },
+    ],
+  },
   {
     to: '/admin/staff',
     label: 'Organization',
@@ -171,6 +201,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
       { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
       { to: '/admin/roles', label: 'Roles', module: 'organization.roles' },
       { to: '/admin/settings/public-verification', label: 'Verification Settings', module: 'governance.config' },
+      { to: '/admin/settings/modules', label: 'Modules', module: 'governance.config' },
     ],
   },
   // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`
@@ -238,18 +269,24 @@ export function navItemsForPermissions(
   items = ADMIN_NAV_ITEMS,
 ): SidebarItem[] {
   return items.flatMap((item) => {
-    if (!isFeaturePathEnabled(item.to)) return [];
-    const dropdown = item.dropdown?.filter((child) =>
-      child.to === '/admin/reports'
-        ? canViewReports(permissions)
-        : canViewNavLink(permissions, child),
+    // A switched-off parent can still hold a child that no switch hides (the Audit
+    // Log under Reports); the group then opens on its first visible child.
+    const dropdown = item.dropdown?.filter(
+      (child) =>
+        isFeaturePathEnabled(child.to) &&
+        (child.to === '/admin/reports'
+          ? canViewReports(permissions)
+          : canViewNavLink(permissions, child)),
     );
+    const parentEnabled = isFeaturePathEnabled(item.to);
     const canViewParent =
-      item.to === '/admin/reports'
+      parentEnabled &&
+      (item.to === '/admin/reports'
         ? canViewReports(permissions)
-        : canViewModule(permissions, item.module);
+        : canViewModule(permissions, item.module));
     if (!canViewParent && !dropdown?.length) return [];
-    return [{ to: item.to, label: item.label, icon: item.icon, end: item.end, dropdown }];
+    const to = parentEnabled ? item.to : (dropdown?.[0]?.to ?? item.to);
+    return [{ to, label: item.label, icon: item.icon, end: item.end, dropdown }];
   });
 }
 

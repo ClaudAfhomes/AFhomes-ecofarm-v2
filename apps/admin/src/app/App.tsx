@@ -1,4 +1,9 @@
 import { lazy } from 'react';
+const ModuleSettingsPage = lazy(() =>
+  import('../features/afhomes/ModuleSettingsPage').then((m) => ({
+    default: m.ModuleSettingsPage,
+  })),
+);
 const PublicVerificationSettingsPage = lazy(() =>
   import('../features/afhomes/PublicVerificationSettingsPage').then((m) => ({
     default: m.PublicVerificationSettingsPage,
@@ -213,6 +218,20 @@ const OstReferralCodesPage = lazy(() =>
 const AuditPage = lazy(() =>
   import('../features/reports/AuditPage').then((m) => ({ default: m.AuditPage })),
 );
+const InquiriesPage = lazy(() =>
+  import('../features/inquiries/InquiriesPage').then((m) => ({ default: m.InquiriesPage })),
+);
+const BookingsPage = lazy(() =>
+  import('../features/engagement/BookingsPage').then((m) => ({ default: m.BookingsPage })),
+);
+const AnnouncementsPage = lazy(() =>
+  import('../features/engagement/AnnouncementsPage').then((m) => ({
+    default: m.AnnouncementsPage,
+  })),
+);
+const MessagesPage = lazy(() =>
+  import('../features/engagement/MessagesPage').then((m) => ({ default: m.MessagesPage })),
+);
 const ReportsPage = lazy(() =>
   import('../features/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })),
 );
@@ -243,6 +262,19 @@ const IstPortalPage = lazy(() => import('../features/ist/IstPortalPage').then(m 
 const IstAccreditationPage = lazy(() => import('../features/ist/IstPortalPage').then(m => ({ default: m.IstAccreditationPage })));
 
 const protectedPage = (page: ReactNode) => <RequireRole>{page}</RequireRole>;
+
+/**
+ * Unknown admin URL. Signed-in staff get the 404 inside the shell; anyone else
+ * is sent to sign in first instead of seeing an empty authenticated shell.
+ * Deliberately not a guarded route: it maps to no module.
+ */
+function UnknownAdminRoute() {
+  return (
+    <RequireRole unknownRoute>
+      <NotFound />
+    </RequireRole>
+  );
+}
 
 export default function App() {
   const location = useLocation();
@@ -338,6 +370,10 @@ export default function App() {
                 path="/admin/sales/reservations"
                 element={protectedPage(<ReservationAgreementsPage />)}
               />
+              <Route path="/admin/sales/inquiries" element={protectedPage(<InquiriesPage />)} />
+              <Route path="/admin/bookings" element={protectedPage(<BookingsPage />)} />
+              <Route path="/admin/announcements" element={protectedPage(<AnnouncementsPage />)} />
+              <Route path="/admin/messages" element={protectedPage(<MessagesPage />)} />
               <Route
                 path="/admin/sales/reservations/new"
                 element={protectedPage(<ReservationAgreementEditorPage />)}
@@ -472,6 +508,7 @@ export default function App() {
               />
               <Route path="/admin/roles" element={protectedPage(<AfHomesRolesPage />)} />
               <Route path="/admin/settings/public-verification" element={protectedPage(<PublicVerificationSettingsPage />)} />
+              <Route path="/admin/settings/modules" element={protectedPage(<ModuleSettingsPage />)} />
               {/* My Account: the forced first-login password change lives here, so
               the guard must let a gated session through (see RequireRole). */}
               <Route path="/admin/profile" element={protectedPage(<MyAccountPage />)} />
@@ -531,7 +568,7 @@ export default function App() {
               <Route path="/admin/cms/history" element={protectedPage(<CmsHistoryPage />)} />
               <Route path="/admin/staff/:id" element={protectedPage(<AfHomesStaffDetailPage />)} />
               <Route path="/admin/roles/:id" element={protectedPage(<AfHomesRoleDetailPage />)} />
-              <Route path="*" element={<NotFound />} />
+              <Route path="*" element={<UnknownAdminRoute />} />
             </Route>
           </>,
         )}

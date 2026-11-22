@@ -624,7 +624,7 @@ export type OnboardingToken = z.infer<typeof onboardingTokenSchema>;
 /** Authorized staff recovery response. The token exists only inside the one-time URL. */
 export const customerOnboardingRecoverySchema = z.object({
   status: z.enum(['email_sent', 'manual_required']),
-  emailStatus: z.enum(['sent', 'failed']),
+  emailStatus: z.enum(['sent', 'failed', 'not_attempted']),
   email: z.string().email(),
   activationUrl: z.string().url(),
   expiresAt: z.string(),

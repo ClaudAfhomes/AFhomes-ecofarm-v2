@@ -21,6 +21,9 @@
 .link {
   color: var(--color-text-secondary);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
 }
 
 .link:hover {

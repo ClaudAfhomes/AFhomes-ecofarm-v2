@@ -1,17 +1,22 @@
+import { submitInquiryResultSchema } from '@afhomes/contracts';
+
+import { request } from '../../lib/api/client';
+import { ApiError } from '../../lib/api/errors';
 import { inquirySchema } from '../lib/inquiryValidation';
 import { storeInquiry } from './inquiries';
 import { sendClientMessage } from '../lib/email';
 import type { ContactFormValues, ContactSubmitResult } from '../types/contact';
 
 /**
- * Phase 3: there is no inquiry intake backend on this project (the source
- * site's Supabase Edge Function `submit-inquiry` does not exist here), so
- * this flag stays `false`. Submissions take the source site's own offline
- * path: validated, kept in the browser outbox, and handed to the visitor's
- * email app addressed to AFhomes. A server-side intake is Phase 4 / backend
- * work — do not point this at a nonexistent endpoint.
+ * Submissions go to the AF Homes inquiry inbox (`POST /inquiries`, migration
+ * 20270105000027), where staff see them under Sales → Website Inquiries.
+ *
+ * If the server cannot be reached (offline, outage), the old path still runs so
+ * the message is not lost: kept in the browser outbox and handed to the
+ * visitor's email app addressed to AF Homes. A validation refusal (4xx) is shown
+ * to the visitor instead, because emailing it would only hide the problem.
  */
-export const hasInquiryBackend = false;
+export const hasInquiryBackend = true;
 
 export const contactApi = {
   async submitInquiry(payload: ContactFormValues): Promise<ContactSubmitResult> {
@@ -19,6 +24,21 @@ export const contactApi = {
     if (!checked.success)
       throw new Error(checked.error.issues.map((issue) => issue.message).join(' '));
     const value = checked.data;
+
+    try {
+      const saved = await request('/inquiries', submitInquiryResultSchema, {
+        method: 'POST',
+        body: JSON.stringify(value),
+      });
+      return {
+        ok: true,
+        reference: saved.reference,
+        message: 'AF Homes received your message and will contact you soon.',
+      };
+    } catch (error) {
+      if (error instanceof ApiError && error.status < 500) throw error;
+      // Server unreachable: fall through to the offline path below.
+    }
 
     storeInquiry({
       id: value.requestId,
@@ -40,9 +60,10 @@ export const contactApi = {
 
     return {
       ok: true,
+      offline: true,
       reference: value.requestId,
       message:
-        'Your message was prepared in your email app and sent to AFhomes at info@afhomes.com.ph.',
+        'We could not reach AF Homes just now, so your message was prepared in your email app, addressed to info@afhomes.com.ph. Please press Send there.',
     };
   },
 };

@@ -193,7 +193,7 @@ describe('Customer onboarding recovery', () => {
     );
 
     const dialog = await screen.findByRole('dialog', { name: 'Customer activation ready' });
-    expect(dialog).toHaveTextContent('Email could not be sent');
+    expect(dialog).toHaveTextContent('AF Homes does not email it');
     expect(dialog).toHaveTextContent('This activation link is shown once');
     expect(screen.getByLabelText('Customer activation link')).toHaveValue(
       'https://members.afhomes.test/customer/activate#token=one-time-token',

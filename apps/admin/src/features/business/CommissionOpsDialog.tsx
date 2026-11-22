@@ -17,7 +17,7 @@ import type {
   CommissionRecoveryCase,
   CommissionRecoveryTrigger,
 } from '@afhomes/contracts';
-import { formatMoneyOrDash } from '@afhomes/shared';
+import { formatMoneyOrDash, manilaToday } from '@afhomes/shared';
 
 import { formatDate } from '../../lib/format';
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
@@ -54,8 +54,6 @@ const PAYOUT_TONE: Record<CommissionPayout['status'], StatusTone> = {
   reconciled: 'success',
 };
 
-/** Today's calendar date in Asia/Manila (UTC+8, no DST). */
-const manilaToday = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
 const MONEY = /^\d+(\.\d{1,2})?$/;
 
 type Props = {

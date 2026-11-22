@@ -818,6 +818,9 @@ export const purchaseReceiptSchema = z.object({
   status: z.enum(['recorded', 'verified', 'rejected', 'voided']),
   recordedBy: z.string().uuid().nullable(),
   verifiedBy: z.string().uuid().nullable(),
+  /** Display names for the two staff ids; null when the account is unknown. */
+  recordedByName: z.string().nullable().optional(),
+  verifiedByName: z.string().nullable().optional(),
   recordedAt: z.string().nullable(),
   verifiedAt: z.string().nullable(),
   rejectionReason: z.string().nullable(),

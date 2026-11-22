@@ -201,15 +201,81 @@ describe('spending promotions', () => {
     );
   });
 
-  it('shows an empty state that names the staycation default, not a blank page', async () => {
+  it('shows an empty state that says no service accepts points yet, not a blank page', async () => {
+    // Every spend, staycation included, needs an active rule for its rate
+    // (NO_REDEMPTION_RATE otherwise), so the empty state must not promise one.
     vi.mocked(listRedemptionRules).mockResolvedValue([]);
     renderWithProviders(<PointsRulesPage />, { user: admin });
     expect(await screen.findByText('No spending promotions')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Staycation purchases work without one. Add a promotion to open another service to points spending.',
+        'No service accepts points yet. Add an accommodation conversion rule for staycation services, or a promotion for any other service.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('sets the value of one point on every ACTIVE rule in one confirmed action', async () => {
+    const second = { ...PROMOTION, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' };
+    const inactive = { ...PROMOTION, id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', isActive: false };
+    vi.mocked(listRedemptionRules).mockResolvedValue([PROMOTION, second, inactive]);
+    vi.mocked(updateRedemptionRule).mockResolvedValue({ ...PROMOTION, pesoValuePerPoint: '0.5' });
+    const user = userEvent.setup();
+    renderWithProviders(<PointsRulesPage />, { user: admin });
+    expect(await screen.findByText(/on all 2 active rules/)).toBeInTheDocument();
+    const field = screen.getByLabelText(/new value of one point/i);
+    const button = screen.getByRole('button', { name: 'Update all active rules' });
+    await user.type(field, '1');
+    expect(button).toBeDisabled(); // already the current value
+    await user.clear(field);
+    await user.type(field, '0.5');
+    await user.click(button);
+    await waitFor(() => expect(updateRedemptionRule).toHaveBeenCalledTimes(2));
+    expect(updateRedemptionRule).toHaveBeenCalledWith(PROMOTION.id, { pesoValuePerPoint: '0.5' });
+    expect(updateRedemptionRule).toHaveBeenCalledWith(second.id, { pesoValuePerPoint: '0.5' });
+    expect(updateRedemptionRule).not.toHaveBeenCalledWith(inactive.id, expect.anything());
+  });
+
+  it('refuses a zero point value and reports rules that failed to update', async () => {
+    const second = { ...PROMOTION, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' };
+    vi.mocked(listRedemptionRules).mockResolvedValue([PROMOTION, second]);
+    vi.mocked(updateRedemptionRule)
+      .mockResolvedValueOnce(PROMOTION)
+      .mockRejectedValueOnce(new Error('Rule window closed'));
+    const user = userEvent.setup();
+    renderWithProviders(<PointsRulesPage />, { user: admin });
+    const field = await screen.findByLabelText(/new value of one point/i);
+    const button = screen.getByRole('button', { name: 'Update all active rules' });
+    await user.type(field, '0');
+    expect(button).toBeDisabled();
+    expect(screen.getByText('Enter a peso amount greater than zero.')).toBeInTheDocument();
+    await user.clear(field);
+    await user.type(field, '2');
+    await user.click(button);
+    expect(await screen.findByText('Not every rule was updated')).toBeInTheDocument();
+    expect(screen.getByText(/1 rule\(s\) were not updated\. Rule window closed/)).toBeInTheDocument();
+  });
+
+  it('adds an accommodation conversion rule with stacking off and pre-filled dates', async () => {
+    vi.mocked(listServices).mockResolvedValue([{ ...SERVICE, isStaycationEligible: true }]);
+    vi.mocked(createRedemptionRule).mockResolvedValue(PROMOTION);
+    const user = userEvent.setup();
+    renderWithProviders(<PointsRulesPage />, { user: admin });
+    await screen.findByText('TEP-2026');
+    await user.selectOptions(screen.getByLabelText('Redemption rule type'), 'accommodation');
+    expect(screen.getByLabelText(/permit combining/i)).toBeDisabled();
+    expect((screen.getByLabelText(/effective from/i, { selector: '#promo-start' }) as HTMLInputElement).value).not.toBe('');
+    await user.selectOptions(
+      screen.getByLabelText('Service', { selector: '#promo-service' }),
+      SERVICE_ID,
+    );
+    await user.type(screen.getByLabelText(/pesos per point/i), '1');
+    await user.type(screen.getByLabelText(/rule reference/i), 'STAYCATION-RATE-2027');
+    await user.click(screen.getByRole('button', { name: 'Add conversion rule' }));
+    await waitFor(() =>
+      expect(createRedemptionRule).toHaveBeenCalledWith(
+        expect.objectContaining({ ruleKind: 'accommodation', allowDiscountStacking: false }),
+      ),
+    );
   });
 });
 

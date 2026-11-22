@@ -206,14 +206,30 @@ describe('purchase receipts', () => {
 
   it('shows the recorder and the verifier as SEPARATE attributed acts', async () => {
     mockedReceipts.mockResolvedValue([
-      { ...RECEIPT, status: 'verified', verifiedBy: '22222222-2222-4222-8222-222222222222' },
+      {
+        ...RECEIPT,
+        status: 'verified',
+        recordedByName: 'MARIA SANTOS',
+        verifiedBy: '22222222-2222-4222-8222-222222222222',
+        verifiedByName: 'JUAN CRUZ',
+      },
     ] as never);
     await openPurchase();
     await screen.findByText('verified');
     expect(screen.getByRole('columnheader', { name: 'Recorded by' })).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Verified by' })).toBeTruthy();
-    expect(screen.getByText('11111111-1111-4111-8111-111111111111')).toBeTruthy();
-    expect(screen.getByText('22222222-2222-4222-8222-222222222222')).toBeTruthy();
+    expect(screen.getByText('MARIA SANTOS')).toBeTruthy();
+    expect(screen.getByText('JUAN CRUZ')).toBeTruthy();
+  });
+
+  it('never shows a raw staff id when a name is unavailable', async () => {
+    mockedReceipts.mockResolvedValue([
+      { ...RECEIPT, status: 'verified', verifiedBy: '22222222-2222-4222-8222-222222222222' },
+    ] as never);
+    await openPurchase();
+    await screen.findByText('verified');
+    expect(screen.queryByText(/1111-4111|2222-4222/)).toBeNull();
+    expect(screen.getAllByText('Staff account')).toHaveLength(2);
   });
 
   it('refuses a rejection with no reason, in the UI', async () => {

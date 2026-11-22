@@ -178,7 +178,7 @@ export function CustomerRecordActions({
             <p>
               {activationResult.emailStatus === 'sent'
                 ? 'Activation email sent.'
-                : 'Email could not be sent. Copy this link and give it to the customer.'}
+                : 'Copy this link and give it to the customer. AF Homes does not email it.'}
             </p>
             <p>
               <strong>This activation link is shown once.</strong> Closing this dialog removes it

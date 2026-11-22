@@ -8,7 +8,7 @@
  * downloads through a stubbed object URL. Every figure asserted arrives in
  * the mocked server payload; the screens compute nothing themselves.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -266,15 +266,65 @@ describe('Phase 30 audit page', () => {
     expect(await screen.findByText('No audit events')).toBeInTheDocument();
   });
 
-  it('renders rows with pagination and opens redacted metadata', async () => {
+  it('renders rows with pagination and opens the event details', async () => {
     const user = userEvent.setup();
     render('/admin/audit');
     expect(await screen.findByText('Application submitted')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Metadata' }));
-    expect(await screen.findByText('Event metadata (redacted)')).toBeInTheDocument();
-    expect(screen.getByText(/SALE-000001/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('SALE-000001')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByText('Event metadata (redacted)')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('filters by category and department and shows what changed', async () => {
+    const user = userEvent.setup();
+    install({
+      'GET /reports/audit': {
+        status: 200,
+        body: {
+          ...auditBody([
+            {
+              ...auditRows[0],
+              action: 'REDEMPTION_RULE_UPDATED',
+              actorName: 'GSD Cashier',
+              actorRole: 'GSD',
+              actorDepartment: 'General Services',
+              before: { pointsPerPeso: '0.10', name: 'Teppanyaki' },
+              metadata: { pointsPerPeso: '0.20', name: 'Teppanyaki' },
+            },
+          ]),
+          options: {
+            roles: [{ slug: 'gsd', name: 'GSD' }],
+            departments: [
+              { id: '22222222-2222-4222-8222-222222222222', name: 'General Services' },
+            ],
+          },
+        },
+      },
+    });
+    render('/admin/audit');
+    expect(await screen.findByText('GSD · General Services')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Category'), 'ist');
+    await user.selectOptions(screen.getByLabelText('Department'), 'General Services');
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (r) =>
+            r.path === '/reports/audit' &&
+            r.query.includes('role=ist') &&
+            r.query.includes('departmentId=22222222-2222-4222-8222-222222222222'),
+        ),
+      ).toBe(true),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    const table = await screen.findByRole('table', { name: 'What changed' });
+    // Only the field that changed is listed, with its old and new value.
+    expect(within(table).getByText('0.10')).toBeInTheDocument();
+    expect(within(table).getByText('0.20')).toBeInTheDocument();
+    expect(within(table).queryByText('Teppanyaki')).toBeNull();
   });
 
   it('exports audit CSV through the filtered endpoint', async () => {

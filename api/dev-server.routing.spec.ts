@@ -13,7 +13,7 @@
  *
  * Nothing here touches production data: there is no database to touch.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -67,7 +67,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (child) {
-    child.kill('SIGKILL');
+    // With `shell: true` the child is the shell. On Windows killing it orphans the
+    // node server, which then keeps the port and answers the NEXT run with stale
+    // code (a false pass). Kill the whole tree there.
+    if (process.platform === 'win32' && child.pid)
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    else child.kill('SIGKILL');
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 5000);
       child!.once('exit', () => {
@@ -141,8 +146,9 @@ describe('dev-server HTTP routing', () => {
     handlerReached(await call('/api/v1/points/accounts/abc'));
     handlerReached(await call('/api/v1/ost/applications/abc'));
     handlerReached(await call('/api/v1/documents/abc'));
-    expect((await call('/api/v1/redemptions/resolve?identifier=x')).status).toBe(404);
-    expect((await call('/api/v1/earning/purchases')).status).toBe(404);
+    // Module switches default ON (D25), so redemption and services routes are reached.
+    handlerReached(await call('/api/v1/redemptions/resolve?identifier=x'));
+    handlerReached(await call('/api/v1/earning/purchases'));
     handlerReached(await call('/api/v1/queues/finance'));
     handlerReached(await call('/api/v1/customer/membership'));
     handlerReached(await call('/api/v1/commissions/abc/qualify', { method: 'POST' }));

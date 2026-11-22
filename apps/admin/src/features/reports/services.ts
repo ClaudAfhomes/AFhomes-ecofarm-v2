@@ -37,6 +37,9 @@ export type AuditFilters = {
   action?: string;
   entityType?: string;
   entityId?: string;
+  /** Role slug of the actor, or `ist` for the IST group. */
+  role?: string;
+  departmentId?: string;
   from?: string;
   to?: string;
   limit?: number;

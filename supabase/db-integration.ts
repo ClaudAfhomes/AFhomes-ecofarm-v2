@@ -23859,6 +23859,345 @@ async function main(): Promise<void> {
       } finally {
         await db.query(own82 ? 'rollback' : 'rollback to savepoint bulk82');
       }
+      section('83. Module switches: governed update, validation and audit');
+      // Migrations 20270105000025/26. Rolled back, so the shared switches stay all ON.
+      let own83 = false;
+      try { await db.query('savepoint flags83'); }
+      catch { await db.query('begin'); own83 = true; }
+      try {
+        const firstLine = (text: string) => text.split('\n')[0] ?? '';
+        const flags = async () =>
+          (await one<{ v: Record<string, boolean> }>('select public.get_feature_flags() as v')).v;
+        // 20270105000026 adds the remaining switchable modules.
+        eq(
+          'all nine modules are seeded ON',
+          JSON.stringify(await flags()),
+          JSON.stringify({
+            cms: true,
+            sales: true,
+            finance: true,
+            network: true,
+            payroll: true,
+            reports: true,
+            services: true,
+            redemption: true,
+            commissions: true,
+          }),
+        );
+        const auditCount = async () =>
+          (await one<{ n: number }>(
+            `select count(*)::int n from public.audit_events where action='FEATURE_FLAGS_UPDATED'`,
+          )).n;
+        const before = await auditCount();
+
+        const smDenied = await throwsIsolated('an SM without governance.config cannot switch a module', () =>
+          db.query(`select public.update_feature_flags($1, '{"cms": false}'::jsonb)`, [staff['sm']!]),
+        );
+        check('  -> MUTATION_FORBIDDEN', smDenied.includes('MUTATION_FORBIDDEN'), firstLine(smDenied));
+        const unknownActor = await throwsIsolated('an unknown actor cannot switch a module', () =>
+          db.query(`select public.update_feature_flags(gen_random_uuid(), '{"cms": false}'::jsonb)`),
+        );
+        check('  -> refused', unknownActor.length > 0, firstLine(unknownActor));
+        for (const [label, input, code] of [
+          ['an empty change', '{}', 'FEATURE_FLAGS_EMPTY'],
+          ['an unknown module', '{"organization": false}', 'FEATURE_FLAG_UNKNOWN'],
+          ['an unknown module beside a known one', '{"cms": false, "audit": false}', 'FEATURE_FLAG_UNKNOWN'],
+          ['a non-boolean value', '{"cms": "off"}', 'FEATURE_FLAG_NOT_BOOLEAN'],
+        ] as const) {
+          const refused = await throwsIsolated(`Super Admin: ${label} is refused`, () =>
+            db.query('select public.update_feature_flags($1, $2::jsonb)', [staff['super-admin']!, input]),
+          );
+          check(`  -> ${code}`, refused.includes(code), firstLine(refused));
+        }
+        eq('refused attempts change nothing and audit nothing', await auditCount(), before);
+
+        await db.query(`select public.update_feature_flags($1, '{"cms": false}'::jsonb)`, [
+          staff['super-admin']!,
+        ]);
+        eq('Super Admin switches CMS off', (await flags()).cms, false);
+        const audit = await one<{ actor: string; b: Record<string, boolean>; a: Record<string, boolean> }>(
+          `select actor_id::text actor, before_data b, after_data a from public.audit_events
+            where action='FEATURE_FLAGS_UPDATED' order by created_at desc, id desc limit 1`,
+        );
+        check(
+          'one audit row records who, before and after',
+          audit.actor === staff['super-admin'] && audit.b.cms === true && audit.a.cms === false,
+        );
+        eq('exactly one audit row was written', await auditCount(), before + 1);
+        await db.query(`select public.update_feature_flags($1, '{"cms": false}'::jsonb)`, [
+          staff['super-admin']!,
+        ]);
+        eq('a no-op save writes no audit row', await auditCount(), before + 1);
+        await db.query(
+          `select public.update_feature_flags($1, '{"payroll": false, "network": false}'::jsonb)`,
+          [staff['super-admin']!],
+        );
+        const after = await flags();
+        check(
+          'a new module (payroll, network) switches off in one audited save',
+          after.payroll === false && after.network === false && after.sales === true,
+        );
+        eq('that save wrote one more audit row', await auditCount(), before + 2);
+
+        const browser = await one<{ t: boolean; u: boolean; g: boolean }>(
+          `select has_table_privilege('authenticated','private.feature_flags','SELECT') t,
+                  has_function_privilege('authenticated','public.update_feature_flags(uuid,jsonb)','EXECUTE') u,
+                  has_function_privilege('anon','public.get_feature_flags()','EXECUTE') g`,
+        );
+        check('browser roles hold nothing on module switches', !browser.t && !browser.u && !browser.g);
+      } catch (error) {
+        check('section 83 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own83 ? 'rollback' : 'rollback to savepoint flags83');
+      }
+      section('84. Website inquiries: unexposed inbox, constraints and references');
+      // Migration 20270105000027. Rolled back: no inquiry row survives the run.
+      let own84 = false;
+      try { await db.query('savepoint inquiries84'); }
+      catch { await db.query('begin'); own84 = true; }
+      try {
+        const firstLine = (text: string) => text.split('\n')[0] ?? '';
+        const grant = await one<{ v: boolean; c: boolean; u: boolean; d: boolean } | null>(
+          `select rp.can_view v, rp.can_create c, rp.can_update u, rp.can_delete d
+             from public.role_permissions rp join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+            where r.slug = 'admin' and m.key = 'sales.inquiries'`,
+        );
+        check(
+          'admin holds sales.inquiries view + update only',
+          !!grant && grant.v && grant.u && !grant.c && !grant.d,
+        );
+        const others = await one<{ n: number }>(
+          `select count(*)::int n from public.role_permissions rp join public.roles r on r.id = rp.role_id
+             join public.modules m on m.id = rp.module_id
+            where m.key = 'sales.inquiries' and r.slug <> 'admin'`,
+        );
+        eq('no other role is seeded with the inbox', others.n, 0);
+        const exposure = await one<{ as: boolean; ai: boolean; us: boolean; ui: boolean; rls: boolean }>(
+          `select has_table_privilege('anon','public.website_inquiries','SELECT') "as",
+                  has_table_privilege('anon','public.website_inquiries','INSERT') ai,
+                  has_table_privilege('authenticated','public.website_inquiries','SELECT') us,
+                  has_table_privilege('authenticated','public.website_inquiries','INSERT') ui,
+                  (select relrowsecurity from pg_class where oid = 'public.website_inquiries'::regclass) rls`,
+        );
+        check(
+          'browser roles can neither read nor write the inbox, and RLS is on',
+          !exposure.as && !exposure.ai && !exposure.us && !exposure.ui && exposure.rls,
+        );
+
+        const insert = (over: Record<string, unknown> = {}) => {
+          const row = {
+            client_request_id: randomUUID(),
+            kind: 'inquiry',
+            inquiry_type: 'General Inquiry',
+            name: 'JUAN DELA CRUZ',
+            email: 'juan@example.com',
+            contact_number: '+639171234567',
+            message: 'We would like to visit the resort soon.',
+            visit_date: null,
+            end_date: null,
+            guests: null,
+            ...over,
+          };
+          return db.query<{ reference: string; status: string; seq: string }>(
+            `insert into public.website_inquiries
+               (client_request_id, kind, inquiry_type, name, email, contact_number, message, visit_date, end_date, guests)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning reference, status, seq::text`,
+            [row.client_request_id, row.kind, row.inquiry_type, row.name, row.email, row.contact_number,
+              row.message, row.visit_date, row.end_date, row.guests],
+          );
+        };
+        const first = (await insert()).rows[0]!;
+        check(
+          'a submission gets an INQ reference from its sequence and starts new',
+          first.reference === `INQ-${first.seq.padStart(6, '0')}` && first.status === 'new',
+          `${first.reference} / ${first.seq}`,
+        );
+        const big = await one<{ reference: string }>(
+          `insert into public.website_inquiries
+             (seq, client_request_id, inquiry_type, name, email, contact_number, message)
+           overriding system value
+           values (12345678, gen_random_uuid(), 'General Inquiry', 'ANA REYES', 'ana@example.com',
+                   '09171234567', 'A long-running inbox keeps every digit.')
+           returning reference`,
+        );
+        eq('a reference longer than six digits is never truncated', big.reference, 'INQ-12345678');
+
+        const requestId = randomUUID();
+        await insert({ client_request_id: requestId });
+        const duplicate = await throwsIsolated('the same form submission cannot be stored twice', () =>
+          insert({ client_request_id: requestId }),
+        );
+        check('  -> unique client_request_id', duplicate.includes('website_inquiries_client_request_unique'), firstLine(duplicate));
+        for (const [label, over, constraint] of [
+          ['a reservation without a visit date', { kind: 'reservation', guests: 2 }, 'website_inquiries_reservation_details'],
+          ['an end date before the visit date', { visit_date: '2099-01-10', end_date: '2099-01-09' }, 'website_inquiries_dates'],
+          ['an unknown inquiry type', { inquiry_type: 'Free stuff' }, 'inquiry_type'],
+          ['an email that is not lower-case', { email: 'Juan@Example.com' }, 'email'],
+          ['zero guests', { guests: 0 }, 'guests'],
+        ] as const) {
+          const refused = await throwsIsolated(`${label} is refused`, () => insert(over));
+          check(`  -> ${constraint}`, refused.includes(constraint), firstLine(refused));
+        }
+        const badStatus = await throwsIsolated('an unknown status is refused', () =>
+          db.query(`update public.website_inquiries set status = 'deleted' where reference = $1`, [first.reference]),
+        );
+        check('  -> status check', badStatus.includes('status'), firstLine(badStatus));
+        const okReservation = (await insert({
+          kind: 'reservation', visit_date: '2099-01-10', end_date: '2099-01-12', guests: 2,
+        })).rows[0]!;
+        check('a complete reservation request is accepted', okReservation.status === 'new');
+      } catch (error) {
+        check('section 84 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own84 ? 'rollback' : 'rollback to savepoint inquiries84');
+      }
+      section('85. Member engagement: notifications, bookings, announcements, messages');
+      // Migrations 20270105000028-31. Rolled back: no engagement row survives the run.
+      let own85 = false;
+      try { await db.query('savepoint engagement85'); }
+      catch { await db.query('begin'); own85 = true; }
+      try {
+        const firstLine = (text: string) => text.split('\n')[0] ?? '';
+        for (const [key, want] of [
+          ['operations.bookings', 'tftf'],
+          ['communication.announcements', 'tttf'],
+          ['communication.messages', 'tftf'],
+        ] as const) {
+          const rows = (await db.query<{ slug: string; g: string }>(
+            `select r.slug,
+                    concat(case when rp.can_view then 't' else 'f' end, case when rp.can_create then 't' else 'f' end,
+                           case when rp.can_update then 't' else 'f' end, case when rp.can_delete then 't' else 'f' end) g
+               from public.role_permissions rp join public.roles r on r.id = rp.role_id
+               join public.modules m on m.id = rp.module_id where m.key = $1`,
+            [key],
+          )).rows;
+          check(`${key}: seeded for admin only (${want})`, rows.length === 1 && rows[0]!.slug === 'admin' && rows[0]!.g === want,
+            JSON.stringify(rows));
+        }
+        for (const table of ['customer_notifications', 'service_bookings', 'announcements',
+          'customer_conversations', 'customer_conversation_messages']) {
+          const x = await one<{ a: boolean; u: boolean; w: boolean; rls: boolean }>(
+            `select has_table_privilege('anon', $1, 'SELECT') a,
+                    has_table_privilege('authenticated', $1, 'SELECT') u,
+                    has_table_privilege('authenticated', $1, 'INSERT,UPDATE,DELETE') w,
+                    (select relrowsecurity from pg_class where oid = $1::regclass) rls`,
+            [`public.${table}`],
+          );
+          check(`${table}: unexposed to browser roles, RLS on`, !x.a && !x.u && !x.w && x.rls);
+        }
+        const trig = await one<{ e: boolean }>(
+          `select has_function_privilege('anon', 'private.touch_customer_conversation()', 'EXECUTE')
+               or has_function_privilege('authenticated', 'private.touch_customer_conversation()', 'EXECUTE') e`,
+        );
+        check('browser roles cannot execute the message trigger function', !trig.e);
+
+        const people = (await db.query<{ id: string }>(`select id from public.customers order by created_at limit 2`)).rows;
+        const staff = await one<{ id: string } | null>(`select id from public.staff_users order by created_at limit 1`);
+        check('fixture: at least one customer and one staff member exist', people.length >= 1 && !!staff);
+        const cust = people[0]!.id;
+        const svc = await one<{ id: string }>(
+          `insert into public.service_catalog (code, name) values ($1, 'Section 85 Suite') returning id`,
+          [`S85-${randomUUID().slice(0, 8)}`],
+        );
+
+        // Notifications: a link can only be a portal path.
+        const notify = (link: string | null) =>
+          db.query(`insert into public.customer_notifications (customer_id, kind, title, link) values ($1, 'account', 'Hello', $2)`, [cust, link]);
+        await notify('/customer/bookings');
+        await notify(null);
+        check('a portal-path link and no link are accepted', true);
+        for (const bad of ['https://evil.example/x', '/admin/staff', '/customer/../admin', 'javascript:alert(1)']) {
+          const refused = await throwsIsolated(`notification link ${bad} is refused`, () => notify(bad));
+          check('  -> link check', refused.includes('link'), firstLine(refused));
+        }
+
+        // Bookings.
+        const book = (over: Record<string, unknown> = {}) => {
+          const row = { req: randomUUID(), customer: cust, start: '2099-03-01', end: null as string | null, status: 'requested', by: null as string | null, ...over };
+          return db.query<{ reference: string; seq: string }>(
+            `insert into public.service_bookings
+               (client_request_id, customer_id, service_id, service_name_snapshot, start_date, end_date, guests, status, cancelled_by)
+             values ($1, $2, $3, 'Section 85 Suite', $4, $5, 2, $6, $7) returning reference, seq::text`,
+            [row.req, row.customer, svc.id, row.start, row.end, row.status, row.by],
+          );
+        };
+        const b1 = (await book()).rows[0]!;
+        check('a booking gets a BKG reference from its sequence', b1.reference === `BKG-${b1.seq.padStart(6, '0')}`, b1.reference);
+        const sameReq = randomUUID();
+        await book({ req: sameReq });
+        const dupBooking = await throwsIsolated('one member cannot store the same request twice', () => book({ req: sameReq }));
+        check('  -> service_bookings_request_unique', dupBooking.includes('service_bookings_request_unique'), firstLine(dupBooking));
+        if (people[1]) {
+          await book({ req: sameReq, customer: people[1].id });
+          check('another member may use the same request id (scoped per member)', true);
+        }
+        for (const [label, over, constraint] of [
+          ['an end date before the start', { end: '2099-02-28' }, 'service_bookings_dates'],
+          ['cancelled without who cancelled', { status: 'cancelled' }, 'service_bookings_cancelled_by'],
+          ['a canceller on a live booking', { by: 'staff' }, 'service_bookings_cancelled_by'],
+          ['an unknown status', { status: 'held' }, 'status'],
+        ] as const) {
+          const refused = await throwsIsolated(`${label} is refused`, () => book(over));
+          check(`  -> ${constraint}`, refused.includes(constraint), firstLine(refused));
+        }
+        await book({ status: 'cancelled', by: 'customer' });
+        check('a cancelled booking with its canceller is accepted', true);
+
+        // Announcements.
+        const announce = (status: string, published: string | null, expires: string | null) =>
+          db.query(
+            `insert into public.announcements (title, body, audience, status, published_at, expires_at)
+             values ('Pool notice', 'Closed Monday.', 'customers', $1, $2, $3)`,
+            [status, published, expires],
+          );
+        await announce('draft', null, null);
+        await announce('published', '2099-01-01T00:00:00Z', '2099-02-01T00:00:00Z');
+        check('a draft and a dated published notice are accepted', true);
+        const undated = await throwsIsolated('a published notice needs a publish time', () => announce('published', null, null));
+        check('  -> announcements_published_at', undated.includes('announcements_published_at'), firstLine(undated));
+        const backwards = await throwsIsolated('expiry before publication is refused', () =>
+          announce('published', '2099-01-02T00:00:00Z', '2099-01-01T00:00:00Z'));
+        check('  -> announcements_expiry', backwards.includes('announcements_expiry'), firstLine(backwards));
+
+        // Messages: the trigger keeps the thread summary in step.
+        const convo = await one<{ id: string }>(
+          `insert into public.customer_conversations (customer_id, client_request_id, subject)
+           values ($1, gen_random_uuid(), 'Breakfast question') returning id`,
+          [cust],
+        );
+        const say = (kind: 'customer' | 'staff', staffId: string | null, req = randomUUID()) =>
+          db.query(
+            `insert into public.customer_conversation_messages (conversation_id, client_request_id, sender_kind, sender_staff_id, body)
+             values ($1, $2, $3, $4, 'Hello')`,
+            [convo.id, req, kind, staffId],
+          );
+        const thread = () => one<{ status: string; last_sender_kind: string; c_read: boolean; s_read: boolean; closed_by: string | null }>(
+          `select status, last_sender_kind, customer_last_read_at is not null c_read,
+                  staff_last_read_at is not null s_read, closed_by::text
+             from public.customer_conversations where id = $1`,
+          [convo.id],
+        );
+        const firstReq = randomUUID();
+        await say('customer', null, firstReq);
+        let t = await thread();
+        check('a member message marks the thread from the member and read by them', t.last_sender_kind === 'customer' && t.c_read && !t.s_read);
+        await db.query(`update public.customer_conversations set status = 'closed', closed_by = $2 where id = $1`, [convo.id, staff!.id]);
+        await say('staff', staff!.id);
+        t = await thread();
+        check('a staff reply records staff as last sender and keeps the thread closed', t.last_sender_kind === 'staff' && t.s_read && t.status === 'closed');
+        await say('customer', null);
+        t = await thread();
+        check('a new member message reopens the thread and clears closed_by', t.status === 'open' && t.closed_by === null && t.last_sender_kind === 'customer');
+        const forged = await throwsIsolated('a member message cannot carry a staff id', () => say('customer', staff!.id));
+        check('  -> customer_conversation_messages_sender', forged.includes('customer_conversation_messages_sender'), firstLine(forged));
+        const dupMsg = await throwsIsolated('a retried message is not stored twice', () => say('customer', null, firstReq));
+        check('  -> customer_conversation_messages_request_unique', dupMsg.includes('customer_conversation_messages_request_unique'), firstLine(dupMsg));
+      } catch (error) {
+        check('section 85 completed', false, safeErrorMessage(error));
+      } finally {
+        await db.query(own85 ? 'rollback' : 'rollback to savepoint engagement85');
+      }
     } catch (error) {
       check('post-baseline sections completed', false, safeErrorMessage(error));
     } finally {

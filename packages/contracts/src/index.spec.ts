@@ -83,7 +83,7 @@ describe('exact decimal money', () => {
 
 describe('afHomesModuleKeySchema', () => {
   it('exposes the base keys plus CMS, bulk import, and the Operational Services keys', () => {
-    expect(afHomesModuleKeySchema.options).toHaveLength(40);
+    expect(afHomesModuleKeySchema.options).toHaveLength(44);
     expect(afHomesModuleKeySchema.options).toContain('finance.payment_adjustment_decision');
     const keys = afHomesModuleKeySchema.options as readonly string[];
     // IST Payroll (12 Nov 2026): four separate keys so reviewing, approving,
@@ -124,6 +124,17 @@ describe('afHomesModuleKeySchema', () => {
     // riding on `organization.staff` (whole-directory) or `network.genealogy`
     // (read-only structure).
     expect(keys).toContain('network.members');
+    // Website inquiries inbox, seeded by 20270105000027. Its own key so working
+    // website leads never needs `sales.customers` (the whole customer record).
+    expect(keys).toContain('sales.inquiries');
+    // Bookings, announcements and member messages, seeded by 20270105000029-31.
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'operations.bookings',
+        'communication.announcements',
+        'communication.messages',
+      ]),
+    );
   });
 
   it('covers every seeded module group', () => {
@@ -137,6 +148,7 @@ describe('afHomesModuleKeySchema', () => {
       'operations.',
       'governance.',
       'cms.',
+      'communication.',
     ]) {
       expect(
         keys.some((k) => k.startsWith(group)),

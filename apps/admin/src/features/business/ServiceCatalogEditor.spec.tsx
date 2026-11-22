@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../../test/utils';
 import { ServiceCatalogEditor } from './ServiceCatalogEditor';
-import { createService, updateService } from './points-services';
+import { createEarningRule, createService, updateService } from './points-services';
 import type { SessionUser } from '../../lib/session';
 
 vi.mock('./points-services', () => ({
+  createEarningRule: vi.fn(),
   createService: vi.fn(),
   updateService: vi.fn(),
   uploadServicePhoto: vi.fn(),
@@ -117,6 +118,93 @@ describe('service catalog editing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Save unavailable');
     expect(screen.getByLabelText('Availability')).toHaveValue('unavailable');
     expect(screen.getByLabelText('Base price')).toHaveValue('2000.00');
+  });
+  it('accepts a typed peso amount and creates the points rule in the same step', async () => {
+    vi.mocked(createService).mockResolvedValue(service);
+    vi.mocked(createEarningRule).mockResolvedValue({} as never);
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ServiceCatalogEditor services={[]} loading={false} error={null} onSaved={vi.fn()} />,
+      { user: admin },
+    );
+    await user.click(screen.getByRole('button', { name: 'Add service' }));
+    await user.type(screen.getByLabelText('Service name'), 'Teppanyaki');
+    await user.type(screen.getByLabelText('Base price'), '₱2,000');
+    await user.selectOptions(screen.getByLabelText('Pricing unit'), 'person');
+    expect(screen.getByText(/2,000\.00 per person/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Points per person(Optional)'), '200');
+    await user.click(screen.getByLabelText('Silver'));
+    await user.click(screen.getByRole('button', { name: 'Save service' }));
+    await waitFor(() =>
+      expect(createEarningRule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serviceId: service.id,
+          pointsAmount: 200,
+          eligibleTiers: ['BRONZE', 'GOLD'],
+          minQuantity: 1,
+          isActive: true,
+        }),
+      ),
+    );
+    expect(createService).toHaveBeenCalledWith(
+      expect.objectContaining({ basePrice: '2000.00', pricingUnit: 'person' }),
+    );
+    const rule = vi.mocked(createEarningRule).mock.calls[0]![0];
+    expect(rule.effectiveStart < rule.effectiveEnd).toBe(true);
+    expect(await screen.findByText(/earn 200 points per person/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it('keeps the saved service when the points rule fails, and says so', async () => {
+    vi.mocked(createService).mockResolvedValue(service);
+    vi.mocked(createEarningRule).mockRejectedValue(new Error('Rule overlaps'));
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ServiceCatalogEditor services={[]} loading={false} error={null} onSaved={vi.fn()} />,
+      { user: admin },
+    );
+    await user.click(screen.getByRole('button', { name: 'Add service' }));
+    await user.type(screen.getByLabelText('Service name'), 'Teppanyaki');
+    await user.type(screen.getByLabelText('Base price'), '2000');
+    await user.type(screen.getByLabelText('Points per unit(Optional)'), '200');
+    await user.click(screen.getByRole('button', { name: 'Save service' }));
+    expect(
+      await screen.findByText(/service was saved, but the points rule was not: Rule overlaps/),
+    ).toBeInTheDocument();
+  });
+  it('shows field errors instead of saving an incomplete service', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ServiceCatalogEditor services={[]} loading={false} error={null} onSaved={vi.fn()} />,
+      { user: admin },
+    );
+    await user.click(screen.getByRole('button', { name: 'Add service' }));
+    await user.type(screen.getByLabelText('Base price'), '12abc');
+    await user.type(screen.getByLabelText('Points per unit(Optional)'), '1.5');
+    await user.click(screen.getByRole('button', { name: 'Save service' }));
+    expect(await screen.findByText('Enter the service name.')).toBeInTheDocument();
+    expect(screen.getByText(/Enter the price in pesos/)).toBeInTheDocument();
+    expect(screen.getByText(/whole number of points/)).toBeInTheDocument();
+    expect(createService).not.toHaveBeenCalled();
+  });
+  it('closes the editor after a successful edit', async () => {
+    vi.mocked(updateService).mockResolvedValue({ ...service, basePrice: '2500.00' });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ServiceCatalogEditor services={[service]} loading={false} error={null} onSaved={vi.fn()} />,
+      { user: admin },
+    );
+    await user.click(screen.getByRole('button', { name: 'Edit Teppanyaki' }));
+    expect(screen.queryByLabelText(/points per/i)).toBeNull();
+    const price = screen.getByLabelText('Base price');
+    await user.clear(price);
+    await user.type(price, '2500');
+    await user.click(screen.getByRole('button', { name: 'Save service' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(updateService).toHaveBeenCalledWith(
+      service.id,
+      expect.objectContaining({ basePrice: '2500.00' }),
+    );
   });
   it('gives a view-only GSD the catalog without administration controls', () => {
     renderWithProviders(

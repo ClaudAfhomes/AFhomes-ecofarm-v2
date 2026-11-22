@@ -373,9 +373,18 @@ export function ReportsPage() {
                   return (
                     <tr
                       key={reference}
+                      tabIndex={0}
+                      aria-selected={selected?.referenceNumber === reference}
                       onClick={() =>
                         setSelected(selected?.referenceNumber === reference ? null : record)
                       }
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelected(selected?.referenceNumber === reference ? null : record);
+                        }
+                      }}
                       className={styles.clickableRow}
                     >
                       {def.columns.map((col) => (

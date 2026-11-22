@@ -131,13 +131,15 @@ async function currentNetworkContext(db: Db, principal: AfHomesPrincipal, kind: 
   if (relationshipResult.error) throw relationshipResult.error;
   const uplineId = (relationshipResult.data as Row | null)?.upline_staff_id;
   if (!uplineId) return { upperline: null };
-  const [staff, assignments, roles] = await Promise.all([
-    rows(db, 'staff_users', 'id,full_name'),
-    rows(db, 'staff_role_assignments', 'staff_id,role_id'),
+  const [staffResult, assignmentResult, roles] = await Promise.all([
+    db.from('staff_users').select('id,full_name').eq('id', uplineId),
+    db.from('staff_role_assignments').select('staff_id,role_id').eq('staff_id', uplineId),
     rows(db, 'roles', 'id,name'),
   ]);
-  const upline = staff.find((row) => row.id === uplineId);
-  const assignment = assignments.find((row) => row.staff_id === uplineId);
+  if (staffResult.error) throw staffResult.error;
+  if (assignmentResult.error) throw assignmentResult.error;
+  const upline = (staffResult.data as Row[] | null)?.[0];
+  const assignment = (assignmentResult.data as Row[] | null)?.[0];
   const role = roles.find((row) => row.id === assignment?.role_id);
   return {
     upperline: upline
@@ -555,9 +557,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const period = parsed.data;
     const { from, to } = calendarWindow(period);
     const kind = roleScope(principal);
-    const scoped = await scopedSales(db, principal, kind);
-    const saleIds = scoped.sales.map((sale) => String(sale.id));
-    const customerIds = [...new Set(scoped.sales.map((sale) => String(sale.customer_id)))];
+    const scopedPromise = scopedSales(db, principal, kind);
+    // Global sections do not depend on sale IDs; scoped callers still resolve ownership first.
+    const scoped = kind === 'global' || kind === 'finance' ? null : await scopedPromise;
+    const saleIds = (scoped?.sales ?? []).map((sale) => String(sale.id));
+    const customerIds = [...new Set((scoped?.sales ?? []).map((sale) => String(sale.customer_id)))];
     const canFinancial =
       kind === 'global' || kind === 'finance' || SELLER_ROLES.has(principal.roleSlug);
     const canCommissions = principal.permissions.some(
@@ -573,6 +577,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ));
 
     const [
+      resolvedScope,
       allCustomers,
       plans,
       paymentsAll,
@@ -584,6 +589,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       organizationDepartments,
       networkContext,
     ] = await Promise.all([
+      scopedPromise,
       kind === 'global' || kind === 'finance'
         ? rows(db, 'customers', 'id,created_at')
         : customerIds.length
@@ -653,30 +659,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       kind === 'global' || kind === 'organization' ? rows(db, 'departments', 'id,is_active') : [],
       currentNetworkContext(db, principal, kind),
     ]);
-    return res
-      .status(200)
-      .json(
-        projectAnalytics({
-          principal,
-          period,
-          from,
-          to,
-          kind,
-          scoped,
-          canCommissions,
-          canRedemption,
-          allCustomers: allCustomers as Row[],
-          plans: plans as Row[],
-          paymentsAll: paymentsAll as Row[],
-          membershipsAll: membershipsAll as Row[],
-          commissionsAll: commissionsAll as Row[],
-          redemptionsAll: redemptionsAll as Row[],
-          sellers,
-          organizationStaff: organizationStaff as Row[],
-          organizationDepartments: organizationDepartments as Row[],
-          networkContext,
-        }),
-      );
+    return res.status(200).json(
+      projectAnalytics({
+        principal,
+        period,
+        from,
+        to,
+        kind,
+        scoped: resolvedScope,
+        canCommissions,
+        canRedemption,
+        allCustomers: allCustomers as Row[],
+        plans: plans as Row[],
+        paymentsAll: paymentsAll as Row[],
+        membershipsAll: membershipsAll as Row[],
+        commissionsAll: commissionsAll as Row[],
+        redemptionsAll: redemptionsAll as Row[],
+        sellers,
+        organizationStaff: organizationStaff as Row[],
+        organizationDepartments: organizationDepartments as Row[],
+        networkContext,
+      }),
+    );
   } catch (error) {
     console.error('[api] analytics:', error instanceof Error ? error.message : error);
     return fail(res, 'INTERNAL', 'Internal server error', 500);

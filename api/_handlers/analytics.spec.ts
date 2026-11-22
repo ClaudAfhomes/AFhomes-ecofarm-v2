@@ -30,7 +30,11 @@ function install() {
     ost_applications: [],
     final_qualifications: [],
   });
-  holder.db = new FakeSupabase({ tables, tokens: phase2WorldTokens(), rpcs: [{ fn: 'account_imported_sales', result: [] }] });
+  holder.db = new FakeSupabase({
+    tables,
+    tokens: phase2WorldTokens(),
+    rpcs: [{ fn: 'account_imported_sales', result: [] }],
+  });
   return holder.db as FakeSupabase;
 }
 
@@ -64,6 +68,35 @@ describe('Phase 14 analytics', () => {
     const parsed = analyticsOverviewSchema.parse(state.body);
     expect(parsed.scope.kind).toBe('global');
     expect(parsed.headline.totalCardSales).toBeGreaterThan(0);
+  });
+
+  it('starts global dashboard sections while the independent sale read is pending', async () => {
+    const db = holder.db as FakeSupabase;
+    const from = db.from.bind(db);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'card_sales' || table === 'customers') {
+        const then = query.then.bind(query);
+        query.then = (onFulfilled, onRejected) => {
+          started.add(table);
+          return gate.then(() => then(onFulfilled, onRejected));
+        };
+      }
+      return query;
+    });
+    const pending = call(TOKEN.superAdmin);
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(2), { timeout: 300 });
+    } finally {
+      release();
+      expect((await pending).status).toBe(200);
+      vi.restoreAllMocks();
+    }
   });
 
   it('gives Finance global financial facts but no redemption section', async () => {
@@ -126,6 +159,34 @@ describe('Phase 14 analytics', () => {
       networkContext: { upperline: { id: STAFF2.salesManager } },
       organization: null,
     });
+  });
+
+  it('loads only the upperline profile and assignment for a self-scoped dashboard', async () => {
+    const db = holder.db as FakeSupabase;
+    const from = db.from.bind(db);
+    const readSizes: number[] = [];
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'staff_users' || table === 'staff_role_assignments') {
+        const then = query.then.bind(query);
+        query.then = (onFulfilled, onRejected) =>
+          then((result) => {
+            readSizes.push(result.data?.length ?? 0);
+            return onFulfilled?.(result);
+          }, onRejected);
+      }
+      return query;
+    });
+    try {
+      const state = await call(TOKEN2.ost);
+      expect(state.status).toBe(200);
+      expect(state.body).toMatchObject({
+        networkContext: { upperline: { id: STAFF2.salesManager } },
+      });
+      expect(readSizes).toEqual([1, 1]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('uses immutable snapshot rows for VD, SSM and SM team totals', async () => {

@@ -130,7 +130,11 @@ const REFUSALS: Record<string, [string, string, number]> = {
     'Points can only be used on accommodation and staycation purchases, unless a current promotion applies.',
     409,
   ],
-  NO_REDEMPTION_RATE: ['CONFLICT', 'No current promotion price is available for these items.', 409],
+  NO_REDEMPTION_RATE: [
+    'CONFLICT',
+    'No points spending rule is active for this service and card tier. An administrator can add one under Catalog → Points spending rules.',
+    409,
+  ],
   REVERSAL_DEBT_OUTSTANDING: [
     'CONFLICT',
     'Points cannot be spent while a reversal is outstanding. Earning is not affected.',
@@ -434,7 +438,7 @@ const toClaimRow = (row: Record<string, unknown>) => ({
 });
 
 /** One receipt row. Shared by the service fetch and the Preview bundle. */
-const toPaymentRow = (row: Record<string, unknown>) => ({
+const toPaymentRow = (row: Record<string, unknown>, names = new Map<string, string>()) => ({
   id: row.id,
   paymentNumber: row.payment_number,
   amount: String(row.amount),
@@ -443,6 +447,8 @@ const toPaymentRow = (row: Record<string, unknown>) => ({
   status: row.status,
   recordedBy: row.recorded_by,
   verifiedBy: row.verified_by ?? null,
+  recordedByName: names.get(String(row.recorded_by)) ?? null,
+  verifiedByName: row.verified_by ? (names.get(String(row.verified_by)) ?? null) : null,
   recordedAt: isoOrNull(row.recorded_at),
   verifiedAt: isoOrNull(row.verified_at),
   rejectionReason: row.rejection_reason ?? null,
@@ -877,7 +883,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           p_purchase_id: payListRoute[1],
         });
         if (wrapped.error) return mapRpcError(res, wrapped.error);
-        return list(res, ((wrapped.data ?? []) as Record<string, unknown>[]).map(toPaymentRow));
+        return list(
+          res,
+          ((wrapped.data ?? []) as Record<string, unknown>[]).map((row) => toPaymentRow(row)),
+        );
       }
       const { data, error } = await db
         .from('purchase_payments')
@@ -891,9 +900,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // result set is tiny and the security boundary is the permission above, not
       // the filter.
       const rows = (data ?? []) as Record<string, unknown>[];
+      // Staff see who recorded and verified a receipt by name, never by raw id.
+      const actorIds = [
+        ...new Set(
+          rows
+            .flatMap((row) => [row.recorded_by, row.verified_by])
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      const names = new Map<string, string>();
+      if (actorIds.length > 0) {
+        const staff = await db.from('staff_users').select('id, full_name').in('id', actorIds);
+        if (staff.error) throw staff.error;
+        for (const s of (staff.data ?? []) as Record<string, unknown>[])
+          if (s.full_name) names.set(String(s.id), String(s.full_name));
+      }
       return list(
         res,
-        rows.map(toPaymentRow),
+        rows.map((row) => toPaymentRow(row, names)),
       );
     }
 
