@@ -877,6 +877,7 @@ export * from './schemas/commission-ops.js';
 export * from './schemas/payroll.js';
 export * from './schemas/external-evidence.js';
 export * from './schemas/cms-content.js';
+export * from './schemas/cms-theme.js';
 export * from './schemas/media.js';
 export * from './schemas/inquiries.js';
 export * from './schemas/engagement.js';

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeSupabase, makeReq, makeRes } from '../_lib/testing/supabase-fake.js';
+import { DEFAULT_SITE_THEME } from '@afhomes/contracts';
 
 const STAFF = '00000000-0000-4000-8000-0000000000aa';
 const holder = vi.hoisted(() => ({ db: null as unknown, denied: false }));
@@ -89,6 +90,32 @@ describe('Phase 6 CMS handler', () => {
     });
     expect((holder.db as FakeSupabase).rows('cms_document_versions')).toHaveLength(1);
     expect((holder.db as FakeSupabase).rows('audit_events')).toHaveLength(1);
+  });
+
+  it('rejects a site theme that fails the contrast check and writes nothing', async () => {
+    const result = await call('documents/site', 'PATCH', {
+      value: { theme: { ...DEFAULT_SITE_THEME, text: '#eeeeee', background: '#ffffff' } },
+      expectedVersion: 1,
+      changeSummary: 'Pale theme',
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Theme colours are invalid or too low in contrast.',
+      },
+    });
+    expect((holder.db as FakeSupabase).rows('cms_documents')).toHaveLength(2);
+  });
+
+  it('accepts a valid site theme and stores it normalised', async () => {
+    const result = await call('documents/site', 'PATCH', {
+      value: { theme: { ...DEFAULT_SITE_THEME, primary: '#57AB4B' } },
+      expectedVersion: 1,
+      changeSummary: 'Brand theme',
+    });
+    expect(result.status).toBe(201);
+    expect(result.body).toMatchObject({ draftValue: { theme: DEFAULT_SITE_THEME } });
   });
 
   it('rejects a stale update instead of overwriting a newer draft', async () => {

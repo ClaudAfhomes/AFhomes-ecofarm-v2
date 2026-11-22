@@ -179,3 +179,206 @@
 .selectedMedia { width: min(100%,280px); max-height: 180px; object-fit: contain; }
 .check { display: flex; gap: var(--space-2); align-items: center; }
 .previewFrame { width: 100%; height: 75vh; border: 1px solid var(--color-border, #ddd); border-radius: 8px; background: white; }
+
+/* Document editor: section navigator beside the form, sticky action bar below. */
+.editorLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.editorMain {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.editorMain [id^='cms-'] {
+  scroll-margin-top: var(--space-6);
+}
+
+.sectionNav {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sectionSearchLabel {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.sectionSearch {
+  min-height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.sectionNav ul {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 var(--space-1);
+  list-style: none;
+  overflow-x: auto;
+}
+
+.sectionNav li button {
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sectionNav li button:hover {
+    color: var(--color-brand-primary);
+    border-color: var(--color-brand-primary);
+  }
+}
+
+.sectionEmpty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+@media (min-width: 1024px) {
+  .editorLayout {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+
+  .sectionNav {
+    position: sticky;
+    top: var(--space-5);
+    max-height: calc(100vh - var(--space-10, 5rem));
+    overflow-y: auto;
+  }
+
+  .sectionNav ul {
+    flex-direction: column;
+    gap: 2px;
+    overflow: visible;
+  }
+
+  .sectionNav li button {
+    width: 100%;
+    min-height: 2.25rem;
+    border-color: transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    text-align: left;
+    white-space: normal;
+  }
+}
+
+.actionBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-bg-surface-raised) 92%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-md);
+}
+
+.state,
+.stateDirty {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.stateDirty {
+  color: var(--color-accent-strong);
+}
+
+.stateDirty::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (max-width: 639px) {
+  /* On phones the bar only follows the reader while there is something to save. */
+  .actionBar:not(.actionBarDirty) {
+    position: static;
+    box-shadow: none;
+  }
+
+  .actionBar .actions {
+    width: 100%;
+  }
+
+  .actionBar .actions > * {
+    flex: 1 1 auto;
+  }
+}
+
+/* Booleans read as switches; the native checkbox keeps keyboard and form semantics. */
+.switch {
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 1.4rem;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(1.4rem - 6px);
+  height: calc(1.4rem - 6px);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--motion-150) var(--ease-out);
+}
+
+.switch:checked {
+  background: var(--color-brand-primary);
+}
+
+.switch:checked::after {
+  transform: translateX(1.1rem);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

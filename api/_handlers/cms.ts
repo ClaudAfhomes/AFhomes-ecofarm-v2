@@ -4,6 +4,7 @@ import {
   createCmsMediaSchema,
   createCmsPageSchema,
   updateCmsDocumentSchema,
+  SiteThemeSchema,
   updateCmsPageSchema,
 } from '@afhomes/contracts';
 import { randomUUID } from 'node:crypto';
@@ -180,6 +181,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const parsed = updateCmsDocumentSchema.safeParse(jsonBody(req));
       if (!key.success || !parsed.success)
         return fail(res, 'VALIDATION_ERROR', 'Check the content and version.', 400);
+      // The site theme drives public-site colours: only well-formed, readable themes are stored.
+      const value = parsed.data.value;
+      if (
+        key.data === 'site' &&
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        (value as Record<string, unknown>).theme !== undefined
+      ) {
+        const theme = SiteThemeSchema.safeParse((value as Record<string, unknown>).theme);
+        if (!theme.success)
+          return fail(
+            res,
+            'VALIDATION_ERROR',
+            'Theme colours are invalid or too low in contrast.',
+            400,
+          );
+        parsed.data.value = { ...(value as Record<string, unknown>), theme: theme.data };
+      }
       const auth = await authorizeAfHomes(req, documentPermission(key.data), 'update');
       if ('error' in auth) return deny(res, auth);
       const existing = await db

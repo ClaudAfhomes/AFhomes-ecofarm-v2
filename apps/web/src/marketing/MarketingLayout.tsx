@@ -5,7 +5,10 @@ import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { LoadingState } from './components/ui/Feedback';
 import { Layout } from './components/layout/Layout';
 import './marketing.css';
-import { hydrateCms } from './lib/cms';
+import { cmsRepository, hydrateCms } from './lib/cms';
+import { startCmsPreview } from './lib/cms-preview';
+import { themeStyle } from './lib/theme';
+import { env } from '../lib/env';
 import { useCmsRevision } from './hooks/useCmsRevision';
 
 /**
@@ -25,8 +28,17 @@ export function MarketingLayout() {
   useEffect(() => {
     void hydrateCms();
   }, []);
+  // Admin "Preview saved draft": only inside an iframe opened with ?cmsPreview=<session>.
+  useEffect(() => {
+    const session = new URLSearchParams(window.location.search).get('cmsPreview');
+    if (!session || window.parent === window) return;
+    const admin = new URL(env.VITE_ADMIN_URL, window.location.href).origin;
+    return startCmsPreview([...new Set([admin, window.location.origin])], session);
+  }, []);
+  // A published CMS theme recolours the palette; no theme leaves the stylesheet as-is.
+  const style = themeStyle((cmsRepository.getSiteConfig() as { theme?: unknown }).theme);
   return (
-    <div className="afh-public">
+    <div className="afh-public" style={style}>
       <MotionConfig reducedMotion="user">
         <ErrorBoundary>
           <Suspense fallback={<LoadingState />}>

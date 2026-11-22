@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SiteThemeSchema } from './cms-theme.js';
 
 /** Public marketing destinations only. Reject script/data and network-relative URLs. */
 export const cmsLinkSchema = z.string().max(2000).refine(value => !value || (/^(https?:\/\/|mailto:|tel:|\/(?!\/)|#)/i.test(value) && !/[\u0000-\u001f\u007f\\]/.test(value)), 'Use an http(s), site-relative, email, or telephone link.');
@@ -55,6 +56,7 @@ siteUrl: cmsLinkSchema,
 businessName: z.string().max(20000),
 brand: SiteBrandSchema,
 logo: ImageSpecSchema.optional(),
+theme: SiteThemeSchema.optional(),
 social: z.object({
 facebookCorporate: cmsLinkSchema,
 facebookResort: cmsLinkSchema,

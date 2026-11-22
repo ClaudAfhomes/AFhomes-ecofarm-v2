@@ -14,7 +14,7 @@
  *
  * Callers continue to program against this stable repository interface.
  */
-import { cmsPublicContentSchema } from '@afhomes/contracts';
+import { cmsPublicContentSchema, type CmsDocumentKey } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
 import { experiences } from '../data/mock/experiences';
 import { faqCategories } from '../data/mock/faq';
@@ -51,6 +51,8 @@ const fallback: CmsState = {
 };
 let current: CmsState = fallback;
 let hydration: Promise<void> | null = null;
+/** Documents overlaid by the admin draft preview; published content must not replace them. */
+const previewKeys = new Set<CmsDocumentKey>();
 
 function matchesFallbackShape(value: unknown, template: unknown): boolean {
   if (template === null) return value === null || value !== undefined;
@@ -77,7 +79,7 @@ export function hydrateCms(): Promise<void> {
   if (hydration) return hydration;
   hydration = request('/cms/public', cmsPublicContentSchema)
     .then(({ documents }) => {
-      current = {
+      const published: CmsState = {
         site: safeOverride(documents.site, fallback.site),
         pageContent: safeOverride(documents.pageContent, fallback.pageContent),
         experiences: safeOverride(documents.experiences, fallback.experiences),
@@ -86,12 +88,21 @@ export function hydrateCms(): Promise<void> {
         stories: safeOverride(documents.stories, fallback.stories),
         mediaBlocks: safeOverride(documents.mediaBlocks, fallback.mediaBlocks),
       };
+      for (const key of previewKeys) Object.assign(published, { [key]: current[key] });
+      current = published;
       window.dispatchEvent(new Event('afhomes-cms-updated'));
     })
     .catch(() => {
       // Static Phase 3 content remains authoritative when CMS is unavailable.
     });
   return hydration;
+}
+
+/** Admin draft preview only: overlay one saved draft document for this page view. */
+export function applyCmsPreview(key: CmsDocumentKey, value: unknown): void {
+  previewKeys.add(key);
+  current = { ...current, [key]: safeOverride(value, fallback[key]) };
+  window.dispatchEvent(new Event('afhomes-cms-updated'));
 }
 
 export const cmsRepository = {

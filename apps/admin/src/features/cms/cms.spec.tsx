@@ -195,7 +195,7 @@ describe('Phase 28 CMS page editing', () => {
     await user.click(screen.getByRole('button', { name: 'New page' }));
     await user.type(screen.getByLabelText('Title(Optional)'), 'Harvest');
     await user.type(screen.getByLabelText('Slug(Optional)'), 'harvest');
-    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Announce the harvest.');
+    await user.type(screen.getByLabelText(/^Change summary/), 'Announce the harvest.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     await waitFor(() => {
       const post = requests.find((r) => r.method === 'POST' && r.path === '/cms/pages');
@@ -216,7 +216,7 @@ describe('Phase 28 CMS page editing', () => {
     await user.click(screen.getByRole('button', { name: 'New page' }));
     await user.type(screen.getByLabelText('Title(Optional)'), 'Copy');
     await user.type(screen.getByLabelText('Slug(Optional)'), 'visit-us');
-    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Duplicate the slug.');
+    await user.type(screen.getByLabelText(/^Change summary/), 'Duplicate the slug.');
     await user.click(screen.getByRole('button', { name: 'Save page' }));
     expect(await screen.findByText('That slug or media path already exists.')).toBeInTheDocument();
     // The editor stays open for correction.
@@ -271,7 +271,7 @@ describe('Phase 28 CMS document editing', () => {
     });
     render('/admin/cms/stories');
     expect(await screen.findByRole('heading', { name: 'Stories' })).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Refresh the stories.');
+    await user.type(screen.getByLabelText(/^Change summary/), 'Refresh the stories.');
     await user.click(screen.getByRole('button', { name: 'Save Draft' }));
     expect(await screen.findByText('Draft saved. The public website is unchanged until you publish.')).toBeInTheDocument();
     expect(requests.find((r) => r.method === 'PATCH' && r.path === '/cms/documents/stories')?.body)
@@ -282,6 +282,87 @@ describe('Phase 28 CMS document editing', () => {
       .toMatchObject({ expectedVersion: 2 });
   });
 
+  const siteDoc = (over: Record<string, unknown> = {}) => ({
+    key: 'site',
+    draftValue: websiteDefaults.site,
+    publishedValue: null,
+    status: 'draft',
+    version: 2,
+    publishedAt: null,
+    updatedAt: '2026-10-02T00:00:00.000Z',
+    ...over,
+  });
+
+  it('pre-fills the change summary from the edit so saving needs no typing', async () => {
+    const user = userEvent.setup();
+    render('/admin/cms/site-settings');
+    const footer = await screen.findByLabelText(/^Footer Title/, undefined, { timeout: 5000 });
+    await user.type(footer, '!');
+    expect(screen.getByLabelText(/^Change summary/)).toHaveValue('Updated Footer Title');
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  });
+
+  it('saves and publishes in one confirmed step', async () => {
+    const user = userEvent.setup();
+    install({
+      'PATCH /cms/documents/site': { status: 201, body: siteDoc() },
+      'POST /cms/documents/site/publish': {
+        status: 200,
+        body: siteDoc({ version: 3, status: 'published', publishedValue: websiteDefaults.site }),
+      },
+    });
+    render('/admin/cms/site-settings');
+    await user.type(await screen.findByLabelText(/^Footer Title/, undefined, { timeout: 5000 }), '!');
+    await user.click(screen.getByRole('button', { name: 'Save & Publish' }));
+    await user.click(await screen.findByRole('button', { name: 'Publish now' }));
+    expect(await screen.findByText('Saved and published.')).toBeInTheDocument();
+    const writes = requests.filter((r) => r.method !== 'GET').map((r) => `${r.method} ${r.path}`);
+    expect(writes).toEqual(['PATCH /cms/documents/site', 'POST /cms/documents/site/publish']);
+    expect(requests.find((r) => r.method === 'POST')?.body).toMatchObject({ expectedVersion: 2 });
+  });
+
+  it('says the draft was kept when publishing fails after saving', async () => {
+    const user = userEvent.setup();
+    install({
+      'PATCH /cms/documents/site': { status: 201, body: siteDoc() },
+      'POST /cms/documents/site/publish': {
+        status: 409,
+        body: { error: { code: 'CONFLICT', message: 'This content changed. Reload and try again.' } },
+      },
+    });
+    render('/admin/cms/site-settings');
+    await user.type(await screen.findByLabelText(/^Footer Title/, undefined, { timeout: 5000 }), '!');
+    await user.click(screen.getByRole('button', { name: 'Save & Publish' }));
+    await user.click(await screen.findByRole('button', { name: 'Publish now' }));
+    expect(
+      await screen.findByText(/Draft saved, but publishing failed: This content changed/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Saved version 2.', { exact: false })).toBeInTheDocument();
+  });
+
+  it('finds a field and narrows the section list', async () => {
+    const user = userEvent.setup();
+    render('/admin/cms/site-settings');
+    const nav = await screen.findByRole('navigation', { name: 'Sections' }, { timeout: 5000 });
+    expect(within(nav).getByRole('button', { name: 'Offices' })).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox', { name: 'Find a field' }), 'footer');
+    expect(within(nav).getByRole('button', { name: 'General details' })).toBeInTheDocument();
+    expect(within(nav).queryByRole('button', { name: 'Offices' })).not.toBeInTheDocument();
+  });
+
+  it('edits the site theme in Site Settings and blocks saving an unreadable one', async () => {
+    const user = userEvent.setup();
+    render('/admin/cms/site-settings');
+    expect(await screen.findByRole('group', { name: 'Theme & colours' })).toBeInTheDocument();
+    const text = screen.getByRole('textbox', { name: 'Text' });
+    await user.clear(text);
+    await user.type(text, '#ffffff');
+    expect(screen.getByText('Fix the colours marked below before saving.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^Change summary/), 'Pale theme.');
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+  });
+
   it('retains invalid structured content and blocks saving with an explanation', async () => {
     const user = userEvent.setup();
     install({ 'GET /cms/documents': list([storiesDoc({ draftValue: [websiteDefaults.stories[0]] })]) });
@@ -290,7 +371,7 @@ describe('Phase 28 CMS document editing', () => {
     const editor = screen.getByLabelText('Title(Optional)');
     const invalid = 'x'.repeat(20001);
     fireEvent.change(editor, { target: { value: invalid } });
-    await user.type(screen.getByLabelText('Change summary(Optional)'), 'Broken edit.');
+    await user.type(screen.getByLabelText(/^Change summary/), 'Broken edit.');
     expect(screen.getByText(/Content needs review. The original data is preserved/)).toBeInTheDocument();
     expect(editor).toHaveValue(invalid);
     const save = screen.getByRole('button', { name: 'Save Draft' });
