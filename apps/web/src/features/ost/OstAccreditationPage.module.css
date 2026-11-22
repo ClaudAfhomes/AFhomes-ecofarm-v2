@@ -2,6 +2,7 @@
   text-align: center;
   padding: var(--space-8);
   color: var(--color-text-secondary);
+  animation: afh-fade-in var(--motion-200) var(--ease-out) backwards;
 }
 
 .centered {
@@ -33,6 +34,16 @@
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
   flex-wrap: wrap;
+  box-shadow: var(--shadow-xs);
+  transition:
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
+}
+
+.historyItem:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border-strong);
 }
 
 .historyKind {

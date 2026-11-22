@@ -7,6 +7,14 @@
   border: 1px solid var(--color-border-default);
   font-size: var(--text-body-s);
   line-height: 1.5;
+  animation: alertIn var(--motion-200) var(--ease-out) backwards;
+}
+
+@keyframes alertIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 .icon {

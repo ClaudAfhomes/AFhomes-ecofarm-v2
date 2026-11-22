@@ -4,6 +4,12 @@
   border-radius: var(--radius-lg, 12px);
   padding: var(--space-5);
   margin-bottom: var(--space-5);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(16 24 40 / 6%));
+}
+
+/* Spacing for the shared photo editor, matching the gap below each `.card`. */
+.photoSlot {
+  margin-bottom: var(--space-5);
 }
 
 .cardHead {
@@ -13,6 +19,25 @@
   gap: var(--space-3);
   flex-wrap: wrap;
   margin-bottom: var(--space-4);
+}
+
+.selectLabel {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 20rem;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .cardTitle {
@@ -59,17 +84,29 @@
    monospace face and generous letter spacing to make transposed characters
    visible. `input` is used rather than a styled div so the field is keyboard-,
    paste- and mobile-native with no picker or custom key handling. */
+.claimLabel {
+  display: block;
+  margin: var(--space-4) 0 var(--space-2);
+}
+
 .claimInput {
   display: block;
   width: 100%;
   margin: 0 0 var(--space-4);
   padding: var(--space-3);
-  border-radius: var(--radius-md, 8px);
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-surface);
+  min-height: var(--control-md);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface-raised);
   color: var(--color-text-primary);
   font-family: var(--font-mono);
   letter-spacing: 0.04em;
+  transition: border-color var(--motion-150) var(--ease-out);
+}
+
+.claimInput:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 1px;
 }
 
 .claimInput:disabled {
@@ -84,6 +121,16 @@
   border: 1px solid var(--color-border-subtle);
   color: var(--color-text-secondary);
   font-size: var(--text-body-s);
+}
+
+.notice a {
+  color: var(--color-brand-primary);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.notice a:hover {
+  color: var(--color-brand-strong);
 }
 
 .noticeWarning {
@@ -111,6 +158,11 @@
   text-transform: uppercase;
   color: var(--color-text-muted);
   font-weight: 600;
+}
+
+/* Display-only: stored values stay lowercase codes; the cell reads as words. */
+.capitalize::first-letter {
+  text-transform: uppercase;
 }
 
 .numeric {
@@ -246,6 +298,11 @@
     grid-template-columns: 1fr 1fr;
     gap: var(--space-3);
   }
+
+  /* An odd last tile (often a date) takes the full row instead of truncating. */
+  .kpiGrid > li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Small screens: keep wide tables usable without breaking the card layout. */
@@ -329,10 +386,53 @@
   color: var(--color-text-primary);
 }
 
-.kpiSubLabel {
+/* `.kpiCard dd` outranks a lone class, so qualify it to stay a caption. */
+.kpiCard .kpiSubLabel {
   font-size: var(--text-caption);
+  font-weight: 500;
   color: var(--color-text-secondary);
   margin-top: var(--space-1);
+}
+
+/* OST list tables (dashboard, sales, commissions). */
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.tableWrap table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-size: var(--text-body-s);
+}
+
+.tableWrap th,
+.tableWrap td {
+  text-align: left;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.tableWrap th {
+  background: var(--color-bg-subtle);
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.tableWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr:hover td {
+    background: color-mix(in srgb, var(--color-brand-soft) 55%, transparent);
+  }
 }
 
 .reportPeriod {
@@ -366,5 +466,10 @@
   .kpiGrid {
     grid-template-columns: 1fr 1fr;
     gap: var(--space-3);
+  }
+
+  /* An odd last tile (often a date) takes the full row instead of truncating. */
+  .kpiGrid > li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 }

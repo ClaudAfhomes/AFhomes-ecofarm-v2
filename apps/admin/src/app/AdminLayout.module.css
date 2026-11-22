@@ -59,7 +59,7 @@
 }
 
 .roleNoticeAction:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .brandBlock {

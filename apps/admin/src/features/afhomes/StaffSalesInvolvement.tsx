@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Button, DetailCard, DetailCardTitle, ErrorState, Skeleton } from '@afhomes/ui';
+import {
+  Button,
+  DetailCard,
+  DetailCardTitle,
+  EmptyState,
+  ErrorState,
+  Skeleton,
+} from '@afhomes/ui';
 import { getStaffSalesInvolvement } from './services';
 import { formatDateTime } from '../../lib/format';
 
@@ -25,7 +32,10 @@ export function StaffSalesInvolvement({ staffId }: { staffId: string }) {
       ) : (
         <>
           {history.data.length === 0 ? (
-            <p>No recorded involvement on this page.</p>
+            <EmptyState
+              title="No recorded involvement on this page."
+              description="Sales this staff member took part in will appear here."
+            />
           ) : (
             <ul>
               {history.data.map((item) => (

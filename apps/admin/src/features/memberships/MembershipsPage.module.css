@@ -163,6 +163,10 @@
   }
 }
 
+.table tbody tr.clickable td {
+  transition: background-color var(--transition-fast);
+}
+
 .table tbody tr.clickable:focus-visible {
   outline: 3px solid var(--color-state-focus);
   outline-offset: -3px;

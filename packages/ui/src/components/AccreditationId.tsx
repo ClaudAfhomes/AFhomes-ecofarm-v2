@@ -7,7 +7,7 @@ export function AccreditationId({ value }: { value: string | null | undefined })
   const [feedback, setFeedback] = useState<{ id: string; text: string } | null>(null);
   return (
     <div className={styles.id}>
-      <strong className={styles.number}>
+      <strong className={value ? styles.number : `${styles.number} ${styles.placeholder}`}>
         {value ?? (value === null ? 'Not Yet Issued' : 'AA number unavailable')}
       </strong>
       {value ? (

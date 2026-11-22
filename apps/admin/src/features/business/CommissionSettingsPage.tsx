@@ -1,6 +1,15 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router';
-import { ErrorState, PageHeader, StatusChip, Tabs, type TabItem } from '@afhomes/ui';
+import { Link, useSearchParams } from 'react-router';
+import {
+  Alert,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  StatusChip,
+  Tabs,
+  buttonClassName,
+  type TabItem,
+} from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
 
 import { useSession } from '../../lib/session';
@@ -24,24 +33,43 @@ export function CommissionSettingsPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab');
   const tab = TABS.some((item) => item.value === requested) ? requested! : 'sellers';
-  const mayManage =
-    user?.afHomesPermissions.some(
-      (permission) => permission.moduleKey === 'network.commissions' && permission.canUpdate,
-    ) === true;
+  const permissions = user?.afHomesPermissions ?? [];
+  const holds = (key: string, action: 'canView' | 'canUpdate') =>
+    permissions.some((permission) => permission.moduleKey === key && permission[action]);
+  const mayManage = holds('network.commissions', 'canUpdate');
+  // Mirrors the server's rate-read rule: everyone who sees EVERY commission
+  // (Finance, card activation, managers) may read rates; scoped sellers may not.
+  const mayRead =
+    mayManage ||
+    (holds('network.commissions', 'canView') &&
+      (holds('finance.payment_verification', 'canView') ||
+        holds('finance.card_activation', 'canView')));
+  const readOnly = !mayManage;
 
   // One-row roster: positions and headline counts for the whole page.
   const overview = useQuery({
     queryKey: sharedScopes.commissionRosterPage({ overview: true }),
     queryFn: () => getCommissionRoster({ limit: 1 }),
-    enabled: mayManage,
+    enabled: mayRead,
     placeholderData: keepPreviousData,
   });
 
-  if (!mayManage)
+  if (!mayRead)
     return (
       <section className={styles.page}>
         <PageHeader title="Commission Settings" description="Set rates by position or person." />
-        <p role="alert">You do not have permission to manage commission rules.</p>
+        {/* View opens this route; reading rates needs a see-all commission grant (server-enforced). */}
+        <div role="alert">
+          <EmptyState
+            title="Rates are managed by commission administrators"
+            description="Your role can view commissions but cannot see or change commission rates. Ask a Super Admin if you need this access."
+            action={
+              <Link to="/admin/finance/commissions" className={buttonClassName('secondary', 'sm')}>
+                View commissions
+              </Link>
+            }
+          />
+        </div>
       </section>
     );
 
@@ -58,7 +86,19 @@ export function CommissionSettingsPage() {
 
   return (
     <section className={styles.page}>
-      <PageHeader title="Commission Settings" description="Set rates by position or person." />
+      <PageHeader
+        title="Commission Settings"
+        description={
+          readOnly
+            ? 'Current rates by position and person (read-only).'
+            : 'Set rates by position or person.'
+        }
+      />
+      {readOnly ? (
+        <Alert variant="info" title="Read-only">
+          You can review rates. Changing them needs commission update access.
+        </Alert>
+      ) : null}
 
       {overview.isError ? (
         <ErrorState error={overview.error} onRetry={overview.refetch} />
@@ -74,7 +114,11 @@ export function CommissionSettingsPage() {
             </li>
             <li>
               <StatusChip
-                label={needsRate > 0 ? `Need a rate: ${formatCountOrDash(needsRate)}` : 'All sellers have rates'}
+                label={
+                  needsRate > 0
+                    ? `Need a rate: ${formatCountOrDash(needsRate)}`
+                    : 'All sellers have rates'
+                }
                 tone={needsRate > 0 ? 'warning' : 'success'}
                 icon={needsRate > 0 ? 'alert' : 'check'}
               />
@@ -112,9 +156,19 @@ export function CommissionSettingsPage() {
           {/* Inactive panels stay mounted but hidden, so selections and filters survive a tab switch. */}
           {(
             [
-              ['sellers', <CommissionSellersTab key="sellers" positions={positions} />],
-              ['positions', <CommissionPositionRates key="positions" positions={positions} />],
-              ['rules', <CommissionRulesTab key="rules" />],
+              [
+                'sellers',
+                <CommissionSellersTab key="sellers" positions={positions} readOnly={readOnly} />,
+              ],
+              [
+                'positions',
+                <CommissionPositionRates
+                  key="positions"
+                  positions={positions}
+                  readOnly={readOnly}
+                />,
+              ],
+              ['rules', <CommissionRulesTab key="rules" readOnly={readOnly} />],
             ] as const
           ).map(([value, content]) => (
             <div

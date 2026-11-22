@@ -81,33 +81,48 @@ function Performance({
           label={`${prefix} Total Sales`}
           value={amount(data.salesAmount)}
           description={`${count(data.salesCount)} sales`}
+          icon="wallet"
         />
         {team && 'withSales' in data ? (
           <>
-            <MetricCard label="OST Members With Sales" value={count(data.withSales)} />
-            <MetricCard label="OST Members With No Sales" value={count(data.withoutSales)} />
+            <MetricCard
+              label="OST Members With Sales"
+              value={count(data.withSales)}
+              description="Sold in this period"
+              icon="user-check"
+            />
+            <MetricCard
+              label="OST Members With No Sales"
+              value={count(data.withoutSales)}
+              description="No sales in this period"
+              icon="user-x"
+            />
           </>
         ) : (
           <MetricCard
             label="My Qualifying Sales"
             value={count(data.qualifyingSales)}
             description="Active sales"
+            icon="check"
           />
         )}
         <MetricCard
           label={`${prefix} Commission to Earn`}
           value={amount(data.toEarn)}
           description="Pending qualification; not guaranteed or payable"
+          icon="clock"
         />
         <MetricCard
           label={`${prefix} Commission Earned`}
           value={amount(data.earned)}
           description="Includes paid commissions once"
+          icon="dollar-sign"
         />
         <MetricCard
           label={`${prefix} Commission Paid`}
           value={amount(data.paid)}
           description="Already marked paid; included in earned"
+          icon="file-text"
         />
       </div>
     </section>
@@ -189,10 +204,31 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
     <div className={styles.lightPage}>
       <PageHeader
         title={TITLES[view]}
-        actions={view === 'my-sales' && customerPermission?.canView ? <>
-          <Button variant="secondary" onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/applications'))}>Applications</Button>
-          {mayCreate ? <Button onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/new'))}>Create Application &amp; RA</Button> : null}
-        </> : undefined}
+        actions={
+          <>
+            <label className={styles.periodControl}>
+              <span>Reporting period</span>
+              <Select
+                aria-label="Reporting period"
+                value={preset}
+                options={PRESETS}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === 'custom') {
+                    setCustom({ from, to });
+                    setRange({ from, to }, value);
+                  } else setRange(istDateRange(value), value);
+                }}
+              />
+            </label>
+            {view === 'my-sales' && customerPermission?.canView ? (
+              <>
+                <Button variant="secondary" onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/applications'))}>Applications</Button>
+                {mayCreate ? <Button onClick={() => navigate(staffPortalPath(user?.roleSlug, '/admin/customers/new'))}>Create Application &amp; RA</Button> : null}
+              </>
+            ) : null}
+          </>
+        }
         description={
           view === 'dashboard'
             ? 'Your account, personal performance and authorized OST team.'
@@ -201,53 +237,36 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
               : 'Frozen sales attributed to the selected scope.'
         }
       />
-      <div className={styles.filters}>
-        <label>
-          Reporting period
-          <Select
-            aria-label="Reporting period"
-            value={preset}
-            options={PRESETS}
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value === 'custom') {
-                setCustom({ from, to });
-                setRange({ from, to }, value);
-              } else setRange(istDateRange(value), value);
-            }}
-          />
-        </label>
-        {preset === 'custom' ? (
-          <>
-            <DateField
-              id="ist-from"
-              name="from"
-              label="Custom Start Date"
-              value={custom.from}
-              onChange={(value) => setCustom((v) => ({ ...v, from: value }))}
-              max={custom.to}
-            />
-            <DateField
-              id="ist-to"
-              name="to"
-              label="Custom End Date"
-              value={custom.to}
-              onChange={(value) => setCustom((v) => ({ ...v, to: value }))}
-              min={custom.from}
-            />
-            <Button
-              disabled={!istPortalQuerySchema.safeParse({ ...custom, view }).success}
-              onClick={() => setRange(custom, 'custom')}
-            >
-              Apply dates
-            </Button>
-          </>
-        ) : null}
-      </div>
       <p className={styles.period}>
         Reporting period: {from} – {to}, inclusive UTC. Sales use sale creation date; commissions
         use commission creation date.
       </p>
+      {preset === 'custom' ? (
+        <div className={styles.filters}>
+          <DateField
+            id="ist-from"
+            name="from"
+            label="Custom Start Date"
+            value={custom.from}
+            onChange={(value) => setCustom((v) => ({ ...v, from: value }))}
+            max={custom.to}
+          />
+          <DateField
+            id="ist-to"
+            name="to"
+            label="Custom End Date"
+            value={custom.to}
+            onChange={(value) => setCustom((v) => ({ ...v, to: value }))}
+            min={custom.from}
+          />
+          <Button
+            disabled={!istPortalQuerySchema.safeParse({ ...custom, view }).success}
+            onClick={() => setRange(custom, 'custom')}
+          >
+            Apply dates
+          </Button>
+        </div>
+      ) : null}
       {!valid ? (
         <p role="alert">Choose valid dates, with the start on or before the end.</p>
       ) : report.isPending ? (
@@ -289,15 +308,36 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
               <section className={styles.section} aria-label="Team Summary">
                 <h2>Team Summary</h2>
                 <div className={styles.metrics}>
-                  <MetricCard label="Total Authorized Downline" value={count(data.team.total)} />
-                  <MetricCard label="Active Members" value={count(data.team.active)} />
+                  <MetricCard
+                    label="Total Authorized Downline"
+                    value={count(data.team.total)}
+                    description="Everyone in your authorized team"
+                    icon="users"
+                  />
+                  <MetricCard
+                    label="Active Members"
+                    value={count(data.team.active)}
+                    description="Currently able to transact"
+                    icon="user-check"
+                  />
                   <MetricCard
                     label="Team Sales"
                     value={amount(data.team.salesAmount)}
                     description={`${count(data.team.salesCount)} sales`}
+                    icon="wallet"
                   />
-                  <MetricCard label="Members With Sales" value={count(data.team.withSales)} />
-                  <MetricCard label="Members With No Sales" value={count(data.team.withoutSales)} />
+                  <MetricCard
+                    label="Members With Sales"
+                    value={count(data.team.withSales)}
+                    description="Sold in this period"
+                    icon="user-plus"
+                  />
+                  <MetricCard
+                    label="Members With No Sales"
+                    value={count(data.team.withoutSales)}
+                    description="No sales in this period"
+                    icon="user-x"
+                  />
                 </div>
               </section>
               <Performance title="Personal Performance" data={data.personal} />
@@ -393,6 +433,8 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
                       value={count(
                         view === 'team-sales' ? data.team.salesCount : data.personal.salesCount,
                       )}
+                      description="Frozen sales in period"
+                      icon="file-text"
                     />
                     <MetricCard
                       label="Qualifying Sales"
@@ -401,12 +443,16 @@ export function IstPortalPage({ view = 'dashboard' }: { view?: IstPortalView }) 
                           ? (data.team.qualifyingSales ?? null)
                           : data.personal.qualifyingSales,
                       )}
+                      description="Active sales"
+                      icon="check"
                     />
                     <MetricCard
                       label="Sales Amount"
                       value={amount(
                         view === 'team-sales' ? data.team.salesAmount : data.personal.salesAmount,
                       )}
+                      description="Total of frozen sales"
+                      icon="wallet"
                     />
                   </div>
                 </section>

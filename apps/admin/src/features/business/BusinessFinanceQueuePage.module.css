@@ -46,6 +46,7 @@
   color: var(--color-on-dark);
   box-shadow: var(--shadow-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
 }
 
 .heroText {
@@ -138,6 +139,8 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   overflow: auto;
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
+  animation-delay: 50ms;
 }
 
 /* The wide-table floor is desktop-only: on phones the rows collapse to
@@ -177,6 +180,10 @@
    the affordance. The row menu stops propagation, so menu use never opens. */
 .queueTable tbody tr.clickableRow {
   cursor: pointer;
+}
+
+.queueTable tbody tr.clickableRow td {
+  transition: background-color var(--transition-fast);
 }
 
 @media (hover: hover) {

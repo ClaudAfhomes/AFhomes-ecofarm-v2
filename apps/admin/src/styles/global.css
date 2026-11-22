@@ -57,6 +57,13 @@ small[role='alert'] {
   outline: 3px solid var(--color-state-focus);
   outline-offset: 2px;
 }
+@media (hover: hover) {
+  /* Fully zero-specificity so component borders and the invalid state below
+     (later in source) still win. */
+  :where(input, select, textarea):where(:hover:not(:disabled):not(:focus)) {
+    border-color: var(--color-text-muted);
+  }
+}
 :where(input, select, textarea):disabled {
   background: var(--color-state-disabled-bg);
   color: var(--color-state-disabled-text);

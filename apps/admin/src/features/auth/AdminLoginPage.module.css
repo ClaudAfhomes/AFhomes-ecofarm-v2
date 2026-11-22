@@ -29,7 +29,7 @@
 }
 
 .textLink:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .prompt {
@@ -46,7 +46,7 @@
 }
 
 .promptLink:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .note {

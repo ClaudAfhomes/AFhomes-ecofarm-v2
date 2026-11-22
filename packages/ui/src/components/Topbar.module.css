@@ -10,7 +10,9 @@
   position: sticky;
   top: 0;
   z-index: var(--z-topbar);
-  backdrop-filter: saturate(1.2);
+  /* Frosted bar: content scrolling underneath stays faintly visible. */
+  background-color: color-mix(in srgb, var(--color-bg-surface-raised) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
 }
 
 .left {

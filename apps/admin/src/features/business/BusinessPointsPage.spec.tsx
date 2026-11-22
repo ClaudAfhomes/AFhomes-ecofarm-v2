@@ -79,6 +79,34 @@ beforeEach(() => {
 });
 
 describe('earn points: identify', () => {
+  it('explains, without calling the refused reads, when the role can view sales but not record one', async () => {
+    // Finance holds operations.sales VIEW only (it verifies receipts) and no catalog grant.
+    renderWithProviders(<BusinessPointsPage />, {
+      user: {
+        id: 'u-finance',
+        name: 'FIN USER',
+        email: 'finance@afhomes.test',
+        roleId: 'r-finance',
+        roleSlug: 'finance',
+        roleName: 'Finance',
+        status: 'active',
+        afHomesPermissions: [
+          {
+            moduleKey: 'operations.sales',
+            canView: true,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: false,
+          },
+        ],
+      },
+    });
+    expect(await screen.findByText('Sales are recorded at the service desk')).toBeInTheDocument();
+    expect(services).not.toHaveBeenCalled();
+    expect(listOwnPurchases).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /record/i })).not.toBeInTheDocument();
+  });
+
   it('reopens an existing verified sale without recording another purchase', async () => {
     const user = userEvent.setup();
     const id = 'aaaaaaaa-0000-4000-8000-000000000001';

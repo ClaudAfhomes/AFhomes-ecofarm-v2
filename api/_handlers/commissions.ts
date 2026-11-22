@@ -32,6 +32,7 @@ import {
 } from '@afhomes/contracts';
 
 import { authorizeAfHomes } from '../_lib/afhomes-access.js';
+import { toErrorEnvelope } from '../_lib/envelope.js';
 import {
   audit,
   deny,
@@ -70,6 +71,23 @@ async function resolveCommissionScope(req: VercelRequest) {
   return { view, canSeeAll: false } as const;
 }
 
+/**
+ * Reading the rate configuration (roster + rules) is allowed to everyone who
+ * sees EVERY commission: Finance, card activation and commission managers
+ * (owner-approved 2026-11-22). A scoped seller, who sees only their own
+ * commissions, is refused: the roster lists every seller's personal rate.
+ * Changing a rate, and the audit-backed rule history, still require update.
+ */
+async function authorizeRateRead(req: VercelRequest) {
+  const scope = await resolveCommissionScope(req);
+  if ('error' in scope.view) return scope.view;
+  if (!scope.canSeeAll)
+    return {
+      error: toErrorEnvelope('FORBIDDEN', 'You do not have permission to view commission rates.', 403),
+    };
+  return scope.view;
+}
+
 function commissionInScope(
   scope: { canSeeAll: boolean; view: Awaited<ReturnType<typeof authorizeAfHomes>> },
   row: Record<string, unknown>,
@@ -106,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (await handleCommissionOps(req, res, db)) return;
     if (subPath(req) === 'rules/roster' && method(req) === 'GET') {
-      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      const auth = await authorizeRateRead(req);
       if ('error' in auth) return deny(res, auth);
       const parsed = commissionRosterQuerySchema.safeParse(req.query ?? {});
       if (!parsed.success)
@@ -114,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(await commissionRoster(db, parsed.data));
     }
     if (subPath(req) === 'rules' && method(req) === 'GET') {
-      const auth = await authorizeAfHomes(req, 'network.commissions', 'update');
+      const auth = await authorizeRateRead(req);
       if ('error' in auth) return deny(res, auth);
       const { data, error } = await db
         .from('commission_rules')

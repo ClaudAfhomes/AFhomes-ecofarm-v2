@@ -120,11 +120,25 @@
      not the page background. Mobile: max(logo 40, toggle 44) + 24px padding. */
   --header-height: 68px;
 
+  --shadow-xs: 0 1px 2px rgba(28, 43, 58, 0.05);
   --shadow-sm: 0 1px 2px rgba(28, 43, 58, 0.06), 0 1px 3px rgba(28, 43, 58, 0.08);
   --shadow-md: 0 18px 40px -24px rgba(28, 43, 58, 0.32);
   --shadow-lg: 0 28px 64px -28px rgba(28, 43, 58, 0.42);
+  /* Lifted state for clickable cards: a soft, close shadow plus a wide halo. */
+  --shadow-hover: 0 2px 4px rgba(28, 43, 58, 0.06), 0 12px 28px -12px rgba(23, 79, 59, 0.28);
 
-  --transition-fast: 160ms ease;
+  /* Motion - four durations only; ease-out on enter, ease-in on exit, no
+     bounce. Only transform/opacity animate. Reduced motion (base.css) turns
+     every animation and transition off. */
+  --motion-100: 100ms;
+  --motion-150: 150ms;
+  --motion-200: 200ms;
+  --motion-300: 300ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  --transition-fast: var(--motion-150) var(--ease-standard);
 
   /* Overlays & skeleton */
   --color-overlay: rgba(20, 27, 34, 0.45);

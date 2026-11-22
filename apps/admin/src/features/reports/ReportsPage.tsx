@@ -186,118 +186,127 @@ export function ReportsPage() {
         description="Operational reports. Every figure is computed server-side from your authorized scope."
       />
 
-      <FilterBar
-        search={
-          <SearchField
-            label="Search report"
-            placeholder={
-              type === 'redemptions' ? 'customer / membership / reference / item' : 'name / number'
-            }
-            value={search}
-            onChange={(value) => {
-              setSearch(value);
-            }}
-            busy={query.isFetching && !query.isPending}
-          />
-        }
-        filters={
-          <>
-            <Select
-              aria-label="Report"
-              value={type}
-              onChange={(e) => {
-                switchType(e.target.value);
-              }}
-              options={defs.map((d) => ({ value: d.type, label: d.label }))}
-            />
-            <DateField
-              id="reports-from"
-              name="from"
-              label="From"
-              optional
-              value={from}
-              onChange={(value) => {
-                setFrom(value);
-                resetPage();
-              }}
-            />
-            <DateField
-              id="reports-to"
-              name="to"
-              label="To"
-              optional
-              value={to}
-              onChange={(value) => {
-                setTo(value);
-                resetPage();
-              }}
-            />
+      <div className={styles.toolbar}>
+        <FilterBar
+          search={
             <SearchField
-              label="Status"
-              placeholder="exact status"
-              value={status}
+              label="Search report"
+              placeholder={
+                type === 'redemptions'
+                  ? 'customer / membership / reference / item'
+                  : 'name / number'
+              }
+              value={search}
               onChange={(value) => {
-                setStatus(value);
+                setSearch(value);
               }}
+              busy={query.isFetching && !query.isPending}
             />
-            {type === 'redemptions' ? (
+          }
+          filters={
+            <div className={styles.filterRow}>
               <Select
-                aria-label="Transaction type"
-                value={transactionType}
+                aria-label="Report"
+                value={type}
                 onChange={(e) => {
-                  setTransactionType(e.target.value);
-                  resetPage();
+                  switchType(e.target.value);
                 }}
-                options={[
-                  { value: '', label: 'All types' },
-                  { value: 'redemption', label: 'Redemption' },
-                ]}
+                options={defs.map((d) => ({ value: d.type, label: d.label }))}
               />
-            ) : null}
-            {type === 'ost' ? (
-              <Select
-                aria-label="Kind"
-                value={kind}
-                onChange={(e) => {
-                  setKind(e.target.value);
-                  resetPage();
+              <SearchField
+                label="Status"
+                placeholder="exact status"
+                value={status}
+                onChange={(value) => {
+                  setStatus(value);
                 }}
-                options={[
-                  { value: '', label: 'Applications' },
-                  { value: 'members', label: 'Members' },
-                ]}
               />
-            ) : null}
-          </>
-        }
-        actions={
-          <>
-            {(['today', 'week', 'month', 'custom'] as const).map((preset) => (
-              <Button key={preset} variant="ghost" onClick={() => applyPreset(preset)}>
-                {preset === 'today'
-                  ? 'Today'
-                  : preset === 'week'
-                    ? 'This week'
-                    : preset === 'month'
-                      ? 'This month'
-                      : 'Custom'}
-              </Button>
-            ))}
-            {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
-              <Button
-                key={format}
-                variant="secondary"
-                disabled={exporting !== null}
-                onClick={() => void runExport(format)}
-              >
-                {exporting === format
-                  ? `Exporting ${format.toUpperCase()}…`
-                  : `Export ${format.toUpperCase()}`}
-              </Button>
-            ))}
-          </>
-        }
-      />
+              {type === 'redemptions' ? (
+                <Select
+                  aria-label="Transaction type"
+                  value={transactionType}
+                  onChange={(e) => {
+                    setTransactionType(e.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: '', label: 'All types' },
+                    { value: 'redemption', label: 'Redemption' },
+                  ]}
+                />
+              ) : null}
+              {type === 'ost' ? (
+                <Select
+                  aria-label="Kind"
+                  value={kind}
+                  onChange={(e) => {
+                    setKind(e.target.value);
+                    resetPage();
+                  }}
+                  options={[
+                    { value: '', label: 'Applications' },
+                    { value: 'members', label: 'Members' },
+                  ]}
+                />
+              ) : null}
+              <span className={styles.rowBreak} aria-hidden="true" />
+              <div className={styles.dateRange}>
+                <DateField
+                  id="reports-from"
+                  name="from"
+                  label="From"
+                  optional
+                  value={from}
+                  onChange={(value) => {
+                    setFrom(value);
+                    resetPage();
+                  }}
+                />
+                <DateField
+                  id="reports-to"
+                  name="to"
+                  label="To"
+                  optional
+                  value={to}
+                  onChange={(value) => {
+                    setTo(value);
+                    resetPage();
+                  }}
+                />
+              </div>
+              <div className={styles.segmented} role="group" aria-label="Quick date range">
+                {(['today', 'week', 'month', 'custom'] as const).map((preset) => (
+                  <Button key={preset} variant="ghost" onClick={() => applyPreset(preset)}>
+                    {preset === 'today'
+                      ? 'Today'
+                      : preset === 'week'
+                        ? 'This week'
+                        : preset === 'month'
+                          ? 'This month'
+                          : 'Custom'}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          }
+          actions={
+            <div className={styles.exportGroup} role="group" aria-label="Export report">
+              {(['csv', 'xlsx', 'pdf'] as const).map((format) => (
+                <Button
+                  key={format}
+                  variant="secondary"
+                  disabled={exporting !== null}
+                  onClick={() => void runExport(format)}
+                >
+                  {exporting === format
+                    ? `Exporting ${format.toUpperCase()}…`
+                    : `Export ${format.toUpperCase()}`}
+                </Button>
+              ))}
+            </div>
+          }
+        />
+      </div>
 
       <p className={styles.muted}>{def.description}</p>
 

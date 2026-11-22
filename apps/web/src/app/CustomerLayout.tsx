@@ -1,13 +1,12 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { isFeaturePathEnabled } from '@afhomes/shared';
-import { Button, ErrorState, Spinner } from '@afhomes/ui';
+import { Button, ErrorState, Icon, IconButton, Spinner, type IconName } from '@afhomes/ui';
 
 import { useCustomerSession } from '../lib/customer-session';
 import { CustomerGuard } from './CustomerGuard';
 import { useCustomerProfileQuery } from '../features/customer/queries';
 import { isForbidden, isUnauthorized } from '../features/customer/http';
 import { useNotificationsQuery } from '../features/customer/engagement';
-import engagement from '../features/customer/engagement.module.css';
 import styles from './CustomerLayout.module.css';
 
 /** Header bell: unread count from the server, refreshed every 30s. */
@@ -16,12 +15,13 @@ function NotificationBell() {
   return (
     <Link
       to="/customer/notifications"
-      className={engagement.bell}
+      className={styles.iconAction}
+      title="Notifications"
       aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
     >
-      <span aria-hidden="true">Notifications</span>
+      <Icon name="bell" size={20} />
       {unread > 0 && (
-        <span className={engagement.badge} aria-hidden="true">
+        <span className={styles.badge} aria-hidden="true">
           {unread}
         </span>
       )}
@@ -30,14 +30,14 @@ function NotificationBell() {
 }
 
 const NAV_ITEMS = [
-  { to: '/customer', label: 'Dashboard', end: true },
-  { to: '/customer/membership', label: 'My card', end: false },
-  { to: '/customer/points', label: 'Points', end: false },
-  { to: '/customer/redemptions', label: 'Redemptions', end: false },
-  { to: '/customer/payments', label: 'Payments', end: false },
-  { to: '/customer/bookings', label: 'Bookings', end: false },
-  { to: '/customer/messages', label: 'Messages', end: false },
-  { to: '/customer/profile', label: 'Profile', end: false },
+  { to: '/customer', label: 'Dashboard', icon: 'home' as IconName, end: true },
+  { to: '/customer/membership', label: 'My card', icon: 'grid' as IconName, end: false },
+  { to: '/customer/points', label: 'Points', icon: 'wallet' as IconName, end: false },
+  { to: '/customer/redemptions', label: 'Redemptions', icon: 'list' as IconName, end: false },
+  { to: '/customer/payments', label: 'Payments', icon: 'dollar-sign' as IconName, end: false },
+  { to: '/customer/bookings', label: 'Bookings', icon: 'clock' as IconName, end: false },
+  { to: '/customer/messages', label: 'Messages', icon: 'message' as IconName, end: false },
+  { to: '/customer/profile', label: 'Profile', icon: 'user' as IconName, end: false },
 ];
 /** Read at render: module switches load at startup and may change. */
 const navItems = () => NAV_ITEMS.filter((item) => isFeaturePathEnabled(item.to));
@@ -125,16 +125,25 @@ function CustomerShell() {
   return (
     <div className={styles.shell}>
       <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>AFhomes Ecofarm</p>
-          <p className={styles.customerName}>{customer.fullName}</p>
-          <p className={styles.customerNumber}>{customer.customerNumber}</p>
-        </div>
-        <div>
-          <NotificationBell />
-          <Button variant="secondary" onClick={() => void signOut()}>
-            Sign out
-          </Button>
+        <div className={styles.headerInner}>
+          <div className={styles.brand}>
+            <img src="/logo.png" alt="AFhomes logo" className={styles.brandLogo} />
+            <div className={styles.identity}>
+              <p className={styles.eyebrow}>AFhomes Ecofarm</p>
+              <p className={styles.customerName}>{customer.fullName}</p>
+              <p className={styles.customerNumber}>{customer.customerNumber}</p>
+            </div>
+          </div>
+          <div className={styles.actions}>
+            <NotificationBell />
+            <IconButton
+              icon="logout"
+              label="Sign out"
+              variant="ghost"
+              className={styles.iconAction}
+              onClick={() => void signOut()}
+            />
+          </div>
         </div>
       </header>
 
@@ -158,12 +167,13 @@ function CustomerShell() {
             end={item.end}
             className={({ isActive }) => (isActive ? styles.navLinkActive : styles.navLink)}
           >
-            {item.label}
+            <Icon name={item.icon} size={16} />
+            <span>{item.label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <main className={styles.main}>
+      <main className={`${styles.main} afh-route`}>
         {tab ? <h1 className="sr-only">{tab.label}</h1> : null}
         <Outlet />
       </main>

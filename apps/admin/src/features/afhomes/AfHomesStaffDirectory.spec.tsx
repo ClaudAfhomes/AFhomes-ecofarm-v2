@@ -31,7 +31,23 @@ const ADMIN: SessionUser = {
   roleSlug: 'admin',
   roleName: 'Admin',
   status: 'active',
-  afHomesPermissions: [],
+  // Mirrors the real Admin grants this page depends on (baseline migration).
+  afHomesPermissions: [
+    {
+      moduleKey: 'organization.staff',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+    {
+      moduleKey: 'organization.roles',
+      canView: true,
+      canCreate: true,
+      canUpdate: true,
+      canDelete: false,
+    },
+  ],
 };
 
 const role = (extra: Partial<AfHomesRole>): AfHomesRole =>
@@ -120,6 +136,24 @@ beforeEach(() => {
 });
 
 describe('staff directory columns', () => {
+  it('does not request the roles list for a role without organization.roles (HR)', async () => {
+    show([ANA], {
+      ...ADMIN,
+      roleSlug: 'hr',
+      roleName: 'HR',
+      afHomesPermissions: [
+        {
+          moduleKey: 'organization.staff',
+          canView: true,
+          canCreate: true,
+          canUpdate: true,
+          canDelete: false,
+        },
+      ],
+    });
+    expect(await screen.findByText('AF-EMP-00001')).toBeInTheDocument();
+    expect(getAfHomesRoles).not.toHaveBeenCalled();
+  });
   it('shows Code, Name, Email, Role, Status, Added and Actions only', async () => {
     show([ANA]);
     const table = await screen.findByRole('table');

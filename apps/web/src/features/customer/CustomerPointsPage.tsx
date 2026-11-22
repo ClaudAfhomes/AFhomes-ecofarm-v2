@@ -6,6 +6,7 @@ import {
   Button,
   ErrorState,
   Skeleton,
+  Select,
   notifyConfirm,
   notifySuccess,
   useQrScanner,
@@ -183,18 +184,19 @@ export function CustomerPointsPage() {
           When AFhomes Ecofarm records a purchase for you, you get a claim code. Enter it here or
           scan its QR, review the purchase, then confirm to add the points to your card.
         </p>
-        <label>
+        <label className={styles.selectLabel}>
           Camera
-          <select
+          <Select
             value={camera}
             onChange={(event) => {
               stopScan();
               setCamera(event.target.value === 'user' ? 'user' : 'environment');
             }}
-          >
-            <option value="environment">Rear camera</option>
-            <option value="user">Front camera</option>
-          </select>
+            options={[
+              { value: 'environment', label: 'Rear camera' },
+              { value: 'user', label: 'Front camera' },
+            ]}
+          />
         </label>
         {/*
           Camera states are named out loud rather than implied by a video element.
@@ -230,7 +232,7 @@ export function CustomerPointsPage() {
           <p role="status">Camera ready. Point it at the claim QR shown by AFhomes.</p>
         )}
         {scanMessage && <p role="status">{scanMessage}</p>}
-        <label className={styles.fieldLabel} htmlFor="claim-credential">
+        <label className={`${styles.fieldLabel} ${styles.claimLabel}`} htmlFor="claim-credential">
           Claim code
         </label>
         <input
@@ -407,7 +409,7 @@ export function CustomerPointsPage() {
         {ledger.data && ledger.data.length > 0 && (
           <p className={styles.notice}>Showing {ledger.data.length} entries on this page.</p>
         )}
-        <nav aria-label="Points history pages">
+        <nav className={styles.pager} aria-label="Points history pages">
           <Button
             variant="secondary"
             disabled={!ledger.hasPrevious || ledger.isFetching}

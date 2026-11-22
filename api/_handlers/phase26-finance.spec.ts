@@ -21,12 +21,14 @@ import {
   MEMBERSHIP,
   PAYMENT,
   PRODUCT,
+  ROLE2,
   SALE,
   STAFF2,
   TOKEN2,
   TOKEN,
   UUID,
   UNIQUE,
+  moduleId,
   phase2World,
   phase2WorldTokens,
 } from '../_lib/testing/phase2-fixtures.js';
@@ -1252,4 +1254,47 @@ it('mounts the Supabase Commission Settings roster and validates authorization a
   expect((await callCommissions({path:'rules/roster',token:TOKEN.superAdmin,query:{limit:'1'}})).status).toBe(200);
   expect((await callCommissions({path:'rules/roster',token:TOKEN.superAdmin,query:{limit:'101'}})).status).toBe(400);
   expect((await callCommissions({path:'rules/roster'})).status).toBe(401);
+});
+
+it('lets every-commission readers (Finance) read rates, but never change them or read audit history', async () => {
+  install();
+  const finance = TOKEN2.finance;
+  expect((await callCommissions({ path: 'rules/roster', token: finance, query: { limit: '1' } })).status).toBe(200);
+  const rules = await callCommissions({ path: 'rules', token: finance });
+  expect(rules.status).toBe(200);
+  // Writes and the audit-backed history still need network.commissions update.
+  const write = await callCommissions({ path: 'rules/bulk', method: 'POST', token: finance, body: {} });
+  expect(write.status).toBe(403);
+  const history = await callCommissions({
+    path: 'rules/00000000-0000-4000-8000-000000000001/history',
+    token: finance,
+  });
+  expect(history.status).toBe(403);
+});
+
+it('refuses rate reads to a scoped seller who views only their own commissions', async () => {
+  // A Sales Manager granted network.commissions VIEW, without any see-all grant.
+  install({
+    tables: {
+      role_permissions: [
+        ...(phase2World().role_permissions as Record<string, unknown>[]),
+        {
+          role_id: ROLE2.salesManager,
+          module_id: moduleId('network.commissions'),
+          can_view: true,
+          can_create: false,
+          can_update: false,
+          can_delete: false,
+        },
+      ],
+    },
+  });
+  const seller = TOKEN2.salesManager;
+  // The seller can still list commissions (scoped to their own) ...
+  expect((await callCommissions({ path: '', token: seller })).status).toBe(200);
+  // ... but never the roster of every seller's rate, nor the rules.
+  const roster = await callCommissions({ path: 'rules/roster', token: seller, query: { limit: '1' } });
+  expect(roster.status).toBe(403);
+  expect(err(roster.body).code).toBe('FORBIDDEN');
+  expect((await callCommissions({ path: 'rules', token: seller })).status).toBe(403);
 });

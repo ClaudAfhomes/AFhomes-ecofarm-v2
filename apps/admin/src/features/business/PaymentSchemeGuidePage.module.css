@@ -20,6 +20,15 @@
   border-radius: var(--radius-md);
   background-color: var(--color-bg-surface-raised);
   box-shadow: var(--shadow-sm);
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
+}
+
+.section:nth-of-type(2) {
+  animation-delay: 50ms;
+}
+
+.section:nth-of-type(n + 3) {
+  animation-delay: 100ms;
 }
 
 .sectionHeader {

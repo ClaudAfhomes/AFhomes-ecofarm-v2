@@ -3,6 +3,7 @@ import { profilePhotoSchema } from '@afhomes/contracts';
 import { ProfilePhotoEditor } from '@afhomes/ui';
 import { request } from '../../lib/api/client';
 import { useCustomerSession } from '../../lib/customer-session';
+import { styles } from './portal-ui';
 
 export function ProfilePhotoCard({ scope = 'customer' }: { scope?: 'customer' | 'staff' }) {
   const { user } = useCustomerSession(),
@@ -41,17 +42,19 @@ export function ProfilePhotoCard({ scope = 'customer' }: { scope?: 'customer' | 
     },
   });
   return (
-    <ProfilePhotoEditor
-      photo={photo.data}
-      loading={photo.isPending}
-      error={photo.error?.message}
-      onRefresh={() => void photo.refetch()}
-      onUpload={(data) =>
-        user
-          ? upload.mutateAsync({ dataBase64: data, expectedUserId: user.authUserId })
-          : Promise.reject(new Error('Sign in again before uploading.'))
-      }
-      onRemove={user ? () => remove.mutateAsync() : undefined}
-    />
+    <div className={styles.photoSlot}>
+      <ProfilePhotoEditor
+        photo={photo.data}
+        loading={photo.isPending}
+        error={photo.error?.message}
+        onRefresh={() => void photo.refetch()}
+        onUpload={(data) =>
+          user
+            ? upload.mutateAsync({ dataBase64: data, expectedUserId: user.authUserId })
+            : Promise.reject(new Error('Sign in again before uploading.'))
+        }
+        onRemove={user ? () => remove.mutateAsync() : undefined}
+      />
+    </div>
   );
 }

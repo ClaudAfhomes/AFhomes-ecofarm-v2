@@ -10274,6 +10274,13 @@ async function main(): Promise<void> {
         financeQualify?.can_view === true && financeQualify?.can_update === false,
         JSON.stringify(financeQualify ?? null),
       );
+      // 20270105000032: HR reads roles for its Staff screen, and nothing more.
+      const hrRoles = await flag('hr', 'organization.roles');
+      check(
+        'hr may view roles but never create or change one',
+        hrRoles?.can_view === true && hrRoles?.can_create === false && hrRoles?.can_update === false,
+        JSON.stringify(hrRoles ?? null),
+      );
       const redeem = await flag('employee', 'operations.redemption');
       check(
         'employee alone may spend points (operations.redemption create)',

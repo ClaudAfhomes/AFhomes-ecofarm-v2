@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { formatCountOrDash } from '@afhomes/shared';
+import { MetricCard } from '@afhomes/ui';
+import type { IconName } from '@afhomes/ui';
 
 import { formatMoney } from './format';
 import { businessKeys } from './queryKeys';
@@ -24,24 +26,40 @@ export function FinanceSummaryCards() {
     return <div className={styles.grid} aria-busy="true" aria-label="Loading month summary" />;
   }
   const s = query.data;
-  const cards: { label: string; value: string; sub?: string }[] = [
-    { label: 'Pending verification', value: formatCountOrDash(s.pendingVerification) },
+  const cards: { label: string; value: string; sub?: string; icon: IconName }[] = [
+    {
+      label: 'Pending verification',
+      value: formatCountOrDash(s.pendingVerification),
+      icon: 'clock',
+    },
     {
       label: 'Verified this month',
+      icon: 'wallet',
       value: formatMoney(s.verifiedTotal),
       sub: `${formatCountOrDash(s.verifiedCount)} payments`,
     },
-    { label: 'Held for duplicate review', value: formatCountOrDash(s.heldForDuplicateReview) },
-    { label: 'Proposed adjustments', value: formatCountOrDash(s.proposedAdjustments) },
-    { label: 'Late postings', value: formatCountOrDash(s.latePostings) },
+    {
+      label: 'Held for duplicate review',
+      value: formatCountOrDash(s.heldForDuplicateReview),
+      icon: 'alert',
+    },
+    {
+      label: 'Proposed adjustments',
+      value: formatCountOrDash(s.proposedAdjustments),
+      icon: 'pencil',
+    },
+    { label: 'Late postings', value: formatCountOrDash(s.latePostings), icon: 'list' },
   ];
   return (
     <ul className={styles.grid} aria-label="Month summary">
       {cards.map((card) => (
         <li key={card.label} className={styles.card}>
-          <span className={styles.label}>{card.label}</span>
-          <span className={styles.value}>{card.value}</span>
-          {card.sub ? <span className={styles.sub}>{card.sub}</span> : null}
+          <MetricCard
+            label={card.label}
+            value={card.value}
+            icon={card.icon}
+            description={card.sub}
+          />
         </li>
       ))}
     </ul>

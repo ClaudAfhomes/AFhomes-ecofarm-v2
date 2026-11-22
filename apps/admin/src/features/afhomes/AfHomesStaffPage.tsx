@@ -25,6 +25,7 @@ import { PERSON_NAME_RE, type AfHomesStaff } from '@afhomes/contracts';
 import { normalizeLiveHumanField } from '../../lib/normalize';
 import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
+import { canViewModule } from '../../app/navigation';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import styles from './AfHomesStaffPage.module.css';
 import {
@@ -62,6 +63,9 @@ export function AfHomesStaffPage() {
   const roles = useQuery({
     queryKey: ['afhomes', 'roles'],
     queryFn: getAfHomesRoles,
+    // The roles list is gated on organization.roles server-side (HR holds only
+    // organization.staff); without that grant the call is always refused.
+    enabled: !user || canViewModule(user.afHomesPermissions, 'organization.roles'),
     placeholderData: keepPreviousData,
   });
   const departments = useQuery({

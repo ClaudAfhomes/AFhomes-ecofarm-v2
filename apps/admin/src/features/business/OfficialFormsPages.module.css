@@ -1155,7 +1155,7 @@
 }
 
 .linkedCustomerName:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .linkedCustomerMeta {

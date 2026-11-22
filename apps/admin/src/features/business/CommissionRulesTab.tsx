@@ -40,7 +40,7 @@ const emptyEdit = () => ({
 });
 
 /** Every rule with edit, enable/disable and audit history. */
-export function CommissionRulesTab() {
+export function CommissionRulesTab({ readOnly = false }: { readOnly?: boolean }) {
   const client = useQueryClient();
   const [edit, setEdit] = useState(emptyEdit);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -80,12 +80,15 @@ export function CommissionRulesTab() {
     onError: (error) => notifyError({ title: 'Rule not saved', message: error.message }),
   });
   const toggle = useBusinessMutation({
-    mutationFn: (rule: CommissionRule) => updateCommissionRule(rule.id, { isActive: !rule.isActive }),
+    mutationFn: (rule: CommissionRule) =>
+      updateCommissionRule(rule.id, { isActive: !rule.isActive }),
     onSuccess: async (_saved, rule) => {
       await refresh();
       notifySuccess({
         title: rule.isActive ? 'Rule disabled' : 'Rule activated',
-        message: rule.isActive ? 'Sellers fall back to other rates.' : 'It applies to future sales.',
+        message: rule.isActive
+          ? 'Sellers fall back to other rates.'
+          : 'It applies to future sales.',
       });
     },
     onError: (error) => notifyError({ title: 'Rule not changed', message: error.message }),
@@ -264,9 +267,11 @@ export function CommissionRulesTab() {
                 </th>
                 <th scope="col">Applies</th>
                 <th scope="col">Status</th>
-                <th scope="col" className={styles.actionHead}>
-                  Actions
-                </th>
+                {readOnly ? null : (
+                  <th scope="col" className={styles.actionHead}>
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -313,35 +318,37 @@ export function CommissionRulesTab() {
                         tone={rule.isActive ? 'success' : 'neutral'}
                       />
                     </td>
-                    <td data-label="Actions" className={styles.actionCell}>
-                      <span className={styles.actionGroup}>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={toggling}
-                          onClick={() => startEdit(rule)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          loading={toggling}
-                          loadingLabel={rule.isActive ? 'Disabling…' : 'Activating…'}
-                          onClick={() => onToggle(rule)}
-                        >
-                          {rule.isActive ? 'Disable' : 'Activate'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={toggling}
-                          onClick={() => setHistoryId(rule.id)}
-                        >
-                          History
-                        </Button>
-                      </span>
-                    </td>
+                    {readOnly ? null : (
+                      <td data-label="Actions" className={styles.actionCell}>
+                        <span className={styles.actionGroup}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={toggling}
+                            onClick={() => startEdit(rule)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={toggling}
+                            loadingLabel={rule.isActive ? 'Disabling…' : 'Activating…'}
+                            onClick={() => onToggle(rule)}
+                          >
+                            {rule.isActive ? 'Disable' : 'Activate'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={toggling}
+                            onClick={() => setHistoryId(rule.id)}
+                          >
+                            History
+                          </Button>
+                        </span>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

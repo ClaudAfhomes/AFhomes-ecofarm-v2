@@ -80,7 +80,7 @@
 }
 
 .textLink:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .prompt {
@@ -97,7 +97,7 @@
 }
 
 .promptLink:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 .divider {
@@ -126,7 +126,6 @@
 
 .crumbLink:hover {
   color: var(--color-brand-primary);
-  text-decoration: underline;
 }
 
 .crumbSeparator {

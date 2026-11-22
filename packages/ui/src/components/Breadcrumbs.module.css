@@ -28,9 +28,19 @@
 
 .link:hover {
   color: var(--color-brand-primary);
-  text-decoration: underline;
+}
+
+.group {
+  color: var(--color-text-muted);
+}
+
+.separator {
+  display: inline-flex;
+  color: var(--color-text-muted);
+  opacity: 0.6;
 }
 
 .current {
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
+  font-weight: 600;
 }

@@ -5,6 +5,7 @@ import {
   Alert,
   Button,
   Dialog,
+  EmptyState,
   ErrorState,
   FileField,
   Select,
@@ -244,7 +245,7 @@ export function ServiceRefundPanel({ purchase }: { purchase: PurchaseRow }) {
             />
           )}
           {save.isError && <ErrorState error={save.error} title="Refund not recorded" />}
-          {history.data?.length === 0 && <p>No refund requests yet.</p>}
+          {history.data?.length === 0 && <EmptyState title="No refund requests yet." />}
           {(history.data ?? []).map((refund) => (
             <section key={refund.id} aria-label={'Refund ' + refund.reference}>
               <h3>

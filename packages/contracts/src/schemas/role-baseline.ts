@@ -169,6 +169,11 @@ export const MIGRATION_SEEDED_GRANTS: readonly {
   { moduleKey: 'operations.bookings', roles: ['admin'] },
   { moduleKey: 'communication.announcements', roles: ['admin'] },
   { moduleKey: 'communication.messages', roles: ['admin'] },
+  // HR reads roles, seeded by 20270105000032 (owner-approved 2026-11-22): the
+  // Staff screen assigns roles, and listing them is gated on this key. VIEW
+  // only - HR still cannot create, change or delete a role. Admin already holds
+  // it in the matrix above, so only `hr` is listed here.
+  { moduleKey: 'organization.roles', roles: ['hr'] },
 ];
 
 export const DEFAULT_ROLE_BASELINE: Record<BaselineRole, readonly BaselineGrant[]> = {

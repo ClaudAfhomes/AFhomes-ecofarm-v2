@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, StatusChip, ErrorState } from '@afhomes/ui';
+import { StatusChip, ErrorState } from '@afhomes/ui';
 
-import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
 import { request } from '../../lib/api/client';
 import { ostMeSchema } from '@afhomes/contracts';
@@ -13,7 +12,6 @@ import styles from './OstProfilePage.module.css';
  * OST profile page - displays the OST member's profile details and photo.
  */
 export function OstProfilePage() {
-  const { signOut } = useCustomerSession();
   const portals = useQuery({ queryKey: ['ost', 'portals'], queryFn: getAuthPortals });
   const me = useQuery({
     queryKey: ['ost', 'me'],
@@ -22,7 +20,12 @@ export function OstProfilePage() {
     retry: false,
   });
 
-  if (portals.isLoading || me.isLoading) return <p role="status" className={styles.loading}>Loading your profile…</p>;
+  if (portals.isLoading || me.isLoading)
+    return (
+      <p role="status" className={styles.loading}>
+        Loading your profile…
+      </p>
+    );
   if (portals.isError || me.isError) {
     return (
       <ErrorState
@@ -36,9 +39,7 @@ export function OstProfilePage() {
 
   return (
     <>
-      <Card title="Profile Photo">
-        <ProfilePhotoCard scope="staff" />
-      </Card>
+      <ProfilePhotoCard scope="staff" />
 
       <Card title="Account Information">
         <FieldList>
@@ -57,30 +58,6 @@ export function OstProfilePage() {
           <Field label="Approved" value={formatDate(record.approvedAt)} />
         </FieldList>
       </Card>
-
-      <Card title="Account Details">
-        <FieldList>
-          <Field label="OST Number" value={record.ostNumber} />
-          <Field label="Full Name" value={record.fullName} />
-          <Field
-            label="Status"
-            value={
-              <StatusChip
-                label={record.status}
-                tone={record.status === 'active' ? 'success' : 'warning'}
-              />
-            }
-          />
-          <Field label="Sponsor" value={record.sponsorName} />
-          <Field label="Approved" value={formatDate(record.approvedAt)} />
-        </FieldList>
-      </Card>
-
-      <div className={styles.actions}>
-        <Button variant="secondary" onClick={() => void signOut()}>
-          Sign out
-        </Button>
-      </div>
     </>
   );
 }

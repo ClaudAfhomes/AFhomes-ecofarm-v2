@@ -150,6 +150,68 @@ const openTab = (user: ReturnType<typeof userEvent.setup>, name: string) =>
   user.click(screen.getByRole('tab', { name }));
 
 describe('CommissionSettingsPage', () => {
+  const FINANCE: SessionUser = {
+    ...MANAGER,
+    roleId: 'r-finance',
+    roleName: 'Finance',
+    afHomesPermissions: [
+      {
+        moduleKey: 'network.commissions',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+      {
+        moduleKey: 'finance.payment_verification',
+        canView: true,
+        canCreate: false,
+        canUpdate: false,
+        canDelete: false,
+      },
+    ],
+  };
+
+  it('shows Finance every rate read-only, with no way to change one', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CommissionSettingsPage />, { user: FINANCE });
+    const ben = (await screen.findByText('Ben Cruz')).closest('tr')!;
+    expect(within(ben).getByText('4.00%')).toBeInTheDocument();
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Select Ana Reyes')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set their rate' })).not.toBeInTheDocument();
+    await openTab(user, 'Position rates');
+    expect(screen.queryByRole('button', { name: /^Save .* rate$/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/rate \(%\)/)).not.toBeInTheDocument();
+    await openTab(user, 'All rules');
+    const rules = screen.getByRole('tabpanel', { name: 'All rules' });
+    expect(await within(rules).findAllByText('Active')).not.toHaveLength(0);
+    for (const name of ['Edit', 'Disable', 'Activate', 'History'])
+      expect(within(rules).queryByRole('button', { name })).not.toBeInTheDocument();
+    expect(bulkSetCommissionRate).not.toHaveBeenCalled();
+  });
+
+  it('explains instead of loading rates for a seller who sees only their own commissions', async () => {
+    renderWithProviders(<CommissionSettingsPage />, {
+      user: {
+        ...MANAGER,
+        afHomesPermissions: [
+          {
+            moduleKey: 'network.commissions',
+            canView: true,
+            canCreate: false,
+            canUpdate: false,
+            canDelete: false,
+          },
+        ],
+      },
+    });
+    expect(
+      await screen.findByText('Rates are managed by commission administrators'),
+    ).toBeInTheDocument();
+    expect(getCommissionRoster).not.toHaveBeenCalled();
+  });
+
   it('shows position rates, sellers with their applied rate, and the 0% notice', async () => {
     renderWithProviders(<CommissionSettingsPage />, { user: MANAGER });
     const row = (await screen.findByText('Ana Reyes')).closest('tr')!;
@@ -307,7 +369,9 @@ describe('CommissionSettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled();
     finish();
     await waitFor(() =>
-      expect(notifySuccess).toHaveBeenCalledWith(expect.objectContaining({ title: 'Rule disabled' })),
+      expect(notifySuccess).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Rule disabled' }),
+      ),
     );
   });
 
@@ -318,7 +382,11 @@ describe('CommissionSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Set their rate' }));
 
     expect(await screen.findByRole('dialog', { name: 'Set personal rate' })).toBeInTheDocument();
-    expect(getCommissionRoster).toHaveBeenCalledWith({ sales: 'with', needsRate: true, limit: 100 });
+    expect(getCommissionRoster).toHaveBeenCalledWith({
+      sales: 'with',
+      needsRate: true,
+      limit: 100,
+    });
     expect(screen.getByText(/Applies to 2 sellers/)).toBeInTheDocument();
   });
 

@@ -1,4 +1,4 @@
-import { Button, ErrorState, Skeleton } from '@afhomes/ui';
+import { Button, EmptyState, ErrorState, Skeleton } from '@afhomes/ui';
 
 import { useCustomerLedgerQuery } from './queries';
 import { isForbidden } from './http';
@@ -40,9 +40,10 @@ export function CustomerRedemptionsPage() {
   return (
     <Card title="Redemption history">
       {rows.length === 0 ? (
-        <p className={styles.notice}>
-          No redemptions yet. Points are spent with AFhomes Ecofarm staff.
-        </p>
+        <EmptyState
+          title="No redemptions yet."
+          description="Points are spent with AFhomes Ecofarm staff."
+        />
       ) : (
         <>
           <div className={styles.tableScroll}>
@@ -84,7 +85,7 @@ export function CustomerRedemptionsPage() {
           <p className={styles.notice}>Showing {rows.length} redemptions on this page.</p>
         </>
       )}
-      <nav aria-label="Redemption history pages">
+      <nav className={styles.pager} aria-label="Redemption history pages">
         <Button
           variant="secondary"
           disabled={!ledger.hasPrevious || ledger.isFetching}

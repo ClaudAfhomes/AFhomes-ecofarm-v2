@@ -794,7 +794,9 @@ describe('customer payments screen', () => {
     installRoutes({ '/customer/payments': list(PAYMENTS.data) });
     render('/customer/payments');
     expect(await screen.findByText('TRF-9001')).toBeInTheDocument();
-    expect(screen.getByText('bank_transfer')).toBeInTheDocument();
+    // Method codes are shown as words; the stored code is never rendered raw.
+    expect(screen.getByText('bank transfer')).toBeInTheDocument();
+    expect(screen.queryByText('bank_transfer')).not.toBeInTheDocument();
     expect(screen.getByText('verified')).toBeInTheDocument();
     for (const heading of ['Date', 'Type', 'Method', 'Reference', 'Status', 'Amount']) {
       expect(screen.getByRole('columnheader', { name: heading })).toBeInTheDocument();

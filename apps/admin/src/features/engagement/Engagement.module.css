@@ -105,9 +105,25 @@
   font-weight: 700;
   line-height: 18px;
   text-align: center;
+  animation: countPop var(--motion-200) var(--ease-out) backwards;
+}
+
+@keyframes countPop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
 }
 
 .bellMenu {
+  animation: menuIn var(--motion-150) var(--ease-out);
   position: absolute;
   right: 0;
   top: calc(100% + 4px);

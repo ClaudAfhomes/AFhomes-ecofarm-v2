@@ -13,6 +13,15 @@
   user-select: all;
 }
 
+/* No ID yet: plain muted text, not a monospace "value" that invites copying. */
+.placeholder {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  user-select: auto;
+}
+
 @media (max-width: 480px) {
   .id {
     align-items: flex-start;

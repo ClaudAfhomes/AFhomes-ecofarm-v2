@@ -12,12 +12,24 @@
 }
 
 .control {
-  padding: var(--space-3);
-  border-radius: var(--radius-md, 8px);
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-surface);
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface-raised);
   color: var(--color-text-primary);
   font: inherit;
+  transition: border-color var(--motion-150) var(--ease-out);
+}
+
+.control:hover {
+  border-color: var(--color-border-strong, var(--color-border-default));
+}
+
+.control:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
+  border-color: var(--color-brand-primary);
 }
 
 .control:disabled {
@@ -102,15 +114,48 @@
   color: #fff;
   font-size: var(--text-caption);
   text-align: center;
+  animation: badgePop var(--motion-200) var(--ease-out) backwards;
+}
+
+@keyframes badgePop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
 }
 
 .bell {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  min-height: var(--control-md);
   margin-right: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   color: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 600;
   text-decoration: none;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.bell:hover {
+  background-color: var(--color-state-hover);
+  border-color: var(--color-border-default);
+}
+
+.bell:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.bellIcon {
+  width: var(--icon-action);
+  height: var(--icon-action);
+  flex-shrink: 0;
 }
 
 .actions {

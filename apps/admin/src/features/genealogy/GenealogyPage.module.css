@@ -98,7 +98,6 @@
 
 .headName:hover {
   color: var(--color-brand-secondary);
-  text-decoration: underline;
 }
 
 .headMeta {
@@ -173,7 +172,6 @@
 
 .nodeName:hover {
   color: var(--color-brand-secondary);
-  text-decoration: underline;
 }
 
 .nodeMeta {
@@ -453,7 +451,7 @@
 }
 
 .teamLink:hover {
-  text-decoration: underline;
+  opacity: 0.78;
 }
 
 /* View Genealogy button in table */

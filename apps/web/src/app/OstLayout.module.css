@@ -6,11 +6,14 @@
 }
 
 .sidebar {
-  background: var(--color-bg-surface);
-  border-right: 1px solid var(--color-border-default);
-  padding: var(--space-6) var(--space-4);
+  background:
+    radial-gradient(120% 60% at 0% 0%, color-mix(in srgb, var(--color-brand-secondary) 35%, transparent), transparent 70%),
+    var(--color-brand-deep);
+  color: var(--color-on-dark);
+  padding: var(--space-5) var(--space-3);
   display: flex;
   flex-direction: column;
+  gap: var(--space-5);
   height: 100vh;
   position: sticky;
   top: 0;
@@ -18,9 +21,53 @@
 }
 
 .sidebarBrand {
-  margin-bottom: var(--space-8);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border-default);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+}
+
+.brandLogo {
+  height: 36px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.brandText {
+  display: grid;
+  gap: 2px;
+}
+
+.brandName {
+  font-family: var(--font-family-display);
+  font-size: var(--text-body);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.brandTag {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-on-dark-faint);
+  line-height: 1;
+}
+
+.account {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-on-dark) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-on-dark) 12%, transparent);
+}
+
+.accountLabel {
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-on-dark-faint);
 }
 
 .eyebrow {
@@ -32,50 +79,92 @@
 }
 
 .ostNumber {
-  margin: var(--space-1) 0 0;
-  font-size: var(--text-h3);
-  font-weight: 600;
-  color: var(--color-brand-primary);
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-on-dark);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   flex: 1;
 }
 
 .navLink,
-.navLinkActive {
-  padding: var(--space-3) var(--space-4);
-  font-size: var(--text-body-m);
+.navLinkActive,
+.signOutBtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body-s);
+  font-weight: 500;
   text-decoration: none;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  color: var(--color-on-dark-muted);
+  border-radius: var(--radius-sm);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
-.navLink:hover {
-  background: var(--color-bg-subtle);
-  color: var(--color-text-primary);
+.navLink:hover,
+.signOutBtn:hover {
+  background: var(--color-on-dark-hover);
+  color: var(--color-on-dark);
 }
 
 .navLinkActive {
-  background: var(--color-brand-soft);
-  color: var(--color-brand-strong);
+  background: color-mix(in srgb, var(--color-on-dark) 14%, transparent);
+  color: var(--color-on-dark);
   font-weight: 600;
+}
+
+/* Active indicator: a short bar that eases in from the left edge. */
+.navLinkActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--color-accent, var(--color-on-dark));
+  animation: afh-fade-in var(--motion-200) var(--ease-out) backwards;
+}
+
+.navLink:focus-visible,
+.navLinkActive:focus-visible,
+.signOutBtn:focus-visible {
+  outline: 2px solid var(--color-on-dark);
+  outline-offset: 2px;
 }
 
 .sidebarFooter {
   margin-top: auto;
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border-default);
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--color-on-dark) 12%, transparent);
 }
 
 .signOutBtn {
   width: 100%;
-  justify-content: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.backdrop {
+  display: none;
+}
+
+.menuButton {
+  display: none;
 }
 
 .main {
@@ -84,6 +173,9 @@
 }
 
 .header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   margin-bottom: var(--space-6);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border-default);
@@ -128,22 +220,44 @@
 
   .sidebar {
     position: fixed;
-    left: -100%;
+    left: 0;
     top: 0;
     bottom: 0;
     z-index: 50;
     width: 16rem;
     height: 100vh;
-    transition: left var(--transition-normal);
-    box-shadow: var(--shadow-xl);
+    /* Off-canvas by transform (compositor-only), not by animating `left`. */
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--motion-300) var(--ease-out),
+      visibility 0s linear var(--motion-300);
+    box-shadow: var(--shadow-lg);
   }
 
   .sidebar.open {
-    left: 0;
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--motion-300) var(--ease-out),
+      visibility 0s;
   }
 
   .main {
     padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+
+  .menuButton {
+    display: inline-flex;
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(14, 43, 32, 0.45);
+    animation: afh-fade-in var(--motion-200) var(--ease-out);
   }
 }
 

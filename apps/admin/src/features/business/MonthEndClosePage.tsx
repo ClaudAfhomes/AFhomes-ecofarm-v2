@@ -6,6 +6,7 @@ import {
   Button,
   Dialog,
   ErrorState,
+  Icon,
   PageHeader,
   Select,
   Skeleton,
@@ -13,7 +14,7 @@ import {
   TextField,
   notifySuccess,
 } from '@afhomes/ui';
-import type { StatusTone } from '@afhomes/ui';
+import type { IconName, StatusTone } from '@afhomes/ui';
 import { formatCountOrDash } from '@afhomes/shared';
 
 import { useSession } from '../../lib/session';
@@ -166,31 +167,44 @@ export function MonthEndClosePage() {
           ? 'The submitter cannot close.'
           : null);
 
-  const lines: { label: string; value: string; to?: string; note?: string }[] = s
+  const lines: {
+    label: string;
+    value: string;
+    icon: IconName;
+    to?: string;
+    note?: string;
+    warn?: boolean;
+  }[] = s
     ? [
         {
           label: 'Verified',
+          icon: 'check',
           value: formatMoney(s.verifiedTotal),
           note: `${formatCountOrDash(s.verifiedCount)} payments`,
         },
         {
           label: 'Pending verification',
+          icon: 'clock',
           value: formatCountOrDash(s.pendingVerification),
           to: PAYMENTS_PATH,
         },
         {
           label: 'Held for duplicate review',
+          icon: 'alert',
           value: formatCountOrDash(s.heldForDuplicateReview),
           to: PAYMENTS_PATH,
         },
         {
           label: 'Proposed adjustments',
+          icon: 'pencil',
           value: formatCountOrDash(s.proposedAdjustments),
           to: PAYMENTS_PATH,
         },
-        { label: 'Late postings', value: formatCountOrDash(s.latePostings) },
+        { label: 'Late postings', icon: 'list', value: formatCountOrDash(s.latePostings) },
         {
           label: 'Earlier open months',
+          icon: 'alert',
+          warn: earlierOpen.length > 0,
           value: earlierOpen.length ? earlierOpen.map(monthLabel).join(', ') : 'None',
           note: earlierOpen.length ? 'Blocks closing' : undefined,
         },
@@ -293,7 +307,13 @@ export function MonthEndClosePage() {
 
           <ul className={styles.metrics} aria-label="Pre-close checklist">
             {lines.map((line) => (
-              <li key={line.label} className={styles.metric}>
+              <li
+                key={line.label}
+                className={line.warn ? `${styles.metric} ${styles.metricWarn}` : styles.metric}
+              >
+                <span className={styles.metricIcon} aria-hidden="true">
+                  <Icon name={line.icon} size={20} />
+                </span>
                 <span className={styles.metricLabel}>
                   {line.to ? <Link to={line.to}>{line.label}</Link> : line.label}
                 </span>

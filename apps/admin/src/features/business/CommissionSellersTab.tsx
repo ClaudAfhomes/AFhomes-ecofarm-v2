@@ -44,7 +44,13 @@ const SOURCE: Record<
 type SalesFilter = 'all' | 'with' | 'without' | 'needs';
 
 /** Sellers with their applied rate. Tick sellers to give them a personal rate in one step. */
-export function CommissionSellersTab({ positions }: { positions: CommissionRosterPosition[] }) {
+export function CommissionSellersTab({
+  positions,
+  readOnly = false,
+}: {
+  positions: CommissionRosterPosition[];
+  readOnly?: boolean;
+}) {
   const client = useQueryClient();
   const [search, setSearch] = useState('');
   const [position, setPosition] = useState('');
@@ -65,7 +71,8 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
   };
   const roster = useQuery({
     queryKey: sharedScopes.commissionRosterPage({ ...query, page }),
-    queryFn: () => getCommissionRoster({ ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    queryFn: () =>
+      getCommissionRoster({ ...query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     // Keep the table on screen while filters or a save refetch it.
     placeholderData: keepPreviousData,
   });
@@ -158,14 +165,16 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
           title={`${formatCount(needsRateCount)} ${needsRateCount === 1 ? 'seller has' : 'sellers have'} sales at 0%`}
         >
           <div className={styles.noticeActions}>
-            <Button
-              size="sm"
-              loading={fetchingNeeds}
-              loadingLabel="Loading…"
-              onClick={selectNeedingRate}
-            >
-              Set their rate
-            </Button>
+            {readOnly ? null : (
+              <Button
+                size="sm"
+                loading={fetchingNeeds}
+                loadingLabel="Loading…"
+                onClick={selectNeedingRate}
+              >
+                Set their rate
+              </Button>
+            )}
             <Button
               size="sm"
               variant="secondary"
@@ -250,7 +259,7 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
         ) : null}
       </div>
 
-      {selected.size > 0 ? (
+      {!readOnly && selected.size > 0 ? (
         <div className={styles.selectionBar} role="status">
           <strong>{formatCount(selected.size)} selected</strong>
           <span className={styles.actionGroup}>
@@ -281,17 +290,19 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
           <table className={styles.queueTable}>
             <thead>
               <tr>
-                <th scope="col" className={styles.selectHead}>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all on page"
-                    checked={allOnPage}
-                    ref={(node) => {
-                      if (node) node.indeterminate = someOnPage && !allOnPage;
-                    }}
-                    onChange={togglePage}
-                  />
-                </th>
+                {readOnly ? null : (
+                  <th scope="col" className={styles.selectHead}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all on page"
+                      checked={allOnPage}
+                      ref={(node) => {
+                        if (node) node.indeterminate = someOnPage && !allOnPage;
+                      }}
+                      onChange={togglePage}
+                    />
+                  </th>
+                )}
                 <th scope="col">Seller</th>
                 <th scope="col">Sales</th>
                 <th scope="col" className={styles.numeric}>
@@ -303,14 +314,16 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
             <tbody>
               {members.map((member) => (
                 <tr key={member.id} data-selected={selected.has(member.id) || undefined}>
-                  <td className={styles.selectCell}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${member.name}`}
-                      checked={selected.has(member.id)}
-                      onChange={() => toggleOne(member.id)}
-                    />
-                  </td>
+                  {readOnly ? null : (
+                    <td className={styles.selectCell}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${member.name}`}
+                        checked={selected.has(member.id)}
+                        onChange={() => toggleOne(member.id)}
+                      />
+                    </td>
+                  )}
                   <td data-label="Seller" className={styles.targetCell}>
                     <span className={styles.primary}>{member.name}</span>
                     <span className={styles.secondary}>{member.positionName}</span>
@@ -318,7 +331,9 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
                   <td data-label="Sales" className={styles.appliesCell}>
                     <span className={styles.primary}>{formatCount(member.salesCount)}</span>
                     <span className={styles.secondary}>
-                      {member.lastSaleAt ? `Last ${member.lastSaleAt.slice(0, 10)}` : 'No sales yet'}
+                      {member.lastSaleAt
+                        ? `Last ${member.lastSaleAt.slice(0, 10)}`
+                        : 'No sales yet'}
                     </span>
                   </td>
                   <td data-label="Rate" className={`${styles.numeric} ${styles.rateCell}`}>
@@ -368,8 +383,8 @@ export function CommissionSellersTab({ positions }: { positions: CommissionRoste
       >
         <div className={styles.dialogBody}>
           <p className={styles.panelNote}>
-            Applies to {formatCount(selected.size)} {selected.size === 1 ? 'seller' : 'sellers'}.
-            It replaces any personal rate. Future sales only.
+            Applies to {formatCount(selected.size)} {selected.size === 1 ? 'seller' : 'sellers'}. It
+            replaces any personal rate. Future sales only.
           </p>
           <div className={styles.formGrid}>
             <TextField

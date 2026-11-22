@@ -66,13 +66,22 @@ import { earningKeys } from './queryKeys';
  */
 export function BusinessPointsPage() {
   const client = useQueryClient();
+  const sessionUser = useSession().user;
   const mayCorrect =
-    useSession().user?.afHomesPermissions?.some(
+    sessionUser?.afHomesPermissions?.some(
       (p) => p.moduleKey === 'operations.redemption' && p.canUpdate,
+    ) === true;
+  // View opens this route (e.g. Finance reads operational sales), but recording a
+  // sale needs create; the server refuses it either way. Skip the reads it would refuse.
+  const maySell =
+    !sessionUser ||
+    sessionUser.afHomesPermissions?.some(
+      (p) => p.moduleKey === 'operations.sales' && p.canCreate,
     ) === true;
   const services = useQuery({
     queryKey: earningKeys.services,
     queryFn: listServices,
+    enabled: maySell,
     placeholderData: keepPreviousData,
   });
 
@@ -183,6 +192,7 @@ export function BusinessPointsPage() {
   const ownPurchases = useQuery({
     queryKey: earningKeys.ownPurchases,
     queryFn: listOwnPurchases,
+    enabled: maySell,
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
@@ -289,6 +299,20 @@ export function BusinessPointsPage() {
     }
   };
 
+  if (!maySell)
+    return (
+      <section className={styles.page}>
+        <PageHeader
+          title="Elite Service Delivery"
+          description="Scan the member's card, record the purchase, and issue their claim code."
+        />
+        <EmptyState
+          title="Sales are recorded at the service desk"
+          description="Your role can review service sales but cannot record one. Ask a Super Admin if you need this access."
+        />
+      </section>
+    );
+
   // First load skeletonizes the whole page so no static content flashes
   // before the data it describes. Refetches keep previous data visible via
   // keepPreviousData and never reach this branch.
@@ -325,45 +349,48 @@ export function BusinessPointsPage() {
         description="Scan the member's card, record the purchase, and issue their claim code."
       />
 
-      <section aria-label="Resume sale" className={styles.section}>
-        {ownPurchases.isPending && (
-          <div role="status" aria-label="Loading sales" aria-busy="true">
-            <Skeleton />
-          </div>
-        )}
-        {ownPurchases.isError && (
-          <ErrorState error={ownPurchases.error} onRetry={() => void ownPurchases.refetch()} />
-        )}
-        {resumable.length > 0 && (
-          <>
-            <label htmlFor="earning-resume">Resume an existing sale</label>
-            <Select
-              id="earning-resume"
-              value={lastPurchase ?? ''}
-              onChange={(event) => {
-                const purchase = resumable.find((row) => row.id === event.target.value);
-                if (!purchase) return;
-                setLastPurchase(purchase.id);
-                setPriced({
-                  purchaseId: purchase.id,
-                  purchaseNumber: purchase.purchaseNumber,
-                  grossAmount: purchase.grossAmount,
-                  tierDiscountAmount: purchase.tierDiscountAmount,
-                  pointsDiscountAmount: purchase.pointsDiscountAmount,
-                  netAmount: purchase.netAmount,
-                });
-              }}
-              options={[
-                { value: '', label: 'Choose a sale' },
-                ...resumable.map((purchase) => ({
-                  value: purchase.id,
-                  label: `${purchase.purchaseNumber} - ${formatMoneyOrDash(purchase.netAmount)}`,
-                })),
-              ]}
-            />
-          </>
-        )}
-      </section>
+      {/* Only rendered when there is something to show; otherwise it was an empty card. */}
+      {(ownPurchases.isPending || ownPurchases.isError || resumable.length > 0) && (
+        <section aria-label="Resume sale" className={styles.section}>
+          {ownPurchases.isPending && (
+            <div role="status" aria-label="Loading sales" aria-busy="true">
+              <Skeleton />
+            </div>
+          )}
+          {ownPurchases.isError && (
+            <ErrorState error={ownPurchases.error} onRetry={() => void ownPurchases.refetch()} />
+          )}
+          {resumable.length > 0 && (
+            <>
+              <label htmlFor="earning-resume">Resume an existing sale</label>
+              <Select
+                id="earning-resume"
+                value={lastPurchase ?? ''}
+                onChange={(event) => {
+                  const purchase = resumable.find((row) => row.id === event.target.value);
+                  if (!purchase) return;
+                  setLastPurchase(purchase.id);
+                  setPriced({
+                    purchaseId: purchase.id,
+                    purchaseNumber: purchase.purchaseNumber,
+                    grossAmount: purchase.grossAmount,
+                    tierDiscountAmount: purchase.tierDiscountAmount,
+                    pointsDiscountAmount: purchase.pointsDiscountAmount,
+                    netAmount: purchase.netAmount,
+                  });
+                }}
+                options={[
+                  { value: '', label: 'Choose a sale' },
+                  ...resumable.map((purchase) => ({
+                    value: purchase.id,
+                    label: `${purchase.purchaseNumber} - ${formatMoneyOrDash(purchase.netAmount)}`,
+                  })),
+                ]}
+              />
+            </>
+          )}
+        </section>
+      )}
       <section aria-label="Identify the member" className={styles.section}>
         <h2 className={styles.sectionTitle}>1. Identify the member</h2>
 

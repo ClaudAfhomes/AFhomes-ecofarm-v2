@@ -9,6 +9,25 @@
   border-radius: var(--radius-md);
   background-color: var(--color-bg-surface-raised);
   box-shadow: var(--shadow-sm);
+  animation: emptyIn var(--motion-300) var(--ease-out) backwards;
+}
+
+/* Decorative inbox mark (CSS only, so it is never announced). */
+.empty::before {
+  content: '';
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-soft)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23174f3b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 12h-6l-2 3h-4l-2-3H2'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E")
+    center / 22px no-repeat;
+}
+
+@keyframes emptyIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .title {

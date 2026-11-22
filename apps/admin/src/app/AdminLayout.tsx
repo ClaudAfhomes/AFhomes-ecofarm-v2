@@ -157,7 +157,7 @@ export function AdminLayout() {
           </>
         }
       >
-        <div className={styles.content}>
+        <div className={`${styles.content} afh-route`}>
           {crumbs && !applicationWorkspace ? <Breadcrumbs items={crumbs} /> : null}
           {/* Route pages load on demand: the shell stays mounted while the
           page chunk loads, so navigation never blanks. */}

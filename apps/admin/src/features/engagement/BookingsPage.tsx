@@ -76,7 +76,7 @@ const stay = (b: Pick<Booking, 'startDate' | 'endDate' | 'guests'>) =>
  * confirm or decline, then mark it completed once the date has come. Reading
  * needs `operations.bookings` view, every decision needs update and is
  * re-checked and audited server-side. The message to the member is shown in
- * their portal and emailed.
+ * their portal (in-app only; AF Homes sends no email).
  */
 export function BookingsPage() {
   const queryClient = useQueryClient();
@@ -115,8 +115,7 @@ export function BookingsPage() {
         message: `${saved.reference} is ${BOOKING_STATUS_LABELS[saved.status].toLowerCase()}.`,
       });
     },
-    onError: (error) =>
-      notifyError({ title: 'Booking not updated', message: errorText(error) }),
+    onError: (error) => notifyError({ title: 'Booking not updated', message: errorText(error) }),
   });
 
   const openBooking = query.data?.data.find((b) => b.id === openId);
@@ -149,7 +148,7 @@ export function BookingsPage() {
     <section className={styles.page}>
       <PageHeader
         title="Service Bookings"
-        description="Members request a service for a date. Confirm or decline each request, and mark it completed once the date has come. Your message to the member is shown in their portal and emailed."
+        description="Members request a service for a date. Confirm or decline each request, and mark it completed once the date has come. Your message to the member is shown in their portal."
       />
 
       <FilterBar
@@ -393,7 +392,7 @@ export function BookingsPage() {
                 name="note"
                 label="Message to member"
                 optional
-                hint="Shown to the member in their portal and emailed with your decision."
+                hint="Shown to the member in their portal with your decision."
                 rows={3}
                 maxLength={1000}
                 value={note}

@@ -104,7 +104,15 @@
   display: none;
 }
 
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 .panel {
+  animation: menuIn var(--motion-150) var(--ease-out);
   position: absolute;
   top: calc(100% + var(--space-1));
   right: 0;

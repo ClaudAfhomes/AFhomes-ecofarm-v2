@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Button, ErrorState } from '@afhomes/ui';
+import { Button, EmptyState, ErrorState } from '@afhomes/ui';
 
 import {
   useConversationQuery,
@@ -45,7 +45,10 @@ function ThreadList({ onOpen, onCompose }: { onOpen: (id: string) => void; onCom
           message="We could not load your messages. Please try again in a moment."
         />
       ) : (query.data ?? []).length === 0 ? (
-        <p className={styles.hint}>No messages yet. Use New message to write to AF Homes.</p>
+        <EmptyState
+          title="No messages yet."
+          description="Use New message to write to AF Homes."
+        />
       ) : (
         <ul className={styles.list}>
           {(query.data ?? []).map((c) => (

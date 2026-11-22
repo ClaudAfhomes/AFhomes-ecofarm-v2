@@ -5,13 +5,19 @@ import { Button, EmptyState, TextField, notifyError, notifySuccess } from '@afho
 import { formatCount } from '@afhomes/shared';
 
 import { useBusinessMutation } from '../../lib/useBusinessMutation';
-import { percentToRate, rateToPercent } from './format';
+import { formatRate, percentToRate, rateToPercent } from './format';
 import { sharedScopes } from './queryKeys';
 import { createCommissionRule, updateCommissionRule } from './services';
 import styles from './CommissionSettingsPage.module.css';
 
 /** One default rate per position. Everyone in the position inherits it automatically. */
-export function CommissionPositionRates({ positions }: { positions: CommissionRosterPosition[] }) {
+export function CommissionPositionRates({
+  positions,
+  readOnly = false,
+}: {
+  positions: CommissionRosterPosition[];
+  readOnly?: boolean;
+}) {
   const client = useQueryClient();
   const save = useBusinessMutation({
     mutationFn: ({ target, rate }: { target: CommissionRosterPosition; rate: string }) =>
@@ -28,7 +34,10 @@ export function CommissionPositionRates({ positions }: { positions: CommissionRo
         client.invalidateQueries({ queryKey: sharedScopes.commissionRules }),
         client.invalidateQueries({ queryKey: sharedScopes.commissionRoster }),
       ]);
-      notifySuccess({ title: 'Rate saved', message: `${target.name} is now ${rateToPercent(rate)}%.` });
+      notifySuccess({
+        title: 'Rate saved',
+        message: `${target.name} is now ${rateToPercent(rate)}%.`,
+      });
     },
     onError: (error) => notifyError({ title: 'Rate not saved', message: error.message }),
   });
@@ -42,6 +51,7 @@ export function CommissionPositionRates({ positions }: { positions: CommissionRo
         <PositionRow
           key={`${position.roleId}:${position.defaultRate ?? ''}`}
           position={position}
+          readOnly={readOnly}
           pending={save.isPending && save.variables?.target.roleId === position.roleId}
           onSave={(target, rate) => save.mutate({ target, rate })}
         />
@@ -52,14 +62,18 @@ export function CommissionPositionRates({ positions }: { positions: CommissionRo
 
 function PositionRow({
   position,
+  readOnly,
   pending,
   onSave,
 }: {
   position: CommissionRosterPosition;
+  readOnly: boolean;
   pending: boolean;
   onSave: (position: CommissionRosterPosition, rate: string) => void;
 }) {
-  const [draft, setDraft] = useState(position.defaultRate ? rateToPercent(position.defaultRate) : '');
+  const [draft, setDraft] = useState(
+    position.defaultRate ? rateToPercent(position.defaultRate) : '',
+  );
   const rate = percentToRate(draft);
   const changed = rate !== null && rate !== position.defaultRate;
   return (
@@ -71,28 +85,36 @@ function PositionRow({
           {position.defaultRate === null ? ' · No rate set' : ''}
         </span>
       </div>
-      <TextField
-        id={`position-rate-${position.slug}`}
-        name={`rate-${position.slug}`}
-        label={`${position.name} rate (%)`}
-        inputMode="decimal"
-        value={draft}
-        onChange={setDraft}
-        placeholder="0"
-        disabled={pending}
-        error={draft && rate === null ? 'Use 0 to 100.' : undefined}
-      />
-      <Button
-        size="sm"
-        variant="secondary"
-        aria-label={`Save ${position.name} rate`}
-        loading={pending}
-        loadingLabel="Saving…"
-        disabled={!changed}
-        onClick={() => rate && onSave(position, rate)}
-      >
-        Save
-      </Button>
+      {readOnly ? (
+        <span className={styles.primary} aria-label={`${position.name} rate`}>
+          {position.defaultRate === null ? '—' : formatRate(position.defaultRate)}
+        </span>
+      ) : (
+        <>
+          <TextField
+            id={`position-rate-${position.slug}`}
+            name={`rate-${position.slug}`}
+            label={`${position.name} rate (%)`}
+            inputMode="decimal"
+            value={draft}
+            onChange={setDraft}
+            placeholder="0"
+            disabled={pending}
+            error={draft && rate === null ? 'Use 0 to 100.' : undefined}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-label={`Save ${position.name} rate`}
+            loading={pending}
+            loadingLabel="Saving…"
+            disabled={!changed}
+            onClick={() => rate && onSave(position, rate)}
+          >
+            Save
+          </Button>
+        </>
+      )}
     </li>
   );
 }

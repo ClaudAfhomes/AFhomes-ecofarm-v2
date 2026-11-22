@@ -1,13 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { AccreditationId, Button, ErrorState, StatusChip } from '@afhomes/ui';
+import { AccreditationId, Button, EmptyState, ErrorState, StatusChip } from '@afhomes/ui';
 import { formatMoney } from '@afhomes/shared';
 
-import { useCustomerSession } from '../../lib/customer-session';
 import { getAuthPortals } from '../../lib/portals';
 import { getOstMe, getOstDashboard } from './services';
 import { Card, Field, FieldList, formatDate, styles } from '../customer/portal-ui';
-import { saleTeamLookupSchema } from '@afhomes/contracts';
+import { MEMBER_POSITION_LABELS, saleTeamLookupSchema } from '@afhomes/contracts';
 import { request } from '../../lib/api/client';
 import { ProfilePhotoCard } from '../customer/ProfilePhotoCard';
 import { formatCountOrDash } from '@afhomes/shared';
@@ -19,7 +18,6 @@ import { formatCountOrDash } from '@afhomes/shared';
  * bearer token, so there is no member id to pass or to spoof.
  */
 export function OstDashboardPage() {
-  const { signOut } = useCustomerSession();
   const portals = useQuery({ queryKey: ['ost', 'portals'], queryFn: getAuthPortals });
   const accreditation = useQuery({
     queryKey: ['ost', 'accreditation'],
@@ -55,14 +53,8 @@ export function OstDashboardPage() {
 
   return (
     <>
-      <Card
-        title="OST Account"
-        actions={
-          <Button variant="secondary" onClick={() => void signOut()}>
-            Sign out
-          </Button>
-        }
-      >
+      {/* Sign-out lives once, in the OST sidebar. */}
+      <Card title="OST Account">
         <FieldList>
           <Field label="OST Number" value={record.ostNumber} />
           <Field
@@ -112,7 +104,13 @@ export function OstDashboardPage() {
       <Card title="My Head (Sponsor)">
         <FieldList>
           <Field label="Head Name" value={dash.head.headName} />
-          <Field label="Head Role" value={dash.head.headRole} />
+          <Field
+            label="Head Role"
+            value={
+              MEMBER_POSITION_LABELS[dash.head.headRole as keyof typeof MEMBER_POSITION_LABELS] ??
+              dash.head.headRole.replaceAll('_', ' ')
+            }
+          />
           <Field
             label="Head Status"
             value={
@@ -191,7 +189,7 @@ export function OstDashboardPage() {
             <dd className={styles.kpiSubLabel}>{dash.commissions.paid.count} commission(s)</dd>
           </article>
           <article className={styles.kpiCard}>
-            <div className={styles.kpiIcon} style={{ background: 'var(--color-error)' }}>
+            <div className={styles.kpiIcon} style={{ background: 'var(--color-danger)' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="15" y1="9" x2="9" y2="15" />
@@ -217,8 +215,8 @@ export function OstDashboardPage() {
             <tbody>
               {dash.commissionHistory.length === 0 ? (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', padding: 'var(--space-4)' }}>
-                    No commission records yet.
+                  <td colSpan={3}>
+                    <EmptyState title="No commission records yet." description="Commissions appear here once a sale you took part in qualifies." />
                   </td>
                 </tr>
               ) : (
@@ -245,15 +243,6 @@ export function OstDashboardPage() {
         </div>
       </Card>
 
-      {accreditation.isError ? (
-        <Button variant="secondary" onClick={() => void accreditation.refetch()}>
-          Retry accreditation
-        </Button>
-      ) : null}
-      <p className={styles.notice}>
-        Applications you sponsor appear after applicants register with your referral code.{' '}
-        <Link to="/ost/renewal">Accreditation history and renewal</Link>
-      </p>
       <ProfilePhotoCard scope="staff" />
     </>
   );

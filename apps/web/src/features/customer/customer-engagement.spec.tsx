@@ -75,7 +75,10 @@ function install(over: Record<string, Handler> = {}) {
   routes.clear();
   routes.set('/auth/portals', ok({ staff: null, customer: { status: 'active' }, ost: null }));
   routes.set('/customer', ok(CUSTOMER));
-  routes.set('/profile-photo/customer', ok({ url: null, expiresAt: null, canUpload: true, notice: null }));
+  routes.set(
+    '/profile-photo/customer',
+    ok({ url: null, expiresAt: null, canUpload: true, notice: null }),
+  );
   routes.set('/customer/membership', ok({}, 404));
   routes.set('/customer/points', ok({}, 404));
   routes.set('/customer/points/position', ok({}, 404));
@@ -114,6 +117,10 @@ beforeEach(() => {
   );
 });
 
+// The full App lazy-loads each route; under a parallel run the first paint can
+// exceed Testing Library's 1s default, so the first query after a render waits longer.
+const FIRST_PAINT = { timeout: 5000 };
+
 const render = (route: string) =>
   renderWithProviders(<App />, {
     route,
@@ -136,7 +143,9 @@ describe('notifications bell', () => {
       '/portal/notifications/read': ok({ ok: true }),
     });
     render('/customer/notifications');
-    expect(await screen.findByLabelText('Notifications, 3 unread')).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText('Notifications, 3 unread', undefined, FIRST_PAINT),
+    ).toBeInTheDocument();
     await userEvent.click(await screen.findByRole('button', { name: 'Mark all as read' }));
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/portal/notifications/read')?.body).toEqual({
@@ -166,7 +175,9 @@ describe('notifications bell', () => {
       '/portal/bookings': list([]),
     });
     render('/customer/notifications');
-    await userEvent.click(await screen.findByRole('button', { name: /Booking confirmed/ }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Booking confirmed/ }, FIRST_PAINT),
+    );
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/portal/notifications/read')?.body).toEqual({
         ids: [ID(30)],
@@ -186,7 +197,9 @@ describe('bookings', () => {
           : { status: 200, body: { data: [], meta: {} } },
     });
     render('/customer/bookings');
-    expect(await screen.findByText(/₱12,000\.00 per night/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/₱12,000\.00 per night/, undefined, FIRST_PAINT),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Request booking' })).toBeDisabled();
     expect(screen.getByText(/AF Homes will confirm your request/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Start date'), '2999-01-01');
@@ -212,13 +225,16 @@ describe('bookings', () => {
           ? {
               status: 403,
               body: {
-                error: { code: 'FORBIDDEN', message: 'Bookings are available to active members only.' },
+                error: {
+                  code: 'FORBIDDEN',
+                  message: 'Bookings are available to active members only.',
+                },
               },
             }
           : { status: 200, body: { data: [], meta: {} } },
     });
     render('/customer/bookings');
-    await screen.findByText(/per night/);
+    await screen.findByText(/per night/, undefined, FIRST_PAINT);
     await userEvent.type(screen.getByLabelText('Start date'), '2999-01-01');
     await userEvent.click(screen.getByRole('button', { name: 'Request booking' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -236,7 +252,7 @@ describe('bookings', () => {
       ]),
     });
     render('/customer/bookings');
-    await screen.findByText(/BKG-UP/);
+    await screen.findByText(/BKG-UP/, undefined, FIRST_PAINT);
     expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1);
   });
 });
@@ -278,7 +294,9 @@ describe('messages', () => {
       }),
     });
     render('/customer/messages');
-    expect(await screen.findByText('New reply from AF Homes')).toBeInTheDocument();
+    expect(
+      await screen.findByText('New reply from AF Homes', undefined, FIRST_PAINT),
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Question' }));
     expect(await screen.findByText(/Mia Staff/)).toBeInTheDocument();
     const send = screen.getByRole('button', { name: 'Send' });
@@ -296,7 +314,7 @@ describe('messages', () => {
 describe('dashboard announcements', () => {
   it('hides the card when there are none', async () => {
     render('/customer');
-    await screen.findByRole('heading', { name: 'Dashboard', level: 1 });
+    await screen.findByRole('heading', { name: 'Dashboard', level: 1 }, FIRST_PAINT);
     await waitFor(() => expect(calls.some((c) => c.path === '/portal/announcements')).toBe(true));
     expect(screen.queryByRole('heading', { name: 'Announcements' })).not.toBeInTheDocument();
   });
@@ -315,7 +333,9 @@ describe('dashboard announcements', () => {
       ]),
     });
     render('/customer');
-    expect(await screen.findByRole('heading', { name: 'Announcements' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Announcements' }, FIRST_PAINT),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Holiday hours/)).toBeInTheDocument();
   });
 });

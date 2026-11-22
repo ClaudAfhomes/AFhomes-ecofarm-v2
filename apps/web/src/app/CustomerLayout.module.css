@@ -5,13 +5,38 @@
 }
 
 .header {
+  margin: calc(var(--space-6) * -1) 0 0;
+  padding: var(--space-4);
+  border-radius: 0 0 var(--radius-lg, 12px) var(--radius-lg, 12px);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-brand-secondary) 35%, transparent), transparent 70%),
+    var(--color-brand-deep);
+  color: var(--color-on-dark);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.headerInner {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  flex-wrap: wrap;
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border-default);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.brandLogo {
+  height: 44px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.identity {
+  min-width: 0;
 }
 
 .eyebrow {
@@ -19,21 +44,76 @@
   font-size: var(--text-caption);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-accent);
 }
 
 .customerName {
-  margin: var(--space-1) 0 0;
+  margin: 2px 0 0;
   font-size: var(--text-h3);
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--color-on-dark);
+  overflow-wrap: anywhere;
 }
 
 .customerNumber {
   margin: 2px 0 0;
   font-size: var(--text-body-s);
-  color: var(--color-text-muted);
+  color: var(--color-on-dark-faint);
   font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.iconAction {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--color-on-dark) 18%, transparent);
+  background: color-mix(in srgb, var(--color-on-dark) 7%, transparent);
+  color: var(--color-on-dark);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color var(--motion-150) var(--ease-out),
+    transform var(--motion-150) var(--ease-out);
+}
+
+.iconAction:hover {
+  background: color-mix(in srgb, var(--color-on-dark) 16%, transparent);
+  color: var(--color-on-dark);
+}
+
+.iconAction:active {
+  transform: scale(0.96);
+}
+
+.iconAction:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 1.25rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-brand-deep);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
 }
 
 .restricted {
@@ -49,25 +129,52 @@
 .nav {
   display: flex;
   gap: var(--space-1);
-  flex-wrap: wrap;
   margin: var(--space-4) 0 var(--space-6);
-  border-bottom: 1px solid var(--color-border-default);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nav::-webkit-scrollbar {
+  display: none;
 }
 
 .navLink,
 .navLinkActive {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
   padding: var(--space-2) var(--space-3);
-  font-size: var(--text-body-m);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  white-space: nowrap;
   text-decoration: none;
   color: var(--color-text-muted);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  border-radius: var(--radius-control);
+  transition:
+    background-color var(--motion-150) var(--ease-out),
+    color var(--motion-150) var(--ease-out);
+}
+
+.navLink:hover {
+  background: var(--color-state-hover);
+  color: var(--color-text-primary);
+}
+
+.navLink:focus-visible,
+.navLinkActive:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
 }
 
 .navLinkActive {
-  color: var(--color-brand-primary);
+  background: var(--color-brand-deep);
+  color: var(--color-on-dark);
   font-weight: 600;
-  border-bottom-color: var(--color-brand-primary);
 }
 
 .main {
@@ -86,9 +193,16 @@
     padding: var(--space-4) var(--space-3) var(--space-8);
   }
 
-  .navLink,
-  .navLinkActive {
-    padding: var(--space-2);
-    font-size: var(--text-body-s);
+  .header {
+    margin: calc(var(--space-4) * -1) 0 0;
+    padding: var(--space-3);
+  }
+
+  .brandLogo {
+    height: 36px;
+  }
+
+  .customerName {
+    font-size: var(--text-body);
   }
 }

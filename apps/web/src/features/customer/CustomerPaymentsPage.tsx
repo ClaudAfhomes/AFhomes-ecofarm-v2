@@ -1,4 +1,4 @@
-import { ErrorState } from '@afhomes/ui';
+import { ErrorState, StatusChip } from '@afhomes/ui';
 import { formatMoneyOrDash } from '@afhomes/shared';
 
 import { useCustomerPaymentsQuery } from './queries';
@@ -37,32 +37,36 @@ export function CustomerPaymentsPage() {
       ) : (
         <>
           <div className={styles.tableScroll}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th scope="col">Date</th>
-                <th scope="col">Type</th>
-                <th scope="col">Method</th>
-                <th scope="col">Reference</th>
-                <th scope="col">Status</th>
-                <th scope="col" className={styles.numeric}>
-                  Amount
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((payment) => (
-                <tr key={payment.id}>
-                  <td>{formatDate(payment.recordedAt)}</td>
-                  <td>{payment.paymentType ?? '—'}</td>
-                  <td>{payment.method}</td>
-                  <td className={styles.mono}>{payment.reference ?? '—'}</td>
-                  <td>{payment.status}</td>
-                  <td className={styles.numeric}>{formatMoneyOrDash(payment.amount)}</td>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Method</th>
+                  <th scope="col">Reference</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" className={styles.numeric}>
+                    Amount
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((payment) => (
+                  <tr key={payment.id}>
+                    <td>{formatDate(payment.recordedAt)}</td>
+                    <td className={styles.capitalize}>
+                      {payment.paymentType?.replaceAll('_', ' ') ?? '—'}
+                    </td>
+                    <td className={styles.capitalize}>{payment.method.replaceAll('_', ' ')}</td>
+                    <td className={styles.mono}>{payment.reference ?? '—'}</td>
+                    <td>
+                      <StatusChip label={payment.status} />
+                    </td>
+                    <td className={styles.numeric}>{formatMoneyOrDash(payment.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           <p className={styles.notice}>Showing the most recent {rows.length} payments.</p>
         </>

@@ -8,6 +8,7 @@ import {
   Button,
   ChoiceChips,
   Dialog,
+  EmptyState,
   ErrorState,
   PageHeader,
   Select,
@@ -514,7 +515,10 @@ export function IstPayrollPage() {
                           ) : null}
                         </div>
                         {filteredLines.length === 0 && allLines.length > 0 ? (
-                          <p>No employees match these filters.</p>
+                          <EmptyState
+                            title="No employees match these filters."
+                            description="Clear or change the employee filters to see more lines."
+                          />
                         ) : (
                           <PayrollLinesTable
                             lines={filteredLines}

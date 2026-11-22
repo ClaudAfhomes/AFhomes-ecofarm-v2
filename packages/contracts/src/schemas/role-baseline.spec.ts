@@ -101,6 +101,12 @@ describe('default role permission baseline', () => {
     ).toEqual(ALL_KEYS);
   });
 
+  it('lets HR read roles via a migration-seeded grant, without any role authority', () => {
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({ moduleKey: 'organization.roles', roles: ['hr'] });
+    // The reviewed matrix keeps HR to staff/departments; it is not rewritten.
+    expect(DEFAULT_ROLE_BASELINE.hr.some((g) => g.moduleKey === 'organization.roles')).toBe(false);
+  });
+
   it('reserves bulk customer import for admin via its migration-seeded grant', () => {
     expect(MIGRATION_SEEDED_GRANTS).toContainEqual({
       moduleKey: 'governance.customer_import',
