@@ -12,6 +12,7 @@ export async function loadFeatureFlags(): Promise<void> {
   try {
     setFeatureFlags(
       await request('/settings/features', featureFlagsSchema, {
+        auth: 'none',
         signal: AbortSignal.timeout(3000),
       }),
     );

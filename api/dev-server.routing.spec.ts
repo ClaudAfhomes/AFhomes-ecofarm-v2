@@ -16,6 +16,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const PORT = 32107;
 const BASE = `http://127.0.0.1:${PORT}`;
 const SERVER_FILE = join(dirname(fileURLToPath(import.meta.url)), 'dev-server.ts');
+const TSX_CLI = createRequire(import.meta.url).resolve('tsx/cli');
 
 let child: ChildProcess | null = null;
 
@@ -56,10 +58,9 @@ beforeAll(async () => {
   ]) {
     delete scrubbed[key];
   }
-  child = spawn(`npx tsx "${SERVER_FILE}" ${PORT}`, {
+  child = spawn(process.execPath, [TSX_CLI, SERVER_FILE, String(PORT)], {
     cwd: mkdtempSync(join(tmpdir(), 'afhomes-dev-server-')),
     env: scrubbed,
-    shell: true,
     stdio: 'ignore',
   });
   await waitForServer();
@@ -67,9 +68,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (child) {
-    // With `shell: true` the child is the shell. On Windows killing it orphans the
-    // node server, which then keeps the port and answers the NEXT run with stale
-    // code (a false pass). Kill the whole tree there.
+    // The TypeScript runner may launch a child Node process. Stop the whole
+    // tree so a stale server cannot retain this port and falsely pass the next run.
     if (process.platform === 'win32' && child.pid)
       spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     else child.kill('SIGKILL');

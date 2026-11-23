@@ -218,7 +218,12 @@ export async function handleMemberWorkbook(
           .in('phone', phones)
           .in('status', ['submitted', 'under_review', 'changes_requested', 'approved']),
       ]);
-      if (results.some((r) => r.error || r.count !== (r.data?.length ?? 0)))
+      if (
+        results.some(
+          (r: { error: unknown; count: number | null; data: unknown[] | null }) =>
+            r.error || r.count !== (r.data?.length ?? 0),
+        )
+      )
         throw new Error('Conflict checks unavailable.');
       for (const r of results[0]!.data ?? []) existingEmails.add(String(r.email).toLowerCase());
       for (const r of results[1]!.data ?? [])

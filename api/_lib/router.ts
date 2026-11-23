@@ -12,7 +12,7 @@
  * loaded on first use (cold-start win); shared libs stay imported eagerly.
  */
 import { toErrorEnvelope } from './envelope.js';
-import { isFeaturePathEnabled } from '@afhomes/shared';
+import { isFeaturePathEnabled } from '@afhomes/shared/features';
 import { refreshFeatureFlags } from './feature-flags.js';
 import type { VercelRequest, VercelResponse } from './http.js';
 

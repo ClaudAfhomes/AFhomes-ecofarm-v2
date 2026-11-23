@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { useState } from "react";
 import { cn } from "../../lib/cn";
 import { cmsRepository } from "../../lib/cms";
 import { useCmsRevision } from "../../hooks/useCmsRevision";
@@ -13,6 +14,8 @@ interface LogoProps {
 export function Logo({ className, to = "/" }: LogoProps) {
   useCmsRevision();
   const siteConfig = cmsRepository.getSiteConfig();
+  const src = siteConfig.logo?.src || logo;
+  const [failedSrc, setFailedSrc] = useState<string>();
   return (
     <Link
       to={to}
@@ -20,7 +23,8 @@ export function Logo({ className, to = "/" }: LogoProps) {
       aria-label="AFhomes — Home Away From Home"
     >
       <img
-        src={siteConfig.logo?.src || logo}
+        src={failedSrc === src ? logo : src}
+        onError={() => setFailedSrc(src)}
         alt={siteConfig.logo?.alt || "AFhomes"}
         width={1480}
         height={855}

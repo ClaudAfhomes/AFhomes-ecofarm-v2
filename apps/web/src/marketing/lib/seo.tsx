@@ -93,7 +93,7 @@ export function Seo({ title, description, path = "/", openGraphTitle, openGraphD
     }
     setLink("canonical", canonical);
     if (site.seo.favicon.src) {
-      setLink("icon", absoluteUrl(canonicalBase, site.seo.favicon.src));
+      setLink("icon", site.seo.favicon.src);
     }
 
     const primaryOffice = site.offices.find((office) => /head|resort/i.test(office.role)) ?? site.offices[0];

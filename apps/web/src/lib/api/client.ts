@@ -23,14 +23,18 @@ import {
   tryRefreshSession,
 } from '../supabase';
 
-async function rawRequest(path: string, init?: RequestInit, retried = false): Promise<Response> {
+/** Public bootstrap reads can skip SDK initialization; other requests retain session recovery. */
+export type ApiRequestInit = RequestInit & { auth?: 'none' | 'optional' };
+
+async function rawRequest(path: string, init?: ApiRequestInit, retried = false): Promise<Response> {
   const url = `${env.VITE_API_BASE_URL}${path}`;
+  const { auth = 'optional', ...fetchInit } = init ?? {};
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    ...(init?.headers as Record<string, string> | undefined),
+    ...(fetchInit.headers as Record<string, string> | undefined),
   };
-  if (!isMongoAuth && isSupabaseConfigured()) {
+  if (auth !== 'none' && !isMongoAuth && isSupabaseConfigured()) {
     const { data } = (await getSupabaseClient()?.auth.getSession()) ?? {
       data: { session: null },
     };
@@ -41,7 +45,7 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
   let res: Response;
   try {
     res = await fetch(url, {
-      ...init,
+      ...fetchInit,
       headers,
       credentials: init?.credentials ?? 'same-origin',
     });
@@ -53,8 +57,8 @@ async function rawRequest(path: string, init?: RequestInit, retried = false): Pr
   // always 403, never 401). Heal once via rotation, then retry; if rotation
   // fails the session is dead, so clear it and let the guard redirect.
   init?.signal?.throwIfAborted();
-  if (res.status === 401 && isMongoAuth) notifyCookieAuth();
-  if (res.status === 401 && !retried && !isMongoAuth && isSupabaseConfigured()) {
+  if (res.status === 401 && auth !== 'none' && isMongoAuth) notifyCookieAuth();
+  if (res.status === 401 && auth !== 'none' && !retried && !isMongoAuth && isSupabaseConfigured()) {
     const healed = await tryRefreshSession();
     init?.signal?.throwIfAborted();
     if (healed) return rawRequest(path, init, true);
@@ -73,7 +77,7 @@ async function parseBody(res: Response): Promise<unknown> {
   }
 }
 
-async function requestBody(path: string, init?: RequestInit) {
+async function requestBody(path: string, init?: ApiRequestInit) {
   try {
     return await withRequestDeadline(async (signal) => {
       const res = await rawRequest(path, { ...init, signal });
@@ -89,7 +93,7 @@ async function requestBody(path: string, init?: RequestInit) {
 }
 
 /** Request a single resource; validate against `schema`. */
-export async function request<T>(path: string, schema: ZodType<T>, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, schema: ZodType<T>, init?: ApiRequestInit): Promise<T> {
   const { res, body } = await requestBody(path, init);
   if (!res.ok) throw toApiError(body, res.status);
   const parsed = schema.safeParse(body);
@@ -101,7 +105,7 @@ export async function request<T>(path: string, schema: ZodType<T>, init?: Reques
 export async function requestList<T>(
   path: string,
   itemSchema: ZodType<T>,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ): Promise<T[]> {
   const { res, body } = await requestBody(path, init);
   if (!res.ok) throw toApiError(body, res.status);

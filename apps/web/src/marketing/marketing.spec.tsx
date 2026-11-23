@@ -431,6 +431,7 @@ describe('SEO behavior', () => {
       'href',
       'https://www.afhomes.com.ph/about',
     );
+    expect(document.querySelector('link[rel="icon"]')).toHaveAttribute('href', '/logo.png?v=3');
     const schema = document.querySelector('#afhomes-local-business-schema');
     expect(schema?.textContent).toContain('"@type":"Resort"');
     expect(document.querySelector('meta[property="og:url"]')).toHaveAttribute(

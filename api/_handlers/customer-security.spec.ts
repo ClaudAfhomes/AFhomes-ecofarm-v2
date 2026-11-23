@@ -31,7 +31,15 @@ function sourceFiles(dir = REPO, out: string[] = []): string[] {
 }
 
 const FILES = sourceFiles();
-const read = (file: string) => readFileSync(file, 'utf8');
+// Every guard inspects the same source snapshot without repeating thousands of disk reads.
+const source = new Map<string, string>();
+const read = (file: string) => {
+  const cached = source.get(file);
+  if (cached !== undefined) return cached;
+  const text = readFileSync(file, 'utf8');
+  source.set(file, text);
+  return text;
+};
 const rel = (file: string) => relative(REPO, file).replace(/\\/g, '/');
 
 /** Strip comments, so prose that NAMES a forbidden thing to forbid it is not

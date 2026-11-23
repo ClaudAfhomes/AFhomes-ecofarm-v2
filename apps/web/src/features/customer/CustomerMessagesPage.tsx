@@ -78,7 +78,7 @@ function ThreadList({
         ) : (
           <ul className={`${ui.surface} ${styles.rows}`} aria-label="Conversations">
             {conversations.map((c) => {
-              const tagId = `${uid}-${c.id}-unread`;
+              const unreadDescriptionId = `${uid}-${c.id}-unread`;
               return (
                 <li
                   key={c.id}
@@ -92,7 +92,7 @@ function ThreadList({
                       <button
                         type="button"
                         className={`${styles.rowButton} ${c.unread ? styles.rowButtonUnread : ''}`}
-                        aria-describedby={c.unread ? tagId : undefined}
+                        aria-describedby={c.unread ? unreadDescriptionId : undefined}
                         onClick={() => onOpen(c.id)}
                       >
                         {c.subject}
@@ -102,7 +102,7 @@ function ThreadList({
                       </time>
                     </div>
                     {c.unread && (
-                      <span id={tagId} className={styles.unreadTag}>
+                      <span id={unreadDescriptionId} className={styles.unreadTag}>
                         New reply from AF Homes
                       </span>
                     )}

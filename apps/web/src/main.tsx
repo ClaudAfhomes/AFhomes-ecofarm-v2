@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import App from './app/App';
+import { preloadInitialRoute } from './app/initial-route';
 import { loadFeatureFlags } from './lib/feature-flags';
 import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
@@ -18,6 +19,8 @@ if (!rootElement) {
 }
 
 // Module switches decide which routes and links exist, so they load first.
+// Fetch only this entry's code in parallel; no account data or route renders early.
+void preloadInitialRoute(window.location.pathname);
 void loadFeatureFlags().then(() =>
   createRoot(rootElement).render(
     <StrictMode>

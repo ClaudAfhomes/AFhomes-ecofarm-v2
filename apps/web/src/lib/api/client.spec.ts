@@ -23,6 +23,30 @@ afterEach(() => {
 });
 
 describe('customer request lifecycle', () => {
+  it('reads anonymous startup settings without waiting for or attaching a session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response());
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(request('/settings/features', schema, { auth: 'none' })).resolves.toEqual({
+      ok: true,
+    });
+    expect(auth.getSession).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toBeUndefined();
+  });
+
+  it('does not refresh or clear a user session when an anonymous endpoint refuses a request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Not allowed' } }), {
+        status: 401,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(request('/settings/features', schema, { auth: 'none' })).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(auth.refresh).not.toHaveBeenCalled();
+    expect(auth.clear).not.toHaveBeenCalled();
+  });
   it.each(['session', 'fetch', 'body'])(
     'bounds a stalled %s without replaying a POST',
     async (stage) => {

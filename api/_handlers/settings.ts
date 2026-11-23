@@ -1,7 +1,6 @@
-import { featureFlagsSchema, updateFeatureFlagsSchema } from '@afhomes/contracts';
-import { FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
+import { featureFlagsSchema, updateFeatureFlagsSchema } from '@afhomes/contracts/feature-flags';
+import { FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared/features';
 
-import { authorizeAfHomes } from '../_lib/afhomes-access.js';
 import { invalidateFeatureFlags, refreshFeatureFlags } from '../_lib/feature-flags.js';
 import { deny, fail, jsonBody, mapRpcError, method, subPath } from '../_lib/handler-kit.js';
 import { serviceClient } from '../_lib/rest.js';
@@ -27,6 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (verb !== 'PUT') return fail(res, 'NOT_FOUND', 'Route not found.', 404);
 
+  const { authorizeAfHomes } = await import('../_lib/afhomes-access.js');
   const auth = await authorizeAfHomes(req, 'governance.config', 'update');
   if ('error' in auth) return deny(res, auth);
   const parsed = updateFeatureFlagsSchema.safeParse(jsonBody(req));

@@ -85,17 +85,21 @@ const schemeOfSale = async (
 ): Promise<{ paymentScheme: string; validityMonths: number | null; vipCardNumber: string | null }> => {
   const fallback = { paymentScheme: 'spot_cash', validityMonths: null as number | null, vipCardNumber: null };
   if (typeof saleId !== 'string' || !saleId) return fallback;
-  const { data, error } = await db
-    .from('card_sales')
-    .select('payment_scheme,validity_months_snapshot')
-    .eq('id', saleId)
-    .maybeSingle();
+  const [saleResult, reservationResult] = await Promise.all([
+    db
+      .from('card_sales')
+      .select('payment_scheme,validity_months_snapshot')
+      .eq('id', saleId)
+      .maybeSingle(),
+    db
+      .from('reservation_agreements')
+      .select('vip_card_number')
+      .eq('sale_id', saleId)
+      .maybeSingle(),
+  ]);
+  const { data, error } = saleResult;
+  const { data: reservation, error: reservationError } = reservationResult;
   if (error) throw error;
-  const { data: reservation, error: reservationError } = await db
-    .from('reservation_agreements')
-    .select('vip_card_number')
-    .eq('sale_id', saleId)
-    .maybeSingle();
   if (reservationError) throw reservationError;
   const row = (data ?? {}) as Record<string, unknown>;
   const months =
@@ -248,12 +252,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const row = await activeMembershipOf(db, principal.customerId);
       if (!row) return fail(res, 'NOT_FOUND', 'No active membership found', 404);
-
-      const { count } = await db
-        .from('customer_onboarding_tokens')
-        .select('id', { count: 'exact', head: true })
-        .eq('customer_id', principal.customerId);
-      void count;
 
       return res.status(200).json(toMembership(row, true, await schemeOfSale(db, row.sale_id)));
     }
@@ -527,71 +525,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * on, not just a number going down. The driving set is already this
        * customer's own ledger, and the redemption is additionally pinned to the
        * same customer id, so the join cannot widen anything. */
-      const quoteRefs = rows
-        .filter(
-          (row) =>
-            row.reference_type === 'redemption_quote' && typeof row.reference_id === 'string',
-        )
-        .map((row) => String(row.reference_id));
-      if (quoteRefs.length > 0) {
-        const { data: quotes, error: quoteError } = await db
-          .from('redemption_quotes')
-          .select('id, quote_number')
-          .in('id', quoteRefs)
-          .eq('approval_customer_id', principal.customerId);
-        if (quoteError) throw quoteError;
-        for (const quote of quotes ?? [])
-          referenceNumbers.set('redemption_quote:' + quote.id, String(quote.quote_number));
-      }
-      const claimRefs = rows
-        .filter(
-          (row) => row.reference_type === 'earning_claim' && typeof row.reference_id === 'string',
-        )
-        .map((row) => String(row.reference_id));
-      if (claimRefs.length > 0) {
-        const { data: claims, error: claimError } = await db
-          .from('earning_claims')
-          .select('id, claim_number')
-          .in('id', claimRefs)
-          .eq('customer_id', principal.customerId);
-        if (claimError) throw claimError;
-        for (const claim of claims ?? [])
-          referenceNumbers.set('earning_claim:' + claim.id, String(claim.claim_number));
-      }
-
-      const purchaseRefs = rows
-        .filter((row) => row.reference_type === 'purchase' && typeof row.reference_id === 'string')
-        .map((row) => String(row.reference_id));
-      if (purchaseRefs.length > 0) {
-        const { data: purchases, error: purchaseError } = await db
-          .from('purchases')
-          .select('id, purchase_number')
-          .in('id', purchaseRefs)
-          .eq('customer_id', principal.customerId);
-        if (purchaseError) throw purchaseError;
-        for (const purchase of purchases ?? [])
-          referenceNumbers.set('purchase:' + purchase.id, String(purchase.purchase_number));
-      }
-
-      const redemptionRefs = [
-        ...new Set(
-          rows
-            .filter((r) => r.entry_type === 'redemption' && typeof r.reference_id === 'string')
-            .map((r) => String(r.reference_id)),
-        ),
-      ];
-      if (redemptionRefs.length > 0) {
-        const { data: redemptions } = await db
-          .from('redemptions')
-          .select(
-            'id, redemption_number, item_name_snapshot, item_code_snapshot, quantity, total_points, customer_id',
-          )
-          .in('id', redemptionRefs)
-          .eq('customer_id', principal.customerId);
-        for (const row of (redemptions ?? []) as Record<string, unknown>[]) {
-          redemptionByRef.set(String(row.id), row);
-        }
-      }
+      // Each batch is independently scoped to this customer; overlap the network reads.
+      await Promise.all([
+        (async () => {
+          const quoteRefs = rows
+            .filter(
+              (row) =>
+                row.reference_type === 'redemption_quote' && typeof row.reference_id === 'string',
+            )
+            .map((row) => String(row.reference_id));
+          if (quoteRefs.length > 0) {
+            const { data: quotes, error: quoteError } = await db
+              .from('redemption_quotes')
+              .select('id, quote_number')
+              .in('id', quoteRefs)
+              .eq('approval_customer_id', principal.customerId);
+            if (quoteError) throw quoteError;
+            for (const quote of quotes ?? [])
+              referenceNumbers.set('redemption_quote:' + quote.id, String(quote.quote_number));
+          }
+        })(),
+        (async () => {
+          const claimRefs = rows
+            .filter(
+              (row) => row.reference_type === 'earning_claim' && typeof row.reference_id === 'string',
+            )
+            .map((row) => String(row.reference_id));
+          if (claimRefs.length > 0) {
+            const { data: claims, error: claimError } = await db
+              .from('earning_claims')
+              .select('id, claim_number')
+              .in('id', claimRefs)
+              .eq('customer_id', principal.customerId);
+            if (claimError) throw claimError;
+            for (const claim of claims ?? [])
+              referenceNumbers.set('earning_claim:' + claim.id, String(claim.claim_number));
+          }
+        })(),
+        (async () => {
+          const purchaseRefs = rows
+            .filter((row) => row.reference_type === 'purchase' && typeof row.reference_id === 'string')
+            .map((row) => String(row.reference_id));
+          if (purchaseRefs.length > 0) {
+            const { data: purchases, error: purchaseError } = await db
+              .from('purchases')
+              .select('id, purchase_number')
+              .in('id', purchaseRefs)
+              .eq('customer_id', principal.customerId);
+            if (purchaseError) throw purchaseError;
+            for (const purchase of purchases ?? [])
+              referenceNumbers.set('purchase:' + purchase.id, String(purchase.purchase_number));
+          }
+        })(),
+        (async () => {
+          const redemptionRefs = [
+            ...new Set(
+              rows
+                .filter((r) => r.entry_type === 'redemption' && typeof r.reference_id === 'string')
+                .map((r) => String(r.reference_id)),
+            ),
+          ];
+          if (redemptionRefs.length > 0) {
+            const { data: redemptions } = await db
+              .from('redemptions')
+              .select(
+                'id, redemption_number, item_name_snapshot, item_code_snapshot, quantity, total_points, customer_id',
+              )
+              .in('id', redemptionRefs)
+              .eq('customer_id', principal.customerId);
+            for (const row of (redemptions ?? []) as Record<string, unknown>[]) {
+              redemptionByRef.set(String(row.id), row);
+            }
+          }
+        })(),
+      ]);
       }
 
       return res.status(200).json({

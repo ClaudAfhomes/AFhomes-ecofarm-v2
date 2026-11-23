@@ -31,12 +31,7 @@ import {
   rejectOstApplicationSchema,
   requestOstApplicationChangesSchema,
   ostDashboardSchema,
-  ostHeadInfoSchema,
-  ostPersonalSalesSchema,
-  ostPersonalCommissionsSchema,
-  ostCommissionRecordSchema,
-  ostSalesRecordSchema,
-  ostCommissionListRecordSchema,
+  type OstCommissionRecord,
   ostSalesListSchema,
   ostCommissionsListSchema,
 } from '@afhomes/contracts';
@@ -1038,50 +1033,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (member.status !== 'active')
         return fail(res, 'FORBIDDEN', 'OST account is not active', 403);
 
-      // Get head info (sponsor)
-      const { data: sponsor, error: sponsorError } = await db
-        .from('staff_users')
-        .select('id, full_name, status')
-        .eq('id', member.sponsor_staff_id)
-        .maybeSingle();
-      if (sponsorError) throw sponsorError;
-      const { data: sponsorRole } = sponsor
-        ? await db.from('staff_role_assignments').select('role_id').eq('staff_id', member.sponsor_staff_id).maybeSingle()
-        : { data: null };
-      const { data: sponsorRoleName } = sponsorRole
-        ? await db.from('roles').select('slug').eq('id', sponsorRole.role_id).maybeSingle()
-        : { data: null };
+      // These self-scoped reads are independent once both account gates pass.
+      const [headInfo, salesResult, importedSales, commissionsResult] = await Promise.all([
+        (async () => {
+          const { data: sponsor, error: sponsorError } = await db
+            .from('staff_users')
+            .select('id, full_name, status')
+            .eq('id', member.sponsor_staff_id)
+            .maybeSingle();
+          if (sponsorError) throw sponsorError;
+          const { data: sponsorRole } = sponsor
+            ? await db.from('staff_role_assignments').select('role_id').eq('staff_id', member.sponsor_staff_id).maybeSingle()
+            : { data: null };
+          const { data: sponsorRoleName } = sponsorRole
+            ? await db.from('roles').select('slug').eq('id', sponsorRole.role_id).maybeSingle()
+            : { data: null };
 
-      const headInfo = {
-        headId: sponsor?.id ?? '',
-        headName: sponsor?.full_name ?? 'Unknown',
-        headRole: sponsorRoleName?.slug ?? 'Unknown',
-        headStatus: sponsor?.status ?? 'unknown',
-        relationship: 'Direct Sponsor',
-      };
-
-      // Get personal sales (qualifying sales where this OST is the seller)
-      const { data: sales, error: salesError } = await db
-        .from('card_sales')
-        .select('id, sale_number, status, created_at, cash_price_snapshot')
-        .eq('origin', 'normal')
-        .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
-        .order('created_at', { ascending: false });
-      if (salesError) throw salesError;
-      const accountSales = mergeAccountSales(sales ?? [], await importedAccountSales(db, userId));
-      const qualifyingSales = accountSales.filter(s => s.status === 'active');
-      const periodSales = qualifyingSales.length; // For now, all qualifying sales
-
-      const salesInfo = {
-        totalSales: accountSales.length,
-        periodSales,
-        qualifyingSaleStatus: 'active',
-      };
-
-      // Get personal commissions
-      const { data: commissions, error: commError } = await db
-        .from('commissions')
-        .select(`
+          return {
+            headId: sponsor?.id ?? '',
+            headName: sponsor?.full_name ?? 'Unknown',
+            headRole: sponsorRoleName?.slug ?? 'Unknown',
+            headStatus: sponsor?.status ?? 'unknown',
+            relationship: 'Direct Sponsor',
+          };
+        })(),
+        db
+          .from('card_sales')
+          .select('id, sale_number, status, created_at, cash_price_snapshot')
+          .eq('origin', 'normal')
+          .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
+          .order('created_at', { ascending: false }),
+        importedAccountSales(db, userId),
+        db
+          .from('commissions')
+          .select(`
           id,
           commission_number,
           sale_id,
@@ -1093,22 +1078,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           created_at,
           card_sales!inner(sale_number)
         `)
-        .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
-        .not('settled_before_system', 'is', true)
-        .order('created_at', { ascending: false });
+          .or(`beneficiary_staff_id.eq.${userId},beneficiary_ost_id.eq.${userId}`)
+          .not('settled_before_system', 'is', true)
+          .order('created_at', { ascending: false }),
+      ]);
+      const { data: sales, error: salesError } = salesResult;
+      const { data: commissions, error: commError } = commissionsResult;
+      if (salesError) throw salesError;
       if (commError) throw commError;
+      const accountSales = mergeAccountSales(sales ?? [], importedSales);
+      const salesInfo = {
+        totalSales: accountSales.length,
+        periodSales: accountSales.filter(s => s.status === 'active').length,
+        qualifyingSaleStatus: 'active',
+      };
 
-      const commissionRecords = (commissions ?? []).map((row: any) => ({
+      const commissionRecords = (commissions ?? []).map((row: Record<string, unknown>) => ({
         id: row.id,
         commissionNumber: row.commission_number ?? null,
-        saleNumber: row.card_sales?.sale_number ?? '',
+        saleNumber: (row.card_sales as Record<string, unknown> | null)?.sale_number ?? '',
         amount: row.amount,
         status: row.status,
         qualifiedAt: row.qualified_at ?? null,
         earnedAt: row.earned_at ?? null,
         paidAt: row.paid_at ?? null,
         createdAt: row.created_at,
-      }));
+      })) as OstCommissionRecord[];
 
       // Calculate commission KPIs
       const toEarn = commissionRecords.filter((c: { status: string }) => ['pending', 'payment_verified', 'final_qualification_pending'].includes(c.status));
@@ -1201,7 +1196,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('origin', 'normal')
         .or(`seller_staff_id.eq.${userId},seller_ost_id.eq.${userId}`)
         .order('created_at', { ascending: false }).order('id');
-      const accountSales = mergeAccountSales(await readSearchRows(query), await importedAccountSales(db, userId));
+      const [normalSales, importedSales] = await Promise.all([
+        readSearchRows(query),
+        importedAccountSales(db, userId),
+      ]);
+      const accountSales = mergeAccountSales(normalSales, importedSales);
       const matchingSales = accountSales.filter(s => (!status || s.status === status)
         && matchesSearch(search, [s.sale_number, s.customer_id]));
       matchingSales.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(a.id).localeCompare(String(b.id)));

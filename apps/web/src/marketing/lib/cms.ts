@@ -77,7 +77,7 @@ export function safeOverride<T>(value: unknown, defaultValue: T): T {
 /** Overlay published server documents on repository defaults. Failure is intentionally non-fatal. */
 export function hydrateCms(): Promise<void> {
   if (hydration) return hydration;
-  hydration = request('/cms/public', cmsPublicContentSchema)
+  hydration = request('/cms/public', cmsPublicContentSchema, { auth: 'none' })
     .then(({ documents }) => {
       const published: CmsState = {
         site: safeOverride(documents.site, fallback.site),

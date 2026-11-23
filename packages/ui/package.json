@@ -13,6 +13,7 @@
     ".": "./src/index.ts",
     "./tokens.css": "./src/styles/tokens.css",
     "./base.css": "./src/styles/base.css",
+    "./brand-image": "./src/brand-image.ts",
     "./website-content": "./src/website-content/index.ts",
     "./website-content/*": "./src/website-content/*.ts"
   },

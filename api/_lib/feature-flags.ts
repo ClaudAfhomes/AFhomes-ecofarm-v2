@@ -1,4 +1,4 @@
-import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared';
+import { DEFAULT_FEATURE_FLAGS, setFeatureFlags } from '@afhomes/shared/features';
 
 import { serviceClient } from './rest.js';
 

@@ -169,7 +169,7 @@ describe('OST login', () => {
     };
     const user = userEvent.setup();
     render('/ost/login');
-    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Temporary123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect(
@@ -209,7 +209,7 @@ describe('OST login', () => {
     };
     const user = userEvent.setup();
     render('/ost/login');
-    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'TempPass123');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect(
@@ -241,7 +241,7 @@ describe('OST login', () => {
   it('signs an approved OST in and lands on the dashboard', async () => {
     const user = userEvent.setup();
     render('/ost/login');
-    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect((await screen.findAllByText('OST-000007')).length).toBeGreaterThan(0);
@@ -276,7 +276,7 @@ describe('OST login', () => {
     };
     const user = userEvent.setup();
     render('/ost/login');
-    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.type(screen.getByLabelText('Password'), 'Password123!');
     await user.click(screen.getByRole('button', { name: /^sign in$/i }));
     expect(await screen.findByText(/record is suspended/i)).toBeInTheDocument();
@@ -344,7 +344,7 @@ describe('OST recovery targets', () => {
   it('requests recovery for the OST reset page', async () => {
     const user = userEvent.setup();
     render('/ost/forgot-password');
-    await user.type(screen.getByLabelText('Email'), 'ost@afhomes.test');
+    await user.type(await screen.findByLabelText('Email'), 'ost@afhomes.test');
     await user.click(screen.getByRole('button', { name: /send reset link/i }));
     expect(authMock.resetPasswordForEmail).toHaveBeenCalledWith(
       'ost@afhomes.test',

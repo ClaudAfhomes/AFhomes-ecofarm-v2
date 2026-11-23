@@ -25,7 +25,6 @@
  * otherwise would be testing nothing.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import jsQR from 'jsqr';
 
 export type ScannerStatus = 'idle' | 'requesting' | 'scanning' | 'denied' | 'unavailable' | 'error';
 
@@ -35,9 +34,6 @@ export type FrameDecoder = (
   width: number,
   height: number,
 ) => { data: string } | null;
-
-export const defaultDecoder: FrameDecoder = (data, width, height) =>
-  jsQR(data, width, height, { inversionAttempts: 'dontInvert' });
 
 /** Suppresses re-firing the same code while it stays in view. */
 const REPEAT_SUPPRESS_MS = 1500;
@@ -60,7 +56,7 @@ export type UseQrScannerResult = {
 
 export function useQrScanner(
   onDecoded: (value: string) => void,
-  decoder: FrameDecoder = defaultDecoder,
+  decoder?: FrameDecoder,
 ): UseQrScannerResult {
   const [status, setStatus] = useState<ScannerStatus>('idle');
 
@@ -70,6 +66,7 @@ export function useQrScanner(
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const frameHandle = useRef<number | null>(null);
   const lastValue = useRef<{ value: string; at: number } | null>(null);
+  const loadedDecoder = useRef<FrameDecoder | null>(null);
   // The decode callback is held in a ref so the frame effect never has to be
   // torn down and rebuilt when the parent re-renders with a new closure. It is
   // synced in an effect, never written during render: a ref written during
@@ -114,6 +111,13 @@ export function useQrScanner(
             return;
           }
           stream.current = media;
+          // Balance/history views need no decoder. Download it only after the
+          // member starts scanning, while preserving cancellation and cleanup.
+          if (!decoder && !loadedDecoder.current) {
+            const module = await import('./qr-decoder.js');
+            if (generation.current !== requestGeneration) return;
+            loadedDecoder.current = module.defaultDecoder;
+          }
           const video = videoElement.current;
           if (video) {
             video.srcObject = media;
@@ -138,7 +142,7 @@ export function useQrScanner(
           } else setStatus('error');
         });
     },
-    [release],
+    [release, decoder],
   );
 
   // The frame loop. One schedule point, torn down whenever scanning stops.
@@ -160,7 +164,7 @@ export function useQrScanner(
         if (context) {
           context.drawImage(video, 0, 0, width, height);
           const frame = context.getImageData(0, 0, width, height);
-          const decoded = decoder(frame.data, width, height);
+          const decoded = (decoder ?? loadedDecoder.current)?.(frame.data, width, height);
           if (decoded?.data) {
             const now = Date.now();
             const previous = lastValue.current;

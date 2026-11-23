@@ -14,6 +14,8 @@
  * pins them to one host and breaks preview deployments.
  */
 import { writeFileSync } from 'node:fs';
+import process from 'node:process';
+import console from 'node:console';
 
 // Full application deployments need privileged APIs even when public Auth can still log in.
 if (['preview', 'production'].includes(process.env.VERCEL_ENV)) {
@@ -28,6 +30,7 @@ if (['preview', 'production'].includes(process.env.VERCEL_ENV)) {
     ],
     ['VITE_SUPABASE_URL'],
     ['VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SUPABASE_ANON_KEY'],
+    ['VITE_TURNSTILE_SITE_KEY'],
   ];
   const missing = required.filter((names) => !names.some((name) => process.env[name]?.trim()));
   if (missing.length) {

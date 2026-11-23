@@ -4,47 +4,98 @@ import { Navigate, Route, Routes } from 'react-router';
 import { NotFound, ScrollToTop } from '@afhomes/ui';
 import { FEATURE_FLAGS } from '@afhomes/shared';
 
-import { CustomerActivatePage } from '../features/customer/CustomerActivatePage';
-import { CustomerForgotPasswordPage } from '../features/customer/CustomerForgotPasswordPage';
-import { CustomerLoginPage } from '../features/customer/CustomerLoginPage';
-import { CustomerResetPasswordPage } from '../features/customer/CustomerResetPasswordPage';
-import { AdminEntryPage, StaffLoginEntryPage } from '../features/staff/StaffEntryPage';
-import { OstLoginPage } from '../features/ost/OstLoginPage';
-import { OstForgotPasswordPage } from '../features/ost/OstForgotPasswordPage';
-import { OstResetPasswordPage } from '../features/ost/OstResetPasswordPage';
 import { LoadingState } from '../marketing/components/ui/Feedback';
-import { MarketingLayout } from '../marketing/MarketingLayout';
-import { CustomerLayout } from './CustomerLayout';
-import { OstLayout } from './OstLayout';
 import { OstGuard } from './OstGuard';
+
+// Keep each account entry and shell out of unrelated route downloads.
+const CustomerActivatePage = lazy(() =>
+  import('../features/customer/CustomerActivatePage').then((m) => ({
+    default: m.CustomerActivatePage,
+  })),
+);
+const CustomerForgotPasswordPage = lazy(() =>
+  import('../features/customer/CustomerForgotPasswordPage').then((m) => ({
+    default: m.CustomerForgotPasswordPage,
+  })),
+);
+const CustomerLoginPage = lazy(() =>
+  import('../features/customer/CustomerLoginPage').then((m) => ({ default: m.CustomerLoginPage })),
+);
+const CustomerResetPasswordPage = lazy(() =>
+  import('../features/customer/CustomerResetPasswordPage').then((m) => ({
+    default: m.CustomerResetPasswordPage,
+  })),
+);
+const AdminEntryPage = lazy(() =>
+  import('../features/staff/StaffEntryPage').then((m) => ({ default: m.AdminEntryPage })),
+);
+const StaffLoginEntryPage = lazy(() =>
+  import('../features/staff/StaffEntryPage').then((m) => ({ default: m.StaffLoginEntryPage })),
+);
+const OstLoginPage = lazy(() =>
+  import('../features/ost/OstLoginPage').then((m) => ({ default: m.OstLoginPage })),
+);
+const OstForgotPasswordPage = lazy(() =>
+  import('../features/ost/OstForgotPasswordPage').then((m) => ({
+    default: m.OstForgotPasswordPage,
+  })),
+);
+const OstResetPasswordPage = lazy(() =>
+  import('../features/ost/OstResetPasswordPage').then((m) => ({ default: m.OstResetPasswordPage })),
+);
+const MarketingLayout = lazy(() =>
+  import('../marketing/MarketingLayout').then((m) => ({ default: m.MarketingLayout })),
+);
+const CustomerLayout = lazy(() =>
+  import('./CustomerLayout').then((m) => ({ default: m.CustomerLayout })),
+);
+const OstLayout = lazy(() => import('./OstLayout').then((m) => ({ default: m.OstLayout })));
 
 // Portal screens load only when opened, like the marketing routes below.
 const CustomerDashboardPage = lazy(() =>
-  import('../features/customer/CustomerDashboardPage').then((m) => ({ default: m.CustomerDashboardPage })),
+  import('../features/customer/CustomerDashboardPage').then((m) => ({
+    default: m.CustomerDashboardPage,
+  })),
 );
 const CustomerMembershipPage = lazy(() =>
-  import('../features/customer/CustomerMembershipPage').then((m) => ({ default: m.CustomerMembershipPage })),
+  import('../features/customer/CustomerMembershipPage').then((m) => ({
+    default: m.CustomerMembershipPage,
+  })),
 );
 const CustomerPaymentsPage = lazy(() =>
-  import('../features/customer/CustomerPaymentsPage').then((m) => ({ default: m.CustomerPaymentsPage })),
+  import('../features/customer/CustomerPaymentsPage').then((m) => ({
+    default: m.CustomerPaymentsPage,
+  })),
 );
 const CustomerPointsPage = lazy(() =>
-  import('../features/customer/CustomerPointsPage').then((m) => ({ default: m.CustomerPointsPage })),
+  import('../features/customer/CustomerPointsPage').then((m) => ({
+    default: m.CustomerPointsPage,
+  })),
 );
 const CustomerProfilePage = lazy(() =>
-  import('../features/customer/CustomerProfilePage').then((m) => ({ default: m.CustomerProfilePage })),
+  import('../features/customer/CustomerProfilePage').then((m) => ({
+    default: m.CustomerProfilePage,
+  })),
 );
 const CustomerRedemptionsPage = lazy(() =>
-  import('../features/customer/CustomerRedemptionsPage').then((m) => ({ default: m.CustomerRedemptionsPage })),
+  import('../features/customer/CustomerRedemptionsPage').then((m) => ({
+    default: m.CustomerRedemptionsPage,
+  })),
 );
 const CustomerBookingsPage = lazy(() =>
-  import('../features/customer/CustomerBookingsPage').then((m) => ({ default: m.CustomerBookingsPage })),
+  import('../features/customer/CustomerBookingsPage').then((m) => ({
+    default: m.CustomerBookingsPage,
+  })),
 );
 const CustomerMessagesPage = lazy(() =>
-  import('../features/customer/CustomerMessagesPage').then((m) => ({ default: m.CustomerMessagesPage })),
+  import('../features/customer/CustomerMessagesPage').then((m) => ({
+    default: m.CustomerMessagesPage,
+  })),
 );
 const CustomerNotificationsPage = lazy(() =>
-  import('../features/customer/CustomerNotificationsPage').then((m) => ({ default: m.CustomerNotificationsPage })),
+  import('../features/customer/CustomerNotificationsPage').then((m) => ({
+    default: m.CustomerNotificationsPage,
+  })),
 );
 const OstRegisterPage = lazy(() =>
   import('../features/ost/OstRegisterPage').then((m) => ({ default: m.OstRegisterPage })),

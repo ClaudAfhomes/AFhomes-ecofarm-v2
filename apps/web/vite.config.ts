@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
+import { preloadFeatureFlags } from '../../scripts/preload-feature-flags';
 
 export default defineConfig(({ mode }) => ({
   // Single shared env source: repo-root `.env.local` (see AGENTS.md). Vite only
@@ -15,7 +16,7 @@ export default defineConfig(({ mode }) => ({
     process.env.AFHOMES_DEV_ENV_DIR ?? (mode === 'test'
       ? fileURLToPath(new URL('./', import.meta.url))
       : fileURLToPath(new URL('../../', import.meta.url))),
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), preloadFeatureFlags()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

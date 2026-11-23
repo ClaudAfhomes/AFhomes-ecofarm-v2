@@ -50,6 +50,7 @@ describe('VIP release deployment guard', () => {
         VITE_SUPABASE_URL: 'https://fixture.supabase.co',
         VITE_SUPABASE_PUBLISHABLE_KEY: 'public-fixture',
         SUPABASE_SERVICE_ROLE_KEY: 'server-fixture',
+        VITE_TURNSTILE_SITE_KEY: 'synthetic-public-key',
       },
     });
     expect(result.status).toBe(0);
@@ -59,5 +60,25 @@ describe('VIP release deployment guard', () => {
   it('leaves offline local builds independent of Vercel credentials', () => {
     const result = spawnSync(process.execPath, [prepare], { encoding: 'utf8', env: {} });
     expect(result.status).toBe(0);
+  });
+
+  it.each([
+    ['production', false], ['production', true], ['preview', false], ['preview', true],
+  ] as const)('requires the %s Turnstile site key (present: %s)', (VERCEL_ENV, present) => {
+    const result = spawnSync(process.execPath, [prepare], {
+      encoding: 'utf8',
+      env: {
+        VERCEL_ENV,
+        SUPABASE_URL: 'https://fixture.supabase.co',
+        SUPABASE_PUBLISHABLE_KEY: 'public-fixture',
+        VITE_SUPABASE_URL: 'https://fixture.supabase.co',
+        VITE_SUPABASE_PUBLISHABLE_KEY: 'public-fixture',
+        SUPABASE_SERVICE_ROLE_KEY: 'server-fixture',
+        ...(present ? { VITE_TURNSTILE_SITE_KEY: 'synthetic-public-key' } : {}),
+      },
+    });
+    expect(result.status === 0).toBe(present);
+    if (!present) expect(result.stderr).toContain('VITE_TURNSTILE_SITE_KEY');
+    expect(result.stdout + result.stderr).not.toContain('server-fixture');
   });
 });

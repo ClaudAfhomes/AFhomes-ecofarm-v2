@@ -123,7 +123,8 @@ export { VerifiedBadge } from './components/VerifiedBadge.js';
 export { IdCapturePicker } from './components/IdCapturePicker.js';
 export { TurnstileChallenge } from './components/TurnstileChallenge.js';
 
-export { useQrScanner, defaultDecoder } from './hooks/useQrScanner.js';
+export { useQrScanner } from './hooks/useQrScanner.js';
+export { defaultDecoder } from './hooks/qr-decoder.js';
 export type {
   ScannerStatus,
   FrameDecoder,

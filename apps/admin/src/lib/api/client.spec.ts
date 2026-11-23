@@ -18,6 +18,24 @@ import { createAfHomesStaff, deleteAfHomesStaff } from '../../features/afhomes/s
 import { protectedRequest, request } from './client';
 
 const okSchema = z.object({ ok: z.literal(true) });
+
+it('reads anonymous startup settings without waiting for or attaching a session', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(response({ ok: true }));
+  vi.stubGlobal('fetch', fetchMock);
+  await expect(request('/settings/features', okSchema, { auth: 'none' })).resolves.toEqual({
+    ok: true,
+  });
+  expect(auth.getSession).not.toHaveBeenCalled();
+  expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toBeUndefined();
+});
+
+it('does not let anonymous settings options disable protected-request authentication', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(response({ ok: true }));
+  vi.stubGlobal('fetch', fetchMock);
+  await protectedRequest('/protected', okSchema, { auth: 'none' });
+  expect(auth.getSession).toHaveBeenCalled();
+  expect(fetchMock.mock.calls[0]?.[1].headers.Authorization).toMatch(/^Bearer /);
+});
 afterEach(() => vi.useRealTimers());
 
 describe('request deadlines', () => {

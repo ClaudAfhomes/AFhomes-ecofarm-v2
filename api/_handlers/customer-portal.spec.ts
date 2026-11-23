@@ -1002,6 +1002,49 @@ describe('customer profile read model', () => {
 describe('customer membership summary', () => {
   beforeEach(() => install());
 
+  it('does not read onboarding tokens to display an existing membership', async () => {
+    const db = install();
+    const from = vi.spyOn(db, 'from');
+    expect((await callPortal('membership')).status).toBe(200);
+    expect(from.mock.calls.map(([table]) => table)).not.toContain('customer_onboarding_tokens');
+    from.mockRestore();
+  });
+
+  it.each(['card_sales', 'reservation_agreements'])('fails closed when membership detail %s fails', async (table) => {
+    const db = install();
+    db.errors[table] = { message: 'PRIVATE membership detail failure' };
+    const result = await callPortal('membership');
+    expect(result.status).toBeGreaterThanOrEqual(500);
+    expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+  });
+
+  it('reads the owned sale scheme and VIP record concurrently', async () => {
+    const db = install();
+    const from = db.from.bind(db);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const spy = vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'card_sales' || table === 'reservation_agreements') {
+        const maybeSingle = query.maybeSingle.bind(query);
+        query.maybeSingle = () => {
+          started.add(table);
+          return gate.then(() => maybeSingle());
+        };
+      }
+      return query;
+    });
+    const pending = callPortal('membership');
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(2), { timeout: 300 });
+    } finally {
+      release();
+      expect((await pending).status).toBe(200);
+      spy.mockRestore();
+    }
+  });
+
   it('shows the latest owned membership with its own purchase VIP ID', async () => {
     const tables = baseTables();
     const latest = { ...tables.memberships[0]!, id: 'dddddddd-0000-4000-8000-000000000002', sale_id: 'bbbbbbbb-0000-4000-8000-000000000002', membership_number: 'MBS-000999', activated_at: inHours(1) };
@@ -1185,6 +1228,85 @@ describe('customer points', () => {
     const s = await callPortal('points');
     expect(body(s).balance).not.toBe(25000);
     expect(body(s).membershipId).not.toBe(OTHER_MEMBERSHIP_ID);
+  });
+
+  it('loads independent owned ledger reference batches concurrently', async () => {
+    const accountId = baseTables().points_accounts[0]!.id;
+    const db = install({ tables: baseTables({
+      points_ledger: ['redemption_quote', 'earning_claim', 'purchase', 'redemption'].map((kind, i) => ({
+        id: String(100 + i), account_id: accountId,
+        entry_type: kind === 'earning_claim' ? 'earned' : 'redemption',
+        amount: 100, balance_after: 60000, reference_type: kind,
+        reference_id: `own-${kind}`, created_at: agoHours(1),
+      })),
+      redemption_quotes: [{ id: 'own-redemption_quote', approval_customer_id: CUSTOMER_ID, quote_number: 'Q-OWN' }],
+      earning_claims: [{ id: 'own-earning_claim', customer_id: CUSTOMER_ID, claim_number: 'CLM-OWN' }],
+      purchases: [{ id: 'own-purchase', customer_id: CUSTOMER_ID, purchase_number: 'P-OWN' }],
+      redemptions: [{ id: 'own-redemption', customer_id: CUSTOMER_ID, redemption_number: 'R-OWN', item_name_snapshot: 'Own reward', item_code_snapshot: 'OWN', quantity: 1 }],
+    }) });
+    const from = db.from.bind(db);
+    const targets = new Set(['redemption_quotes', 'earning_claims', 'purchases', 'redemptions']);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const spy = vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (targets.has(table)) {
+        const then = query.then.bind(query);
+        query.then = (fulfilled, rejected) => {
+          started.add(table);
+          return gate.then(() => then(fulfilled, rejected));
+        };
+      }
+      return query;
+    });
+    const pending = callPortal('points/ledger');
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(4), { timeout: 500 });
+    } finally {
+      release();
+      const result = await pending;
+      spy.mockRestore();
+      expect(result.status).toBe(200);
+      expect(data(result)).toContainEqual(expect.objectContaining({ id: '100', referenceNumber: 'Q-OWN' }));
+      expect(data(result)).toContainEqual(expect.objectContaining({ id: '101', referenceNumber: 'CLM-OWN' }));
+      expect(data(result)).toContainEqual(expect.objectContaining({ id: '102', referenceNumber: 'P-OWN' }));
+      expect(data(result)).toContainEqual(expect.objectContaining({ id: '103', itemName: 'Own reward' }));
+    }
+  });
+
+  it('skips reference reads when the ledger has no related transactions', async () => {
+    const db = install();
+    const spy = vi.spyOn(db, 'from');
+    const result = await callPortal('points/ledger');
+    expect(result.status).toBe(200);
+    for (const table of ['redemption_quotes', 'earning_claims', 'purchases', 'redemptions']) {
+      expect(spy).not.toHaveBeenCalledWith(table);
+    }
+    spy.mockRestore();
+  });
+
+  it.each([
+    ['redemption_quote', 'redemption_quotes'],
+    ['earning_claim', 'earning_claims'],
+    ['purchase', 'purchases'],
+  ])('preserves failure handling when the %s reference lookup fails', async (kind, table) => {
+    const db = install({ tables: baseTables({
+      points_ledger: [{
+        id: '100', account_id: baseTables().points_accounts[0]!.id,
+        entry_type: 'earned', amount: 100, balance_after: 60100,
+        reference_type: kind, reference_id: 'own-reference', created_at: agoHours(1),
+      }],
+    }) });
+    db.errors[table] = { message: 'reference lookup unavailable' };
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = await callPortal('points/ledger');
+      expect(result.status).toBeGreaterThanOrEqual(500);
+      expect(result.body).not.toHaveProperty('data');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('resolves customer-owned operational spending references without exposing another customer quote', async () => {

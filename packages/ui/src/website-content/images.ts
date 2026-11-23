@@ -1,8 +1,8 @@
 /**
  * Centralized placeholder image registry.
  *
- * Placeholder imagery is served from Unsplash CDN. When official AFhomes
- * assets are available, replace the `src` values here — no component changes
+ * Most placeholders use Unsplash CDN; the first-screen valley is bundled locally.
+ * When official AFhomes assets are available, replace the `src` values here — no component changes
  * are required.
  *
  * IMPORTANT: these are generic, unattributed stock placeholders. They must be
@@ -12,6 +12,7 @@
 import { tierArtwork } from '../tier-artwork';
 
 import logo from "./assets/logo.png";
+import { authBrandImage as valley } from '../brand-image';
 
 export type ImageKey = string;
 
@@ -81,7 +82,7 @@ export const PLACEHOLDER = {
     "Expansive mountain and lake landscape under soft light",
   ),
   "resort-valley": spec(
-    unsplash("photo-1470071459604-3b5ec3a7fe05"),
+    valley,
     "Rolling green valley and forest in morning fog",
   ),
   "resort-forest": spec(

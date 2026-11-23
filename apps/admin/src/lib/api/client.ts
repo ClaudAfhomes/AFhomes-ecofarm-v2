@@ -23,7 +23,8 @@ import {
  * no token can be recovered; public requests may continue anonymously.
  * Credentials stay `same-origin` (the default `/api/v1` deployment).
  */
-export type ApiRequestInit = RequestInit & { auth?: 'optional' | 'required' };
+/** Public bootstrap reads can skip SDK initialization; protected wrappers always require Auth. */
+export type ApiRequestInit = RequestInit & { auth?: 'none' | 'optional' | 'required' };
 
 let testAccessToken: string | null | undefined;
 
@@ -79,7 +80,7 @@ async function rawRequest(
     'Content-Type': 'application/json',
     ...(fetchInit.headers as Record<string, string> | undefined),
   };
-  const token = isMongoAuth
+  const token = auth === 'none' || isMongoAuth
     ? null
     : (forcedAccessToken ??
       (auth === 'required' ? await getFreshAccessToken() : await currentAccessToken()));

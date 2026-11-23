@@ -49,7 +49,7 @@ export default function CmsPage() {
   const slug = useParams().slug ?? '';
   const page = useQuery({
     queryKey: ['cms', 'public-page', slug],
-    queryFn: () => request(`/cms/public/pages/${encodeURIComponent(slug)}`, cmsPageSchema),
+    queryFn: () => request(`/cms/public/pages/${encodeURIComponent(slug)}`, cmsPageSchema, { auth: 'none' }),
     enabled: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && !reserved.has(slug),
     retry: false,
   });

@@ -23,8 +23,6 @@ const OST_ID = '55555555-5555-4555-8555-555555555555';
 const SM_ID = '22222222-2222-4222-8222-222222222222';
 const OTHER_ID = '99999999-9999-4999-8999-999999999999';
 
-type Row = Record<string, unknown>;
-
 function install() {
   resetIdentifierRateLimit();
   holder.db = new FakeSupabase({
@@ -96,6 +94,99 @@ async function call(token?: string, path = 'me') {
 }
 
 describe('GET /ost/me', () => {
+  it.each(['card_sales', 'commissions'])(
+    'does not return a partial dashboard when %s fails',
+    async (table) => {
+      install();
+      const db = holder.db as FakeSupabase;
+      db.errors[table] = { message: 'PRIVATE dashboard read failure' };
+      const result = await call('tok-ost', 'me/dashboard');
+      expect(result.status).toBeGreaterThanOrEqual(500);
+      expect(JSON.stringify(result.body)).not.toContain('PRIVATE');
+    },
+  );
+
+  it('keeps commission totals exact and restricted to the current OST', async () => {
+    install();
+    const db = holder.db as FakeSupabase;
+    const saleId = '44444444-4444-4444-8444-444444444444';
+    db.rows('card_sales').push({
+      id: saleId,
+      sale_number: 'AF-SALE-261023-001',
+      seller_ost_id: OST_ID,
+      origin: 'normal',
+      status: 'active',
+    });
+    db.rows('commissions').push(
+      ...[OST_ID, OTHER_ID].map((id, i) => ({
+        id: `66666666-6666-4666-8666-66666666666${i}`,
+        sale_id: saleId,
+        beneficiary_ost_id: id,
+        amount: i ? '99999.99' : '0.10',
+        status: 'earned',
+        created_at: '2026-10-23T00:00:00Z',
+        settled_before_system: false,
+      })),
+    );
+    const result = await call('tok-ost', 'me/dashboard');
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      sales: { totalSales: 1, periodSales: 1 },
+      commissions: { earned: { count: 1, amount: '0.10' } },
+    });
+    expect(JSON.stringify(result.body)).not.toContain('99999.99');
+  });
+
+  it('starts independent dashboard reads together after account verification', async () => {
+    install();
+    const db = holder.db as FakeSupabase;
+    const from = db.from.bind(db);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'staff_role_assignments') {
+        const maybeSingle = query.maybeSingle.bind(query);
+        query.maybeSingle = () => {
+          started.add(table);
+          return gate.then(() => maybeSingle());
+        };
+      } else if (['card_sales', 'commissions'].includes(table)) {
+        const then = query.then.bind(query);
+        query.then = (fulfilled, rejected) => {
+          started.add(table);
+          return gate.then(() => then(fulfilled, rejected));
+        };
+      }
+      return query;
+    });
+    const pending = call('tok-ost', 'me/dashboard');
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(3), { timeout: 300 });
+    } finally {
+      release();
+      expect((await pending).status).toBe(200);
+      spy.mockRestore();
+    }
+  });
+
+  it.each(['staff_users', 'ost_members'])(
+    'does not load dashboard data for restricted %s',
+    async (table) => {
+      install();
+      const db = holder.db as FakeSupabase;
+      db.rows(table).find((row) => row.id === OST_ID)!.status = 'suspended';
+      const from = vi.spyOn(db, 'from');
+      expect((await call('tok-ost', 'me/dashboard')).status).toBe(403);
+      expect(from.mock.calls.map(([name]) => name)).not.toContain('commissions');
+      expect(from.mock.calls.map(([name]) => name)).not.toContain('card_sales');
+      from.mockRestore();
+    },
+  );
+
   it('shows staff-backed OST commissions but excludes pre-system settlement history', async () => {
     install();
     const db = holder.db as FakeSupabase;

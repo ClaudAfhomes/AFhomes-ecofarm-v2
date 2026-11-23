@@ -87,7 +87,7 @@ export function CustomerNotificationsPage() {
         <ul className={`${ui.surface} ${styles.rows}`} aria-label="Notifications">
           {notices.map((notice) => {
             const unread = !notice.readAt;
-            const tagId = `notice-${notice.id}-state`;
+            const unreadDescriptionId = `notice-${notice.id}-state`;
             return (
               <li
                 key={notice.id}
@@ -101,7 +101,7 @@ export function CustomerNotificationsPage() {
                     <button
                       type="button"
                       className={`${styles.rowButton} ${unread ? styles.rowButtonUnread : ''}`}
-                      aria-describedby={unread ? tagId : undefined}
+                      aria-describedby={unread ? unreadDescriptionId : undefined}
                       onClick={() => open(notice)}
                     >
                       {notice.title}
@@ -111,7 +111,7 @@ export function CustomerNotificationsPage() {
                     </time>
                   </div>
                   {unread ? (
-                    <span id={tagId} className={styles.unreadTag}>
+                    <span id={unreadDescriptionId} className={styles.unreadTag}>
                       Unread
                     </span>
                   ) : null}
