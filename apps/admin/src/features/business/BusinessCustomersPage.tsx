@@ -246,7 +246,7 @@ export function BusinessCustomersPage() {
         search={
           <SearchField
             label="Search customers"
-            placeholder="Name, email, customer or membership number"
+            placeholder="Name, email or number"
             value={search}
             onChange={setSearch}
           />

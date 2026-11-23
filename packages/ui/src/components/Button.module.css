@@ -126,8 +126,10 @@
   outline: 3px solid var(--color-state-focus);
   outline-offset: 3px;
 }
+/* Touch screens: every button reaches the 44px comfortable target. */
 @media (pointer: coarse) {
-  .sm {
-    min-height: var(--control-md);
+  .sm,
+  .md {
+    min-height: 2.75rem;
   }
 }

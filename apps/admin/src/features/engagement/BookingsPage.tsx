@@ -155,7 +155,7 @@ export function BookingsPage() {
         search={
           <SearchField
             label="Search"
-            placeholder="Member name, number or booking reference"
+            placeholder="Member or booking reference"
             value={search}
             onChange={setSearch}
             busy={query.isFetching && !query.isPending}
