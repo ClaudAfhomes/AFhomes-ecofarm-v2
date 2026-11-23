@@ -206,7 +206,6 @@ export function CustomerPointsPage() {
               {position.reversalDebt > 0 && (
                 <Row label="Held for a reversal" value={num(position.reversalDebt)} />
               )}
-              <Row label="Available to spend" value={num(position.spendable)} strong />
             </dl>
 
             {position.reversalDebt > 0 && (

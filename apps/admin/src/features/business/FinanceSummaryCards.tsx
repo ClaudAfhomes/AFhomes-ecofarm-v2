@@ -36,7 +36,7 @@ export function FinanceSummaryCards() {
       label: 'Verified this month',
       icon: 'wallet',
       value: formatMoney(s.verifiedTotal),
-      sub: `${formatCountOrDash(s.verifiedCount)} payments`,
+      sub: `${formatCountOrDash(s.verifiedCount)} ${s.verifiedCount === 1 ? 'payment' : 'payments'}`,
     },
     {
       label: 'Held for duplicate review',

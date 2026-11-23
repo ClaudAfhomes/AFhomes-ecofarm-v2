@@ -95,6 +95,13 @@ describe('Finance summary cards', () => {
     expect(screen.getByText('7 payments')).toBeTruthy();
   });
 
+  it('says "1 payment" in the singular', async () => {
+    summary = { ...summary, verifiedCount: 1 };
+    renderWithProviders(<FinanceSummaryCards />, { user: SUBMITTER });
+    expect(await screen.findByText('1 payment')).toBeTruthy();
+    expect(screen.queryByText('1 payments')).toBeNull();
+  });
+
   it('is hidden when the summary is forbidden', async () => {
     summaryStatus = 403;
     renderWithProviders(<FinanceSummaryCards />, { user: SUBMITTER });

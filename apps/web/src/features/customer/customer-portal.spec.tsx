@@ -657,7 +657,8 @@ describe('points position vs legacy summary', () => {
     expect(screen.getByText('Available points').nextElementSibling).toHaveTextContent('45,000');
     expect(screen.getByText('On your card').nextElementSibling).toHaveTextContent('60,000');
     expect(screen.getByText('Held for a reversal').nextElementSibling).toHaveTextContent('15,000');
-    expect(screen.getByText('Available to spend').nextElementSibling).toHaveTextContent('45,000');
+    // The spendable figure is shown once, in the hero, not repeated as a row.
+    expect(screen.queryByText('Available to spend')).toBeNull();
   });
 
   it('a member at their earning cap still sees a healthy spendable balance', async () => {
@@ -699,7 +700,7 @@ describe('points screen', () => {
     expect(await within(card).findByText('Available points')).toBeInTheDocument();
     // The three figures are labelled separately so none can be read as another.
     expect(within(card).getByText('On your card')).toBeInTheDocument();
-    expect(within(card).getByText('Available to spend')).toBeInTheDocument();
+    expect(within(card).queryByText('Available to spend')).toBeNull();
     // No reversal is outstanding, so no "held" measure is shown.
     expect(within(card).queryByText('Held for a reversal')).toBeNull();
     expect(within(card).getByText('Can still earn this year')).toBeInTheDocument();
