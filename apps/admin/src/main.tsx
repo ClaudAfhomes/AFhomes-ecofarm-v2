@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import App from './app/App';
+import { preloadAdminShell } from './app/preload-shell';
 import { loadFeatureFlags } from './lib/feature-flags';
 import { queryClient } from './lib/query';
 import { SessionProvider } from './lib/session';
@@ -20,6 +21,10 @@ if (!rootElement) {
 }
 
 // Module switches decide which routes and links exist, so they load first.
+// Protected entries need the shell; overlap its download without loading it on public entries.
+void preloadAdminShell(window.location.pathname).catch(() => {
+  // The routed import retains the normal error-boundary path if this speculative fetch fails.
+});
 void loadFeatureFlags().then(() =>
   createRoot(rootElement).render(
     <StrictMode>

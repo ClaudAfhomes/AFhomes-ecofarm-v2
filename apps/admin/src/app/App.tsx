@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy, Suspense } from 'react';
 const ModuleSettingsPage = lazy(() =>
   import('../features/afhomes/ModuleSettingsPage').then((m) => ({
     default: m.ModuleSettingsPage,
@@ -241,7 +241,7 @@ import { staffPortalPath } from '@afhomes/contracts';
 import { useSession } from '../lib/session';
 import type { ReactNode } from 'react';
 import { roleRoutes } from './role-routes';
-import { NotFound, ScrollToTop } from '@afhomes/ui';
+import { NotFound, PageSkeleton, ScrollToTop } from '@afhomes/ui';
 import {
   AdminForgotPasswordPage,
   StaffForgotPasswordPage,
@@ -253,7 +253,8 @@ import {
   AdminResetPasswordPage,
   StaffResetPasswordPage,
 } from '../features/auth/AdminResetPasswordPage';
-import { AdminLayout } from './AdminLayout';
+// Public login/recovery routes do not need the signed-in shell and alerts.
+const AdminLayout = lazy(() => import('./AdminLayout').then((m) => ({ default: m.AdminLayout })));
 import { ErrorBoundary } from './ErrorBoundary';
 import { RequireRole } from './RequireRole';
 import { isIstRole } from '@afhomes/contracts';
@@ -305,7 +306,13 @@ export default function App() {
             <Route path="/admin/reset-password" element={<AdminResetPasswordPage />} />
             <Route path="/staff/forgot-password" element={<StaffForgotPasswordPage />} />
             <Route path="/staff/reset-password" element={<StaffResetPasswordPage />} />
-            <Route element={<AdminLayout />}>
+            <Route
+              element={
+                <Suspense fallback={<PageSkeleton />}>
+                  <AdminLayout />
+                </Suspense>
+              }
+            >
               {/* GSD / Employee customer desk. Read-only, and gated on the same
           `operations.customer_lookup` view the nav uses, so hiding the link and
           refusing the URL cannot disagree. */}
