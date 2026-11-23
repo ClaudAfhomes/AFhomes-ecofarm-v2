@@ -3,7 +3,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
     },
     "dev": {
       "cache": false,
@@ -11,6 +18,42 @@
     },
     "lint": {},
     "typecheck": {},
+    "@afhomes/config#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "api#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "@afhomes/shared#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
+    "@afhomes/contracts#typecheck": {
+      "env": [
+        "VITE_API_BASE_URL",
+        "VITE_WEB_URL",
+        "VITE_ADMIN_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_PUBLISHABLE_KEY"
+      ]
+    },
     "test": {
       "dependsOn": ["^build"]
     }

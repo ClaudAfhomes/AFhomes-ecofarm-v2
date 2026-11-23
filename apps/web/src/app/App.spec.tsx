@@ -1,54 +1,46 @@
-import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import App from './App';
 import { renderWithProviders } from '../test/utils';
+import App from './App';
 
-describe('App routing', () => {
-  it.each([
-    ['/', /where big dreams meet property/i],
-    ['/about', /about ja&d/i],
-    ['/properties', /properties & listings/i],
-    ['/faqs', /frequently asked questions/i],
-    ['/contact', /talk with ja&d realty services/i],
-    ['/login', /welcome back/i],
-    ['/register', /join ja&d/i],
-  ])('renders the %s route', async (route, heading) => {
-    renderWithProviders(<App />, { route });
+beforeEach(() => {
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  window.scrollTo = vi.fn() as never;
+});
 
-    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
-  });
-
-  it('renders a property category page', async () => {
-    renderWithProviders(<App />, { route: '/properties/income-generating-properties' });
-
+describe('public site shell', () => {
+  it('serves the AFHomes public site at / without JAD branding', async () => {
+    renderWithProviders(<App />);
+    const main = await screen.findByRole('main', undefined, { timeout: 20000 });
     expect(
-      await screen.findByRole('heading', { name: 'Income Generating Properties' }),
+      within(main).getByText('Hospitality · Wellness · Dining · Nature — Laguna, Philippines'),
     ).toBeInTheDocument();
+    expect(document.title).not.toMatch(/JA&D|JAD Realty/i);
+    await vi.waitFor(() => expect(document.title).toContain('AFhomes'), { timeout: 20000 });
   });
 
-  it('renders a property detail page', async () => {
-    renderWithProviders(<App />, {
-      route: '/properties/tenanted-condo-resales/prisma-astra-1br',
-    });
+  it('keeps the customer portal mounted under /customer', async () => {
+    renderWithProviders(<App />, { route: '/customer/login' });
+    expect(await screen.findByLabelText(/Email/)).toBeInTheDocument();
+  });
 
+  it('renders the marketing 404 for unknown paths', async () => {
+    // The 404 page carries no <main> landmark by design.
+    renderWithProviders(<App />, { route: '/definitely-not-a-page' });
     expect(
-      await screen.findByRole('heading', { name: 'Prisma Residences - Astra Building Condo' }),
+      await screen.findByRole(
+        'heading',
+        { name: 'This page is taking a rest day.' },
+        { timeout: 20000 },
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText('₱5,300,000.00')).toBeInTheDocument();
-  });
-
-  it('renders the friendly 404 page for an unknown property route', async () => {
-    renderWithProviders(<App />, {
-      route: '/properties/tenanted-condo-resales/no-such-property',
-    });
-
-    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
-  });
-
-  it('renders the friendly 404 page for an unknown route', async () => {
-    renderWithProviders(<App />, { route: '/no-such-page' });
-
-    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
   });
 });

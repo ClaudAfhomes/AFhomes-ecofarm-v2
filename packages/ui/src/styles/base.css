@@ -1,8 +1,7 @@
 /*
- * Shared base + accessibility contract (@jad/ui/base.css).
- * Consumed by every JAD app before its own global styles: box-sizing, body
+ * Shared base + accessibility contract (@afhomes/ui/base.css).
+ * Consumed by every app before its own global styles: box-sizing, body
  * defaults, visible focus, screen-reader helpers, skip link, reduced motion.
- * (UI-UX §12, DESIGN-SYSTEM §7.)
  */
 
 *,
@@ -95,38 +94,124 @@ svg {
  * middle of the viewport. Every notification is a proper modal (backdrop +
  * no outside-click): the overlay below is intentionally visible and dark
  * enough to block the page while a notification is displayed. */
-.jad-swal-container {
+.afhomes-swal-container {
   align-items: center;
   justify-content: center;
 }
 
-.jad-swal-container.swal2-backdrop-show {
+.afhomes-swal-container.swal2-backdrop-show {
   background-color: rgba(20, 27, 34, 0.55);
 }
 
-.jad-swal-popup {
+.afhomes-swal-popup {
   margin: auto;
   font-family: var(--font-family-sans);
   border-radius: var(--radius-md);
 }
 
-.jad-swal-title {
+.afhomes-swal-title {
   color: var(--color-text-primary);
   font-size: var(--text-h3);
 }
 
-.jad-swal-text {
+.afhomes-swal-text {
   color: var(--color-text-secondary);
 }
 
-.jad-swal-confirm {
+.afhomes-swal-confirm {
   background-color: var(--color-brand-primary);
   border-radius: var(--radius-sm);
   font-weight: 600;
 }
 
-.jad-swal-confirm:focus {
+.afhomes-swal-confirm:focus {
   box-shadow: 0 0 0 3px var(--color-state-focus);
+}
+
+/* Motion system. Durations/easing come from tokens.css.
+ *
+ * Route enter: each layout puts `afh-route` on the element that holds the
+ * routed page; the page (its last child) fades up 4px when it mounts. Fill
+ * mode is `backwards`, never `both`: a transform left on after the animation
+ * would make the page a containing block for position:fixed descendants. */
+@keyframes afh-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes afh-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes afh-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes afh-dialog-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.afh-route > :last-child {
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
+}
+
+/* Links never wear the browser's underline. Zero specificity, so every
+   component class still decides its own look. Plain inline links (no class)
+   carry weight instead, so they stay distinguishable from body text. */
+:where(a) {
+  color: var(--color-brand-primary);
+  text-decoration: none;
+}
+:where(a:not([class])) {
+  font-weight: 600;
+}
+@media (hover: hover) {
+  :where(a:not([class]):hover) {
+    color: var(--color-brand-strong);
+  }
+}
+
+/* Disclosures that keep the native marker get a quieter, branded one and a
+   clear pointer; summaries with their own chevron (list-style: none) are
+   unaffected. Zero specificity, so component styles still win. */
+:where(summary) {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+:where(summary)::marker {
+  color: var(--color-brand-primary);
+  font-size: 0.8em;
+}
+
+/* Zero-specificity colour easing for raw controls; components keep theirs. */
+:where(a, button, input, select, textarea, summary) {
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* SweetAlert2: replace the library's overshoot "pop" with the calm dialog
+   rise used by every other dialog. Its icon draw-in stays (it carries the
+   outcome). */
+.afhomes-swal-popup.swal2-show {
+  animation: afh-dialog-in var(--motion-200) var(--ease-out);
+}
+.afhomes-swal-popup.swal2-hide {
+  animation: afh-dialog-out var(--motion-150) var(--ease-in) forwards;
+}
+.afhomes-swal-popup {
+  box-shadow: var(--shadow-lg);
 }
 
 /* Reduced motion (UI-UX §12.9, DESIGN-SYSTEM §7.8) */

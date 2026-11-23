@@ -1,5 +1,5 @@
 /**
- * Shared error envelope for api/ handlers. Matches the @jad/contracts
+ * Shared error envelope for api/ handlers. Matches the @afhomes/contracts
  * error envelope shape ({ error: { code, message, details?, requestId,
  * timestamp } }) plus the HTTP status, so handlers can destructure
  * `{ error, status }` uniformly.
@@ -9,7 +9,7 @@ export function toErrorEnvelope(code: string, message: string, status: number, d
     error: {
       code,
       message,
-      details,
+      ...(details === undefined ? {} : { details }),
       requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date().toISOString(),
     },

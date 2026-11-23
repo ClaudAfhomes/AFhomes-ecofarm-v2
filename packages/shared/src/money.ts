@@ -1,4 +1,4 @@
-import { EXACT_DECIMAL_STRING_RE } from '@jad/contracts';
+import { EXACT_DECIMAL_STRING_RE } from '@afhomes/contracts';
 
 /**
  * Money display helpers - DESIGN-SYSTEM.md §9.
@@ -8,7 +8,7 @@ import { EXACT_DECIMAL_STRING_RE } from '@jad/contracts';
  * string for display and never perform arithmetic. No float math anywhere.
  */
 
-/** Exact-decimal money regex lives in `@jad/contracts` (single source, API-SPEC §1.3). */
+/** Exact-decimal money regex lives in `@afhomes/contracts` (single source, API-SPEC §1.3). */
 
 /** Exact-decimal string → integer cents, using BigInt so values never lose precision. */
 function toCents(value: string): bigint {
@@ -59,6 +59,38 @@ export function formatMoney(value: string): string {
     throw new Error(`formatMoney: expected exact-decimal string, got "${value}"`);
   }
   return phpFormatter.format(Number(value));
+}
+
+/**
+ * Nullable display wrapper around {@link formatMoney} (single implementation).
+ * Nullish reads as an em-dash placeholder; any present value stays fail-loud,
+ * so a malformed figure is still a data bug, never a silently formatted one.
+ */
+export function formatMoneyOrDash(value: string | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return formatMoney(value);
+}
+
+/**
+ * Group the thousands of a company-stated money figure.
+ *
+ * Stated figures are verbatim text from the company sheet and may not be a
+ * canonical exact-decimal value (e.g. "190000", "190,000", "N/A"). Numeric
+ * text is grouped with thousands separators (decimals preserved as stated);
+ * anything else is returned verbatim, so a company claim is never silently
+ * reinterpreted as a verified amount and a malformed one cannot crash the page.
+ * This is the single implementation for stated-money display.
+ */
+export function formatStatedMoney(value: string | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  const trimmed = value.trim();
+  if (trimmed === '') return '—';
+  const stripped = trimmed.replace(/[,\s₱$]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(stripped)) return trimmed;
+  const [whole, frac] = stripped.split('.');
+  const w = whole ?? '';
+  const grouped = w.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac ? `${grouped}.${frac}` : grouped;
 }
 
 /**
@@ -115,4 +147,25 @@ export function multiplyMoney(amount: string, rate: string): string {
   const rateBp = BigInt(rWhole) * 10000n + BigInt((rFrac + '0000').slice(0, 4));
   const estCents = (cents * rateBp + 5000n) / 10000n;
   return fromCents(estCents);
+}
+
+/**
+ * Divide an exact-decimal money string into `divisor` equal parts, keeping
+ * two decimals. Throws (never floats, never rounds silently) when the amount
+ * does not split exactly - every approved VIP schedule divides exactly, so an
+ * inexact result is a data bug, not a display decision.
+ */
+export function divideMoneyExact(amount: string, divisor: number): string {
+  if (!isExactDecimal(amount)) {
+    throw new Error(`divideMoneyExact: expected exact-decimal amount, got "${amount}"`);
+  }
+  if (!Number.isInteger(divisor) || divisor <= 0) {
+    throw new Error(`divideMoneyExact: expected a positive integer divisor, got "${divisor}"`);
+  }
+  const cents = toCents(amount);
+  const by = BigInt(divisor);
+  if (cents % by !== 0n) {
+    throw new Error(`divideMoneyExact: ${amount} does not split into ${divisor} exact parts`);
+  }
+  return fromCents(cents / by);
 }

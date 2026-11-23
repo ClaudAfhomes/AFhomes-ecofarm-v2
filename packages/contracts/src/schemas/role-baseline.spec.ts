@@ -1,0 +1,176 @@
+/**
+ * Structural pins for the Phase 2 default role permission baseline.
+ *
+ * These guard the TABLE itself, not any database: every invariant here is a
+ * property the migration SQL must also hold, so a reviewer can see the intent
+ * without reading SQL.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { afHomesModuleKeySchema } from './afhomes.js';
+import {
+  BASELINE_EXCLUDED_MODULES,
+  BASELINE_ROLES,
+  BASELINE_ROW_COUNT,
+  DEFAULT_ROLE_BASELINE,
+  MIGRATION_SEEDED_GRANTS,
+} from './role-baseline.js';
+
+const ALL_KEYS = new Set(afHomesModuleKeySchema.options);
+
+describe('default role permission baseline', () => {
+  it('covers exactly the eight operational roles (never super_admin or customer)', () => {
+    expect([...BASELINE_ROLES].sort()).toEqual(
+      [
+        'admin',
+        'employee',
+        'finance',
+        'hr',
+        'ost',
+        'sales_manager',
+        'senior_sales_manager',
+        'vice_director',
+      ].sort(),
+    );
+    expect(Object.keys(DEFAULT_ROLE_BASELINE).sort()).toEqual([...BASELINE_ROLES].sort());
+  });
+
+  it('uses only existing module keys, with no duplicates per role', () => {
+    for (const [role, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+      const keys = grants.map((grant) => grant.moduleKey);
+      for (const key of keys) {
+        expect(ALL_KEYS.has(key), `${role}: unknown module ${key}`).toBe(true);
+      }
+      expect(new Set(keys).size, `${role}: duplicate module`).toBe(keys.length);
+      expect(keys.length, `${role}: zero modules`).toBeGreaterThan(0);
+    }
+  });
+
+  it('grants canDelete to nobody (no delete endpoint exists to authorize)', () => {
+    for (const [role, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+      for (const grant of grants) {
+        expect(grant.canDelete, `${role} ${grant.moduleKey}: canDelete`).toBe(false);
+      }
+    }
+  });
+
+  it('never grants create/update without view (the database CHECK requires it)', () => {
+    for (const [role, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+      for (const grant of grants) {
+        if (grant.canCreate || grant.canUpdate) {
+          expect(grant.canView, `${role} ${grant.moduleKey}: action without view`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('leaves the unresolved, payroll-authority and Phase 6 CMS modules ungranted to everyone', () => {
+    expect([...BASELINE_EXCLUDED_MODULES].sort()).toEqual(
+      [
+        'finance.final_qualification',
+        // Payroll approval, closing and policy: Super Admin only until delegated.
+        'finance.payroll_approval',
+        'finance.payroll_close',
+        'finance.payroll_policy',
+        'finance.payroll_policy_approval',
+        // Payment adjustment decisions: Super Admin only, plus Q13 pending.
+        'finance.payment_adjustment_decision',
+        'governance.config',
+        'network.withdrawals',
+        'cms.pages',
+        'cms.media',
+        'cms.settings',
+        'cms.history',
+      ].sort(),
+    );
+    const granted = new Set(
+      Object.values(DEFAULT_ROLE_BASELINE).flatMap((grants) => grants.map((g) => g.moduleKey)),
+    );
+    for (const key of BASELINE_EXCLUDED_MODULES) {
+      expect(granted.has(key), `${key} must stay ungranted`).toBe(false);
+    }
+    // And the union of granted + excluded + migration-seeded is the whole
+    // module vocabulary. Migration-seeded grants stay out of the matrix so
+    // the Phase-2-reviewed history is never rewritten.
+    expect(
+      new Set([
+        ...granted,
+        ...BASELINE_EXCLUDED_MODULES,
+        ...MIGRATION_SEEDED_GRANTS.map((g) => g.moduleKey),
+      ]),
+    ).toEqual(ALL_KEYS);
+  });
+
+  it('lets HR read roles via a migration-seeded grant, without any role authority', () => {
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({ moduleKey: 'organization.roles', roles: ['hr'] });
+    // The reviewed matrix keeps HR to staff/departments; it is not rewritten.
+    expect(DEFAULT_ROLE_BASELINE.hr.some((g) => g.moduleKey === 'organization.roles')).toBe(false);
+  });
+
+  it('reserves bulk customer import for admin via its migration-seeded grant', () => {
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({
+      moduleKey: 'governance.customer_import',
+      roles: ['admin'],
+    });
+    const granted = new Set(
+      Object.values(DEFAULT_ROLE_BASELINE).flatMap((grants) => grants.map((g) => g.moduleKey)),
+    );
+    expect(granted.has('governance.customer_import')).toBe(false);
+  });
+
+  it('classifies Customer Lookup as a migration-seeded grant for the GSD desk', () => {
+    // The screen is its own module rather than a reuse of the redemption till
+    // key: the desk keeps the till key and gains this one, and the reviewed
+    // Phase-2 matrix is not rewritten to carry it.
+    expect(MIGRATION_SEEDED_GRANTS).toContainEqual({
+      moduleKey: 'operations.customer_lookup',
+      roles: ['employee', 'admin'],
+    });
+    const granted = new Set(
+      Object.values(DEFAULT_ROLE_BASELINE).flatMap((grants) => grants.map((g) => g.moduleKey)),
+    );
+    expect(granted.has('operations.customer_lookup')).toBe(false);
+    // Sellers and finance never had the lookup and must not gain it by drift.
+    for (const role of ['finance', 'hr', 'vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const)
+      expect(DEFAULT_ROLE_BASELINE[role].map((grant) => grant.moduleKey)).not.toContain(
+        'operations.customer_lookup',
+      );
+  });
+
+  it('gives sellers no sales.uplines row (they must never assign an upline)', () => {
+    for (const role of ['vice_director', 'senior_sales_manager', 'sales_manager', 'ost'] as const) {
+      const keys = DEFAULT_ROLE_BASELINE[role].map((grant) => grant.moduleKey);
+      expect(keys, `${role} must not hold sales.uplines`).not.toContain('sales.uplines');
+    }
+    expect(DEFAULT_ROLE_BASELINE.admin.map((grant) => grant.moduleKey)).toContain('sales.uplines');
+  });
+
+  it('reserves the commission qualification decision (update) for admin alone', () => {
+    for (const [role, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+      const commissions = grants.find((grant) => grant.moduleKey === 'network.commissions');
+      if (!commissions) continue;
+      expect(commissions.canUpdate, `${role} network.commissions update`).toBe(role === 'admin');
+    }
+  });
+
+  it('keeps finance.points read-only everywhere (no adjustment endpoint exists)', () => {
+    for (const [role, grants] of Object.entries(DEFAULT_ROLE_BASELINE)) {
+      const points = grants.find((grant) => grant.moduleKey === 'finance.points');
+      if (!points) continue;
+      expect(points.canCreate, `${role} finance.points`).toBe(false);
+      expect(points.canUpdate, `${role} finance.points`).toBe(false);
+    }
+  });
+
+  it('reports the flat row count the migration must install (70)', () => {
+    expect(BASELINE_ROW_COUNT).toBe(70);
+    expect(DEFAULT_ROLE_BASELINE.admin.length).toBe(20);
+    expect(DEFAULT_ROLE_BASELINE.finance.length).toBe(8);
+    expect(DEFAULT_ROLE_BASELINE.hr.length).toBe(3);
+    expect(DEFAULT_ROLE_BASELINE.vice_director.length).toBe(10);
+    expect(DEFAULT_ROLE_BASELINE.senior_sales_manager.length).toBe(8);
+    expect(DEFAULT_ROLE_BASELINE.sales_manager.length).toBe(10);
+    expect(DEFAULT_ROLE_BASELINE.ost.length).toBe(8);
+    expect(DEFAULT_ROLE_BASELINE.employee.length).toBe(3);
+  });
+});

@@ -1,0 +1,1200 @@
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithProviders } from '../../test/utils';
+import type { SessionUser } from '../../lib/session';
+import { ApiError, ApiNetworkError, ApiParseError } from '../../lib/api/errors';
+import {
+  customerSchema,
+  identityDocumentSchema,
+  purchaseTermsProposalSchema,
+  reservationAgreementListItemSchema,
+} from '@afhomes/contracts';
+import {
+  CustomerApplicationEditorPage,
+  CustomerApplicationsPage,
+  ReservationAgreementsPage,
+  ReservationAgreementEditorPage,
+} from './OfficialFormsPages';
+import { getGenealogy } from '../genealogy/services';
+import {
+  createCustomerApplication,
+  getCardProducts,
+  getCustomerApplication,
+  getCustomerById,
+  getCustomerApplicationsPage,
+  getCustomersPage,
+  getPurchaseTermsProposal,
+  getReservationAgreementsPage,
+  registerCustomerApplication,
+  submitCustomerApplication,
+  getReservationAgreement,
+  getSales,
+  getCustomerApplications,
+  submitReservationAgreement,
+} from './services';
+import { reservationPdf } from './reservation-print';
+import { downloadFile } from '../../lib/download';
+vi.mock('./reservation-print', async (original) => ({
+  ...(await original<typeof import('./reservation-print')>()),
+  reservationPdf: vi.fn(),
+}));
+vi.mock('../../lib/download', () => ({ downloadFile: vi.fn() }));
+import {
+  getCurrentDocument,
+  getDocumentAccessUrl,
+  confirmDocument,
+  completeDocumentUpload,
+  putUploadBytes,
+  requestUploadGrant,
+} from '../documents/services';
+import { getImportContinuations, getImportRowIntake } from './import-workflow-services';
+vi.mock('@afhomes/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@afhomes/ui')>()),
+  notifyWarning: vi.fn(),
+  notifySuccess: vi.fn(),
+}));
+vi.mock('./import-workflow-services', () => ({
+  getImportRowIntake: vi.fn(),
+  getImportContinuations: vi.fn(async () => []),
+}));
+
+vi.mock('./services', () => ({
+  createCustomerApplication: vi.fn(),
+  createReservationAgreement: vi.fn(),
+  decideCustomerApplication: vi.fn(),
+  decideReservationAgreement: vi.fn(),
+  exportCustomerApplication: vi.fn(),
+  exportReservationAgreement: vi.fn(),
+  getCardProducts: vi.fn(),
+  getCustomerApplication: vi.fn(),
+  getCustomerApplications: vi.fn(),
+  getCustomerApplicationsPage: vi.fn(),
+  getCustomersPage: vi.fn(),
+  getCustomerById: vi.fn(),
+  getOfficialFormTemplate: vi.fn(),
+  getReservationAgreement: vi.fn(),
+  getReservationAgreements: vi.fn(),
+  getReservationAgreementsPage: vi.fn(),
+  getSaleSummary: vi.fn(),
+  getSales: vi.fn(),
+  previewOfficialFormImport: vi.fn(),
+  registerCustomerApplication: vi.fn(),
+  reopenCustomerApplication: vi.fn(),
+  reopenReservationAgreement: vi.fn(),
+  getPurchaseTermsProposal: vi.fn(),
+  submitCustomerApplication: vi.fn(),
+  submitReservationAgreement: vi.fn(),
+  updateCustomerApplication: vi.fn(),
+  updateReservationAgreement: vi.fn(),
+}));
+
+vi.mock('../documents/services', async (original) => ({
+  ...(await original()),
+  getCurrentDocument: vi.fn(),
+  completeDocumentUpload: vi.fn(),
+  confirmDocument: vi.fn(),
+  getDocumentAccessUrl: vi.fn(),
+  putUploadBytes: vi.fn(),
+  requestUploadGrant: vi.fn(),
+  runDocumentOcr: vi.fn(),
+}));
+
+// The referral chain reads the Organization live. Tests pin the cascade with
+// their own nodes where needed; by default the list is empty so the four
+// dropdowns render with `Not specified` only and no request ever leaves.
+const SELLER_SM_ID = '00000000-0000-4000-8000-0000000000c1';
+vi.mock('../genealogy/services', () => ({
+  getGenealogy: vi.fn(async () => []),
+  getGenealogyNode: vi.fn(),
+  getGenealogyUpline: vi.fn(async () => []),
+  getGenealogyDownline: vi.fn(async () => []),
+  getGenealogySummary: vi.fn(),
+  resolveAaNumber: vi.fn(async () => ({ member: null })),
+  getAccreditationNumbers: vi.fn(async () => ({})),
+}));
+
+// Geographic reference data comes from the server-held provider. ONE small
+// synthetic hierarchy proves the holder cascade end to end without the
+// network; nothing here is real PSGC data. Fixtures are inline because
+// `vi.mock` factories are hoisted above any module-scope constant.
+vi.mock('../address/services', () => ({
+  getAddressProvinces: vi.fn(async () => [{ code: '0403400000', name: 'Laguna' }]),
+  getAddressLocalities: vi.fn(async () => [
+    {
+      code: '0403406000',
+      name: 'Calauan',
+      type: 'municipality' as const,
+      provinceCode: '0403400000',
+      postalCode: '4004',
+    },
+  ]),
+  getAddressBarangays: vi.fn(async () => [
+    { code: '0403406003', name: 'Dayap', localityCode: '0403406000' },
+  ]),
+}));
+
+beforeEach(() => {
+  sessionStorage.clear();
+  // Default: no current identity document. Tests that need one set it through
+  // their own setup so the value is in place before the query first runs.
+  vi.mocked(getCurrentDocument).mockResolvedValue(null);
+});
+afterEach(() => vi.clearAllMocks());
+
+it('reopens the canonical imported application after a reload instead of creating another', async () => {
+  vi.mocked(getCardProducts).mockResolvedValue([]);
+  vi.mocked(getCustomersPage).mockResolvedValue({ data: [], total: 0 });
+  vi.mocked(getImportRowIntake).mockResolvedValue({
+    continuation: {
+      rowId: 'row',
+      sourceId: 'source',
+      customerId: 'customer',
+      applicationId: 'existing-imported-app',
+      reservationId: null,
+      saleId: null,
+      stage: 'application',
+      missingRequirements: [],
+      conflicts: [],
+      proposedFields: [],
+      claimCount: 1,
+      expectedSourceHash: 'a'.repeat(64),
+      expectedTargetVersion: 'b'.repeat(64),
+      expectedTeamVersion: 'c'.repeat(64),
+      nextAction: null,
+    },
+    prefill: {
+      primary: {},
+      secondary: null,
+      recommenderName: '',
+      recommenderContact: '',
+      recommenderEmail: '',
+      salesManagerName: '',
+      referrerName: '',
+      missingFields: [],
+    },
+    claims: [],
+    purchaseReference: 'REVIEWED PURCHASE',
+    team: {},
+  });
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/customers/applications/new" element={<CustomerApplicationEditorPage />} />
+      <Route
+        path="/admin/customers/applications/existing-imported-app"
+        element={<h1>Existing imported application</h1>}
+      />
+    </Routes>,
+    {
+      route: '/admin/customers/applications/new?importRowId=row',
+      user: {
+        id: 'user',
+        name: 'Admin',
+        email: 'admin@example.invalid',
+        roleId: 'role',
+        roleSlug: 'super_admin',
+        roleName: 'Admin',
+        status: 'active',
+        afHomesPermissions: [],
+      },
+    },
+  );
+  expect(
+    await screen.findByRole('heading', { name: 'Existing imported application' }),
+  ).toBeInTheDocument();
+  expect(createCustomerApplication).not.toHaveBeenCalled();
+  expect(registerCustomerApplication).not.toHaveBeenCalled();
+});
+
+const application = {
+  id: 'app-1',
+  applicationNumber: 'APP-000001',
+  applicantName: 'MARIA SANTOS',
+  tier: 'GOLD',
+  createdBy: '11111111-1111-4111-8111-111111111111',
+  sellerName: 'Sam Seller',
+  status: 'submitted',
+  submittedAt: '2026-09-28T00:00:00.000Z',
+  createdAt: '2026-09-28T00:00:00.000Z',
+};
+
+const agreement = {
+  id: 'res-1',
+  reservationNumber: 'RES-000001',
+  tier: 'SILVER',
+  saleId: 'sale-1',
+  applicantName: 'QA IST Applicant',
+  paymentScheme: 'spot_cash',
+  totalPrice: '312000.00',
+  hasSecondaryHolder: false,
+  status: 'submitted',
+  submittedAt: '2026-09-28T00:00:00.000Z',
+  createdAt: '2026-09-28T00:00:00.000Z',
+};
+
+it('downloads a freshly authorized saved RA without submitting or changing the reservation', async () => {
+  const record = {
+    ...agreement,
+    origin: 'sale',
+    saleId: undefined,
+    planId: '00000000-0000-4000-8000-000000000010',
+    reservationDate: '2026-11-07',
+    agreementDate: '2026-11-07',
+    status: 'draft',
+    reservationFee: '10000.00',
+    downPayment: '20000.00',
+    totalPaymentReceived: '5000.00',
+    balance: '307000.00',
+    monthlyAmortization: null,
+    installmentMonths: null,
+    discountPercent: 20,
+    validityYears: 12,
+    yearlyPoints: 20000,
+    annualPointsTranches: 10,
+    holderLimit: 1,
+    inclusions: {},
+    schedule: [],
+    primary: {
+      holderType: 'PRIMARY',
+      name: 'ANA SANTOS',
+      address: '1 MAIN STREET',
+      contactNumber: '+639171234567',
+      email: 'ana@example.test',
+    },
+    updatedAt: '2026-11-07T00:00:00Z',
+    submittedAt: null,
+    executedAt: null,
+  };
+  vi.mocked(getReservationAgreement).mockResolvedValue(record as never);
+  vi.mocked(getCardProducts).mockResolvedValue([]);
+  vi.mocked(getSales).mockResolvedValue([]);
+  vi.mocked(getCustomerApplications).mockResolvedValue([]);
+  const envelope = { filename: 'RES-000001.pdf', mime: 'application/pdf', content: 'JVBERi0=' };
+  vi.mocked(reservationPdf).mockResolvedValue(envelope);
+  renderWithProviders(
+    <Routes>
+      <Route path="/admin/sales/reservations/:id" element={<ReservationAgreementEditorPage />} />
+    </Routes>,
+    { route: '/admin/sales/reservations/00000000-0000-4000-8000-000000000003' },
+  );
+  const button = await screen.findByRole('button', { name: 'Download RA PDF' });
+  expect(getReservationAgreement).toHaveBeenCalledTimes(1);
+  fireEvent.click(button);
+  await waitFor(() => expect(downloadFile).toHaveBeenCalledWith(envelope));
+  expect(getReservationAgreement).toHaveBeenCalledTimes(2);
+  expect(reservationPdf).toHaveBeenCalledWith(expect.objectContaining({ agreement: record }));
+  expect(submitReservationAgreement).not.toHaveBeenCalled();
+});
+
+describe('CustomerApplicationsPage list states', () => {
+  const pageOf = (rows: unknown[], total: number) => ({ data: rows, total }) as never;
+  const superAdmin: SessionUser = {
+    id: 'u-imports',
+    name: 'Import Admin',
+    email: 'imports@example.test',
+    roleId: 'r-imports',
+    roleSlug: 'super_admin',
+    roleName: 'Super Admin',
+    status: 'active',
+    afHomesPermissions: [],
+  };
+
+  it('shows loading - never a phantom empty state - on first load', () => {
+    vi.mocked(getCustomerApplicationsPage).mockReturnValue(new Promise(() => {}));
+    renderWithProviders(<CustomerApplicationsPage />);
+    expect(screen.getByRole('status', { name: 'Loading applications' })).toBeInTheDocument();
+    expect(screen.queryByText('No customer applications')).not.toBeInTheDocument();
+  });
+
+  it('shows the real empty state only after an empty response', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    renderWithProviders(<CustomerApplicationsPage />);
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+  });
+
+  it('renders rows in the shared filter toolbar with a clearable search', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([application], 1));
+    renderWithProviders(<CustomerApplicationsPage />);
+    expect(await screen.findByText('APP-000001')).toBeInTheDocument();
+    expect(screen.getByText('Sam Seller')).toBeInTheDocument();
+    expect(screen.queryByText(application.createdBy)).not.toBeInTheDocument();
+    // Shared FilterBar grammar: landmark search + clearable field.
+    expect(screen.getByRole('search')).toBeInTheDocument();
+    const search = screen.getByRole('searchbox', { name: 'Search applications' });
+    fireEvent.change(search, { target: { value: 'APP-000001' } });
+    expect(screen.getByRole('button', { name: 'Clear search applications' })).toBeInTheDocument();
+  });
+
+  /**
+   * The default table is APPLICATION WORK. Progressed applications are owned by
+   * the reservation and Finance queues, but stay one filter away - never
+   * deleted, never archived.
+   */
+  it('asks the server for application work by default', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([application], 1));
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    expect(getCustomerApplicationsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ queue: 'application_work', limit: 10, offset: 0 }),
+    );
+  });
+
+  it('drops the queue filter when Include progressed is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([application], 1));
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    vi.mocked(getCustomerApplicationsPage).mockClear();
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Queue' })).getByRole('radio', {
+        name: 'Include progressed',
+      }),
+    );
+    await waitFor(() =>
+      expect(getCustomerApplicationsPage).toHaveBeenCalledWith(
+        expect.not.objectContaining({ queue: expect.anything() }),
+      ),
+    );
+  });
+
+  it('fetches 10-row pages and walks them with the shared pagination', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([application], 25));
+    renderWithProviders(<CustomerApplicationsPage />);
+    await screen.findByText('APP-000001');
+    expect(vi.mocked(getCustomerApplicationsPage).mock.calls[0]![0]).toMatchObject({
+      limit: 10,
+      offset: 0,
+    });
+    expect(
+      screen.getByRole('navigation', { name: 'Customer applications pagination' }),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() =>
+      expect(vi.mocked(getCustomerApplicationsPage).mock.calls[1]![0]).toMatchObject({
+        limit: 10,
+        offset: 10,
+      }),
+    );
+  });
+
+  it('switches to imported purchases without reloading the applications queue', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    vi.mocked(getImportContinuations).mockResolvedValue([]);
+    renderWithProviders(<CustomerApplicationsPage />, {
+      user: superAdmin,
+      route: '/admin/customers/applications',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Applications' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    const importsTab = screen.getByRole('link', { name: 'Imported purchases' });
+    expect(importsTab).toHaveAttribute('href', '/admin/customers/applications?tab=imports');
+    vi.mocked(getCustomerApplicationsPage).mockClear();
+    await user.click(importsTab);
+    expect(await screen.findByRole('heading', { name: 'Imported purchases' })).toBeInTheDocument();
+    expect(await screen.findByText('No imported purchases')).toBeInTheDocument();
+    expect(getImportContinuations).toHaveBeenCalledWith(undefined, 0);
+    expect(getCustomerApplicationsPage).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Imported purchases' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('falls back to applications when imports are not authorized', async () => {
+    vi.mocked(getCustomerApplicationsPage).mockResolvedValue(pageOf([], 0));
+    renderWithProviders(<CustomerApplicationsPage />, {
+      route: '/admin/customers/applications?tab=imports',
+    });
+    expect(await screen.findByText('No customer applications')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Imported purchases' })).not.toBeInTheDocument();
+    expect(getImportContinuations).not.toHaveBeenCalled();
+  });
+});
+
+describe('CustomerApplicationEditorPage load errors', () => {
+  const EDITOR_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const showEditorWithError = (error: unknown) => {
+    vi.mocked(getCustomerApplication).mockRejectedValue(error);
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/admin/customers/applications/:id"
+          element={<CustomerApplicationEditorPage />}
+        />
+      </Routes>,
+      { route: `/admin/customers/applications/${EDITOR_ID}` },
+    );
+  };
+
+  it('tells a missing record apart from a broken one', async () => {
+    showEditorWithError(new ApiError({ code: 'NOT_FOUND', message: 'Not here', status: 404 }));
+    expect(await screen.findByText('Application could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText(/No application exists at this link/)).toBeInTheDocument();
+  });
+
+  it('names record review as the next step when the payload fails the contract', async () => {
+    showEditorWithError(new ApiParseError('/official-forms/customer-applications/x', 'bad'));
+    expect(await screen.findByText('Application could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText(/values this form cannot display/)).toBeInTheDocument();
+  });
+
+  it('names the connection when the API is unreachable', async () => {
+    showEditorWithError(new ApiNetworkError(new Error('refused')));
+    expect(await screen.findByText('Application could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText(/Check your connection/)).toBeInTheDocument();
+  });
+
+  it('falls back to the generic message for unknown failures', async () => {
+    showEditorWithError(new Error('Something odd'));
+    expect(await screen.findByText('Application could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText(/Please try again/)).toBeInTheDocument();
+  });
+});
+
+describe('ReservationAgreementsPage list states', () => {
+  /**
+   * Auto-approved reservations are executed (handed to Finance) but must still
+   * appear in this list by default, so the default queue includes progressed
+   * agreements. The executed agreement stays reachable and is never deleted,
+   * only handed over.
+   */
+  it('includes progressed agreements by default', async () => {
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    expect(getReservationAgreementsPage).toHaveBeenCalledWith(
+      expect.not.objectContaining({ queue: expect.anything() }),
+    );
+    expect(getReservationAgreementsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 10, offset: 0 }),
+    );
+  });
+
+  it('adds the queue filter when reservation work is selected', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    vi.mocked(getReservationAgreementsPage).mockClear();
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Queue' })).getByRole('radio', {
+        name: 'Needs reservation work',
+      }),
+    );
+    await waitFor(() =>
+      expect(getReservationAgreementsPage).toHaveBeenCalledWith(
+        expect.objectContaining({ queue: 'reservation_work' }),
+      ),
+    );
+  });
+
+  it('shows loading - never a phantom empty state - on first load', () => {
+    vi.mocked(getReservationAgreementsPage).mockReturnValue(new Promise(() => {}));
+    renderWithProviders(<ReservationAgreementsPage />);
+    expect(screen.getByRole('status', { name: 'Loading reservations' })).toBeInTheDocument();
+    expect(screen.queryByText('No reservation agreements')).not.toBeInTheDocument();
+  });
+
+  it('renders rows with a clearable search after load', async () => {
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    expect(await screen.findByText('RES-000001')).toBeInTheDocument();
+    expect(screen.getByRole('search')).toBeInTheDocument();
+    expect(
+      screen.getByRole('searchbox', { name: 'Search reservation agreements' }),
+    ).toBeInTheDocument();
+  });
+
+  it('navigates to the detail view when a row is activated', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 1,
+    } as never);
+    renderWithProviders(
+      <Routes>
+        <Route path="/admin/sales/reservations" element={<ReservationAgreementsPage />} />
+        <Route path="/admin/sales/reservations/:id" element={<p>reservation detail view</p>} />
+      </Routes>,
+      { route: '/admin/sales/reservations' },
+    );
+    await screen.findByText('RES-000001');
+    await user.click(screen.getByRole('link', { name: 'Review reservation RES-000001' }));
+    expect(await screen.findByText('reservation detail view')).toBeInTheDocument();
+  });
+
+  it('fetches 10-row pages and walks them with the shared pagination', async () => {
+    vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+      data: [agreement],
+      total: 25,
+    } as never);
+    renderWithProviders(<ReservationAgreementsPage />);
+    await screen.findByText('RES-000001');
+    expect(vi.mocked(getReservationAgreementsPage).mock.calls[0]![0]).toMatchObject({
+      limit: 10,
+      offset: 0,
+    });
+    expect(
+      screen.getByRole('navigation', { name: 'Reservation agreements pagination' }),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await waitFor(() =>
+      expect(vi.mocked(getReservationAgreementsPage).mock.calls[1]![0]).toMatchObject({
+        limit: 10,
+        offset: 10,
+      }),
+    );
+  });
+});
+
+describe('application private ID intake', () => {
+  const customerId = '00000000-0000-4000-8000-000000000001';
+  const documentId = '00000000-0000-4000-8000-000000000002';
+  const document = (status: 'completed' | 'failed') =>
+    identityDocumentSchema.parse({
+      id: documentId,
+      subjectType: 'customer',
+      subjectId: customerId,
+      originalFilename: 'qa.png',
+      mime: 'image/png',
+      sizeBytes: 9,
+      hasFile: true,
+      ocrStatus: status,
+      ocrProvider: 'qa',
+      verificationStatus: 'pending_review',
+      isCurrent: true,
+      extractedFields: {},
+      warnings: [],
+      reviewedFields: { idType: 'passport' },
+      possibleDuplicate: null,
+      uploadedAt: '2026-10-01',
+      reviewedAt: null,
+    });
+  const PLAN_ID = '00000000-0000-4000-8000-000000000010';
+  const QA_PLAN = {
+    cashPrice: '100000.00', installmentPrice: '130000.00', reservationFee: '10000.00', standardInstallmentMonths: 4,
+    id: PLAN_ID,
+    code: 'GOLD',
+    name: 'Gold',
+    discountPercent: 25,
+    cardholderLimit: 2,
+    yearlyPoints: 25000,
+    annualPointsTranches: 20,
+    baseValidityYears: 20,
+    validityExtensionYears: 2,
+    totalLoyaltyValue: '500000.00',
+  };
+  const setup = async (
+    current: ReturnType<typeof document> | null = null,
+    { pickCustomer = true }: { pickCustomer?: boolean } = {},
+  ) => {
+    const qaCustomer = customerSchema.parse({
+      id: customerId,
+      customerNumber: 'CUS-QA-1',
+      fullName: 'QA Customer',
+      email: 'qa@example.com',
+      phone: '+639171234567',
+      dateOfBirth: '1990-01-01',
+      gender: null,
+      address: null,
+      governmentIdType: null,
+      governmentIdMasked: null,
+      status: 'prospect',
+      createdBy: null,
+      createdAt: '2026-10-01',
+      updatedAt: '2026-10-01',
+    });
+    vi.mocked(getCustomersPage).mockResolvedValue({ data: [qaCustomer], total: 1 });
+    vi.mocked(getCustomerById).mockResolvedValue(qaCustomer);
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    vi.mocked(getCurrentDocument).mockResolvedValue(current as never);
+    vi.mocked(requestUploadGrant).mockResolvedValue({
+      documentId,
+      bucket: 'afhomes-customer-ids',
+      uploadUrl: 'https://safe-test.example/signed-upload',
+      expiresAt: '2026-10-03T12:00:00Z',
+    });
+    vi.mocked(putUploadBytes).mockResolvedValue(undefined);
+    vi.mocked(completeDocumentUpload).mockResolvedValue({
+      ...document('completed'),
+      originalFilename: 'qa.png',
+    } as never);
+    if (pickCustomer)
+      vi.mocked(getImportRowIntake).mockResolvedValue({
+        continuation: {
+          rowId: 'row',
+          sourceId: 'source',
+          customerId,
+          applicationId: null,
+          reservationId: null,
+          saleId: null,
+          stage: 'application',
+          missingRequirements: [],
+          conflicts: [],
+          proposedFields: [],
+          claimCount: 1,
+          expectedSourceHash: 'a'.repeat(64),
+          expectedTargetVersion: 'b'.repeat(64),
+          expectedTeamVersion: 'c'.repeat(64),
+          nextAction: null,
+        },
+        prefill: {
+          primary: {},
+          secondary: null,
+          recommenderName: '',
+          recommenderContact: '',
+          recommenderEmail: '',
+          salesManagerName: '',
+          referrerName: '',
+          missingFields: [],
+        },
+        purchaseReference: 'REVIEWED PURCHASE',
+        team: {},
+      } as never);
+    renderWithProviders(<CustomerApplicationEditorPage />, {
+      route: pickCustomer
+        ? '/admin/customers/applications/new?importRowId=row'
+        : '/admin/customers/applications/new',
+      user: {
+        id: customerId,
+        name: 'Operator',
+        email: 'operator@example.invalid',
+        roleId: customerId,
+        roleSlug: 'super_admin',
+        roleName: 'Super Admin',
+        status: 'active',
+        afHomesPermissions: [],
+      },
+    });
+    await screen.findByRole('radio', { name: 'Gold' });
+    if (pickCustomer)
+      await waitFor(() => expect(screen.getByLabelText('Customer')).toHaveValue(customerId));
+    // New Register is the untouched default; only tests that need an existing
+    // customer run the picker.
+
+    // The editor is a wizard: pick a plan on step 1 so Next reaches Identity.
+    fireEvent.click(screen.getByRole('radio', { name: 'Gold' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('group', { name: 'ID Type *' });
+  };
+  const chooseIdTypeAndFile = (name = 'qa.png', type = 'image/png') => {
+    fireEvent.click(screen.getByRole('radio', { name: 'Passport' }));
+    fireEvent.change(screen.getByLabelText('Upload ID'), {
+      target: { files: [new File(['synthetic'], name, { type })] },
+    });
+  };
+
+  it('advances completed Personal information to Address without requiring hidden sections', async () => {
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    const prefix = await screen.findByRole('group', { name: 'Prefix' });
+    fireEvent.click(within(prefix).getByRole('radio', { name: 'Dr.' }));
+    fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Mara' } });
+    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+    fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+    expect(
+      prefix.compareDocumentPosition(screen.getByLabelText('First name')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('tab', { name: 'Address' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Permanent address line 1')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(
+      within(screen.getByRole('group', { name: 'Prefix' })).getByRole('radio', { name: 'Dr.' }),
+    ).toBeChecked();
+    expect(screen.getByLabelText('First name')).toHaveValue('Mara');
+    expect(registerCustomerApplication).not.toHaveBeenCalled();
+  });
+
+  it('shows an optional Gold secondary holder below the primary without hiding either record', async () => {
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'Mara' } });
+    fireEvent.click(screen.getByLabelText('Add optional Gold secondary cardholder'));
+    const primary = screen.getByRole('group', { name: 'Primary holder' });
+    const secondary = screen.getByRole('group', { name: 'Secondary holder (gold optional)' });
+    expect(primary).toBeVisible();
+    expect(secondary).toBeVisible();
+    expect(
+      primary.compareDocumentPosition(secondary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(primary).getByLabelText('First name')).toHaveValue('Mara');
+    expect(
+      within(within(secondary).getByRole('group', { name: 'Prefix' })).getByRole('radio', {
+        name: 'None',
+      }),
+    ).toBeChecked();
+    expect(screen.getAllByLabelText('First name')).toHaveLength(2);
+    fireEvent.click(within(secondary).getByRole('tab', { name: 'Contact' }));
+    expect(within(primary).getByRole('tab', { name: 'Contact' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(within(secondary).getByRole('tab', { name: 'Contact' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(registerCustomerApplication).not.toHaveBeenCalled();
+  });
+
+  it('keeps the plan choice and its persistent preview together on the left, separate from the controls', async () => {
+    vi.mocked(getCardProducts).mockResolvedValueOnce([
+      QA_PLAN,
+      { ...QA_PLAN, id: '00000000-0000-4000-8000-000000000011', code: 'SILVER', name: 'Silver' },
+    ] as never);
+    await setup(null, { pickCustomer: false });
+    const preview = screen.getByRole('complementary', { name: 'Selected VIP card' });
+    const controls = screen.getByRole('region', { name: 'Application form' });
+    // Both the choice (tile) and its live preview (card heading) live in the
+    // left pane; the right pane never repeats the VIP plan choice.
+    expect(within(preview).getByRole('radio', { name: 'Gold' })).toBeChecked();
+    expect(within(preview).getByText('Gold VIP', { selector: 'div > strong' })).toBeVisible();
+    expect(within(controls).queryByRole('radio', { name: 'Gold' })).not.toBeInTheDocument();
+    expect(within(controls).queryByRole('radio', { name: 'Silver' })).not.toBeInTheDocument();
+    expect(within(preview).queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    expect(within(controls).getByRole('group', { name: 'ID Type *' })).toBeVisible();
+    expect(within(controls).getByRole('button', { name: 'Continue' })).toBeVisible();
+    const stepFrame = within(controls).getByRole('group', { name: 'Current application step' });
+    expect(within(stepFrame).getByRole('button', { name: 'Continue' })).toBeVisible();
+    expect(within(stepFrame).getByRole('group', { name: 'ID Type *' })).toBeVisible();
+    expect(screen.queryByText('Cannot save and submit yet:')).not.toBeInTheDocument();
+    expect(controls).toHaveAttribute('tabindex', '0');
+    // Navigating controls back to the Application step never touches or
+    // duplicates the persistent left-pane preview.
+    fireEvent.click(within(controls).getByRole('button', { name: /All steps/ }));
+    fireEvent.click(within(controls).getByRole('button', { name: 'Application' }));
+    expect(within(preview).getByText('Gold VIP', { selector: 'div > strong' })).toBeVisible();
+    fireEvent.click(within(preview).getByRole('radio', { name: 'Silver' }));
+    expect(within(preview).getByText('Silver VIP', { selector: 'div > strong' })).toBeVisible();
+    expect(
+      within(preview).queryByText('Gold VIP', { selector: 'div > strong' }),
+    ).not.toBeInTheDocument();
+    const benefits = within(preview).getByText('View plan details').closest('details')!;
+    expect(benefits).not.toHaveAttribute('open');
+    fireEvent.click(within(preview).getByText('View plan details'));
+    expect(benefits).toHaveAttribute('open');
+    expect(within(preview).getByText('Discount')).toBeVisible();
+  });
+
+  it('resets page scrolling when advancing without scrolling the sticky VIP pane', async () => {
+    await setup(null, { pickCustomer: false });
+    const controls = screen.getByRole('region', { name: 'Application form' });
+    const paneScroll = vi.fn();
+    controls.scrollTo = paneScroll;
+    const windowScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    try {
+      chooseIdTypeAndFile();
+      fireEvent.click(within(controls).getByRole('button', { name: 'Continue' }));
+      await screen.findByLabelText('First name');
+      await waitFor(() => expect(windowScroll).toHaveBeenCalledWith({ top: 0, left: 0 }));
+      expect(paneScroll).not.toHaveBeenCalled();
+    } finally {
+      windowScroll.mockRestore();
+    }
+  });
+
+  it('offers capture + type only, no separate upload button', async () => {
+    await setup(document('completed'));
+    expect(screen.queryByRole('button', { name: 'Detect fields' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload selected ID' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Selected ID:/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose photo / PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Take a photo' })).toBeInTheDocument();
+  });
+
+  it('starts ordinary applications as a new customer without querying a directory', async () => {
+    vi.mocked(getCustomersPage).mockClear();
+    vi.mocked(getCardProducts).mockResolvedValue([QA_PLAN] as never);
+    renderWithProviders(<CustomerApplicationEditorPage />, { user: { id: 'u-create', name: 'Admin', email: 'admin@example.test', roleId: 'r-admin', roleSlug: 'super_admin', roleName: 'Super Admin', status: 'active', afHomesPermissions: [] } });
+    await screen.findByRole('radio', { name: 'Gold' });
+    expect(screen.queryByLabelText('Customer')).not.toBeInTheDocument();
+    expect(getCustomersPage).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Create the linked application and agreement, then submit for approval.'),
+    ).toBeVisible();
+  });
+
+  it('labels the ID types with the shared vocabulary, not slug-derived text', async () => {
+    await setup(null);
+    const group = screen.getByRole('group', { name: 'ID Type *' });
+    const labels = within(group)
+      .getAllByRole('radio')
+      .map((radio) => radio.getAttribute('aria-label'));
+    // Same map the member and OST ID-type dropdowns use. Deriving a label from
+    // the slug produced "Philippine Id", "Drivers License" and "Tax Id".
+    expect(labels).toContain('Philippine ID');
+    expect(labels).toContain("Driver's License");
+    expect(labels).toContain('Tax ID');
+    expect(labels).not.toContain('Philippine Id');
+    expect(labels).not.toContain('Drivers License');
+    expect(labels).not.toContain('Tax Id');
+  });
+
+  it('shows a clickable thumbnail that opens a full preview modal', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:mock-id');
+    URL.revokeObjectURL = vi.fn();
+    await setup();
+    chooseIdTypeAndFile();
+    const thumbnail = await screen.findByAltText('ID preview thumbnail');
+    expect(thumbnail).toHaveAttribute('src', 'blob:mock-id');
+    expect(screen.getByText('Ready to upload on save.')).toBeInTheDocument();
+    fireEvent.click(thumbnail);
+    expect(await screen.findByAltText('Full ID preview')).toBeInTheDocument();
+  });
+
+  it('puts the operator at the top of the page on every step change', async () => {
+    // jsdom cannot scroll, so record what the wizard asks the window to do.
+    //
+    // This asserts the OUTCOME - the page is back at the top - and not the old
+    // mechanism. The previous version of this test passed while the wizard was
+    // broken in a real browser: it only checked that `scrollIntoView` had been
+    // called on the next step's element, which says nothing about where the
+    // operator ends up once advancing unmounts the panel just left behind.
+    const calls: Array<ScrollToOptions | undefined> = [];
+    const original = window.scrollTo;
+    window.scrollTo = function scrolledTo(options?: ScrollToOptions) {
+      calls.push(options);
+    } as typeof window.scrollTo;
+    try {
+      await setup(document('completed'));
+      // setup() already pressed Next once, landing on Identity.
+      await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+      await waitFor(() => expect(calls.length).toBeGreaterThan(1));
+      // Every change asks for the top, and every one of them carries an
+      // explicit target: a bare `scrollTo()` would be an unassertable no-op.
+      expect(calls).toHaveLength(2);
+      for (const call of calls) expect(call).toEqual({ top: 0, left: 0 });
+      // Holders is where the operator must land, not wherever Identity left off.
+      expect(screen.getByText('Primary holder')).toBeInTheDocument();
+    } finally {
+      window.scrollTo = original;
+    }
+  });
+
+  it('defers upload until Save, keeping pickers enabled meanwhile', async () => {
+    await setup();
+    chooseIdTypeAndFile();
+    await screen.findByAltText('ID preview thumbnail');
+    expect(requestUploadGrant).not.toHaveBeenCalled();
+    expect(putUploadBytes).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Upload ID')).toBeEnabled();
+  });
+
+  it('routes Take a photo to the camera-capture input, never the ordinary picker', async () => {
+    await setup();
+    const picker = screen.getByLabelText('Upload ID');
+    const camera = screen.getByLabelText('Scan / Take Photo');
+    expect(camera).toHaveAttribute('capture', 'environment');
+    expect(camera).toHaveAttribute('accept', 'image/*');
+    expect(camera).not.toBe(picker);
+    const pickerClick = vi.spyOn(picker, 'click');
+    const cameraClick = vi.spyOn(camera, 'click');
+    fireEvent.click(screen.getByRole('button', { name: 'Take a photo' }));
+    expect(cameraClick).toHaveBeenCalledTimes(1);
+    expect(pickerClick).not.toHaveBeenCalled();
+    const captured = new File(['cam'], 'capture.jpg', { type: 'image/jpeg' });
+    fireEvent.change(camera, { target: { files: [captured] } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Passport' }));
+    await screen.findByAltText('ID preview thumbnail');
+    expect(requestUploadGrant).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending selection without calling the server', async () => {
+    await setup(document('completed'));
+    await screen.findByText(/Current ID: qa\.png/);
+    chooseIdTypeAndFile('replacement.png');
+    await screen.findByAltText('ID preview thumbnail');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(screen.queryByAltText('ID preview thumbnail')).not.toBeInTheDocument();
+    expect(screen.getByText(/Current ID: qa\.png/)).toBeInTheDocument();
+    expect(requestUploadGrant).not.toHaveBeenCalled();
+    expect(putUploadBytes).not.toHaveBeenCalled();
+  });
+
+  it('leaves Recommender unchecked until recommender details are entered', async () => {
+    // acknowledgedAt ships pre-filled with today, so it must never mark the
+    // step done on its own: a fresh form shows the step number, not a check.
+    await setup();
+    const nav = screen.getByRole('navigation', { name: 'Application steps' });
+    fireEvent.click(within(nav).getByRole('button', { name: /All steps/ }));
+    const item = within(nav).getByText('Network').closest('li')!;
+    expect(item).toHaveAttribute('data-done', 'false');
+    expect(within(item).getByText('4')).toBeInTheDocument();
+  });
+
+  it('shows the recorded ID type by its shared label, never the raw slug', async () => {
+    // The value is the stored slug (`drivers_license`); the shared label map is
+    // the single display vocabulary, the same one the member and OST ID-type
+    // dropdowns render. Deriving a label from the slug is what produced
+    // "Drivers License" and "Tax Id" before.
+    await setup({
+      ...document('completed'),
+      reviewedFields: { idType: 'drivers_license' },
+    } as never);
+    expect(await screen.findByText(/ID type: Driver's License/)).toBeInTheDocument();
+    expect(screen.queryByText(/Drivers License/)).not.toBeInTheDocument();
+    cleanup();
+    await setup({ ...document('completed'), reviewedFields: { idType: 'passport' } } as never);
+    expect(await screen.findByText(/ID type: Passport/)).toBeInTheDocument();
+    cleanup();
+    await setup({ ...document('completed'), reviewedFields: null } as never);
+    expect(
+      await screen.findByText(/Missing: choose the type and upload again/),
+    ).toBeInTheDocument();
+  });
+
+  it('treats a rejected current document as missing', async () => {
+    await setup({
+      ...document('completed'),
+      isCurrent: false,
+      verificationStatus: 'rejected',
+    } as never);
+    expect(await screen.findByText('Valid ID: Required / Missing')).toBeInTheDocument();
+    expect(screen.queryByText(/Current ID:/)).not.toBeInTheDocument();
+  });
+
+  it('requires a preview and explicit holder confirmation before reviewing the current ID', async () => {
+    vi.mocked(getDocumentAccessUrl).mockResolvedValue({ url: 'https://safe-test.example/id' } as never);
+    vi.mocked(confirmDocument).mockResolvedValue({
+      ...document('completed'),
+      verificationStatus: 'confirmed',
+      reviewedAt: '2026-11-17T00:00:00Z',
+    });
+    await setup(document('completed'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Review ID' }));
+    await screen.findByRole('img', { name: 'Current identity document' });
+    const confirm = screen.getByRole('button', { name: 'Confirm ID Review' });
+    expect(confirm).toBeDisabled();
+    expect(confirmDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this ID and confirmed/ }));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirmDocument).toHaveBeenCalledWith(documentId, {
+      decision: 'confirmed',
+      fields: { idType: 'passport' },
+      notes: 'ID reviewed against the primary holder.',
+    }));
+    expect(submitCustomerApplication).not.toHaveBeenCalled();
+  });
+
+  const chooseAddress = async (box: HTMLElement, option: string | RegExp) => {
+    // A real user cannot click a control that has not unlocked yet; waiting
+    // here models that instead of racing the province -> city cascade.
+    await waitFor(() => expect(box).toBeEnabled());
+    fireEvent.click(box);
+    // Options commit on pointerdown (before blur can revert the draft), so a
+    // plain click models nothing a real browser does. pointerdown first is the
+    // browser's own event order.
+    fireEvent.pointerDown(await screen.findByRole('option', { name: option }));
+  };
+
+  it('creates one application and RA and waits for explicit ID review before submission', async () => {
+    // Regression: the create contract was parsed before the register branch,
+    // so New Register - which carries no customerId by design - was refused
+    // with "Select a customer for this application." and never registered.
+    vi.mocked(getGenealogy).mockResolvedValue([
+      {
+        staffId: SELLER_SM_ID,
+        fullName: 'Active Manager',
+        role: 'sales_manager',
+        status: 'active',
+        ostStatus: null,
+        uplineStaffId: null,
+        directDownlineCount: 0,
+        totalDescendantCount: 0,
+      },
+    ] as never);
+    vi.mocked(registerCustomerApplication).mockResolvedValue({
+      id: '00000000-0000-4000-8000-0000000000aa',
+      customerId: '00000000-0000-4000-8000-0000000000bb',
+      status: 'draft',
+    } as never);
+    // The service Zod-parses the proposal, so production data always carries
+    // terms. After submit the screen refetches and renders the offer, so the
+    // mock must be complete or the render crashes on `terms.tier`.
+    vi.mocked(getPurchaseTermsProposal).mockResolvedValue(
+      purchaseTermsProposalSchema.parse({
+        applicationId: '00000000-0000-4000-8000-0000000000aa',
+        expectedProposalHash: 'a'.repeat(64),
+        asOf: '2026-10-07T00:00:00.000Z',
+        offerKind: 'submission',
+        sellerName: 'QA SELLER',
+        terms: {
+          applicationId: '00000000-0000-4000-8000-0000000000aa',
+          customerId: '00000000-0000-4000-8000-0000000000bb',
+          planId: PLAN_ID,
+          sellerStaffId: customerId,
+          captureKind: 'submission',
+          tier: 'GOLD',
+          paymentScheme: 'spot_cash',
+          totalPrice: '60000.00',
+          reservationFee: '10000.00',
+          minimumDownPayment: '10000.00',
+          requiredInitial: '10000.00',
+          installmentMonths: null,
+          monthlyAmount: null,
+          spotCashDays: 7,
+          validityMonths: 12,
+          discountPercent: 10,
+          yearlyPoints: 25000,
+          annualPointsTranches: 1,
+          holderLimit: 2,
+          inclusions: [],
+          commissionRuleId: null,
+          commissionRate: '0.04',
+          commissionBase: '60000.00',
+          expectedCommission: '2400.00',
+        },
+      }),
+    );
+    vi.mocked(submitCustomerApplication)
+      .mockRejectedValueOnce(new Error('Temporary network failure'))
+      .mockResolvedValue({
+        id: '00000000-0000-4000-8000-0000000000aa',
+      } as never);
+
+    await setup(null, { pickCustomer: false });
+    chooseIdTypeAndFile();
+    fireEvent.change(screen.getByLabelText(/Government ID number/), {
+      target: { value: ' P1234567 ' },
+    });
+    await screen.findByText('Ready to upload on save.');
+
+    // Identity is satisfied by the picked file; forward to Holders and fill
+    // every field the register contract requires.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'Ana' } });
+    fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Santos' } });
+    fireEvent.change(screen.getByLabelText('Birth date'), { target: { value: '1990-01-01' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Address' }));
+    fireEvent.change(screen.getByLabelText('Permanent address line 1'), {
+      target: { value: '1 QA Street' },
+    });
+    // Province -> city -> barangay is all three or none: a half-verified
+    // hierarchy is refused, so all three are chosen.
+    await chooseAddress(screen.getByRole('combobox', { name: /^Province/ }), 'Laguna');
+    await chooseAddress(screen.getByRole('combobox', { name: /City \/ municipality/ }), /Calauan/);
+    await chooseAddress(screen.getByRole('combobox', { name: /Barangay/ }), 'Dayap');
+    fireEvent.click(screen.getByRole('tab', { name: 'Contact' }));
+    fireEvent.change(screen.getByLabelText('Mobile'), { target: { value: '+639171234567' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Additional' }));
+    fireEvent.change(screen.getByLabelText('Printed name'), { target: { value: 'Ana Santos' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Recommender
+    // A super admin is not the seller: the Sales Manager is named in the Network step.
+    fireEvent.change(await screen.findByLabelText('Seller of record'), {
+      target: { value: SELLER_SM_ID },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Channel
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Certify
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /I certify the information and consent/ }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })); // Review
+    await screen.findByRole('heading', { name: 'Review application' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Primary holder' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Contact' }));
+    expect(await screen.findByLabelText('Email')).toHaveValue('ana@example.com');
+    expect(screen.getByLabelText('Email')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /All steps/ }));
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Application steps' })).getByRole('button', {
+        name: 'Review',
+      }),
+    );
+    await screen.findByRole('heading', { name: 'Review application' });
+    expect(screen.getByText('ana@example.com')).toBeVisible();
+    // The picker no longer lives on the review step.
+    expect(screen.queryByLabelText('Seller of record')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Application & RA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create Application & RA' }));
+
+    await waitFor(() => expect(vi.mocked(registerCustomerApplication)).toHaveBeenCalledTimes(1));
+    const registration = vi.mocked(registerCustomerApplication).mock.calls[0]![0];
+    expect(registration).toMatchObject({ registerNewCustomer: true });
+    // The typed number travels trimmed; it is the only capture path for it.
+    expect(registration).toMatchObject({ governmentIdNumber: 'P1234567' });
+    // The register contract omits customerId by type: no linked id may travel.
+    expect('customerId' in registration).toBe(false);
+    // The create path belongs to a picked customer only.
+    expect(vi.mocked(createCustomerApplication)).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Select a customer for this application/)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(completeDocumentUpload).toHaveBeenCalledTimes(1));
+    expect(submitCustomerApplication).not.toHaveBeenCalled();
+    expect(confirmDocument).not.toHaveBeenCalled();
+    expect(getCurrentDocument).not.toHaveBeenCalledWith(expect.objectContaining({ subjectId: '' }));
+    expect(getPurchaseTermsProposal).not.toHaveBeenCalledWith(undefined);
+
+  });
+});
+
+it('renders application-origin reservations before a sale exists', async () => {
+  const linked = reservationAgreementListItemSchema.parse({
+    id: '00000000-0000-4000-8000-000000000003',
+    reservation_number: agreement.reservationNumber,
+    origin: 'application',
+    customer_application_id: '00000000-0000-4000-8000-000000000004',
+    sale_id: null,
+    tier_snapshot: agreement.tier,
+    applicant_name: agreement.applicantName,
+    payment_scheme_snapshot: agreement.paymentScheme,
+    total_price_snapshot: agreement.totalPrice,
+    has_secondary_holder: false,
+    status: 'submitted',
+    created_by: null,
+    created_at: agreement.createdAt,
+    submitted_at: agreement.submittedAt,
+  });
+  vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+    data: [linked],
+    total: 1,
+  } as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  expect(await screen.findByText('RES-000001')).toBeInTheDocument();
+  expect(screen.getByText('QA IST Applicant')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open Application & RA' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review and execute' })).toBeNull();
+  expect(screen.queryByText('Agreements could not be loaded')).not.toBeInTheDocument();
+});
+
+it('never renders a raw sale id in the queue table', async () => {
+  vi.mocked(getReservationAgreementsPage).mockResolvedValue({
+    data: [agreement],
+    total: 1,
+  } as never);
+  renderWithProviders(<ReservationAgreementsPage />);
+  await screen.findByText('RES-000001');
+  expect(screen.queryByRole('columnheader', { name: 'Sale' })).not.toBeInTheDocument();
+  expect(screen.queryByText('sale-1')).not.toBeInTheDocument();
+  expect(screen.queryByText(/f8585910-8cd5-43a2-a6d4-8f703667c8fa/)).not.toBeInTheDocument();
+});
+
+/**
+ * The status badge is a pipeline, not a flat chip: it must name the exact state,
+ * say how far through draft -> submitted -> executed the contract is, and carry
+ * an icon so the state survives color-blindness and a screen reader.
+ */

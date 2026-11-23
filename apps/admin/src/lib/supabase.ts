@@ -1,17 +1,22 @@
 /**
- * Supabase client - Phase 3: Storage (marketing-tools) + Realtime (admin).
- * Mirrors `apps/web/src/lib/supabase.ts`. Uses ESM `createClient` with cross-port
+ * Supabase Auth client. Browser data and uploads go through the authorized API.
+ * Mirrors `apps/web/src/lib/supabase.ts` with cross-port
  * cookie storage in DEV so `5173` login session is visible on `5174/admin`.
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { AuthClient } from '@supabase/supabase-js';
+
+type BrowserSupabaseClient = { auth: InstanceType<typeof AuthClient> };
 
 export function isSupabaseConfigured(): boolean {
   const env = import.meta.env as Record<string, string | undefined>;
-  return Boolean(env.VITE_SUPABASE_URL?.trim() && env.VITE_SUPABASE_ANON_KEY?.trim());
+  return Boolean(
+    env.VITE_SUPABASE_URL?.trim() &&
+    (env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || env.VITE_SUPABASE_ANON_KEY?.trim()),
+  );
 }
 
-let cached: SupabaseClient | null = null;
+let cached: BrowserSupabaseClient | null = null;
 
 const cookieStorage = {
   getItem(key: string): string | null {
@@ -30,22 +35,28 @@ const cookieStorage = {
   },
 };
 
-export function getSupabaseClient(): SupabaseClient | null {
+export function getSupabaseClient(): BrowserSupabaseClient | null {
   if (!isSupabaseConfigured()) return null;
   if (cached) return cached;
   const env = import.meta.env as Record<string, string | undefined>;
   const url = env.VITE_SUPABASE_URL?.trim();
-  const anonKey = env.VITE_SUPABASE_ANON_KEY?.trim();
+  const anonKey = env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || env.VITE_SUPABASE_ANON_KEY?.trim();
   if (!url || !anonKey) return null;
-  cached = createClient(url, anonKey, {
-    auth: {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Supabase URL must use HTTP or HTTPS');
+  const baseUrl = new URL(url.endsWith('/') ? url : `${url}/`);
+  // Match the full SDK's Auth settings without loading its unused browser data clients.
+  cached = {
+    auth: new AuthClient({
+      url: new URL('auth/v1', baseUrl).href,
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      storageKey: `sb-${baseUrl.hostname.split('.')[0]}-auth-token`,
+      flowType: 'implicit',
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      flowType: 'pkce',
-      storage: import.meta.env.DEV ? (cookieStorage as never) : undefined,
-    },
-  });
+      storage: import.meta.env.DEV ? cookieStorage : undefined,
+    }),
+  };
   return cached;
 }
 

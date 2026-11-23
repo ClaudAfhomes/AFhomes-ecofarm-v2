@@ -15,25 +15,33 @@ export interface BreadcrumbsProps {
 
 /** Contextual path back to the queue/section (UI-UX §4.3/§4.7). Last item is the current page. */
 export function Breadcrumbs({ items, ariaLabel = 'Breadcrumb' }: BreadcrumbsProps) {
-  const lastIndex = items.length - 1;
+  // A group whose only page shares its name ("Reports > Reports") reads as a
+  // stutter; keep the later (more specific) item.
+  const trail = items.filter((item, index) => item.label !== items[index + 1]?.label);
+  const lastIndex = trail.length - 1;
   return (
     <nav className={styles.breadcrumbs} aria-label={ariaLabel}>
       <ol className={styles.list}>
-        {items.map((item, index) => {
+        {trail.map((item, index) => {
           const isLast = index === lastIndex;
           return (
             <li key={`${index}-${item.label}`} className={styles.item}>
               {isLast || !item.to ? (
-                <span className={styles.current} aria-current={isLast ? 'page' : undefined}>
+                <span
+                  className={isLast ? styles.current : styles.group}
+                  aria-current={isLast ? 'page' : undefined}
+                >
                   {item.label}
                 </span>
               ) : (
-                <>
-                  <Link to={item.to} className={styles.link}>
-                    {item.label}
-                  </Link>
+                <Link to={item.to} className={styles.link}>
+                  {item.label}
+                </Link>
+              )}
+              {!isLast && (
+                <span className={styles.separator} aria-hidden="true">
                   <Icon name="chevron-right" size={14} />
-                </>
+                </span>
               )}
             </li>
           );

@@ -1,0 +1,405 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  aaNumberSchema,
+  saleTeamSearchConfigSchema,
+  saleTeamSearchContactSchema,
+  saleTeamSearchRevealedSchema,
+  saleTeamSearchStartedSchema,
+  type PublicSaleTeamSearchResult,
+  type SaleTeamSearchContact,
+} from '@afhomes/contracts';
+import { Alert, Button, Dialog, Icon, TextField, TurnstileChallenge } from '@afhomes/ui';
+import { request } from '../../lib/api/client';
+import { ApiError } from '../../lib/api/errors';
+import { Container } from '../components/ui/Container';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Seo } from '../lib/seo';
+import { VerificationResultCard } from '../components/VerificationResultCard';
+
+const SESSION_KEY = 'afhomes.saleTeamSearch.session';
+type SearchSession = { sessionId: string; receipt?: string; expiresAt?: number };
+function loadSession(): SearchSession {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null') as SearchSession | null;
+    if (saved && /^[\da-f-]{36}$/i.test(saved.sessionId))
+      return {
+        sessionId: saved.sessionId,
+        ...(typeof saved.receipt === 'string' && Number(saved.expiresAt) > Date.now()
+          ? { receipt: saved.receipt, expiresAt: saved.expiresAt }
+          : {}),
+      };
+  } catch {
+    /* Storage may be unavailable; the in-memory session still works. */
+  }
+  return { sessionId: crypto.randomUUID() };
+}
+
+export default function SaleTeamSearch() {
+  const configQuery = useQuery({
+    queryKey: ['sale-team-search-config'],
+    queryFn: ({ signal }) =>
+      request('/sale-team/search/config', saleTeamSearchConfigSchema, { signal }),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const config = configQuery.data;
+  const [session, setSession] = useState(loadSession);
+  const [input, setInput] = useState('');
+  const [invalid, setInvalid] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'privacy' | 'contact' | 'result'>('idle');
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [searchToken, setSearchToken] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaVersion, setCaptchaVersion] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [contact, setContact] = useState({ name: '', email: '', mobile: '' });
+  const [reuseContact, setReuseContact] = useState(false);
+  const [result, setResult] = useState<PublicSaleTeamSearchResult | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
+  const epoch = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      epoch.current++;
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  function saveSession(value: SearchSession) {
+    setSession(value);
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    } catch {
+      /* Keep only in memory. */
+    }
+  }
+  function discard() {
+    epoch.current++;
+    controller.current?.abort();
+    setBusy(false);
+    setPhase('idle');
+    setResult(null);
+    setPhotoOpen(false);
+    setSearchToken('');
+    setAcknowledged(false);
+    setContact({ name: '', email: '', mobile: '' });
+    setError('');
+  }
+  function start(event: FormEvent) {
+    event.preventDefault();
+    const number = aaNumberSchema.safeParse(input);
+    setInvalid(!number.success);
+    if (!number.success || !config?.available || busy) return;
+    discard();
+    setPhase('privacy');
+    setCaptchaToken(null);
+    setCaptchaVersion((v) => v + 1);
+  }
+  async function reveal(details?: SaleTeamSearchContact) {
+    if (!config || (!searchToken && !captchaToken) || busy) return;
+    const active = epoch.current;
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy(true);
+    setError('');
+    try {
+      let token = searchToken;
+      if (!token) {
+        const started = await request('/sale-team/search/start', saleTeamSearchStartedSchema, {
+          method: 'POST',
+          body: JSON.stringify({ aaNumber: input, sessionId: session.sessionId, captchaToken }),
+          signal: abort.signal,
+        });
+        if (epoch.current !== active) return;
+        token = started.searchToken;
+        setSearchToken(token);
+      }
+      const data = await request('/sale-team/search/reveal', saleTeamSearchRevealedSchema, {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          searchToken: token,
+          acknowledged: true,
+          noticeVersion: config.noticeVersion,
+          ...(details ? { contact: details } : { contactReceipt: session.receipt }),
+        }),
+        signal: abort.signal,
+      });
+      if (epoch.current !== active) return;
+      saveSession({
+        sessionId: session.sessionId,
+        receipt: data.contactReceipt,
+        expiresAt:
+          session.receipt === data.contactReceipt ? session.expiresAt : Date.now() + 86400000,
+      });
+      setContact({ name: '', email: '', mobile: '' });
+      setResult(data.result);
+      setPhase('result');
+    } catch (cause) {
+      if (epoch.current !== active) return;
+      if (cause instanceof ApiError && cause.status === 400) {
+        saveSession({ sessionId: session.sessionId });
+        setReuseContact(false);
+        setSearchToken('');
+        setPhase('contact');
+      }
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : 'Verification is unavailable. Retry this request or cancel.',
+      );
+    } finally {
+      if (epoch.current === active) {
+        setBusy(false);
+        setCaptchaToken(null);
+        setCaptchaVersion((value) => value + 1);
+      }
+    }
+  }
+  function continuePrivacy() {
+    if (!acknowledged || busy) return;
+    setReuseContact(!!session.receipt && Number(session.expiresAt) > Date.now());
+    setPhase('contact');
+  }
+  function submitContact(event: FormEvent) {
+    event.preventDefault();
+    if (reuseContact) {
+      void reveal();
+      return;
+    }
+    const parsed = saleTeamSearchContactSchema.safeParse(contact);
+    if (!parsed.success) {
+      setError('Enter a valid name, email and mobile number.');
+      return;
+    }
+    void reveal(parsed.data);
+  }
+  const dialogError = error ? <Alert variant="danger">{error}</Alert> : null;
+
+  return (
+    <>
+      <Seo
+        title="Verify a sales team member"
+        description="Verify current IST and OST accreditation using an AA number."
+        path="/sale-team-search"
+      />
+      <PageHeader
+        eyebrow="Sales accreditation"
+        title="Verify a sales team member"
+        lede="Enter an AA number to confirm a seller's current accreditation."
+      />
+      <Container size="site" className="py-12 sm:py-16">
+        {config?.localPreview ? (
+          <Alert variant="info">
+            Local preview — draft privacy notice. Use synthetic contact details only.
+          </Alert>
+        ) : null}
+        <section
+          aria-labelledby="sale-team-search-heading"
+          className="rounded-[var(--radius-panel)] border border-line bg-cream-50 p-6 shadow-soft sm:p-8"
+        >
+          <p className="label-caps text-leaf-700">Accreditation check</p>
+          <h2
+            id="sale-team-search-heading"
+            className="mt-3 font-display text-2xl font-medium text-navy-900 sm:text-3xl"
+          >
+            Search by AA number
+          </h2>
+          <p className="mt-2 text-body-sm text-ink-600">
+            Enter the full AA number.{' '}
+            {config?.dailyLimitEnabled !== false
+              ? 'Up to 3 successful verifications per IP address in 24 hours.'
+              : 'The daily search limit is currently disabled. Security checks still apply.'}
+          </p>
+          {config?.available ? (
+            <>
+              <p className="mt-3 text-body-sm text-ink-600">
+                Select Search to read the privacy notice, enter your name, email and mobile number,
+                and complete Cloudflare verification. Validated details are reused during this session.
+              </p>
+            </>
+          ) : null}
+          {configQuery.isLoading ? <p role="status">Loading verification…</p> : null}
+          {!configQuery.isLoading && !config?.available ? (
+            <Alert variant="danger">
+              Verification is currently unavailable. Please try again later.
+            </Alert>
+          ) : null}
+          <form onSubmit={start} className="mt-6 flex flex-col gap-4">
+            <TextField
+              id="sale-team-aa"
+              name="aaNumber"
+              label="AA number"
+              placeholder="Enter AAI or AAO number"
+              normalize={(value) => value.toUpperCase()}
+              value={input}
+              onChange={(value) => {
+                discard();
+                setInput(value);
+                setInvalid(false);
+              }}
+              error={invalid ? 'Enter a valid AA number.' : undefined}
+              autoComplete="off"
+            />
+            <Button type="submit" disabled={!config?.available || busy}>
+              Search
+            </Button>
+          </form>
+          {config?.available ? (
+            <details className="group mt-6 rounded-xl border border-line bg-cream-50 text-body-sm [&::-webkit-details-marker]:hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium text-navy-900">
+                <span>
+                  Privacy notice: <strong className="font-semibold text-navy-900">Data Privacy Act of 2012</strong>
+                </span>
+                <Icon name="chevron-down" size={16} className="shrink-0 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="max-h-80 overflow-y-auto whitespace-pre-wrap border-t border-line px-5 py-4 leading-relaxed text-ink-700" tabIndex={0}>
+                {config.privacyNotice}
+              </div>
+            </details>
+          ) : null}
+        </section>
+        <div aria-live="polite" className="mt-8">
+          {phase === 'idle' || phase === 'result' ? dialogError : null}
+          {phase === 'result' && result && config ? (
+            <VerificationResultCard result={result} config={config} failedPhotoUrl={failedPhotoUrl}
+              onPhotoError={() => setFailedPhotoUrl(result.photoUrl)} onEnlarge={() => setPhotoOpen(true)} />
+          ) : null}
+          {phase === 'result' && !result ? (
+            <p
+              role="status"
+              className="rounded-xl border border-dashed border-line p-8 text-center"
+            >
+              No current accredited seller found.
+            </p>
+          ) : null}
+        </div>
+      </Container>
+      <Dialog
+        open={photoOpen && !!result?.photoUrl}
+        onClose={() => setPhotoOpen(false)}
+        title="Profile photo"
+      >
+        {result?.photoUrl ? (
+          <img
+            src={result.photoUrl}
+            alt={result.maskedName}
+            className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain"
+            onError={() => {
+              setFailedPhotoUrl(result.photoUrl);
+              setPhotoOpen(false);
+            }}
+          />
+        ) : null}
+      </Dialog>
+      <Dialog
+        open={phase === 'privacy'}
+        onClose={discard}
+        title="Privacy notice"
+        footer={
+          <>
+            <Button variant="secondary" onClick={discard}>
+              Cancel
+            </Button>
+            <Button
+              onClick={continuePrivacy}
+              disabled={!acknowledged || busy}
+              loading={busy}
+              loadingLabel="Preparing search"
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
+        <div className="whitespace-pre-wrap text-body-sm text-ink-700">{config?.privacyNotice}</div>
+        <label className="mt-6 flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          <span>
+            I acknowledge that I have read and understood the AFHomes Privacy Notice and agree to the
+            processing of my personal information for accreditation verification and security purposes.
+          </span>
+        </label>
+        {dialogError}
+      </Dialog>
+      <Dialog
+        open={phase === 'contact'}
+        onClose={discard}
+        title="Your contact details and security check"
+      >
+        {reuseContact ? (
+          <p>
+            Your details are already validated for this session. Complete the security check for
+            this search.
+          </p>
+        ) : (
+          <p className="mb-4 text-body-sm">
+            Enter your details as the person conducting this search. Matching details are saved once
+            and reused for later IST/OST verification searches.
+          </p>
+        )}
+        <form onSubmit={submitContact} className="flex flex-col gap-4">
+          {!reuseContact ? (
+            <>
+              <TextField
+                id="search-contact-name"
+                name="name"
+                label="Name"
+                value={contact.name}
+                onChange={(name) => setContact((v) => ({ ...v, name }))}
+                autoComplete="name"
+              />
+              <TextField
+                id="search-contact-email"
+                name="email"
+                label="Email"
+                type="email"
+                value={contact.email}
+                onChange={(email) => setContact((v) => ({ ...v, email }))}
+                autoComplete="email"
+              />
+              <TextField
+                id="search-contact-mobile"
+                name="mobile"
+                label="Mobile"
+                type="tel"
+                value={contact.mobile}
+                onChange={(mobile) => setContact((v) => ({ ...v, mobile }))}
+                autoComplete="tel"
+              />
+            </>
+          ) : null}
+          {phase === 'contact' && config?.available ? (
+            <TurnstileChallenge
+              siteKey={config.siteKey}
+              onToken={setCaptchaToken}
+              resetVersion={captchaVersion}
+            />
+          ) : null}
+          {dialogError}
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary" type="button" onClick={discard}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={(!captchaToken && !searchToken) || busy}
+              loading={busy}
+              loadingLabel="Verifying"
+            >
+              Verify accreditation
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </>
+  );
+}

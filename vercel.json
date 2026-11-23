@@ -1,7 +1,22 @@
 {
   "framework": null,
-  "installCommand": "pnpm install",
-  "buildCommand": "node scripts/prepare-vercel-env.mjs && pnpm exec turbo run build && node scripts/assemble-vercel-output.mjs",
+  "regions": ["hnd1"],
+  "headers": [
+    {
+      "source": "/assets/:file(.+-[A-Za-z0-9_-]{8}\\.[A-Za-z0-9]+)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/admin/assets/:file(.+-[A-Za-z0-9_-]{8}\\.[A-Za-z0-9]+)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ],
+  "installCommand": "pnpm install --filter=!@afhomes/db-testing",
+  "buildCommand": "pnpm typecheck:deploy && node scripts/prepare-vercel-env.mjs && pnpm exec turbo run build && node scripts/assemble-vercel-output.mjs",
   "outputDirectory": "vercel-static",
   "functions": {
     "api/router.ts": {
@@ -12,10 +27,6 @@
     {
       "path": "/health",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/crons/commission-clearing",
-      "schedule": "0 1 * * *"
     }
   ],
   "rewrites": [
@@ -23,6 +34,38 @@
     { "source": "/health", "destination": "/api/router?path=health" },
     { "source": "/admin", "destination": "/admin/index.html" },
     { "source": "/admin/:path*", "destination": "/admin/index.html" },
+    { "source": "/staff/:path*", "destination": "/admin/index.html" },
+    { "source": "/employee", "destination": "/admin/index.html" },
+    { "source": "/employee/:path*", "destination": "/admin/index.html" },
+    { "source": "/finance", "destination": "/admin/index.html" },
+    { "source": "/finance/:path*", "destination": "/admin/index.html" },
+    { "source": "/hr", "destination": "/admin/index.html" },
+    { "source": "/hr/:path*", "destination": "/admin/index.html" },
+    { "source": "/sales", "destination": "/admin/index.html" },
+    { "source": "/sales/:path*", "destination": "/admin/index.html" },
+    { "source": "/about", "destination": "/about/index.html" },
+    { "source": "/experiences", "destination": "/experiences/index.html" },
+    {
+      "source": "/experiences/smart-wellness-hotel",
+      "destination": "/experiences/smart-wellness-hotel/index.html"
+    },
+    {
+      "source": "/experiences/alm-japanese-restaurant",
+      "destination": "/experiences/alm-japanese-restaurant/index.html"
+    },
+    {
+      "source": "/experiences/hotspring-ecofarm-resort",
+      "destination": "/experiences/hotspring-ecofarm-resort/index.html"
+    },
+    { "source": "/vip", "destination": "/vip/index.html" },
+    { "source": "/stories", "destination": "/stories/index.html" },
+    { "source": "/faq", "destination": "/faq/index.html" },
+    { "source": "/compliance", "destination": "/compliance/index.html" },
+    { "source": "/contact", "destination": "/contact/index.html" },
+    { "source": "/sale-team-search", "destination": "/sale-team-search/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": { "claud/develop": true }
+  }
 }

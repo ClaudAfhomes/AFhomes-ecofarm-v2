@@ -1,45 +1,39 @@
-import { QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
+import { QueryClientProvider } from '@tanstack/react-query';
 
 import App from './app/App';
+import { preloadInitialRoute } from './app/initial-route';
+import { loadFeatureFlags } from './lib/feature-flags';
+import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
-import { SessionProvider } from './lib/session';
-import { isSupabaseConfigured } from './lib/supabase';
-import { createMemberMockServer } from './mock';
+import { getSupabaseClient } from './lib/supabase';
 
-import '@jad/ui/tokens.css';
-import '@jad/ui/base.css';
+import '@afhomes/ui/tokens.css';
+import '@afhomes/ui/base.css';
 import './styles/global.css';
-
-// Disable browser scroll restoration as early as possible - before the router mounts.
-// This prevents the browser from restoring scroll position on navigation.
-if ('scrollRestoration' in history) {
-  history.scrollRestoration = 'manual';
-}
-
-// Dev-only mock API. Installed only when Supabase is not configured - with a
-// backend, requests flow through the Vite proxy to api/v1 instead. The app
-// talks to it through the real service functions (lib/api/client) exactly as
-// it will talk to the backend in production.
-if (import.meta.env.DEV && !isSupabaseConfigured()) {
-  createMemberMockServer().install();
-}
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error('Root element #root not found');
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <SessionProvider>
+// Module switches decide which routes and links exist, so rendering waits for them.
+// Restore/refresh the cached SDK session alongside settings, without rendering account content.
+getSupabaseClient();
+// Fetch only this entry's code in parallel; no account data or route renders early.
+void preloadInitialRoute(window.location.pathname);
+void loadFeatureFlags().then(() =>
+  createRoot(rootElement).render(
+    <StrictMode>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <CustomerSessionProvider>
+            <App />
+          </CustomerSessionProvider>
         </BrowserRouter>
       </QueryClientProvider>
-    </SessionProvider>
-  </StrictMode>,
+    </StrictMode>,
+  ),
 );

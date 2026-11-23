@@ -1,0 +1,36 @@
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
+.formGrid {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.section {
+  display: grid;
+  gap: 12px;
+}
+
+.stack > * {
+  animation: afh-fade-up var(--motion-200) var(--ease-out) backwards;
+}
+
+.stack > :nth-child(2) {
+  animation-delay: 50ms;
+}
+
+.stack > :nth-child(n + 3) {
+  animation-delay: 100ms;
+}

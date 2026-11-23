@@ -1,0 +1,532 @@
+/*
+ * Bookings, messages and notifications (presentation only).
+ * Tokens from @afhomes/ui only. No transitions beyond opacity/transform, none needed here.
+ */
+
+/* ---- Page frame ---------------------------------------------------------- */
+
+.page {
+  display: block;
+}
+
+.panel {
+  padding: var(--space-4);
+}
+
+@media (min-width: 40rem) {
+  .panel {
+    padding: var(--space-5);
+  }
+}
+
+.status {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+/* ---- Forms ---------------------------------------------------------------- */
+
+.form {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 40rem;
+}
+
+.group {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.groupLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  align-content: start;
+}
+
+.label {
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.control {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-body);
+  line-height: 1.4;
+}
+
+textarea.control {
+  min-height: 6rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.control:hover {
+  border-color: var(--color-text-muted);
+}
+
+.control:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 1px;
+  border-color: var(--color-brand-primary);
+}
+
+.control:disabled {
+  opacity: 0.6;
+  background: var(--color-bg-subtle);
+}
+
+.controlInvalid {
+  border-color: var(--color-danger);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-body-s);
+  line-height: 1.45;
+  color: var(--color-danger);
+}
+
+.error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Boxed callout: reserved for important notices. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+  line-height: 1.5;
+}
+
+.notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-brand-primary);
+}
+
+.success {
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-success-strong);
+}
+
+.submitRow {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Primary actions fill the width on phones. */
+.fullMobile {
+  min-width: 0;
+}
+
+@media (max-width: 40rem) {
+  .submitRow {
+    justify-items: stretch;
+  }
+
+  .fullMobile {
+    width: 100%;
+  }
+
+  .actions > .fullMobile {
+    flex: 1 1 8rem;
+  }
+}
+
+/* 44px touch target for secondary actions on phones (Button md is 40px). */
+@media (max-width: 48rem) {
+  .tap.tap {
+    min-height: 2.75rem;
+  }
+}
+
+/* ---- Booking records ------------------------------------------------------ */
+
+.records {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.record {
+  padding: var(--space-4);
+}
+
+.recordHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.recordTitle {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.recordRef {
+  margin: 2px 0 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.chipSlot {
+  flex-shrink: 0;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fact svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.quote {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-accent-light);
+}
+
+.quoteLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.body {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-body-s);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.recordFoot {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* ---- Linked rows (conversations, notifications) --------------------------- */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.rowItem {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 3.5rem;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.rowItem:first-child {
+  border-top: 0;
+}
+
+.rowItemUnread {
+  background: color-mix(in srgb, var(--color-brand-soft) 55%, var(--color-bg-surface-raised));
+}
+
+@media (hover: hover) {
+  .rowItem:hover {
+    background: var(--color-state-hover);
+  }
+}
+
+.rowItem:focus-within {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: -3px;
+}
+
+.dotSlot {
+  display: flex;
+  justify-content: center;
+  flex: none;
+  width: 0.75rem;
+  padding-top: 0.45rem;
+}
+
+.unreadDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-primary);
+}
+
+.rowMain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rowHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+}
+
+/* The button carries the row's accessible name; ::after stretches the tap area over the row. */
+.rowButton {
+  display: inline-flex;
+  align-items: center;
+  /* Never below the 24px minimum target; 44px on phones (see the media query below). */
+  min-height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.rowButtonUnread {
+  font-weight: 700;
+}
+
+.rowButton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.rowButton:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 48rem) {
+  .rowButton {
+    min-height: 2.75rem;
+  }
+}
+
+.rowTime {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.unreadTag {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-brand-primary);
+}
+
+.chev {
+  flex: none;
+  align-self: center;
+  color: var(--color-text-muted);
+}
+
+/* ---- Conversation --------------------------------------------------------- */
+
+.convo {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.msg {
+  display: grid;
+  gap: var(--space-1);
+  max-width: min(92%, 36rem);
+}
+
+.msgMine {
+  align-self: flex-end;
+}
+
+.msgStaff {
+  align-self: flex-start;
+}
+
+.msgMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.msgMine .msgMeta {
+  justify-content: flex-end;
+}
+
+.msgName {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.roleTag {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-full);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.msgBubble {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font-size: var(--text-body-s);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msgMine .msgBubble {
+  background: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
+  color: var(--color-text-on-brand);
+}
+
+/* Composer stays reachable while a long thread scrolls (clears the mobile bottom bar). */
+.composer {
+  position: sticky;
+  bottom: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 48rem) {
+  .composer {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.composerFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.composerFoot .hint {
+  flex: 1 1 10rem;
+}
+
+@media (max-width: 40rem) {
+  .composerFoot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

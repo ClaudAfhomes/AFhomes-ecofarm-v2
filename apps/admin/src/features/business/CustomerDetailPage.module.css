@@ -1,0 +1,1139 @@
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+/* Page shell: shrinkable grid so detail cards never prop the page open sideways. */
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+}
+
+/* Short cards hug the top instead of stretching to the tallest neighbor. */
+.topGrid {
+  align-items: start;
+}
+
+/*
+ * Record header. One card that owns the name and the facts about it, so the
+ * title, the standing and the identifiers can no longer drift apart (the
+ * previous strip sat under a PageHeader whose text started on the page edge).
+ *
+ * The state line (Status / Tier / Category / Portal account) is the person's
+ * standing; the rail below is the row it is in. The two groups are separated
+ * by the rail's stronger top rule, as in the prior strip.
+ *
+ * Grid arithmetic at 1440: the canvas is 1100, the card padding 20, so the
+ * identity body is 1100 - 40 - 48 - 16 - 160 - 16 = 820px and the state line
+ * fits its four facts on one row (~600px). The three-fact rail is 1100 - 40 =
+ * 1060px, ~353px per fact.
+ */
+.masthead {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  min-width: 0;
+}
+
+.mastheadIdentity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.monogram {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-brand-soft);
+  color: var(--color-brand-primary);
+  font-size: var(--text-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+
+.mastheadBody {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.mastheadName {
+  margin: 0;
+  font-family: var(--font-family-sans);
+  font-size: var(--text-page-title);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+}
+
+.mastheadActions {
+  display: flex;
+  gap: var(--space-2);
+  justify-self: end;
+  align-self: start;
+}
+
+.mastheadAction {
+  white-space: nowrap;
+}
+
+/*
+ * State line: four facts about the person's standing. Inline on the wide screen,
+ * two columns on the phone, so the labels stay above their values there.
+ */
+.page .mastheadState {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  padding: 0;
+}
+
+.page .mastheadState > div {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.page .mastheadState dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.page .mastheadState dd {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Record rail: the three identifiers that name the row. Stronger top rule to
+ * mark the group boundary; subtle rules between the cells.
+ */
+.page .mastheadIds {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: var(--space-4) 0 0;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.page .mastheadIds > div {
+  min-width: 0;
+  padding-left: var(--space-4);
+}
+
+.page .mastheadIds > div:first-child {
+  padding-left: 0;
+}
+
+.page .mastheadIds > div + div {
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.page .mastheadIds dt {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.page .mastheadIds dd {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-primary);
+}
+
+.monogramSkeleton {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 639px) {
+  .masthead {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+
+  .monogram,
+  .monogramSkeleton {
+    width: 40px;
+    height: 40px;
+    font-size: var(--text-body-s);
+  }
+
+  .mastheadIdentity {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .mastheadAction {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .page .mastheadState {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+  }
+
+  .page .mastheadState > div {
+    display: grid;
+    align-items: start;
+    gap: 2px;
+  }
+
+  .page .mastheadIds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page .mastheadIds > div {
+    padding-left: 0;
+  }
+
+  .page .mastheadIds > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-subtle);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+  }
+}
+
+/* Panels: card sales, and the company form when its tab is open. */
+.panel {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/*
+ * Company record: the company master form, as a dossier.
+ *
+ * Four blocks of the same printed form, so they get four cards rather than one
+ * ruled sheet: each carries its own tinted header saying what the block is, so
+ * an operator who opens this tab knows which part of the form they are reading
+ * without scrolling back to a heading.
+ *
+ * Spans are chosen by field count, not by a uniform grid. Primary is the subject
+ * of the record and takes the full width; Related (8) and Package (9) balance
+ * each other exactly on one line. Nothing is stretched to a neighbour's height.
+ *
+ * Grid arithmetic at 1440 on a 1100 canvas, 20px gutter:
+ *   full  = 1100              -> Primary 4-up  (275/cell, 6 rows)
+ *                                Supplementary 3-up (367/cell, 5 rows)
+ *   half  = (1100 - 20) / 2 = 540 -> Related 2-up (270/cell, 4 rows)
+ *                                Package  2-up (270/cell, 5 rows)
+ */
+.dossier {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.dossierCard {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* The subject of the record, and the one block with enough fields to need the
+   full measure. */
+.dossierCard:nth-child(1),
+.dossierCard:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+/*
+ * Header: one tint doing the area work, the hue only on the mark. The icon
+ * square is the solid colour - a small mark - while the band behind it is the
+ * pale tint, which is the whole move.
+ */
+.dossierHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.dossierMark {
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+}
+
+/* The title is the card's voice: one step above any label inside it. */
+.dossierTitle {
+  margin: 0;
+  align-self: end;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* What the block is, and what it is not. */
+.dossierBlurb {
+  margin: 0;
+  align-self: start;
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.tonebrand {
+  background-color: var(--color-brand-soft);
+}
+
+.tonebrand .dossierMark {
+  background-color: var(--color-brand-secondary);
+}
+
+.toneinfo {
+  background-color: #e8eef6;
+}
+
+.toneinfo .dossierMark {
+  background-color: var(--color-info);
+}
+
+.tonegold {
+  background-color: var(--color-accent-soft);
+}
+
+.tonegold .dossierMark {
+  background-color: var(--color-accent-strong);
+}
+
+.toneneutral {
+  background-color: var(--color-bg-surface);
+}
+
+.toneneutral .dossierMark {
+  background-color: var(--color-text-secondary);
+}
+
+/* Field grid: as many comfortable columns as the card is wide. Three widths,
+   because the cards are three widths - a fixed count would either strand the
+   narrow cards or over-fill the wide one. */
+.page .dossierFields {
+  display: grid;
+  gap: var(--space-4) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin: 0;
+  padding: var(--space-5);
+  align-content: start;
+}
+
+/* The paired cards take three columns rather than two. Eight fields and nine
+   fields in two columns end one row apart and the row stops level; in three
+   they are exactly three rows each, so the pair shares a bottom edge.
+   Desktop only: below the two-column breakpoint the cards go full width, and
+   three columns of a phone is three unreadable 100px strips. */
+@media (min-width: 900px) {
+  .page .dossierCard:nth-child(3) .dossierFields,
+  .page .dossierCard:nth-child(4) .dossierFields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/*
+ * The labels are the form's own all-caps headers, so the shout is in the
+ * strings and cannot be removed. It is answered in weight instead: the header
+ * sits small and muted, the value below it at body size in primary ink.
+ */
+.page .dossierFields dt {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.page .dossierFields dd {
+  margin: 0;
+  font-size: var(--text-body-s);
+  line-height: var(--line-height-body);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* A blank cell recedes so the recorded ones carry the eye. */
+.absent {
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+@media (max-width: 899px) {
+  .dossier {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dossierCard:nth-child(1),
+  .dossierCard:nth-child(2) {
+    grid-column: auto;
+  }
+}
+
+/*
+ * Section tabs. Modern segmented control: a soft track holds pill-shaped
+ * buttons so the active section is unmistakable. The active tab carries the
+ * brand fill; inactive tabs read as quiet ghosts that lift on hover. Links
+ * keep their router semantics; only the presentation is button-like.
+ */
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  background: transparent;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-surface-raised);
+  border-color: var(--color-border-subtle);
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.tabCurrent {
+  color: var(--color-text-on-brand);
+  font-weight: 600;
+  background: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabCurrent:hover {
+  color: var(--color-text-on-brand);
+  background: var(--color-brand-primary-hover);
+  border-color: var(--color-brand-primary-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
+}
+
+/*
+ * Settlement strip: the screen's answer. One divided container, not a tile per
+ * figure. The balance leads; card, scheme, total and paid are its arithmetic.
+ */
+.settlement {
+  display: grid;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+/* Empty settlement: a calm, centred panel rather than a stray sentence, so the
+   Overview still reads as a complete answer when there is nothing to settle. */
+.settlementEmpty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+@media (max-width: 559px) {
+  .settlementEmpty {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+}
+
+.settlementEmptyMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-muted);
+}
+
+.settlementEmptyBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.settlementEmptyTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.settlementEmptyText {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  max-width: 48ch;
+}
+
+.settlementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.settlementRow + .settlementRow {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.settlementLead {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settlementLabel {
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.settlementValue {
+  font-size: var(--text-h2);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settlementFacts {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: var(--space-5);
+  margin: 0;
+}
+
+@media (max-width: 899px) {
+  .settlementRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settlementFacts {
+    grid-template-columns: repeat(2, auto);
+  }
+}
+
+/* Vertical stack of per-sale cards. */
+.saleStack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Grid label + control, matching the directory filter pattern. */
+.filterLabel {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+/* Toggle switch row in the company edit dialog. */
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+}
+
+.checkRow input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--color-border-default);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.checkRow input::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+
+.checkRow input:checked {
+  background: var(--color-brand-primary);
+}
+
+.checkRow input:checked::before {
+  transform: translateX(18px);
+}
+
+.checkRow input:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+/* Company edit dialog: stacked sections, full-width fields. */
+.editGrid {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.editGrid h3 {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-body);
+}
+
+/* Company edit dialog: tab strip over one card per section. */
+.editShell {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.editIntro {
+  display: grid;
+  gap: 2px;
+}
+
+.editIntro p {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.editCard {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-raised);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Author `display` beats the UA `[hidden]` rule; keep inactive tabs hidden. */
+.editCard[hidden] {
+  display: none;
+}
+
+.editCardHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.editCardMark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: #ffffff;
+}
+
+.tonebrand .editCardMark {
+  background-color: var(--color-brand-secondary);
+}
+
+.toneinfo .editCardMark {
+  background-color: var(--color-info);
+}
+
+.tonegold .editCardMark {
+  background-color: var(--color-accent-strong);
+}
+
+.toneneutral .editCardMark {
+  background-color: var(--color-text-secondary);
+}
+
+.editCardHeading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.editCardTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.editCardBlurb {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.editCardBody {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.editFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.editFieldWide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* TIN field and its lock toggle share one grid cell. */
+.tinField {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Government ID image replacement block: current scan, picker, preview. */
+.idImageField {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageLabel {
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.idImagePreview {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.idImagePreviewThumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+}
+
+.idImageActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.editEmpty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+/* Status select pending state: the spinner docks inside the control's right
+   edge (over the chevron spot) instead of sitting beside it, so the busy
+   indicator reads as part of the control that triggered the update. */
+.statusWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.statusSpinner {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px 2px 10px;
+  background-color: var(--color-state-disabled-bg);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+/* The action buttons stay on one row and scroll horizontally on narrow
+   cards instead of wrapping onto a second row. */
+.actionButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.actionButtons > * {
+  flex: 0 0 auto;
+}
+
+/* Phones: a sideways-scrolling strip hid every action past the first with no
+   visible cue, so the actions stack as full-width tap targets instead. */
+@media (max-width: 639px) {
+  .actionButtons {
+    flex-direction: column;
+    align-items: stretch;
+    overflow-x: visible;
+  }
+
+  .actionButtons > * {
+    width: 100%;
+    min-height: 40px;
+  }
+}
+
+/* Field grid: as many comfortable columns as fit, filled in reading order.
+   The previous fixed-row column flow packed the 24-field company block into six
+   implicit columns, so every label wrapped to two or three lines. */
+.topGrid .fields {
+  display: grid;
+  gap: var(--space-3) var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  margin: 0;
+}
+
+/* A long unbroken value (an email, a reference) must wrap inside its field:
+   the shared field grid sizes its column to the value's min-content, which
+   pushed the whole card past a phone screen. */
+.topGrid .fields > * {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.topGrid .fields dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The Government ID field carries the scan when no number is recorded, so it
+   takes the full row instead of being crammed beside the ID type. */
+.govIdField {
+  grid-column: 1 / -1;
+}
+
+.govIdField dd {
+  display: flex;
+  align-items: center;
+}
+
+.govIdField img {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+}
+
+/* The identity card's image block. A rule above it, so the scan reads as one
+   more fact about this record and not as a card inside a card. */
+.groupFooter {
+  min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/*
+ * One solid, unmistakable treatment per action so function reads off color
+ * as well as text. Higher specificity than the design-system variants so the
+ * tone wins regardless of bundle order; every fill pairs a dark tone with
+ * white text at AA contrast. The uniform disabled rule below outranks them
+ * all so a busy control always greys.
+ */
+.actionButtons .toneAccent {
+  background-color: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  color: #ffffff;
+}
+
+.actionButtons .toneAccent:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.actionButtons .toneSlate {
+  background-color: var(--color-text-secondary);
+  border-color: var(--color-text-secondary);
+  color: #ffffff;
+}
+
+.actionButtons .toneSlate:hover:not(:disabled) {
+  filter: brightness(1.3);
+}
+
+.actionButtons .toneInfo {
+  background-color: var(--color-info);
+  border-color: var(--color-info);
+  color: #ffffff;
+}
+
+.actionButtons .toneInfo:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.actionButtons button:disabled {
+  background-color: var(--color-state-disabled-bg);
+  color: var(--color-state-disabled-text);
+  border-color: var(--color-border-default);
+}
+
+.actionsTitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Accordion disclosure for payment history: full-width bar with a rotating
+   chevron. Native <details> behavior only (the `name` attribute groups them
+   where supported); no JS state, keyboard-free. */
+.history {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface);
+}
+
+.history summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  font-size: var(--text-body-s);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-control);
+}
+
+.history summary::-webkit-details-marker {
+  display: none;
+}
+
+.history summary:hover {
+  background-color: var(--color-state-hover);
+}
+
+.history summary:focus-visible {
+  outline: 3px solid var(--color-state-focus);
+  outline-offset: 2px;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--transition-fast);
+}
+
+.history[open] .chevron {
+  transform: rotate(45deg);
+}
+
+.history[open] summary {
+  border-bottom: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+/* aria-disabled keeps the button focusable so its reason stays perceivable;
+   the native disabled look is mirrored without removing it from the tab order. */
+.actionButtons [aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Payment history table: desktop keeps the wide ledger; phones collapse rows
+   to labelled cards using each cell's data-label. */
+.history table {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .history table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  .history {
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+
+  .history summary {
+    border: 1px solid var(--color-border-default);
+  }
+
+  div.history.history table {
+    min-width: 0;
+  }
+
+  .history table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .history thead {
+    display: none;
+  }
+
+  .history tbody {
+    display: block;
+  }
+
+  .history tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .history tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .history tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .history tbody > tr > td > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .history tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .history tbody > tr > td:not([data-label])::before,
+  .history tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+
+  .history tbody > tr > td[data-label=''] {
+    justify-content: flex-end;
+  }
+}

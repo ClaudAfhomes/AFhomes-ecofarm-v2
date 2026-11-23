@@ -10,6 +10,7 @@ export interface TopbarProps {
   actions?: ReactNode;
   /** Optional leading content for mobile (e.g., logo) when menu is hidden on mobile. */
   leading?: ReactNode;
+  context?: ReactNode;
   /** When true, hide the menu button on mobile (<640px) - used when bottom nav provides drawer access. */
   hideMenuOnMobile?: boolean;
   /**
@@ -27,6 +28,7 @@ export function Topbar({
   menuLabel = 'Open menu',
   actions,
   leading,
+  context,
   hideMenuOnMobile = false,
   menuPosition = 'left',
 }: TopbarProps) {
@@ -43,6 +45,7 @@ export function Topbar({
         ) : (
           <span className={styles.menuOnDesktopOnly}>{menuBtn}</span>
         )}
+        {context}
       </div>
       {actions || menuPosition === 'right' ? (
         <div className={styles.actions}>

@@ -1,0 +1,268 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 639px) {
+  .page {
+    overflow-x: clip;
+  }
+
+  .tableWrap.tableWrap {
+    overflow-x: clip;
+  }
+}
+
+.tableWrap {
+  margin-top: var(--space-4);
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (min-width: 640px) {
+  .tableWrap > table {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 639px) {
+  div.tableWrap.tableWrap > table {
+    min-width: 0;
+  }
+
+  .tableWrap > table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tableWrap thead {
+    display: none;
+  }
+
+  .tableWrap tbody {
+    display: block;
+  }
+
+  .tableWrap tbody > tr {
+    display: block;
+    position: relative;
+    max-width: 100%;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background-color: var(--color-bg-surface-raised);
+    margin-bottom: var(--space-3);
+    padding: var(--space-2);
+  }
+
+  .tableWrap tbody > tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .tableWrap tbody > tr > td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    text-align: right;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tableWrap tbody > tr > td > * {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .tableWrap tbody > tr > td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: var(--text-caption);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    text-align: left;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+  }
+
+  .tableWrap tbody > tr > td:not([data-label])::before,
+  .tableWrap tbody > tr > td[data-label='']::before {
+    display: none;
+  }
+}
+
+/*
+ * FilterBar wraps `filters` in a flex item and SearchField/Select roots are
+ * width:100%, so the primitive stacks each control on its own row. Flatten the
+ * wrappers (display: contents) so every control is a direct flex item of the
+ * bar, then order them into two rows: row 1 search/report/type/status, row 2
+ * dates + quick ranges + exports (right-aligned).
+ */
+.toolbar > div {
+  gap: var(--space-3);
+}
+
+.toolbar > div > :first-child {
+  order: 1;
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+
+.toolbar > div > :nth-child(2),
+.filterRow {
+  display: contents;
+}
+
+.filterRow > * {
+  order: 1;
+  flex: 1 1 180px;
+  max-width: 260px;
+  min-width: 0;
+}
+
+.rowBreak {
+  order: 2;
+  flex: 0 0 100%;
+  height: 0;
+  max-width: none;
+}
+
+.filterRow > .dateRange,
+.filterRow > .segmented {
+  order: 3;
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.toolbar > div > :last-child {
+  order: 3;
+  margin-left: auto;
+}
+
+.dateRange {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Quick ranges read as one segmented control; handlers stay on the buttons. */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-control);
+  background: var(--color-bg-surface-raised);
+}
+
+.segmented > button {
+  min-height: calc(var(--control-md) - 6px);
+  border-radius: calc(var(--radius-control) - 2px);
+}
+
+.exportGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 639px) {
+  .toolbar > div > :first-child,
+  .filterRow > *,
+  .filterRow > .dateRange,
+  .filterRow > .segmented {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .rowBreak {
+    display: none;
+  }
+
+  .dateRange > * {
+    flex: 1 1 0;
+  }
+
+  .toolbar > div > :last-child {
+    margin-left: 0;
+  }
+
+  .segmented > button {
+    flex: 1 1 auto;
+    padding-inline: var(--space-2);
+    white-space: nowrap;
+  }
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.badges > li {
+  min-width: 0;
+}
+.summaryLabel {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+.loadingGrid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.clickableRow {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .clickableRow:hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+.clickableRow:focus-visible {
+  outline: 2px solid var(--color-state-focus);
+  outline-offset: -2px;
+}
+
+.detailSection {
+  margin-top: 16px;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.actionsRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}

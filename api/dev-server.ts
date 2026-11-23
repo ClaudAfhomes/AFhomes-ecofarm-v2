@@ -19,12 +19,19 @@ import { fileURLToPath, URL } from 'node:url';
 
 import { findRouteCoverageGaps } from './_lib/route-coverage.js';
 import { getSupabaseEnv } from './_lib/env.js';
-import { findMissingSchemaRelations } from './_lib/schema-check.js';
+import { toErrorEnvelope } from './_lib/envelope.js';
 import { routeRequest } from './_lib/router.js';
 
 // ---------------------------------------------------------------------------
 // Load root .env (Node-compatible, no Vite). Mirrors supabase/seed.ts.
+// Root `.env.local` is the documented single override file (see AGENTS.md),
+// so it must be loaded here: the previous version only read root `.env` plus
+// the per-app files, which meant a root-only setup left SUPABASE_URL and the
+// service key empty and every authenticated call failed. Real process env
+// (shell / Vercel dashboard) always wins; among files, later files win so
+// apps/<app>/.env.local can still override the shared root file.
 // ---------------------------------------------------------------------------
+const initialEnvKeys = new Set(Object.keys(process.env));
 function loadEnvFile(path: string) {
   try {
     const content = fs.readFileSync(path, 'utf8');
@@ -34,12 +41,25 @@ function loadEnvFile(path: string) {
       const eq = trimmed.indexOf('=');
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim();
-      if (!(key in process.env) && value) process.env[key] = value;
+      let value = trimmed.slice(eq + 1).trim();
+      // Allow quoted values pasted from dashboards (`KEY="val"`).
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!key || !value) continue;
+      // Never overwrite a real environment variable; files only fill gaps
+      // (later files overwrite earlier files so app-specific wins over root).
+      if (initialEnvKeys.has(key)) continue;
+      process.env[key] = value;
     }
   } catch {}
 }
 loadEnvFile('.env');
+loadEnvFile('.env.local');
 loadEnvFile('apps/web/.env.local');
 loadEnvFile('apps/admin/.env.local');
 
@@ -100,19 +120,20 @@ const server = http.createServer(async (req, res) => {
     query,
     headers: toVercelHeaders(req.headers),
     body,
+    socket: { remoteAddress: req.socket.remoteAddress },
     url: pathname + url.search,
   };
 
   // Adapt Node ServerResponse to the VercelResponse shape handlers expect.
-  const headersOut: Record<string, string> = {};
+  const headersOut: Record<string, string | string[]> = {};
   let statusCode = 200;
   const vercelRes: Record<string, unknown> & {
-    setHeader: (n: string, v: string) => void;
+    setHeader: (n: string, v: string | string[]) => void;
     status: (c: number) => typeof vercelRes;
     json: (b: unknown) => void;
     end: () => void;
   } = {
-    setHeader: (n: string, v: string) => {
+    setHeader: (n: string, v: string | string[]) => {
       headersOut[n.toLowerCase()] = v;
     },
     status: (code: number) => {
@@ -149,10 +170,9 @@ const server = http.createServer(async (req, res) => {
   try {
     const handled = await routeRequest(vercelReq, vercelRes);
     if (!handled) {
+      const { error } = toErrorEnvelope('NOT_FOUND', `No handler for ${pathname}`, 404);
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({ error: { code: 'NOT_FOUND', message: `No handler for ${pathname}` } }),
-      );
+      res.end(JSON.stringify({ error }));
       console.log(`[dev-server] ${method} ${pathname} -> 404 (no handler)`);
     }
   } catch (e) {
@@ -160,8 +180,9 @@ const server = http.createServer(async (req, res) => {
     // eslint-disable-next-line no-console
     console.error(`[dev-server] request error for ${method} ${pathname}:`, err?.message ?? err);
     if (!res.headersSent) {
+      const { error } = toErrorEnvelope('INTERNAL', 'Internal server error', 500);
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'INTERNAL', message: 'Internal server error' } }));
+      res.end(JSON.stringify({ error }));
     }
   }
 });
@@ -187,30 +208,31 @@ for (const gap of findRouteCoverageGaps(
   );
 }
 
-// Schema self-check: probe the messaging tables via PostgREST so a missing
-// migration is caught at startup (loud) instead of every endpoint returning
-// "Could not find the table 'public.Conversation' in the schema cache".
+// Schema self-check: probe the AFHomes foundation tables via PostgREST so a
+// missing migration is caught at startup (loud) instead of every endpoint
+// returning "Could not find the table ... in the schema cache".
 // Skipped when Supabase is not configured (mock/dev-server-only mode).
+const REQUIRED_TABLES = ['modules', 'roles', 'departments', 'staff_users'] as const;
+
 void (async () => {
   const { url, serviceKey } = getSupabaseEnv();
   if (!url || !serviceKey) return;
   const { createClient } = await import('@supabase/supabase-js');
   const svc = createClient(url, serviceKey, { auth: { autoRefreshToken: false } });
-  try {
-    const missing = await findMissingSchemaRelations(svc as never);
-    if (missing.length > 0) {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[dev-server] FATAL: messaging schema missing (${missing.join(', ')}) - run \`pnpm db:migrate\` or apply supabase/migrations/20261008000001_messaging.sql.`,
-      );
-    }
-  } catch (e) {
+  const missing: string[] = [];
+  for (const table of REQUIRED_TABLES) {
+    const { error } = await svc.from(table).select('*').limit(1);
+    if (error) missing.push(table);
+  }
+  if (missing.length > 0) {
     // eslint-disable-next-line no-console
-    console.error('[dev-server] schema self-check failed:', (e as Error).message);
+    console.error(
+      `[dev-server] FATAL: AFHomes schema incomplete (missing: ${missing.join(', ')}) - run \`pnpm db:migrate\`.`,
+    );
   }
 })();
 
-server.listen(port, () => {
+server.listen(port, process.env.AFHOMES_DEV_HOST ?? '::', () => {
   // eslint-disable-next-line no-console
   console.log(`[dev-server] API listening on http://localhost:${port} (api/v1/*)`);
   // eslint-disable-next-line no-console

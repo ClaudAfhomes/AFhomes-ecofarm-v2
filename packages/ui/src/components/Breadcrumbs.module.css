@@ -21,13 +21,32 @@
 .link {
   color: var(--color-text-secondary);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
 }
 
 .link:hover {
   color: var(--color-brand-primary);
-  text-decoration: underline;
+}
+
+.group {
+  color: var(--color-text-muted);
+}
+
+.separator {
+  display: inline-flex;
+  color: var(--color-text-muted);
+  opacity: 0.6;
 }
 
 .current {
-  color: var(--color-text-muted);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  .link {
+    min-height: 2.75rem;
+  }
 }

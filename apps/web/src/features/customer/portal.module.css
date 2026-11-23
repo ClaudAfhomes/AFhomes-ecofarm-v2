@@ -1,0 +1,475 @@
+.card {
+  background: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg, 12px);
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(16 24 40 / 6%));
+}
+
+/* Spacing for the shared photo editor, matching the gap below each `.card`. */
+.photoSlot {
+  margin-bottom: var(--space-5);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.selectLabel {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 20rem;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-body-s);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--text-h3);
+  color: var(--color-text-primary);
+}
+
+.fieldList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  margin: 0;
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.fieldValue {
+  margin: 0;
+  font-size: var(--text-body-m);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* A claim code is typed or pasted and read back by a member, so it gets a
+   monospace face and generous letter spacing to make transposed characters
+   visible. `input` is used rather than a styled div so the field is keyboard-,
+   paste- and mobile-native with no picker or custom key handling. */
+.claimLabel {
+  display: block;
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.claimInput {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  min-height: var(--control-md);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface-raised);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  transition: border-color var(--motion-150) var(--ease-out);
+}
+
+.claimInput:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 1px;
+}
+
+.claimInput:disabled {
+  opacity: 0.6;
+}
+
+.notice {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-s);
+}
+
+.notice a {
+  color: var(--color-brand-primary);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.notice a:hover {
+  color: var(--color-brand-strong);
+}
+
+.noticeWarning {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-light);
+  color: var(--color-accent-strong);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-s);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.table th {
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+/* Display-only: stored values stay lowercase codes; the cell reads as words. */
+.capitalize::first-letter {
+  text-transform: uppercase;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.positive {
+  color: var(--color-success-strong);
+  font-weight: 600;
+}
+
+.negative {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.balance {
+  font-size: var(--text-metric);
+  font-weight: 600;
+  color: var(--color-brand-primary);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 var(--space-1);
+}
+
+.balanceCaption {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-body-s);
+}
+
+.credentialBox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-subtle);
+}
+
+.credentialText {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.credentialCode {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-h3);
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Digital VIP card: tier artwork beside the member details, QR + code below. */
+.digitalCard {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-bottom: var(--space-5);
+}
+
+.digitalArt {
+  width: 100%;
+  max-width: 26rem;
+  height: auto;
+  aspect-ratio: 2560 / 1597;
+  object-fit: cover;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border-default);
+}
+
+.digitalDetails {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.digitalRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.digitalValue {
+  margin: 0;
+  font-size: var(--text-body-m);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.digitalActions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* KPI summary grid - AFHomes dashboard queue-card grammar. */
+.kpiGrid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: var(--space-4);
+  padding: 0;
+  margin: 0 0 var(--space-6);
+}
+
+.kpiSkeleton {
+  height: 100%;
+  min-height: 168px;
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 30rem) {
+  .kpiGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  /* An odd last tile (often a date) takes the full row instead of truncating. */
+  .kpiGrid > li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Small screens: keep wide tables usable without breaking the card layout. */
+.tableScroll {
+  overflow-x: auto;
+}
+
+.tableScroll .table {
+  min-width: 34rem;
+}
+
+@media (max-width: 48rem) {
+  .card {
+    padding: var(--space-4);
+  }
+
+  .balance {
+    font-size: 1.75rem;
+  }
+
+  .credentialCode {
+    font-size: var(--text-body-m);
+  }
+}
+
+.digitalCard,
+.credentialBox {
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 430px) {
+  .digitalActions {
+    flex-direction: column;
+  }
+  .digitalActions > button {
+    width: 100%;
+  }
+  .kpiGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* KPI Cards for OST Dashboard */
+.kpiCard {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  display: grid;
+  gap: var(--space-2);
+  transition: box-shadow var(--transition-fast);
+}
+
+.kpiCard:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.kpiIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  color: #fff;
+}
+
+.kpiCard dt {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.kpiCard dd {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* `.kpiCard dd` outranks a lone class, so qualify it to stay a caption. */
+.kpiCard .kpiSubLabel {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+}
+
+/* OST list tables (dashboard, sales, commissions). */
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.tableWrap table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-size: var(--text-body-s);
+}
+
+.tableWrap th,
+.tableWrap td {
+  text-align: left;
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.tableWrap th {
+  background: var(--color-bg-subtle);
+  font-size: var(--text-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.tableWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (hover: hover) {
+  .tableWrap tbody tr:hover td {
+    background: color-mix(in srgb, var(--color-brand-soft) 55%, transparent);
+  }
+}
+
+.reportPeriod {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  font-size: var(--text-body-s);
+  color: var(--color-text-secondary);
+}
+
+.kpiGrid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: var(--space-4);
+  padding: 0;
+  margin: 0 0 var(--space-6);
+}
+
+.kpiSkeleton {
+  height: 100%;
+  min-height: 168px;
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 30rem) {
+  .kpiGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  /* An odd last tile (often a date) takes the full row instead of truncating. */
+  .kpiGrid > li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,0 +1,1087 @@
+﻿import { deflateRawSync } from 'node:zlib';
+import { describe, expect, it } from 'vitest';
+import {
+  CUSTOMER_CATEGORY_LABELS,
+  CUSTOMER_EXPORT_COLUMNS,
+  compareMoney,
+  mapSourceStatus,
+  normalizeTier,
+  parseGoogleSheetUrl,
+  resolveCustomerCategory,
+  type CustomerExportRow,
+} from '@afhomes/contracts';
+import {
+  MAX_IMPORT_ROWS,
+  MEMBERSHIP_TEMPLATE_SECTIONS,
+  MEMBERSHIP_TEMPLATE_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_V2_COLUMNS,
+  MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS,
+  MEMBERSHIP_TEMPLATE_V2_SECTIONS,
+  TEMPLATE_STATUS_OPTIONS,
+  customerExportCsv,
+  customerExportXlsx,
+  isLegacyCompanyMembershipTemplate,
+  isV2MembershipTemplate,
+  matrixToRecords,
+  membershipTemplateCsv,
+  membershipTemplateSectionedXlsx,
+  membershipTemplateV2Csv,
+  membershipTemplateV2ReadmeRows,
+  membershipTemplateV2SectionedXlsx,
+  membershipTemplateXlsx,
+  mergeSectionedTemplateSheets,
+  mergeV2SectionedTemplateSheets,
+  looksLikeSectionBandRow,
+  neutralizeFormula,
+  parseCsvMatrix,
+  parseOpeningBalance,
+  parseXlsxMatrix,
+  parseXlsxSheets,
+  remapCompanyTemplateMatrix,
+  remapV2TemplateMatrix,
+  validateImportRow,
+  type ImportContext,
+} from './customer-import.js';
+import {
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+  LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX,
+  LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+  MEMBERSHIP_TEMPLATE_COLUMNS,
+  MEMBERSHIP_TEMPLATE_POSITION_MAP,
+} from '@afhomes/contracts';
+import { toXlsx, toXlsxMulti } from './report-export.js';
+
+const ctx = (overrides: Partial<ImportContext> = {}): ImportContext => ({
+  plansByTier: new Map([
+    ['GOLD', { id: 'plan-gold', code: 'GOLD' }],
+    ['SILVER', { id: 'plan-silver', code: 'SILVER' }],
+    ['BRONZE', { id: 'plan-bronze', code: 'BRONZE' }],
+  ]),
+  customerByNumber: new Map(),
+  customerByEmail: new Map(),
+  membershipByNumber: new Map(),
+  referralStaffByCode: new Map(),
+  seenMembershipNumbers: new Map(),
+  ...overrides,
+});
+
+const TODAY = '2026-10-19';
+
+const baseFields = (overrides: Record<string, string> = {}): Record<string, string> => ({
+  first_name: 'Juan',
+  last_name: 'Cruz',
+  email: 'juan.cruz@example.com',
+  mobile: '09171234567',
+  payment_scheme: 'spot_cash',
+  historical_sale_total: '312000.00',
+  payment_date: '2025-01-01',
+  payment_method: 'cash',
+  source_status: 'Pending',
+  ...overrides,
+});
+
+describe('canonical import birth dates and secondary contacts', () => {
+  it('validates existing VIP IDs against the official allocator format', () => {
+    const invalid = validateImportRow(2, baseFields({ existing_vip_control_number: '26101400003G1C01X' }), ctx(), TODAY);
+    expect(invalid.errors).toContainEqual(expect.objectContaining({ field: 'existing_vip_control_number' }));
+    for (const suffix of ['S', 'N']) {
+      const valid = validateImportRow(2, baseFields({ existing_vip_control_number: `26101400003G1C01${suffix}` }), ctx(), TODAY);
+      expect(valid.errors.some(error => error.field === 'existing_vip_control_number')).toBe(false);
+    }
+  });
+  it('holds conflicting registered identity and retains verified spelling on matching updates', () => {
+    const identity = {
+      first_name: 'JUAN',
+      last_name: 'CRUZ',
+      middle_name: null,
+      suffix: null,
+      email: 'juan.cruz@example.com',
+      phone: '09171234567',
+      birth_date: null,
+    };
+    const context = ctx({
+      customerByEmail: new Map([['juan.cruz@example.com', { id: 'customer' }]]),
+      customerIdentityById: new Map([['customer', identity]]),
+    });
+    const unchanged = validateImportRow(2, baseFields(), context, TODAY);
+    expect(unchanged.errors).toEqual([]);
+    expect(unchanged.normalized?.person.firstName).toBe('JUAN');
+    const disagreement = validateImportRow(
+      2,
+      baseFields({ first_name: 'Different' }),
+      context,
+      TODAY,
+    );
+    expect(disagreement.action).toBe('CONFLICT');
+    expect(disagreement.errors.some((error) => error.field === 'first_name')).toBe(true);
+  });
+  it.each(['2099-01-01', `${new Date().getUTCFullYear() - 121}-01-01`, '1990-02-30'])(
+    'rejects invalid primary and secondary DOB %s',
+    (birthDate) => {
+      for (const field of ['birth_date', 'secondary_birth_date']) {
+        const row = validateImportRow(
+          2,
+          baseFields({ vip_tier: 'GOLD', [field]: birthDate }),
+          ctx(),
+          TODAY,
+        );
+        expect(row.errors.some((error) => error.field === field)).toBe(true);
+        expect(row.normalized).toBeNull();
+      }
+    },
+  );
+  it.each([
+    '09ABC123456',
+    'PHONE123',
+    '0917TEST',
+    '0917-123-4567',
+    '+639171234567',
+    '09171234567 ',
+    '9171234567',
+  ])('rejects secondary phone %s as an error', (phone) => {
+    const row = validateImportRow(
+      2,
+      baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.errors).toContainEqual({
+      field: 'secondary_mobile',
+      message: 'Use exactly 11 digits, including the leading zero; no spaces or separators',
+    });
+    expect(row.normalized).toBeNull();
+  });
+  it.each(['09171234567'])('preserves the leading zero of valid secondary phone %s', (phone) => {
+    const row = validateImportRow(
+      2,
+      baseFields({ vip_tier: 'GOLD', secondary_mobile: phone }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.errors).toEqual([]);
+    expect(row.fields.secondary_mobile).toBe('09171234567');
+    expect(row.normalized?.secondaryNote).toContain('09171234567');
+  });
+  it('uses canonical name length/email rules and normalized preview fields', () => {
+    expect(
+      validateImportRow(2, baseFields({ first_name: 'A'.repeat(81) }), ctx(), TODAY).validation,
+    ).toBe('error');
+    expect(
+      validateImportRow(2, baseFields({ email: 'qa@invalid..com' }), ctx(), TODAY).validation,
+    ).toBe('error');
+    const row = validateImportRow(
+      2,
+      baseFields({ first_name: 'claud', email: 'CLAUD@Example.COM' }),
+      ctx(),
+      TODAY,
+    );
+    expect(row.fields.first_name).toBe('CLAUD');
+    // The original text stays in the row as import evidence; email is never uppercased.
+    expect(JSON.parse(row.fields.source_names!)).toMatchObject({ first_name: 'claud' });
+    expect(row.fields.email).toBe('claud@example.com');
+  });
+});
+
+describe('XLSX matrix reader', () => {
+  const xlsxOf = (rows: string[][]) =>
+    toXlsx(
+      'Sheet1',
+      rows[0]!.map((label) => ({ label, type: 'text' as const })),
+      rows.slice(1),
+    );
+
+  it('parses a stored workbook into a full matrix', () => {
+    const matrix = parseXlsxMatrix(
+      xlsxOf([
+        ['first_name', 'email'],
+        ['Juan', 'j@example.com'],
+        ['Maria', 'm@example.com'],
+      ]),
+    );
+    expect(matrix[0]).toEqual(['first_name', 'email']);
+    expect(matrix[1]).toEqual(['Juan', 'j@example.com']);
+    expect(matrix[2]).toEqual(['Maria', 'm@example.com']);
+  });
+
+  it('decodes deflated entries, the form real spreadsheets use', () => {
+    // Re-emit one stored workbook with its worksheet deflated (method 8).
+    const stored = xlsxOf([
+      ['first_name', 'vip_tier'],
+      ['Juan', 'GOLD'],
+    ]);
+    const text = Buffer.from(stored).toString('latin1');
+    const name = 'xl/worksheets/sheet1.xml';
+    const at = text.indexOf(name);
+    expect(at).toBeGreaterThan(-1);
+    const dataStart = at + name.length;
+    // Stored entries: [local header][name][raw]. Rebuild with method 8.
+    const view = new DataView(stored.buffer, stored.byteOffset, stored.byteLength);
+    let cursor = 0;
+    let sheetRaw = new Uint8Array();
+    while (cursor + 30 <= stored.length && view.getUint32(cursor, true) === 0x04034b50) {
+      const size = view.getUint32(cursor + 18, true);
+      const nameLength = view.getUint16(cursor + 26, true);
+      const extraLength = view.getUint16(cursor + 28, true);
+      const entryName = Buffer.from(stored.slice(cursor + 30, cursor + 30 + nameLength)).toString(
+        'utf8',
+      );
+      const start = cursor + 30 + nameLength + extraLength;
+      if (entryName === name) sheetRaw = stored.slice(start, start + size);
+      cursor = start + size;
+    }
+    expect(sheetRaw.length).toBeGreaterThan(0);
+    const deflated = deflateRawSync(sheetRaw);
+    const crc = (() => {
+      let table: number[] | null = null;
+      const make = () => {
+        const t: number[] = [];
+        for (let n = 0; n < 256; n += 1) {
+          let c = n;
+          for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+          t.push(c >>> 0);
+        }
+        return t;
+      };
+      table = make();
+      let value = 0xffffffff;
+      for (const byte of deflated) value = table[(value ^ byte) & 0xff]! ^ (value >>> 8);
+      return (value ^ 0xffffffff) >>> 0;
+    })();
+    const nameBytes = Buffer.from(name, 'utf8');
+    const local = Buffer.alloc(30 + nameBytes.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(deflated.length, 18);
+    local.writeUInt32LE(sheetRaw.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    nameBytes.copy(local, 30);
+    const central = Buffer.alloc(46 + nameBytes.length);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(8, 8);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(deflated.length, 20);
+    central.writeUInt32LE(sheetRaw.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(0, 42);
+    nameBytes.copy(central, 46);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(1, 8);
+    end.writeUInt16LE(1, 10);
+    end.writeUInt32LE(central.length, 12);
+    end.writeUInt32LE(local.length + deflated.length, 16);
+    const rebuilt = new Uint8Array(Buffer.concat([local, deflated, central, end]));
+    // This old synthetic ZIP omits workbook relationships: fail explicitly.
+    expect(() => parseXlsxMatrix(rebuilt)).toThrow();
+  });
+
+  it('rejects a workbook with no worksheet', () => {
+    expect(() => parseXlsxMatrix(new Uint8Array([1, 2, 3]))).toThrow();
+  });
+});
+
+describe('CSV matrix reader', () => {
+  it('parses quoted commas, quotes, and CRLF', () => {
+    const matrix = parseCsvMatrix(
+      'first_name,notes\r\n"Juan, Jr.","said ""hi"""\r\nMaria,plain\r\n',
+    );
+    expect(matrix).toEqual([
+      ['first_name', 'notes'],
+      ['Juan, Jr.', 'said "hi"'],
+      ['Maria', 'plain'],
+    ]);
+  });
+  it('preserves UTF-8 names and strips the BOM', () => {
+    const matrix = parseCsvMatrix('ï»¿first_name,last_name\nMarÃ­a,DELA PEÃ‘A\n');
+    expect(matrix[1]).toEqual(['MarÃ­a', 'DELA PEÃ‘A']);
+  });
+  it('rejects an unterminated quoted field', () => {
+    expect(() => parseCsvMatrix('a,b\n"oops\n')).toThrow();
+  });
+});
+
+describe('template and headers', () => {
+  it('emits every template column in the single-sheet XLSX template', () => {
+    const matrix = parseXlsxMatrix(membershipTemplateXlsx());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+  });
+  it('emits README plus four section tabs in the legacy sectioned XLSX template', () => {
+    const sheets = parseXlsxSheets(membershipTemplateSectionedXlsx());
+    expect(sheets.map((s) => s.name)).toEqual([
+      'README',
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+    ]);
+    const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
+    for (const section of MEMBERSHIP_TEMPLATE_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([...section.headers]);
+    const { matrix } = mergeSectionedTemplateSheets(sheets);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+  });
+  it('emits the guided workbook with split names, split address and dropdowns', () => {
+    const bytes = membershipTemplateV2SectionedXlsx();
+    const sheets = parseXlsxSheets(bytes);
+    expect(sheets.map((s) => s.name)).toEqual([
+      'README',
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+    ]);
+    const byName = new Map(sheets.map((s) => [s.name, s.matrix[0]]));
+    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
+      expect(byName.get(section.sheet)).toEqual([
+        ...section.columns.map((column) => column.header),
+      ]);
+    // FULL NAME is gone; the name columns are the operator's own split.
+    const primary = byName.get('Primary')!;
+    expect(primary).toContain('FIRST NAME');
+    expect(primary).toContain('LAST NAME');
+    expect(primary).not.toContain('FULL NAME');
+    // Dropdowns live in the worksheet XML. Entries are stored uncompressed,
+    // so the validation list is readable in the raw bytes.
+    const xml = Buffer.from(bytes).toString('latin1');
+    expect(xml).toContain('<dataValidation type="list"');
+    expect(xml).toContain('GOLD,SILVER,BRONZE');
+    expect(xml).toContain('Jr.,Sr.,II,III,IV');
+    // The sectioned workbook merges to the canonical guided matrix.
+    const { matrix } = mergeV2SectionedTemplateSheets(sheets);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+  });
+  it('offers only values the validator accepts, on the fixed-value columns', () => {
+    for (const status of TEMPLATE_STATUS_OPTIONS) expect(mapSourceStatus(status)).not.toBeNull();
+    const dropdownColumns = MEMBERSHIP_TEMPLATE_V2_SECTIONS.flatMap((section) =>
+      section.columns.filter((column) => column.values),
+    ).map((column) => column.header);
+    expect(dropdownColumns).toEqual([
+      'STATUS',
+      'SUFFIX',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'VIP PACKAGE',
+      'PAYMENT TERMS',
+      'PAYMENT TYPE',
+    ]);
+  });
+  it('lists every fixed-value field in the README, derived from the registry', () => {
+    const sheets = parseXlsxSheets(membershipTemplateV2SectionedXlsx());
+    const readme = sheets.find((s) => s.name === 'README')!.matrix;
+    expect(readme[0]).toEqual(['Tab', 'Fill guide']);
+    const rows = membershipTemplateV2ReadmeRows();
+    // README body matches the builder rows exactly.
+    expect(readme.slice(1)).toEqual(rows);
+    // Guide block stays first; CSV states plainly it has no dropdowns.
+    expect(rows.slice(0, 7).map((r) => r[0])).toEqual([
+      'Primary',
+      'Supplementary',
+      'Related',
+      'Package',
+      'Dropdowns',
+      'Dates',
+      'Rows',
+    ]);
+    expect(rows[7]).toEqual(['CSV', 'CSV has no dropdowns. See lists below.']);
+    expect(rows[8]).toEqual(['Allowed values', 'Use only these values.']);
+    // One row per distinct header with values, exact registry order/values.
+    const seen = new Set<string>();
+    const expected: string[][] = [];
+    for (const section of MEMBERSHIP_TEMPLATE_V2_SECTIONS)
+      for (const column of section.columns) {
+        if (!column.values || seen.has(column.header)) continue;
+        seen.add(column.header);
+        expected.push([column.header, [...column.values].join(', ')]);
+      }
+    expect(rows.slice(9)).toEqual(expected);
+    expect(rows.slice(9).map((r) => r[0])).toEqual([
+      'STATUS',
+      'SUFFIX',
+      'GENDER',
+      'CITIZENSHIP',
+      'CIVIL STATUS',
+      'VIP PACKAGE',
+      'PAYMENT TERMS',
+      'PAYMENT TYPE',
+    ]);
+    // Guide sentences stay short (max 6 words per sentence).
+    for (const [, guide] of rows.slice(0, 9))
+      for (const sentence of guide.split('.').map((s) => s.trim()).filter(Boolean))
+        expect(sentence.split(/\s+/).length).toBeLessThanOrEqual(6);
+  });
+  it('emits the guided band row above the guided columns in the CSV template', () => {
+    const matrix = parseCsvMatrix(membershipTemplateV2Csv());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_SECTION_BANDS]);
+    expect(matrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+    expect(looksLikeSectionBandRow(matrix[0]!)).toBe(true);
+  });
+  it('emits the section band row above the 44 columns in the legacy CSV template', () => {
+    const matrix = parseCsvMatrix(membershipTemplateCsv());
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_SECTION_BANDS]);
+    expect(matrix[1]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(looksLikeSectionBandRow(matrix[0]!)).toBe(true);
+  });
+  it('recognizes only a true section band row', () => {
+    const bands = [...MEMBERSHIP_TEMPLATE_SECTION_BANDS];
+    expect(looksLikeSectionBandRow(bands)).toBe(true);
+    // A couple of cleared cells still strip; a wrong label never does.
+    const cleared = [...bands];
+    cleared[0] = '';
+    cleared[20] = '  ';
+    expect(looksLikeSectionBandRow(cleared)).toBe(true);
+    const edited = [...bands];
+    edited[5] = 'STATUS';
+    expect(looksLikeSectionBandRow(edited)).toBe(false);
+    expect(looksLikeSectionBandRow([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    expect(looksLikeSectionBandRow(['Primary'])).toBe(false);
+    expect(looksLikeSectionBandRow(Array(44).fill(''))).toBe(false);
+  });
+  it('recognizes the superseded 45-column layout and nothing else', () => {
+    const legacy = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    expect(legacy).toHaveLength(45);
+    expect(isLegacyCompanyMembershipTemplate(legacy)).toBe(true);
+    // The current 44 headers are the new layout, not the legacy one.
+    expect(isLegacyCompanyMembershipTemplate([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    // A wrong header at the old position is a foreign file, never legacy:
+    // its data must not land on ost_ist_name.
+    const impostor = [...legacy];
+    impostor[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX] = 'EXTRA NOTES';
+    expect(isLegacyCompanyMembershipTemplate(impostor)).toBe(false);
+    // So is any other width or a shuffled row.
+    expect(isLegacyCompanyMembershipTemplate([...legacy, 'EXTRA'])).toBe(false);
+    expect(isLegacyCompanyMembershipTemplate([...legacy].reverse())).toBe(false);
+  });
+  it('keeps the legacy position map aligned with the current one', () => {
+    expect(MEMBERSHIP_TEMPLATE_COLUMNS).toHaveLength(44);
+    expect(MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(44);
+    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).toHaveLength(45);
+    expect(LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP[LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX]).toBeNull();
+    // Every other legacy position matches the current map exactly.
+    LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP.forEach((target, index) => {
+      if (index === LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX) return;
+      const current = index < LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? index : index - 1;
+      expect(target).toBe(MEMBERSHIP_TEMPLATE_POSITION_MAP[current]);
+    });
+    // The removed column now surfaces as an ignored column with a warning.
+    const legacyHeaders = [
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+      LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN,
+      ...MEMBERSHIP_TEMPLATE_COLUMNS.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+    ];
+    const legacyRow = legacyHeaders.map((header, index) =>
+      index === LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX ? 'OST Name' : `v${index}`,
+    );
+    const remapped = remapCompanyTemplateMatrix(
+      [legacyHeaders, legacyRow],
+      LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP,
+    );
+    expect(remapped.dropped.map((d) => d.header)).toContain('OST/IST NAME');
+    expect(remapped.matrix[0]).not.toContain('ost_ist_name');
+  });
+  it('flags unknown columns without failing the file', () => {
+    const { unknownHeaders, rows } = matrixToRecords([
+      ['first_name', 'vip_points_hack'],
+      ['Juan', '999'],
+    ]);
+    expect(unknownHeaders).toEqual(['vip_points_hack']);
+    expect(rows).toHaveLength(1);
+  });
+  it('skips fully blank rows', () => {
+    const { rows } = matrixToRecords([['first_name'], ['Juan'], [''], ['Maria']]);
+    expect(rows.map((r) => r.fields.first_name)).toEqual(['Juan', 'Maria']);
+  });
+});
+
+describe('tier and status mapping', () => {
+  it.each([
+    ['Gold', 'GOLD'],
+    ['GOLD', 'GOLD'],
+    ['gold', 'GOLD'],
+    [' Silver ', 'SILVER'],
+    ['bronze', 'BRONZE'],
+  ])('normalizes %s', (input, expected) => expect(normalizeTier(input)).toBe(expected));
+  it('rejects unknown tiers without guessing', () => {
+    expect(normalizeTier('Diamond')).toBeNull();
+    expect(normalizeTier('')).toBeNull();
+    expect(normalizeTier(undefined)).toBeNull();
+  });
+  it.each([
+    ['Active VIP', 'ACTIVE_VIP'],
+    ['Active', 'ACTIVE_VIP'],
+    ['Fully Paid', 'FULLY_PAID_AWAITING_ACTIVATION'],
+    ['Down Payment', 'DOWN_PAYMENT_COMPLETED'],
+    ['Partial', 'PARTIALLY_PAID'],
+    ['Reservation Paid', 'RESERVATION_PAID'],
+    ['Pending', 'PENDING'],
+    ['Inactive', 'INACTIVE'],
+    ['Suspended', 'SUSPENDED'],
+    ['Expired', 'EXPIRED'],
+    ['Cancelled', 'CANCELLED'],
+  ])('maps %s', (input, expected) => expect(mapSourceStatus(input)).toBe(expected));
+  it('rejects unknown statuses', () => {
+    expect(mapSourceStatus('Diamond')).toBeNull();
+  });
+});
+
+describe('shared category resolver', () => {
+  it('prefers membership state, then customer state, then money', () => {
+    const base = {
+      customerStatus: 'active',
+      membershipStatus: null,
+      verifiedTotal: '0.00',
+      priceTotal: '312000.00',
+    };
+    expect(resolveCustomerCategory({ ...base, membershipStatus: 'active' })).toBe('ACTIVE_VIP');
+    expect(resolveCustomerCategory({ ...base, membershipStatus: 'suspended' })).toBe('SUSPENDED');
+    expect(resolveCustomerCategory({ ...base, membershipStatus: 'expired' })).toBe('EXPIRED');
+    expect(resolveCustomerCategory({ ...base, membershipStatus: 'cancelled' })).toBe('CANCELLED');
+    expect(resolveCustomerCategory({ ...base, customerStatus: 'cancelled' })).toBe('CANCELLED');
+    expect(resolveCustomerCategory({ ...base, customerStatus: 'suspended' })).toBe('SUSPENDED');
+    expect(resolveCustomerCategory({ ...base, customerStatus: 'prospect' })).toBe('PENDING');
+    expect(resolveCustomerCategory({ ...base, customerStatus: 'active' })).toBe('ACTIVE');
+  });
+  it('derives money tiers from thresholds', () => {
+    const money = {
+      customerStatus: 'active',
+      membershipStatus: null,
+      priceTotal: '312000.00',
+      reservationFee: '10000.00',
+      requiredInitial: '124800.00',
+    };
+    expect(resolveCustomerCategory({ ...money, verifiedTotal: '312000.00' })).toBe(
+      'FULLY_PAID_AWAITING_ACTIVATION',
+    );
+    expect(resolveCustomerCategory({ ...money, verifiedTotal: '124800.00' })).toBe(
+      'DOWN_PAYMENT_COMPLETED',
+    );
+    expect(resolveCustomerCategory({ ...money, verifiedTotal: '10000.00' })).toBe(
+      'RESERVATION_PAID',
+    );
+    expect(resolveCustomerCategory({ ...money, verifiedTotal: '5000.00' })).toBe('PARTIALLY_PAID');
+  });
+  it('labels every category', () => {
+    expect(CUSTOMER_CATEGORY_LABELS.ACTIVE_VIP).toBe('Active VIP');
+    expect(Object.keys(CUSTOMER_CATEGORY_LABELS)).toHaveLength(11);
+  });
+  it('compares money exactly', () => {
+    expect(compareMoney('12480.00', '12480')).toBe(0);
+    expect(compareMoney('0.10', '0.2')).toBe(-1);
+    expect(compareMoney('nope', '1.00')).toBeNull();
+  });
+});
+
+describe('row validation', () => {
+  it('accepts a minimal pending row', () => {
+    const v = validateImportRow(2, baseFields(), ctx(), TODAY);
+    expect(v.errors).toEqual([]);
+    expect(v.action).toBe('CREATE');
+    expect(v.normalized?.customerStatus).toBe('prospect');
+  });
+  it('requires identity fields with per-field errors', () => {
+    const v = validateImportRow(
+      2,
+      { source_status: 'Pending', email: 'bad', mobile: '12' },
+      ctx(),
+      TODAY,
+    );
+    expect(v.errors).toContainEqual({ field: 'first_name', message: 'Required' });
+    expect(v.errors).toContainEqual({ field: 'last_name', message: 'Required' });
+    expect(v.errors).toContainEqual({ field: 'email', message: 'Invalid email' });
+    expect(v.errors).toContainEqual({
+      field: 'mobile',
+      message: 'Use exactly 11 digits, including the leading zero; no spaces or separators',
+    });
+    expect(v.action).toBe('CONFLICT');
+  });
+  it('demands tier and payment history for Active VIP, never inventing them', () => {
+    const noTier = validateImportRow(2, baseFields({ source_status: 'Active VIP' }), ctx(), TODAY);
+    expect(noTier.errors).toContainEqual({
+      field: 'vip_tier',
+      message: 'Tier is required for an Active VIP row',
+    });
+    const noPay = validateImportRow(
+      2,
+      baseFields({ source_status: 'Active VIP', vip_tier: 'GOLD' }),
+      ctx(),
+      TODAY,
+    );
+    expect(noPay.errors).toContainEqual({
+      field: 'payment_amount',
+      message: 'Payment history is required; economics are never invented',
+    });
+  });
+  it('accepts Gold secondary holders and rejects Silver/Bronze ones', () => {
+    const gold = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Active VIP',
+        vip_tier: 'GOLD',
+        payment_amount: '312000.00',
+        secondary_first_name: 'Rosa',
+        secondary_last_name: 'Cruz',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(gold.errors).toEqual([]);
+    expect(gold.normalized?.secondaryNote).toContain('ROSA CRUZ');
+    // Parts are joined by a real middle dot, never the mis-encoded "Â·".
+    const withEmail = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Active VIP',
+        vip_tier: 'GOLD',
+        payment_amount: '312000.00',
+        secondary_first_name: 'Rosa',
+        secondary_last_name: 'Cruz',
+        secondary_email: 'rosa@example.com',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(withEmail.normalized?.secondaryNote).toBe('ROSA CRUZ · rosa@example.com');
+    const silver = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Active',
+        vip_tier: 'SILVER',
+        payment_amount: '192000.00',
+        secondary_first_name: 'Rosa',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(silver.errors).toContainEqual({
+      field: 'secondary_first_name',
+      message: 'Secondary holder is Gold-only',
+    });
+  });
+  it('reconciles declared totals against the payment row', () => {
+    const v = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Partial',
+        vip_tier: 'GOLD',
+        payment_amount: '10000.00',
+        total_paid: '9999.00',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(v.errors).toContainEqual({
+      field: 'total_paid',
+      message: 'Must equal the supplied payment amount',
+    });
+  });
+  it('refuses future payment dates and negative balances', () => {
+    const future = validateImportRow(
+      2,
+      baseFields({
+        source_status: 'Partial',
+        vip_tier: 'GOLD',
+        payment_amount: '100.00',
+        payment_date: '2026-10-20',
+      }),
+      ctx(),
+      TODAY,
+    );
+    expect(future.errors).toContainEqual({
+      field: 'payment_date',
+      message: 'Historical payments cannot be dated in the future',
+    });
+    const negative = validateImportRow(
+      2,
+      baseFields({ current_points_balance: '-5' }),
+      ctx(),
+      TODAY,
+    );
+    expect(negative.errors).toContainEqual({
+      field: 'current_points_balance',
+      message: 'Must be a whole non-negative number',
+    });
+  });
+  it('flags formula-like content as warnings, never errors', () => {
+    const v = validateImportRow(2, baseFields({ notes: '=1+1' }), ctx(), TODAY);
+    expect(v.errors).toEqual([]);
+    expect(v.validation).toBe('warning');
+    expect(v.warnings).toContainEqual({
+      field: 'notes',
+      message: 'Formula-like content is stored as plain text',
+    });
+  });
+  it('matches duplicates by membership, customer number, then email', () => {
+    const matchCtx = ctx({
+      membershipByNumber: new Map([['MBS-000001', { id: 'mem-1', customerId: 'cus-1' }]]),
+      customerByNumber: new Map([['CUS-1', { id: 'cus-2', email: 'other@example.com' }]]),
+      customerByEmail: new Map([
+        ['juan.cruz@example.com', { id: 'cus-3' }],
+        ['member.one@example.com', { id: 'cus-1' }],
+      ]),
+    });
+    const byMember = validateImportRow(
+      2,
+      baseFields({
+        membership_number: 'MBS-000001',
+        email: 'member.one@example.com',
+        source_status: 'Suspended',
+      }),
+      matchCtx,
+      TODAY,
+    );
+    expect(byMember.action).toBe('UPDATE');
+    expect(byMember.customerId).toBe('cus-1');
+    const byEmail = validateImportRow(2, baseFields(), matchCtx, TODAY);
+    expect(byEmail.action).toBe('UPDATE');
+    expect(byEmail.customerId).toBe('cus-3');
+    const conflict = validateImportRow(
+      2,
+      baseFields({
+        membership_number: 'MBS-000001',
+        email: 'juan.cruz@example.com',
+        source_status: 'Suspended',
+      }),
+      matchCtx,
+      TODAY,
+    );
+    expect(conflict.action).toBe('CONFLICT');
+    expect(conflict.errors).toContainEqual({
+      field: 'email',
+      message: 'Email belongs to a different customer than the membership',
+    });
+  });
+  it('treats expired-without-member as a conflict and unknown numbers as warnings', () => {
+    const expired = validateImportRow(2, baseFields({ source_status: 'Expired' }), ctx(), TODAY);
+    expect(expired.action).toBe('CONFLICT');
+    const numbered = validateImportRow(2, baseFields({ customer_number: 'CUS-999' }), ctx(), TODAY);
+    expect(numbered.errors).toEqual([]);
+    expect(numbered.warnings).toContainEqual({
+      field: 'customer_number',
+      message: 'Unknown number: a new customer number will be generated',
+    });
+  });
+  it('rejects a second payment row for one membership in the same file', () => {
+    const c = ctx();
+    const first = baseFields({
+      membership_number: 'MBS-000002',
+      source_status: 'Partial',
+      vip_tier: 'GOLD',
+      payment_amount: '100.00',
+    });
+    expect(validateImportRow(2, first, c, TODAY).errors).toEqual([]);
+    const second = validateImportRow(3, first, c, TODAY);
+    expect(second.errors).toContainEqual({
+      field: 'payment_amount',
+      message:
+        'Multiple historical payments per membership are unsupported; use the normal payment workflow',
+    });
+  });
+  it('rejects an opening balance without a member row', () => {
+    const v = validateImportRow(2, baseFields({ current_points_balance: '5000' }), ctx(), TODAY);
+    expect(v.errors).toContainEqual({
+      field: 'current_points_balance',
+      message: 'An opening balance needs an active-member row',
+    });
+  });
+  it('parses opening balances strictly', () => {
+    expect(parseOpeningBalance('')).toBe(0);
+    expect(parseOpeningBalance('25000')).toBe(25000);
+    expect(parseOpeningBalance('-1')).toBeNull();
+    expect(parseOpeningBalance('1.5')).toBeNull();
+  });
+});
+
+describe('Google Sheets URL handling', () => {
+  it('accepts canonical sheet URLs with and without gid', () => {
+    expect(
+      parseGoogleSheetUrl('https://docs.google.com/spreadsheets/d/abcDEF123-_0/edit?gid=42#gid=42'),
+    ).toEqual({
+      spreadsheetId: 'abcDEF123-_0',
+      gid: '42',
+    });
+    expect(parseGoogleSheetUrl('https://docs.google.com/spreadsheets/d/abcDEF123-_0')).toEqual({
+      spreadsheetId: 'abcDEF123-_0',
+      gid: '0',
+    });
+  });
+  it('rejects non-sheet, non-https, and short-id URLs', () => {
+    for (const bad of [
+      'https://evil.com/spreadsheets/d/abcDEF123-_0',
+      'http://docs.google.com/spreadsheets/d/abcDEF123-_0',
+      'https://docs.google.com/document/d/abcDEF123-_0/edit',
+      'https://docs.google.com/spreadsheets/d/short',
+      'not a url',
+      'https://docs.google.com/spreadsheets/d/abcDEF123-_0/edit?gid=abc',
+    ])
+      expect(parseGoogleSheetUrl(bad)).toBeNull();
+  });
+});
+
+describe('limits and export safety', () => {
+  it('caps imports at 5000 rows', () => {
+    expect(MAX_IMPORT_ROWS).toBe(5000);
+  });
+  it('neutralizes formula leaders in exports', () => {
+    expect(neutralizeFormula('=1+1')).toBe("'=1+1");
+    expect(neutralizeFormula('+cmd')).toBe("'+cmd");
+    expect(neutralizeFormula('plain')).toBe('plain');
+  });
+  it('exports filterable rows with escaped cells', () => {
+    const row = () =>
+      Object.fromEntries(CUSTOMER_EXPORT_COLUMNS.map((column) => [column, ''])) as CustomerExportRow;
+    const csv = customerExportCsv([{ ...row(), 'FIRST NAME': '=Juan' }]);
+    expect(csv).toContain("'=Juan");
+    expect(csv).toContain('RA NO');
+    expect(csv).toContain('BARANGGAY');
+    expect(customerExportXlsx([]).length).toBeGreaterThan(0);
+  });
+});
+
+describe('sectioned template merge', () => {
+  const primary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(0, 15)];
+  const supplementary = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(15, 28)];
+  const related = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(28, 35)];
+  const pkg = [...MEMBERSHIP_TEMPLATE_COLUMNS.slice(35, 44)];
+
+  it('merges entry tabs into canonical order regardless of column order', () => {
+    // Reordered columns within tabs still land on canonical positions.
+    const rev = (list: string[]) => [...list].reverse();
+    const pick = (headers: string[], row: string[], want: string) =>
+      row[headers.indexOf(want)] ?? '';
+    const pRow = primary.map((_, i) => `p${i}`);
+    const sRow = supplementary.map((_, i) => `s${i}`);
+    const rRow = related.map((_, i) => `r${i}`);
+    const kRow = pkg.map((_, i) => `k${i}`);
+    const { matrix } = mergeSectionedTemplateSheets([
+      { name: 'Primary', matrix: [rev(primary), rev(primary).map((h) => pick(primary, pRow, h))] },
+      {
+        name: 'Supplementary',
+        matrix: [rev(supplementary), rev(supplementary).map((h) => pick(supplementary, sRow, h))],
+      },
+      { name: 'Related', matrix: [related, rRow] },
+      { name: 'Package', matrix: [pkg, kRow] },
+      {
+        name: 'README',
+        matrix: [
+          ['Section', 'What to do'],
+          ['Primary', 'Fill it'],
+        ],
+      },
+    ]);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    expect(matrix[1]).toEqual([...pRow, ...sRow, ...rRow, ...kRow]);
+  });
+
+  it('round-trips a sectioned workbook through merge and remap', () => {
+    const sheets = parseXlsxSheets(
+      toXlsxMulti(
+        'Sections',
+        MEMBERSHIP_TEMPLATE_SECTIONS.map((section) => ({
+          name: section.sheet,
+          columns: section.headers.map((label) => ({ label, type: 'text' as const })),
+          rows: [[]] as unknown[][],
+        })),
+      ),
+    );
+    const { matrix } = mergeSectionedTemplateSheets(sheets);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_COLUMNS]);
+    // Header-only template merges to headers alone; the positional remap
+    // still classifies every column (dropped FULL NAME/AGE warn by name).
+    const remapped = remapCompanyTemplateMatrix(matrix);
+    expect(remapped.matrix[0]).toHaveLength(44);
+    expect(remapped.dropped.map((d) => d.header)).toContain('FULL NAME');
+  });
+
+  it('pads all-blank tabs instead of rejecting members with no supplementary', () => {
+    // A member with no supplementary (and an untouched Package tab) merges:
+    // blank tabs carry no persons, so padding them cannot misalign anyone.
+    const { matrix } = mergeSectionedTemplateSheets([
+      { name: 'Primary', matrix: [primary, primary.map(() => 'x')] },
+      { name: 'Supplementary', matrix: [supplementary] },
+      { name: 'Related', matrix: [related, related.map(() => 'y')] },
+      { name: 'Package', matrix: [pkg] },
+    ]);
+    expect(matrix).toHaveLength(2);
+    expect(matrix[1]).toEqual([
+      ...primary.map(() => 'x'),
+      ...supplementary.map(() => ''),
+      ...related.map(() => 'y'),
+      ...pkg.map(() => ''),
+    ]);
+  });
+
+  it('recognizes only the exact guided flat layout', () => {
+    expect(isV2MembershipTemplate([...MEMBERSHIP_TEMPLATE_V2_COLUMNS])).toBe(true);
+    expect(isV2MembershipTemplate([...MEMBERSHIP_TEMPLATE_COLUMNS])).toBe(false);
+    expect(isV2MembershipTemplate(MEMBERSHIP_TEMPLATE_V2_COLUMNS.slice(0, 3))).toBe(false);
+    // Order-sensitive: duplicated headers make name matching ambiguous.
+    const reordered = [...MEMBERSHIP_TEMPLATE_V2_COLUMNS];
+    [reordered[0], reordered[1]] = [reordered[1]!, reordered[0]!];
+    expect(isV2MembershipTemplate(reordered)).toBe(false);
+  });
+
+  it('merges guided tabs into the canonical flat matrix in any column order', () => {
+    const section = (sheet: string) =>
+      MEMBERSHIP_TEMPLATE_V2_SECTIONS.find((entry) => entry.sheet === sheet)!;
+    const headersOf = (sheet: string) => section(sheet).columns.map((column) => column.header);
+    // The Primary tab ships reversed: order within a tab is free.
+    const reversed = [...headersOf('Primary')].reverse();
+    const reversedRow = reversed.map((header) =>
+      header === 'FIRST NAME' ? 'JUAN' : header === 'LAST NAME' ? 'CRUZ' : '',
+    );
+    const relatedRow = headersOf('Related').map((header) =>
+      header === 'REFERRER (NAME)' ? 'Thanos' : '',
+    );
+    const { matrix } = mergeV2SectionedTemplateSheets([
+      { name: 'README', matrix: [['Tab', 'Fill guide']] },
+      { name: 'Primary', matrix: [reversed, reversedRow] },
+      { name: 'Supplementary', matrix: [headersOf('Supplementary')] },
+      { name: 'Related', matrix: [headersOf('Related'), relatedRow] },
+      { name: 'Package', matrix: [headersOf('Package')] },
+    ]);
+    expect(matrix[0]).toEqual([...MEMBERSHIP_TEMPLATE_V2_COLUMNS]);
+    expect(matrix[1]![matrix[0]!.indexOf('FIRST NAME')]).toBe('JUAN');
+    expect(matrix[1]![matrix[0]!.indexOf('LAST NAME')]).toBe('CRUZ');
+    expect(matrix[1]![matrix[0]!.indexOf('REFERRER (NAME)')]).toBe('Thanos');
+  });
+
+  it('remaps guided fields, joins part columns, and drops reference columns', () => {
+    const cells = MEMBERSHIP_TEMPLATE_V2_COLUMNS.map(() => '');
+    const offsetOf = (sheet: string) => {
+      let at = 0;
+      for (const entry of MEMBERSHIP_TEMPLATE_V2_SECTIONS) {
+        if (entry.sheet === sheet) break;
+        at += entry.columns.length;
+      }
+      return at;
+    };
+    const set = (sheet: string, header: string, value: string) => {
+      const entry = MEMBERSHIP_TEMPLATE_V2_SECTIONS.find((s) => s.sheet === sheet)!;
+      const k = entry.columns.findIndex((column) => column.header === header);
+      cells[offsetOf(sheet) + k] = value;
+    };
+    set('Primary', 'FIRST NAME', 'Juan');
+    set('Primary', 'LAST NAME', 'Cruz');
+    set('Primary', 'MIDDLE NAME', 'Dela');
+    set('Primary', 'SUFFIX', 'Jr.');
+    set('Primary', 'GENDER', 'Male');
+    set('Primary', 'PERMANENT ADDRESS LINE 1', '1 QA Street');
+    set('Primary', 'PERMANENT ADDRESS LINE 2', 'Brgy San Roque');
+    set('Primary', 'CITY', 'Calauan');
+    set('Primary', 'PROVINCE', 'Laguna');
+    set('Primary', 'BARANGGAY', 'Santo Tomas');
+    set('Primary', 'POSTAL CODE', '4012');
+    set('Primary', 'LANDLINE', '(049) 555-1234');
+    set('Primary', 'EMAIL', 'juan@example.com');
+    set('Primary', 'STATUS', 'Pending');
+    set('Primary', 'AGE', '35');
+    set('Supplementary', 'FIRST NAME', 'Maria');
+    set('Supplementary', 'MIDDLE NAME', 'Clara');
+    set('Supplementary', 'LAST NAME', 'Santos');
+    set('Supplementary', 'SUFFIX', 'II');
+    set('Supplementary', 'PERMANENT ADDRESS LINE 1', '456 Acacia Ave');
+    set('Supplementary', 'PERMANENT ADDRESS LINE 2', 'Quezon City');
+    set('Supplementary', 'PROVINCE', 'Metro Manila');
+    set('Supplementary', 'CITY', 'Quezon City');
+    set('Supplementary', 'BARANGGAY', 'Diliman');
+    set('Supplementary', 'POSTAL CODE', '1101');
+    set('Supplementary', 'BIRTHDAY', '1992-08-10');
+    set('Supplementary', 'LANDLINE', '(02) 8123-4567');
+    set('Supplementary', 'MOBILE NO.', '09181234567');
+    set('Supplementary', 'EMAIL', 'maria@example.com');
+
+    const remapped = remapV2TemplateMatrix([[...MEMBERSHIP_TEMPLATE_V2_COLUMNS], cells]);
+    const machine = remapped.matrix[0]!;
+    const values = remapped.matrix[1]!;
+    const field = (key: string) => values[machine.indexOf(key)];
+    expect(field('first_name')).toBe('Juan');
+    expect(field('middle_name')).toBe('Dela');
+    expect(field('last_name')).toBe('Cruz');
+    expect(field('suffix')).toBe('Jr.');
+    expect(field('sex')).toBe('Male');
+    expect(field('address_line_1')).toBe('1 QA Street');
+    expect(field('address_line_2')).toBe('Brgy San Roque');
+    expect(field('city')).toBe('Calauan');
+    expect(field('province')).toBe('Laguna');
+    expect(field('barangay')).toBe('Santo Tomas');
+    expect(field('postal_code')).toBe('4012');
+    expect(field('landline')).toBe('(049) 555-1234');
+    expect(field('email')).toBe('juan@example.com');
+    expect(field('source_status')).toBe('Pending');
+    expect(field('supplementary_birthday')).toBe('1992-08-10');
+    expect(field('supplementary_mobile')).toBe('09181234567');
+    expect(field('supplementary_email')).toBe('maria@example.com');
+    expect(field('supplementary_landline')).toBe('(02) 8123-4567');
+    // Part columns join into the one text column the record actually has:
+    // names in FIRST/LAST/MIDDLE/SUFFIX order, the six address parts in the
+    // SSOT order, blank parts skipped.
+    expect(remapped.joins[0]!.values.supplementary_full_name).toBe('Maria Santos Clara II');
+    expect(remapped.joins[0]!.values.supplementary_address).toBe(
+      '456 Acacia Ave, Quezon City, Metro Manila, Quezon City, Diliman, 1101',
+    );
+    // Both AGE columns (Primary and Supplementary) are reference-only.
+    expect(remapped.dropped.map((dropped) => dropped.header)).toEqual(['AGE', 'AGE']);
+  });
+
+  it('rejects mismatched row counts when two tabs both carry rows', () => {
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary, primary.map(() => 'x'), primary.map(() => 'z')] },
+        { name: 'Supplementary', matrix: [supplementary] },
+        { name: 'Related', matrix: [related, related.map(() => 'y')] },
+        { name: 'Package', matrix: [pkg] },
+      ]),
+    ).toThrow(/Primary has 2, Supplementary has 0, Related has 1/);
+  });
+
+  it('rejects missing sheets, duplicate sections, and foreign workbooks', () => {
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary] },
+        { name: 'Related', matrix: [related] },
+        { name: 'Package', matrix: [pkg] },
+      ]),
+    ).toThrow(/missing sheets: Supplementary/);
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Primary', matrix: [primary] },
+        { name: 'Primary copy', matrix: [primary] },
+        { name: 'Related', matrix: [related] },
+        { name: 'Package', matrix: [pkg] },
+        { name: 'Supplementary', matrix: [supplementary] },
+      ]),
+    ).toThrow(/Duplicate/);
+    expect(() =>
+      mergeSectionedTemplateSheets([
+        { name: 'Tab A', matrix: [['first_name'], ['Juan']] },
+        { name: 'Tab B', matrix: [['last_name'], ['Cruz']] },
+      ]),
+    ).toThrow(/does not match a template section/);
+  });
+
+  it('reads own single-sheet XLSX files by accurate column names', () => {
+    // Reordered machine-name headers parse by name, never by position.
+    const bytes = toXlsx(
+      'Mine',
+      ['email', 'last_name', 'first_name'].map((label) => ({ label, type: 'text' as const })),
+      [['juan@example.com', 'Cruz', 'Juan']],
+    );
+    expect(parseXlsxMatrix(bytes)[0]).toEqual(['email', 'last_name', 'first_name']);
+    const { rows } = matrixToRecords(parseXlsxMatrix(bytes));
+    expect(rows[0]!.fields).toMatchObject({
+      email: 'juan@example.com',
+      last_name: 'Cruz',
+      first_name: 'Juan',
+    });
+  });
+});

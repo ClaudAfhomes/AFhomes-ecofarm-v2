@@ -15,6 +15,9 @@ import path from 'node:path';
  */
 
 const HANDLER_IMPORT_RE = /^import\s+([A-Za-z_$][\w$]*)\s+from\s+'(\.\.\/_handlers\/[^']+)'/gm;
+// Only a literal dynamic import is deployable. Merely storing a handler path in
+// a data object and later calling import(variable) looks routed in source but is
+// invisible to Vercel's dependency tracer.
 const HANDLER_DYNAMIC_RE = /import\(\s*'(\.\.\/_handlers\/[^']+)'\s*\)/g;
 
 export type RouteCoverageGapReason = 'not-imported' | 'imported-but-unused';

@@ -1,0 +1,103 @@
+/*
+ * Auth form field primitives (AFHomes form-field pattern).
+ * Inputs use the 40px control scale (48px in auth), visible focus, and inline
+ * error styling. Shared across auth and admin forms.
+ */
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Required is marked visually via `::after` (keeps label text clean for
+   accessible-name/label matching); optional is labeled "(Optional)". */
+.label::after {
+  content: '*';
+  color: var(--color-accent-strong);
+}
+
+.labelOptional::after {
+  content: none;
+}
+
+.optionalMark {
+  font-weight: 400;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-body-s);
+  color: var(--color-text-muted);
+  max-width: 55ch;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--text-body-s);
+  font-weight: 600;
+  color: var(--color-danger);
+}
+
+.input {
+  width: 100%;
+  min-height: var(--control-md);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-body);
+  line-height: 1.25;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 1px 2px rgba(28, 43, 58, 0.05);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.input:hover:not(:disabled):not(:focus-visible) {
+  border-color: var(--color-text-muted);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.75;
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--color-state-focus);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.inputError {
+  border-color: var(--color-danger);
+}
+
+.inputError:focus-visible {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(166, 58, 50, 0.18);
+}
+
+/* Reserve room for the inline password toggle button. */
+.inputWithSuffix {
+  padding-right: 52px;
+}
+
+.readOnlyInput {
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  cursor: default;
+  user-select: none;
+}

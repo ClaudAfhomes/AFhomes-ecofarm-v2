@@ -1,615 +1,154 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Db, MongoClient } from 'mongodb';
 
-import {
-  canonicalSlug,
-  extractBearerToken,
-  findAuthUserId,
-  isAuthConflict,
-  slugsAllowed,
-  verifyStaff,
-  verifyStaffModule,
-  verifyUser,
-} from './auth.js';
-import type { VercelRequest } from './http.js';
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn((options: unknown) => ({ options })),
+  adapter: vi.fn(() => () => ({})),
+}));
+vi.mock('better-auth', () => ({ betterAuth: mocks.auth }));
+vi.mock('@better-auth/mongo-adapter', () => ({ mongodbAdapter: mocks.adapter }));
 
-function req(headers: Record<string, string> = {}): VercelRequest {
-  return { method: 'GET', query: {}, headers };
-}
+import { createAfHomesAuth, getAuthOptions, requireAuthTurnstile } from './auth.js';
+const initializationAtImport = mocks.auth.mock.calls.length + mocks.adapter.mock.calls.length;
+const env = {
+  BETTER_AUTH_SECRET: 'phase2-unit-test-only-fixture-'.repeat(3),
+  BETTER_AUTH_URL: 'http://localhost:3000',
+};
 
-const ENV_KEYS = [
-  'SUPABASE_URL',
-  'VITE_SUPABASE_URL',
-  'NEXT_PUBLIC_SUPABASE_URL',
-  'DATABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY',
-  'SUPABASE_ANON_KEY',
-  'VITE_SUPABASE_ANON_KEY',
-] as const;
+describe('unmounted Better Auth foundation', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-function setEnv(values: Partial<Record<(typeof ENV_KEYS)[number], string>>) {
-  for (const key of ENV_KEYS) {
-    if (values[key] === undefined) delete process.env[key];
-    else vi.stubEnv(key, values[key]);
-  }
-}
-
-describe('canonicalSlug', () => {
-  it('normalizes case and separators', () => {
-    expect(canonicalSlug('Super-Admin')).toBe('super_admin');
-    expect(canonicalSlug(' SUPER ADMIN ')).toBe('super_admin');
-    expect(canonicalSlug('admin')).toBe('admin');
-    expect(canonicalSlug(null)).toBe('');
-  });
-});
-
-describe('slugsAllowed', () => {
-  it('matches case- and separator-insensitively', () => {
-    expect(slugsAllowed(['Super-Admin'], ['super_admin'])).toBe(true);
-    expect(slugsAllowed(['ADMIN'], ['admin'])).toBe(true);
+  it('requires login key pairs at application startup and refuses test secrets outside HTTP loopback', () => {
+    expect(() => requireAuthTurnstile(env)).toThrow('VITE_TURNSTILE_SITE_KEY');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key' })).toThrow('AFHOMES_AUTH_TURNSTILE_SECRET');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: 'public-test-key' })).toThrow('not the public');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: ` ${'s'.repeat(16)}` })).toThrow('surrounding whitespace');
+    expect(() => requireAuthTurnstile({ ...env, VITE_TURNSTILE_SITE_KEY: 'public-test-key', AFHOMES_AUTH_TURNSTILE_SECRET: 'short' })).toThrow('at least 16 characters');
+    const challenge = { ...env, VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA', AFHOMES_AUTH_TURNSTILE_SECRET: '1x0000000000000000000000000000000AA' };
+    expect(getAuthOptions(challenge).plugins[0]?.id).toBe('captcha');
+    expect(() => getAuthOptions({ ...challenge, NODE_ENV: 'production', BETTER_AUTH_URL: 'https://app.example.invalid' })).toThrow('test keys');
+    expect(() => getAuthOptions({ ...challenge, BETTER_AUTH_URL: 'https://app.example.invalid' })).toThrow('test keys');
   });
 
-  it('accepts compact superadmin against super_admin', () => {
-    expect(slugsAllowed(['superadmin'], ['super_admin'])).toBe(true);
+  it('does not initialize authentication or the database adapter at import', () => {
+    expect(initializationAtImport).toBe(0);
   });
 
-  it('denies non-listed and empty slugs', () => {
-    expect(slugsAllowed(['user'], ['super_admin', 'admin'])).toBe(false);
-    expect(slugsAllowed([], ['super_admin', 'admin'])).toBe(false);
-    expect(slugsAllowed(['finance'], ['super_admin', 'admin'])).toBe(false);
-  });
-});
-
-describe('extractBearerToken', () => {
-  it('prefers the Authorization bearer token', () => {
-    expect(extractBearerToken(req({ authorization: 'Bearer abc123' }))).toBe('abc123');
-  });
-
-  it('parses the Supabase JSON auth cookie', () => {
-    const cookie = `sb-ref-auth-token=${encodeURIComponent(JSON.stringify({ access_token: 'tok-1' }))}`;
-    expect(extractBearerToken(req({ cookie }))).toBe('tok-1');
-  });
-
-  it('parses the array-form auth cookie', () => {
-    const cookie = `sb-ref-auth-token=${encodeURIComponent(JSON.stringify([{ access_token: 'tok-2' }]))}`;
-    expect(extractBearerToken(req({ cookie }))).toBe('tok-2');
-  });
-
-  it('falls back to a raw cookie string', () => {
-    expect(extractBearerToken(req({ cookie: 'sb-ref-auth-token=raw-token' }))).toBe('raw-token');
-  });
-
-  it('returns undefined when no credential is present', () => {
-    expect(extractBearerToken(req({}))).toBeUndefined();
-    expect(extractBearerToken(req({ authorization: 'Basic xyz' }))).toBeUndefined();
-  });
-});
-
-describe('verifyUser', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('returns 500 when Supabase is not configured', async () => {
-    setEnv({});
-    const result = await verifyUser(req({ authorization: 'Bearer x' }));
-    expect('error' in result && result.error.status).toBe(500);
-  });
-
-  it('returns 401 when the token is missing or invalid', async () => {
-    setEnv({ SUPABASE_URL: 'https://x.supabase.co', VITE_SUPABASE_ANON_KEY: 'anon' });
-    expect('error' in (await verifyUser(req({}))) && true).toBe(true);
-    const bad = await verifyUser(req({ authorization: 'Bearer bad' }), {
-      auth: { getUser: async () => ({ data: { user: null }, error: new Error('bad') }) },
-    });
-    expect('error' in bad && bad.error.status).toBe(401);
-  });
-
-  it('returns the auth user id without any role check', async () => {
-    setEnv({ SUPABASE_URL: 'https://x.supabase.co', VITE_SUPABASE_ANON_KEY: 'anon' });
-    const result = await verifyUser(req({ authorization: 'Bearer good' }), {
-      auth: { getUser: async () => ({ data: { user: { id: 'mem-1' } }, error: null }) },
-    });
-    expect(result).toEqual({ userId: 'mem-1' });
-  });
-});
-
-describe('verifyStaff', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('returns 500 when Supabase is not configured', async () => {
-    setEnv({});
-    const result = await verifyStaff(req({ authorization: 'Bearer x' }), ['admin']);
-    expect('error' in result && result.error.status).toBe(500);
-  });
-
-  it('returns 401 when the token is missing', async () => {
-    setEnv({ SUPABASE_URL: 'https://x.supabase.co', VITE_SUPABASE_ANON_KEY: 'anon' });
-    const result = await verifyStaff(req({}), ['admin']);
-    expect('error' in result && result.error.status).toBe(401);
-  });
-
-  it('returns 401 for an invalid session', async () => {
-    setEnv({ SUPABASE_URL: 'https://x.supabase.co', VITE_SUPABASE_ANON_KEY: 'anon' });
-    const result = await verifyStaff(req({ authorization: 'Bearer bad' }), ['admin'], {
-      anonClient: {
-        auth: { getUser: async () => ({ data: { user: null }, error: new Error('bad') }) },
-      },
-    });
-    expect('error' in result && result.error.status).toBe(401);
-  });
-
-  it('allows a listed staff slug and returns user plus slugs', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaff(
-      req({ authorization: 'Bearer good' }),
-      ['super_admin', 'admin'],
-      {
-        anonClient: {
-          auth: {
-            getUser: async () => ({
-              data: { user: { id: 'u-1', user_metadata: {} } },
-              error: null,
-            }),
-          },
-        },
-        serviceClient: {
-          from: () => ({
-            select: () => ({
-              eq: async () => ({ data: [{ roleId: 'r-1' }], error: null }),
-              in: async () => ({ data: [{ slug: 'super_admin' }], error: null }),
-            }),
-          }),
-        },
-      },
-    );
-    expect(result).toEqual({ userId: 'u-1', slugs: ['super_admin'] });
-  });
-
-  it('returns 403 for an unlisted role', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaff(
-      req({ authorization: 'Bearer good' }),
-      ['super_admin', 'admin'],
-      {
-        anonClient: {
-          auth: {
-            getUser: async () => ({
-              data: { user: { id: 'u-2', user_metadata: {} } },
-              error: null,
-            }),
-          },
-        },
-        serviceClient: {
-          from: () => ({
-            select: () => ({
-              eq: async () => ({ data: [{ roleId: 'r-9' }], error: null }),
-              in: async () => ({ data: [{ slug: 'user' }], error: null }),
-            }),
-          }),
-        },
-      },
-    );
-    expect('error' in result && result.error.status).toBe(403);
-  });
-
-  it('resolves staff slugs from StaffAssignment links', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const seen: string[] = [];
-    const result = await verifyStaff(
-      req({ authorization: 'Bearer good' }),
-      ['super_admin', 'admin', 'finance'],
-      {
-        anonClient: {
-          auth: {
-            getUser: async () => ({
-              data: { user: { id: 'u-5', user_metadata: {} } },
-              error: null,
-            }),
-          },
-        },
-        serviceClient: {
-          from: (table: string) => ({
-            select: () => ({
-              eq: async () => {
-                seen.push(`${table}:eq`);
-                if (table === 'StaffAssignment')
-                  return { data: [{ roleId: 'r-new' }], error: null };
-                return { data: [], error: null };
-              },
-              in: async () => {
-                seen.push(`${table}:in`);
-                if (table === 'Role') return { data: [{ slug: 'finance' }], error: null };
-                return { data: [], error: null };
-              },
-            }),
-          }),
-        },
-      },
-    );
-    expect(seen).toContain('StaffAssignment:eq');
-    expect(result).toEqual({ userId: 'u-5', slugs: ['finance'] });
-  });
-
-  it('ignores legacy MemberRole links (staff domain only)', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const seen: string[] = [];
-    const result = await verifyStaff(
-      req({ authorization: 'Bearer good' }),
-      ['super_admin', 'admin'],
-      {
-        anonClient: {
-          auth: {
-            getUser: async () => ({
-              data: { user: { id: 'u-6', user_metadata: {} } },
-              error: null,
-            }),
-          },
-        },
-        serviceClient: {
-          from: (table: string) => ({
-            select: () => ({
-              eq: async () => {
-                seen.push(`${table}:eq`);
-                if (table === 'StaffAssignment') return { data: [], error: null };
-                if (table === 'MemberRole') return { data: [{ roleId: 'r-old' }], error: null };
-                return { data: [], error: null };
-              },
-              in: async () => {
-                if (table === 'Role') return { data: [{ slug: 'admin' }], error: null };
-                return { data: [], error: null };
-              },
-            }),
-          }),
-        },
-      },
-    );
-    expect(seen.some((s) => s.startsWith('MemberRole'))).toBe(false);
-    expect('error' in result && result.error.status).toBe(403);
-  });
-
-  it('denies unlinked callers even when metadata claims admin (no metadata fallback)', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const empty = {
-      from: () => ({
-        select: () => ({
-          eq: async () => ({ data: [], error: null }),
-          in: async () => ({ data: [], error: null }),
-        }),
-      }),
-    };
-    const meta = {
-      auth: {
-        getUser: async () => ({
-          data: { user: { id: 'u-3', user_metadata: { role: 'admin' } } },
-          error: null,
-        }),
-      },
-    };
-    const spoofed = await verifyStaff(req({ authorization: 'Bearer good' }), ['admin'], {
-      anonClient: meta,
-      serviceClient: empty,
-    });
-    expect('error' in spoofed && spoofed.error.status).toBe(403);
-
-    const denied = await verifyStaff(req({ authorization: 'Bearer good' }), ['admin'], {
-      anonClient: {
-        auth: {
-          getUser: async () => ({ data: { user: { id: 'u-4', user_metadata: {} } }, error: null }),
-        },
-      },
-      serviceClient: empty,
-    });
-    expect('error' in denied && denied.error.status).toBe(403);
-  });
-
-  it('returns 403 when the staff account must change its temporary password', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaff(req({ authorization: 'Bearer good' }), ['super_admin'], {
-      anonClient: {
-        auth: {
-          getUser: async () => ({
-            data: { user: { id: 'u-7', user_metadata: {} } },
-            error: null,
-          }),
-        },
-      },
-      serviceClient: {
-        from: (table: string) => ({
-          select: () => ({
-            eq: async () => {
-              if (table === 'StaffUser')
-                return {
-                  data: [{ id: 'u-7', status: 'ACTIVE', mustChangePassword: true }],
-                  error: null,
-                };
-              if (table === 'StaffAssignment') return { data: [{ roleId: 'r-1' }], error: null };
-              return { data: [], error: null };
-            },
-            in: async () => {
-              if (table === 'Role') return { data: [{ slug: 'super_admin' }], error: null };
-              return { data: [], error: null };
-            },
-          }),
-        }),
-      },
-    });
-    expect('error' in result && result.error.status).toBe(403);
-    expect('error' in result && (result.error.error as { message?: string }).message).toMatch(
-      /password/i,
-    );
-  });
-
-  it('returns 403 when the staff account is disabled', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaff(req({ authorization: 'Bearer good' }), ['super_admin'], {
-      anonClient: {
-        auth: {
-          getUser: async () => ({
-            data: { user: { id: 'u-8', user_metadata: {} } },
-            error: null,
-          }),
-        },
-      },
-      serviceClient: {
-        from: (table: string) => ({
-          select: () => ({
-            eq: async () => {
-              if (table === 'StaffUser')
-                return {
-                  data: [{ id: 'u-8', status: 'DISABLED', mustChangePassword: false }],
-                  error: null,
-                };
-              if (table === 'StaffAssignment') return { data: [{ roleId: 'r-1' }], error: null };
-              return { data: [], error: null };
-            },
-            in: async () => {
-              if (table === 'Role') return { data: [{ slug: 'super_admin' }], error: null };
-              return { data: [], error: null };
-            },
-          }),
-        }),
-      },
-    });
-    expect('error' in result && result.error.status).toBe(403);
-    expect('error' in result && (result.error.error as { message?: string }).message).toMatch(
-      /disabled/i,
-    );
-  });
-});
-
-describe('isAuthConflict', () => {
-  it('recognizes the real GoTrue duplicate wording', () => {
-    expect(
-      isAuthConflict(new Error('A user with this email address has already been registered')),
-    ).toBe(true);
-    expect(
-      isAuthConflict(new Error('A user with this phone number has already been registered')),
-    ).toBe(true);
-  });
-
-  it('recognizes legacy wording and error codes', () => {
-    expect(isAuthConflict(new Error('already exists'))).toBe(true);
-    expect(isAuthConflict({ message: 'duplicate key value', status: 409 })).toBe(true);
-    expect(isAuthConflict({ message: 'x', code: 'email_exists' })).toBe(true);
-    expect(isAuthConflict({ message: 'x', code: 'phone_exists' })).toBe(true);
-  });
-
-  it('rejects unrelated failures and non-errors', () => {
-    expect(isAuthConflict(new Error('Database error saving new user'))).toBe(false);
-    expect(isAuthConflict(new Error('Password should be stronger'))).toBe(false);
-    expect(isAuthConflict(null)).toBe(false);
-    expect(isAuthConflict('already exists')).toBe(false);
-  });
-});
-
-describe('findAuthUserId', () => {
-  const svcFor = (users: unknown[]) => ({
-    auth: {
-      admin: {
-        listUsers: async () => ({ data: { users }, error: null }),
-      },
+  it.each([undefined, '', 'too-short'])(
+    'rejects missing or short secret without printing it',
+    (secret) => {
+      expect(() => getAuthOptions({ ...env, BETTER_AUTH_SECRET: secret })).toThrow(
+        'BETTER_AUTH_SECRET',
+      );
+      expect(mocks.auth).not.toHaveBeenCalled();
+      expect(mocks.adapter).not.toHaveBeenCalled();
     },
+  );
+
+  it.each([
+    '',
+    'not-a-url',
+    'http://example.invalid',
+    'http://localhost.example.invalid',
+    'https://user:password@example.invalid',
+    'https://example.invalid/path',
+    'https://example.invalid/?query=yes',
+    'https://example.invalid/#fragment',
+    'https://*.example.invalid',
+  ])('rejects unsafe or ambiguous base origin %s', (url) => {
+    expect(() => getAuthOptions({ ...env, BETTER_AUTH_URL: url })).toThrow('BETTER_AUTH_URL');
   });
 
-  it('matches an existing auth user by exact email', async () => {
-    const id = await findAuthUserId(
-      svcFor([{ id: 'u-1', email: 'juan@example.com', phone: '+639171234567' }]),
-      { email: 'juan@example.com' },
+  it.each([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://[::1]:3000',
+    'https://example.invalid',
+  ])('sets host-scoped cookie protections for %s', (url) => {
+    const options = getAuthOptions({ ...env, BETTER_AUTH_URL: url });
+    expect(options.trustedOrigins).toEqual([new URL(url).origin]);
+    expect(options.advanced.defaultCookieAttributes).toEqual({
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: url.startsWith('https:'),
+    });
+    expect(options.advanced.disableCSRFCheck).toBe(false);
+    expect(options.advanced.disableOriginCheck).toBe(false);
+  });
+
+  it('allows only explicitly configured trusted origins', () => {
+    const options = getAuthOptions({
+      ...env,
+      AFHOMES_AUTH_TRUSTED_ORIGINS: 'http://localhost:5173, http://localhost:5174',
+    });
+    expect(options.trustedOrigins).toEqual([
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
+    ]);
+    for (const origin of [
+      '*',
+      'https://*.example.invalid',
+      'http://remote.invalid',
+      'https://example.invalid/path',
+    ])
+      expect(() => getAuthOptions({ ...env, AFHOMES_AUTH_TRUSTED_ORIGINS: origin })).toThrow(
+        'AFHOMES_AUTH_TRUSTED_ORIGINS',
+      );
+  });
+
+  it('requires HTTPS even for loopback when running in production', () => {
+    expect(() => getAuthOptions({ ...env, NODE_ENV: 'production' })).toThrow('BETTER_AUTH_URL');
+  });
+
+  it('closes signup and disables session caching, account linking and telemetry', () => {
+    const options = getAuthOptions(env);
+    expect(options.emailAndPassword).toMatchObject({
+      enabled: true,
+      disableSignUp: true,
+      requireEmailVerification: true,
+      minPasswordLength: 10,
+    });
+    expect(options.session.cookieCache.enabled).toBe(false);
+    expect(options.session.deferSessionRefresh).toBe(true);
+    expect(options.account.accountLinking.enabled).toBe(false);
+    expect(options.telemetry.enabled).toBe(false);
+    expect(options.rateLimit).toMatchObject({ enabled: true, storage: 'database' });
+    expect(options.plugins).toEqual([]);
+  });
+
+  it('generates distinct UUID strings for identities and references', () => {
+    const generate = getAuthOptions(env).advanced.database.generateId;
+    const first = generate();
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(generate()).not.toBe(first);
+  });
+
+  it('preserves the existing password policy and uses the library hash/verification', async () => {
+    const password = getAuthOptions(env).emailAndPassword.password;
+    for (const value of ['short', 'longlowercasepassword', 'LongPasswordNoDigit'])
+      await expect(password.hash(value)).rejects.toThrow();
+    const value = 'UnitTestOnlyPassword123';
+    const hash = await password.hash(value);
+    expect(hash).not.toContain(value);
+    await expect(password.verify({ hash, password: value })).resolves.toBe(true);
+    await expect(password.verify({ hash, password: 'wrong' })).resolves.toBe(false);
+  });
+
+  it('requires a matching client/database before explicitly initializing', () => {
+    const client = {} as MongoClient;
+    const db = { databaseName: 'afhomes_dev', client } as unknown as Db;
+    expect(() => createAfHomesAuth({ ...db, databaseName: 'other' } as Db, client, env)).toThrow(
+      'afhomes_dev',
     );
-    expect(id).toBe('u-1');
-  });
-
-  it('adopts case-variant emails (GoTrue stores lowercase, approval rows may not)', async () => {
-    const id = await findAuthUserId(svcFor([{ id: 'u-1', email: 'juan.delacruz@example.com' }]), {
-      email: 'Juan.DelaCruz@Example.COM',
+    expect(() => createAfHomesAuth(db, {} as MongoClient, env)).toThrow('matching');
+    expect(mocks.adapter).not.toHaveBeenCalled();
+    createAfHomesAuth(db, client, env);
+    expect(mocks.adapter).toHaveBeenCalledExactlyOnceWith(db, {
+      client,
+      transaction: true,
+      debugLogs: false,
     });
-    expect(id).toBe('u-1');
-  });
-
-  it('falls back to identity emails when the user email differs', async () => {
-    const id = await findAuthUserId(
-      svcFor([
-        {
-          id: 'u-2',
-          email: 'primary@example.com',
-          identities: [{ identity_data: { email: 'juan@example.com' } }],
-        },
-      ]),
-      { email: 'juan@example.com' },
-    );
-    expect(id).toBe('u-2');
-  });
-
-  it('matches phones despite formatting differences', async () => {
-    const id = await findAuthUserId(svcFor([{ id: 'u-3', email: null, phone: '+639171234567' }]), {
-      phone: '0917 123 4567',
-    });
-    expect(id).toBe('u-3');
-  });
-
-  it('returns null when nothing matches', async () => {
-    const id = await findAuthUserId(svcFor([{ id: 'u-1', email: 'a@b.com' }]), {
-      email: 'missing@example.com',
-    });
-    expect(id).toBeNull();
-  });
-});
-
-describe('verifyStaffModule', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  const authed = {
-    auth: {
-      getUser: async () => ({ data: { user: { id: 'u-9', user_metadata: {} } }, error: null }),
-    },
-  };
-
-  /** Service fake for a custom-role staffer (role rows + assignment links). */
-  const customService = (permissions: string[]) => {
-    const roleRows = [
-      {
-        id: 'x-1',
-        key: 'role-admin-support',
-        slug: 'role-admin-support',
-        name: 'Admin Support',
-        permissions,
-        is_system: false,
-      },
-    ];
-    const roleBuilder = () => {
-      const b: Record<string, unknown> = {};
-      b.select = () => b;
-      b.eq = async () => ({ data: roleRows, error: null });
-      b.in = async () => ({ data: [{ slug: 'role-admin-support' }], error: null });
-      b.then = (resolve: (v: unknown) => void) => resolve({ data: roleRows, error: null });
-      return b;
-    };
-    return {
-      from: (table: string) => {
-        if (table === 'Role') return roleBuilder();
-        return {
-          select: () => ({
-            eq: async () => {
-              if (table === 'StaffAssignment') return { data: [{ roleId: 'x-1' }], error: null };
-              if (table === 'StaffUser')
-                return {
-                  data: { status: 'ACTIVE', mustChangePassword: false },
-                  error: null,
-                };
-              return { data: [], error: null };
-            },
-            in: async () => ({ data: [], error: null }),
-          }),
-        };
-      },
-    };
-  };
-
-  const systemService = (slug: string) => ({
-    from: (table: string) => ({
-      select: () => ({
-        eq: async () => {
-          if (table === 'StaffAssignment') return { data: [{ roleId: 'r-1' }], error: null };
-          if (table === 'StaffUser')
-            return { data: { status: 'ACTIVE', mustChangePassword: false }, error: null };
-          return { data: [], error: null };
-        },
-        in: async () =>
-          table === 'Role' ? { data: [{ slug }], error: null } : { data: [], error: null },
-      }),
-    }),
-  });
-
-  it('keeps system-slug access identical to verifyStaff (finance on vouchers)', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaffModule(
-      req({ authorization: 'Bearer good' }),
-      'vouchers',
-      ['super_admin', 'admin', 'finance'],
-      { anonClient: authed, serviceClient: systemService('finance') },
-    );
-    expect(result).toEqual({ userId: 'u-9', slugs: ['finance'] });
-  });
-
-  it('authorizes a custom role holding the required module', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaffModule(
-      req({ authorization: 'Bearer good' }),
-      'members',
-      ['super_admin', 'admin'],
-      { anonClient: authed, serviceClient: customService(['dashboard', 'members']) },
-    );
-    expect(result).toEqual({ userId: 'u-9', slugs: ['role-admin-support'] });
-  });
-
-  it('denies a custom role missing the required module', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaffModule(
-      req({ authorization: 'Bearer good' }),
-      'sales',
-      ['super_admin', 'admin'],
-      { anonClient: authed, serviceClient: customService(['dashboard', 'members']) },
-    );
-    expect('error' in result && result.error.status).toBe(403);
-    expect('error' in result && result.error.error.message).toBe('Insufficient role');
-  });
-
-  it('denies member-tier slugs through the custom path as well', async () => {
-    setEnv({
-      SUPABASE_URL: 'https://x.supabase.co',
-      VITE_SUPABASE_ANON_KEY: 'anon',
-      SUPABASE_SERVICE_ROLE_KEY: 'service',
-    });
-    const result = await verifyStaffModule(
-      req({ authorization: 'Bearer good' }),
-      'members',
-      ['super_admin', 'admin'],
-      { anonClient: authed, serviceClient: systemService('user') },
-    );
-    expect('error' in result && result.error.status).toBe(403);
+    expect(mocks.auth).toHaveBeenCalledOnce();
   });
 });

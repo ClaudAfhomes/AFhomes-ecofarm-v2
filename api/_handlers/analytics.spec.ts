@@ -1,0 +1,304 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { analyticsOverviewSchema } from '@afhomes/contracts';
+import {
+  STAFF2,
+  TOKEN,
+  TOKEN2,
+  phase2World,
+  phase2WorldTokens,
+} from '../_lib/testing/phase2-fixtures.js';
+import { FakeSupabase, makeRes } from '../_lib/testing/supabase-fake.js';
+
+const holder = vi.hoisted(() => ({ db: null as unknown }));
+vi.mock('../_lib/rest.js', () => ({ serviceClient: () => holder.db, anonClient: () => holder.db }));
+const { default: handler, calendarWindow } = await import('./analytics.js');
+
+it.each(['2026-10-01T12:00:00Z', '2027-01-01T12:00:00Z'])(
+  'keeps calendar weeks seven days across month and year boundaries (%s)',
+  (value) => {
+    const window = calendarWindow('week', new Date(value));
+    expect(window.to.valueOf() - window.from.valueOf()).toBe(7 * 86400000);
+  },
+);
+
+function install() {
+  const tables = phase2World({
+    card_sale_hierarchy_snapshots: [],
+    redemptions: [],
+    ost_applications: [],
+    final_qualifications: [],
+  });
+  holder.db = new FakeSupabase({
+    tables,
+    tokens: phase2WorldTokens(),
+    rpcs: [{ fn: 'account_imported_sales', result: [] }],
+  });
+  return holder.db as FakeSupabase;
+}
+
+async function call(token?: string, period = 'month') {
+  const { res, state } = makeRes();
+  await handler(
+    {
+      method: 'GET',
+      query: { familyPath: '', period },
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    } as never,
+    res as never,
+  );
+  return state;
+}
+
+beforeEach(() => install());
+
+describe('Phase 14 analytics', () => {
+  it('uses exact UTC calendar day, Monday week, month, and year windows', () => {
+    const now = new Date('2026-09-30T14:12:00.000Z');
+    expect(calendarWindow('day', now).from.toISOString()).toBe('2026-09-30T00:00:00.000Z');
+    expect(calendarWindow('week', now).from.toISOString()).toBe('2026-09-28T00:00:00.000Z');
+    expect(calendarWindow('month', now).from.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+    expect(calendarWindow('year', now).from.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('returns global Super Admin analytics and validates the typed contract', async () => {
+    const state = await call(TOKEN.superAdmin);
+    expect(state.status).toBe(200);
+    const parsed = analyticsOverviewSchema.parse(state.body);
+    expect(parsed.scope.kind).toBe('global');
+    expect(parsed.headline.totalCardSales).toBeGreaterThan(0);
+  });
+
+  it('starts global dashboard sections while the independent sale read is pending', async () => {
+    const db = holder.db as FakeSupabase;
+    const from = db.from.bind(db);
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'card_sales' || table === 'customers') {
+        const then = query.then.bind(query);
+        query.then = (onFulfilled, onRejected) => {
+          started.add(table);
+          return gate.then(() => then(onFulfilled, onRejected));
+        };
+      }
+      return query;
+    });
+    const pending = call(TOKEN.superAdmin);
+    try {
+      await vi.waitFor(() => expect(started.size).toBe(2), { timeout: 300 });
+    } finally {
+      release();
+      expect((await pending).status).toBe(200);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('gives Finance global financial facts but no redemption section', async () => {
+    const state = await call(TOKEN2.finance);
+    expect(state.status).toBe(200);
+    expect((state.body as { scope: { kind: string }; redemptions: unknown }).scope.kind).toBe(
+      'finance',
+    );
+    expect((state.body as { redemptions: unknown }).redemptions).toBeNull();
+  });
+
+  it('gives HR organization facts without sales or financial scope', async () => {
+    const db = holder.db as FakeSupabase;
+    const hrRole = {
+      id: '20202020-0000-4000-8000-000000000006',
+      slug: 'hr',
+      name: 'HR',
+      is_system: true,
+      is_active: true,
+    };
+    db.rows('roles').push(hrRole);
+    db.rows('staff_role_assignments').find((row) => row.staff_id === STAFF2.hr)!.role_id =
+      hrRole.id;
+    const staffModule = db.rows('modules').find((row) => row.key === 'organization.staff')!;
+    const dashboardModule = db.rows('modules').find((row) => row.key === 'dashboard.view')!;
+    db.rows('role_permissions').push(
+      {
+        role_id: hrRole.id,
+        module_id: dashboardModule.id,
+        can_view: true,
+        can_create: false,
+        can_update: false,
+        can_delete: false,
+      },
+      {
+        role_id: hrRole.id,
+        module_id: staffModule.id,
+        can_view: true,
+        can_create: true,
+        can_update: true,
+        can_delete: false,
+      },
+    );
+    const state = await call(TOKEN2.hr);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      scope: { kind: 'organization' },
+      headline: { totalCardSales: 0, periodVerifiedPayments: '0.00' },
+      organization: { totalStaff: expect.any(Number), activeStaff: expect.any(Number) },
+      commissions: null,
+      redemptions: null,
+    });
+  });
+
+  it('gives OST self scope and its current upperline only', async () => {
+    const state = await call(TOKEN2.ost);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({
+      scope: { kind: 'self' },
+      networkContext: { upperline: { id: STAFF2.salesManager } },
+      organization: null,
+    });
+  });
+
+  it('loads only the upperline profile and assignment for a self-scoped dashboard', async () => {
+    const db = holder.db as FakeSupabase;
+    const from = db.from.bind(db);
+    const readSizes: number[] = [];
+    vi.spyOn(db, 'from').mockImplementation((table) => {
+      const query = from(table);
+      if (table === 'staff_users' || table === 'staff_role_assignments') {
+        const then = query.then.bind(query);
+        query.then = (onFulfilled, onRejected) =>
+          then((result) => {
+            readSizes.push(result.data?.length ?? 0);
+            return onFulfilled?.(result);
+          }, onRejected);
+      }
+      return query;
+    });
+    try {
+      const state = await call(TOKEN2.ost);
+      expect(state.status).toBe(200);
+      expect(state.body).toMatchObject({
+        networkContext: { upperline: { id: STAFF2.salesManager } },
+      });
+      expect(readSizes).toEqual([1, 1]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('uses immutable snapshot rows for VD, SSM and SM team totals', async () => {
+    const db = holder.db as FakeSupabase;
+    const sale = db.rows('card_sales')[0]!;
+    db.rows('card_sale_hierarchy_snapshots').push(
+      {
+        sale_id: sale.id,
+        ancestor_staff_id: STAFF2.salesManager,
+        ancestor_role: 'sales_manager',
+        depth: 1,
+      },
+      {
+        sale_id: sale.id,
+        ancestor_staff_id: STAFF2.seniorSalesManager,
+        ancestor_role: 'senior_sales_manager',
+        depth: 2,
+      },
+      {
+        sale_id: sale.id,
+        ancestor_staff_id: STAFF2.viceDirector,
+        ancestor_role: 'vice_director',
+        depth: 3,
+      },
+    );
+    for (const token of [TOKEN2.viceDirector, TOKEN2.seniorSalesManager, TOKEN2.salesManager]) {
+      const state = await call(token);
+      expect(state.status).toBe(200);
+      expect((state.body as { headline: { totalCardSales: number } }).headline.totalCardSales).toBe(
+        1,
+      );
+    }
+  });
+
+  it('does not assign a legacy sale to the current team, but keeps it global and seller-owned', async () => {
+    const db = holder.db as FakeSupabase;
+    const sale = db.rows('card_sales')[0]!;
+    sale.seller_staff_id = STAFF2.ost;
+    sale.seller_ost_id = null;
+    sale.referral_relationship_id = db
+      .rows('referral_relationships')
+      .find((row) => row.subject_staff_id === STAFF2.ost)!.id;
+    const team = await call(TOKEN2.salesManager);
+    expect(
+      (
+        team.body as {
+          headline: { totalCardSales: number };
+          scope: { unattributedLegacySaleCount: number };
+        }
+      ).headline.totalCardSales,
+    ).toBe(0);
+    expect(
+      (team.body as { scope: { unattributedLegacySaleCount: number } }).scope
+        .unattributedLegacySaleCount,
+    ).toBe(1);
+    expect((await call(TOKEN.superAdmin)).body).toMatchObject({
+      headline: { totalCardSales: expect.any(Number) },
+    });
+    expect((await call(TOKEN2.ost)).body).toMatchObject({ headline: { totalCardSales: 1 } });
+  });
+
+  it('denies unauthenticated and customer-only callers and returns safe database errors', async () => {
+    expect((await call()).status).toBe(401);
+    holder.db = new FakeSupabase({
+      tables: phase2World({ card_sale_hierarchy_snapshots: [], redemptions: [] }),
+      tokens: phase2WorldTokens(),
+      errors: { card_sales: { message: 'secret database detail' } },
+    });
+    const failed = await call(TOKEN.superAdmin);
+    expect(failed.status).toBe(500);
+    expect(JSON.stringify(failed.body)).not.toContain('secret database detail');
+  });
+});
+
+describe('Phase 14 migration contract', () => {
+  const sql = readFileSync(
+    resolve(process.cwd(), '../supabase/migrations/20261010000001_afhomes_phase14_analytics.sql'),
+    'utf8',
+  );
+  it('captures a complete VD to OST chain and never backfills legacy sales', () => {
+    expect(sql).toMatch(/after insert on public\.card_sales/i);
+    expect(sql).toMatch(/SALE_COMPLETE_HIERARCHY_REQUIRED/);
+    expect(sql).not.toMatch(
+      /insert into public\.card_sale_hierarchy_snapshots[\s\S]*select[\s\S]*from public\.card_sales/i,
+    );
+  });
+  it('makes snapshots immutable and keeps upline correction separate', () => {
+    expect(sql).toMatch(/before update or delete on public\.card_sale_hierarchy_snapshots/i);
+    expect(sql).toMatch(/SALE_HIERARCHY_SNAPSHOT_IMMUTABLE/);
+    expect(sql).not.toMatch(/correct_referral_upline/i);
+  });
+});
+
+it('excludes imported payment history from global operational revenue trends', async () => {
+  const db = holder.db as FakeSupabase;
+  const before = analyticsOverviewSchema.parse((await call(TOKEN.superAdmin)).body);
+  const id = '88888888-0000-4000-8000-000000000048';
+  db.rows('card_sales').push({
+    ...db.rows('card_sales')[0]!,
+    id,
+    origin: 'legacy_import',
+    sale_number: 'LEGACY-048',
+  });
+  db.rows('payments').push({
+    id: '88888888-0000-4000-8000-000000000049',
+    sale_id: id,
+    status: 'verified',
+    amount: '999999.00',
+    verified_at: new Date().toISOString(),
+    recorded_at: new Date().toISOString(),
+  });
+  const after = analyticsOverviewSchema.parse((await call(TOKEN.superAdmin)).body);
+  expect(after.headline).toEqual(before.headline);
+  expect(after.trends).toEqual(before.trends);
+});

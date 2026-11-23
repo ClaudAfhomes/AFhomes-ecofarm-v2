@@ -1,0 +1,738 @@
+import { z } from 'zod';
+import { vipTierSchema } from './official-forms.js';
+import { customerStatusSchema } from './lifecycle.js';
+
+export type VipTier = z.infer<typeof vipTierSchema>;
+
+/**
+ * AFHomes bulk customer import/export contracts.
+ *
+ * Single source for the spreadsheet vocabulary, the friendly-status mapping
+ * into authoritative fields, and the derived display category. The Customers
+ * screen and the import preview resolve categories through the SAME
+ * `resolveCustomerCategory`, so the two can never disagree.
+ *
+ * Display categories are never persisted: only customer.status,
+ * memberships.status and verified payment rows are authoritative.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Template vocabulary (stable machine-readable column names)          */
+/* ------------------------------------------------------------------ */
+
+export const CUSTOMER_IMPORT_COLUMNS = [
+  'customer_number',
+  'membership_number',
+  'first_name',
+  'middle_name',
+  'last_name',
+  'suffix',
+  'birth_date',
+  'sex',
+  'citizenship',
+  'civil_status',
+  'email',
+  'mobile',
+  'landline',
+  'tin',
+  'address_line_1',
+  'address_line_2',
+  'city',
+  'province',
+  'barangay',
+  'postal_code',
+  'country',
+  'occupation',
+  'business_name',
+  'business_address',
+  'industry',
+  'position',
+  'vip_tier',
+  'source_status',
+  'activation_date',
+  'membership_expiry_date',
+  'current_points_balance',
+  'total_paid',
+  'historical_sale_total',
+  'payment_scheme',
+  'historical_reservation_fee',
+  'historical_required_initial',
+  'payment_amount',
+  'payment_date',
+  'payment_method',
+  'payment_reference',
+  'seller_code',
+  'seller_name',
+  'referral_code',
+  'created_date',
+  'secondary_first_name',
+  'secondary_middle_name',
+  'secondary_last_name',
+  'secondary_birth_date',
+  'secondary_email',
+  'secondary_mobile',
+  'notes',
+] as const;
+
+export type CustomerImportColumn = (typeof CUSTOMER_IMPORT_COLUMNS)[number];
+
+/** Hard cap: oversized imports are rejected with a clear error, never streamed. */
+export const CUSTOMER_IMPORT_ROW_LIMIT = 5000;
+
+export const importSourceSchema = z.enum(['excel', 'csv', 'google_sheets']);
+export type ImportSource = z.infer<typeof importSourceSchema>;
+
+export const importJobStatusSchema = z.enum([
+  'uploaded',
+  'parsing',
+  'validated',
+  'ready',
+  'committing',
+  'completed',
+  'completed_with_errors',
+  'failed',
+  'cancelled',
+]);
+export type ImportJobStatus = z.infer<typeof importJobStatusSchema>;
+
+export const importRowActionSchema = z.enum(['CREATE', 'UPDATE', 'SKIP', 'CONFLICT']);
+export type ImportRowAction = z.infer<typeof importRowActionSchema>;
+
+export const importValidationSchema = z.enum(['pending', 'valid', 'warning', 'error']);
+export type ImportValidation = z.infer<typeof importValidationSchema>;
+
+/* ------------------------------------------------------------------ */
+/* Tier normalization (case-insensitive, strict, no fuzzy guessing)    */
+/* ------------------------------------------------------------------ */
+
+/** Trim + scream. Unknown values return null (row validation error), never a guess. */
+export function normalizeTier(value: unknown): VipTier | null {
+  if (typeof value !== 'string') return null;
+  const tier = value.trim().toUpperCase();
+  return tier === 'BRONZE' || tier === 'SILVER' || tier === 'GOLD' ? tier : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Source-status mapping into authoritative fields                     */
+/* ------------------------------------------------------------------ */
+
+export const customerCategorySchema = z.enum([
+  'ACTIVE_VIP',
+  'FULLY_PAID_AWAITING_ACTIVATION',
+  'DOWN_PAYMENT_COMPLETED',
+  'RESERVATION_PAID',
+  'PARTIALLY_PAID',
+  'PENDING',
+  'ACTIVE',
+  'INACTIVE',
+  'SUSPENDED',
+  'EXPIRED',
+  'CANCELLED',
+]);
+export type CustomerCategory = z.infer<typeof customerCategorySchema>;
+
+export const CUSTOMER_CATEGORY_LABELS: Record<CustomerCategory, string> = {
+  ACTIVE_VIP: 'Active VIP',
+  FULLY_PAID_AWAITING_ACTIVATION: 'Fully Paid — Awaiting Activation',
+  DOWN_PAYMENT_COMPLETED: 'Down Payment Completed',
+  RESERVATION_PAID: 'Reservation Paid',
+  PARTIALLY_PAID: 'Partially Paid',
+  PENDING: 'Pending',
+  ACTIVE: 'Active',
+  INACTIVE: 'Inactive',
+  SUSPENDED: 'Suspended',
+  EXPIRED: 'Expired',
+  CANCELLED: 'Cancelled',
+};
+
+const SOURCE_STATUS_ALIASES: Record<string, CustomerCategory> = {
+  activevip: 'ACTIVE_VIP',
+  active: 'ACTIVE_VIP',
+  vip: 'ACTIVE_VIP',
+  fullypaid: 'FULLY_PAID_AWAITING_ACTIVATION',
+  fullypaidawaitingactivation: 'FULLY_PAID_AWAITING_ACTIVATION',
+  awaitingactivation: 'FULLY_PAID_AWAITING_ACTIVATION',
+  downpayment: 'DOWN_PAYMENT_COMPLETED',
+  downpaymentcompleted: 'DOWN_PAYMENT_COMPLETED',
+  dp: 'DOWN_PAYMENT_COMPLETED',
+  reservationpaid: 'RESERVATION_PAID',
+  reservation: 'RESERVATION_PAID',
+  partial: 'PARTIALLY_PAID',
+  partiallypaid: 'PARTIALLY_PAID',
+  part: 'PARTIALLY_PAID',
+  pending: 'PENDING',
+  inactive: 'INACTIVE',
+  suspended: 'SUSPENDED',
+  expired: 'EXPIRED',
+  cancelled: 'CANCELLED',
+  canceled: 'CANCELLED',
+};
+
+/** Friendly spreadsheet status to canonical category. Null = row error. */
+export function mapSourceStatus(value: unknown): CustomerCategory | null {
+  if (typeof value !== 'string') return null;
+  const key = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+  return SOURCE_STATUS_ALIASES[key] ?? null;
+}
+
+/** Authoritative customer.status for a canonical category (DB enum values). */
+export function customerStatusForCategory(category: CustomerCategory): string {
+  switch (category) {
+    case 'PENDING':
+      return 'prospect';
+    case 'SUSPENDED':
+    case 'INACTIVE':
+      return 'suspended';
+    case 'CANCELLED':
+      return 'cancelled';
+    default:
+      return 'active';
+  }
+}
+
+/** Whether the category may create an active membership on CREATE. */
+export function categoryRequiresMember(category: CustomerCategory): boolean {
+  return ['ACTIVE_VIP', 'SUSPENDED', 'EXPIRED'].includes(category);
+}
+
+/* ------------------------------------------------------------------ */
+/* Exact-decimal comparison (no float anywhere near money)             */
+/* ------------------------------------------------------------------ */
+
+function toCents(value: string): bigint | null {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+  return BigInt(match[1] ?? '0') * 100n + BigInt((match[2] ?? '0').padEnd(2, '0'));
+}
+
+/** -1 | 0 | 1, or null when either side is not exact-decimal. */
+export function compareMoney(a: string, b: string): number | null {
+  const ac = toCents(a);
+  const bc = toCents(b);
+  if (ac === null || bc === null) return null;
+  return ac < bc ? -1 : ac > bc ? 1 : 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Derived display category: THE shared resolver                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Resolve the display category from authoritative state only. Used by the
+ * Customers screen and the import preview alike; the result is never stored.
+ */
+export function resolveCustomerCategory(input: {
+  customerStatus: string;
+  membershipStatus: string | null;
+  verifiedTotal: string;
+  priceTotal: string;
+  reservationFee?: string;
+  requiredInitial?: string;
+}): CustomerCategory {
+  const { customerStatus, membershipStatus } = input;
+  // Service-denying account states override an otherwise active card.
+  if (customerStatus === 'cancelled' || membershipStatus === 'cancelled') return 'CANCELLED';
+  if (customerStatus === 'suspended' || membershipStatus === 'suspended') return 'SUSPENDED';
+  if (membershipStatus === 'expired') return 'EXPIRED';
+  if (membershipStatus === 'active') return 'ACTIVE_VIP';
+  const verified = compareMoney(input.verifiedTotal, '0.00');
+  if (verified === null || verified <= 0)
+    return customerStatus === 'prospect' ? 'PENDING' : 'ACTIVE';
+  // Unparseable totals fail closed to PARTIALLY_PAID (money was verified > 0,
+  // but the ceiling is unknown, so no stronger claim is made).
+  const vsPrice = compareMoney(input.verifiedTotal, input.priceTotal);
+  if (vsPrice === null) return 'PARTIALLY_PAID';
+  if (vsPrice >= 0) return 'FULLY_PAID_AWAITING_ACTIVATION';
+  if (
+    input.requiredInitial &&
+    compareMoney(input.requiredInitial, input.reservationFee ?? '0.00') === 1
+  ) {
+    const vsInitial = compareMoney(input.verifiedTotal, input.requiredInitial);
+    if (vsInitial !== null && vsInitial >= 0) return 'DOWN_PAYMENT_COMPLETED';
+  }
+  if (input.reservationFee) {
+    const vsReservation = compareMoney(input.verifiedTotal, input.reservationFee);
+    if (vsReservation !== null && vsReservation >= 0) return 'RESERVATION_PAID';
+  }
+  return 'PARTIALLY_PAID';
+}
+
+/* ------------------------------------------------------------------ */
+/* Google Sheets URL handling (public sheets only, strict allowlist)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Parse a Google Sheets URL into { spreadsheetId, gid }. Returns null for
+ * anything that is not a docs.google.com spreadsheet URL - the server never
+ * fetches arbitrary URLs. Private sheets fail at fetch time with a clear
+ * error naming the missing OAuth/service-credential configuration.
+ */
+export function parseGoogleSheetUrl(url: string): { spreadsheetId: string; gid: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.hostname !== 'docs.google.com' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.port !== ''
+  )
+    return null;
+  const match = /^\/spreadsheets\/d\/([A-Za-z0-9_-]{10,120})(?:\/.*)?$/.exec(parsed.pathname);
+  if (!match) return null;
+  const hashGid = new URLSearchParams(parsed.hash.slice(1)).get('gid');
+  const queryGid = parsed.searchParams.get('gid');
+  if (hashGid !== null && queryGid !== null && hashGid !== queryGid) return null;
+  const gid = queryGid ?? hashGid;
+  if (gid !== null && !/^\d{1,10}$/.test(gid)) return null;
+  return { spreadsheetId: match[1]!, gid: gid ?? '0' };
+}
+
+/** Link-readable CSV export URL for a validated sheet reference. */
+export function googleSheetCsvUrl(ref: { spreadsheetId: string; gid: string }): string {
+  return `https://docs.google.com/spreadsheets/d/${ref.spreadsheetId}/export?format=csv&gid=${ref.gid}`;
+}
+
+export const CUSTOMER_EXPORT_COLUMNS = [
+  // Company record: PRIMARY block, SSOT order (see customer-ssot.ts). AGE is
+  // computed from the birthday at export time; it is never stored.
+  'RA NO',
+  'STATUS',
+  'FIRST NAME',
+  'LAST NAME',
+  'MIDDLE NAME',
+  'SUFFIX',
+  'BIRTHDAY',
+  'GENDER',
+  'AGE',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'PERMANENT ADDRESS LINE 1',
+  'PERMANENT ADDRESS LINE 2',
+  'PROVINCE',
+  'CITY',
+  'BARANGGAY',
+  'POSTAL CODE',
+  'LANDLINE',
+  'EMAIL',
+  'TIN NO.',
+  'MOBILE NO.',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  // SUPPLEMENTARY block. Names and address are stored joined (single text
+  // columns), so the export carries them as the two stored fields; the
+  // remaining columns keep the SSOT names with a SUPPLEMENTARY prefix so
+  // every export header stays unique.
+  'SUPPLEMENTARY FULL NAME',
+  'SUPPLEMENTARY ADDRESS',
+  'SUPPLEMENTARY BIRTHDAY',
+  'SUPPLEMENTARY GENDER',
+  'SUPPLEMENTARY AGE',
+  'SUPPLEMENTARY CITIZENSHIP',
+  'SUPPLEMENTARY CIVIL STATUS',
+  'SUPPLEMENTARY TIN NO.',
+  'SUPPLEMENTARY LANDLINE',
+  'SUPPLEMENTARY MOBILE NO.',
+  'SUPPLEMENTARY EMAIL',
+  'SUPPLEMENTARY OCCUPATION / BUSINESS NAME',
+  'SUPPLEMENTARY OFFICE / BUSINESS ADDRESS',
+  'SUPPLEMENTARY EMPLOYED POSITION',
+  // OST/IST block, verbatim.
+  'SVD (NAME)',
+  'SSM (NAME)',
+  'SM (NAME)',
+  'REFERRER (NAME)',
+  'VIP RECOMMENDER (NAME)',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  // VIP PACKAGE block, verbatim.
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+  // System columns: identifiers and derived state, never company-stated.
+  'CUSTOMER ID',
+  'CUSTOMER CODE',
+  'MEMBERSHIP NUMBER',
+  'CUSTOMER STATUS',
+  'MEMBERSHIP STATUS',
+  'PAYMENT STATUS',
+  'CATEGORY',
+  'POINTS BALANCE',
+  'SELLER',
+  'ACTIVATED AT',
+  'EXPIRES AT',
+  'CREATED AT',
+] as const;
+
+export type CustomerExportRow = Record<(typeof CUSTOMER_EXPORT_COLUMNS)[number], string>;
+
+/* ------------------------------------------------------------------ */
+/* Company membership template (44 columns, exact order and wording)    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The company-provided membership template headers, verbatim. Capitalization,
+ * spacing and punctuation are the source of truth - do not normalize them
+ * here. Note the intentional duplicates: ADDRESS appears at positions 3 and
+ * 16, EMAIL ADDRESS at 11 and 34, and several demographic headers repeat
+ * across the primary/supplementary blocks. Header-name matching therefore
+ * cannot disambiguate them - see MEMBERSHIP_TEMPLATE_POSITION_MAP.
+ *
+ * OST/IST NAME used to sit at position 28 and was removed from the download;
+ * see LEGACY_MEMBERSHIP_TEMPLATE_* below for reading files filled from an
+ * older download.
+ */
+export const MEMBERSHIP_TEMPLATE_COLUMNS = [
+  'RA NO',
+  'STATUS',
+  'FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SUPPLEMENTARY FULL NAME',
+  'ADDRESS',
+  'BIRTHDAY',
+  'AGE',
+  'GENDER',
+  'CITIZENSHIP',
+  'CIVIL STATUS',
+  'TIN NO.',
+  'MOBILE NO.',
+  'EMAIL ADDRESS',
+  'OCCUPATION / BUSINESS NAME',
+  'OFFICE / BUSINESS ADDRESS',
+  'EMPLOYED POSITION',
+  'SVD',
+  'SSM',
+  'SM',
+  'REFERRER',
+  'VIP RECOMMENDER',
+  'CONTACT NO.',
+  'EMAIL ADDRESS',
+  'VIP PACKAGE',
+  'PAYMENT TERMS',
+  'REGULAR PRICE',
+  'DISCOUNT',
+  'TOTAL AMOUNT',
+  'RF',
+  'PAYMENT TYPE',
+  'REF NO',
+  'DATE',
+] as const;
+
+export type MembershipTemplateColumn = (typeof MEMBERSHIP_TEMPLATE_COLUMNS)[number];
+
+/**
+ * Additional import keys accepted ONLY through the company-template remap
+ * path (never part of `CUSTOMER_IMPORT_COLUMNS`, so the established customer
+ * template is unchanged). Each key has a matching nullable column on
+ * customers and is validated in `validateImportRow` before persistence.
+ */
+export const COMPANY_IMPORT_EXTRA_COLUMNS = [
+  'ra_number',
+  'citizenship',
+  'civil_status',
+  'tin_number',
+  'occupation_business_name',
+  'office_business_address',
+  'employed_position',
+  'supplementary_full_name',
+  'supplementary_address',
+  'supplementary_birthday',
+  'supplementary_gender',
+  'supplementary_citizenship',
+  'supplementary_civil_status',
+  'supplementary_tin_number',
+  'supplementary_mobile',
+  'supplementary_email',
+  'supplementary_landline',
+  'supplementary_occupation_business_name',
+  'supplementary_office_address',
+  'supplementary_position',
+  'svd_name',
+  'ssm_name',
+  'sm_name',
+  'referrer_name',
+  'vip_recommender_name',
+  'related_contact_no',
+  'related_email',
+  'stated_regular_price',
+  'stated_discount',
+  'stated_total_amount',
+  'stated_rf',
+] as const;
+
+/**
+ * Positional mapping from the 44-column company template onto customer-import
+ * columns. An entry is the import column for that exact position, or null
+ * when the company field has no established v2 target (unmapped positions are
+ * reported as ignored warnings, never silently merged). Only fields whose
+ * meaning is exact AND whose values flow through existing validators are
+ * mapped - value vocabularies are never translated, so unknown tier, scheme
+ * or status values fail rows safely instead of corrupting records. FULL NAME
+ * is deliberately unmapped: splitting it into first/middle/last would invent
+ * identity parse rules.
+ */
+export const MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  /* 0 RA NO */ 'ra_number',
+  /* 1 STATUS */ 'source_status',
+  /* 2 FULL NAME */ null,
+  /* 3 ADDRESS (primary) */ 'address_line_1',
+  /* 4 BIRTHDAY (primary) */ 'birth_date',
+  /* 5 AGE */ null,
+  /* 6 GENDER (primary) */ 'sex',
+  /* 7 CITIZENSHIP */ 'citizenship',
+  /* 8 CIVIL STATUS */ 'civil_status',
+  /* 9 TIN NO. */ 'tin_number',
+  /* 10 MOBILE NO. (primary) */ 'mobile',
+  /* 11 EMAIL ADDRESS (primary) */ 'email',
+  /* 12 OCCUPATION / BUSINESS NAME */ 'occupation_business_name',
+  /* 13 OFFICE / BUSINESS ADDRESS */ 'office_business_address',
+  /* 14 EMPLOYED POSITION */ 'employed_position',
+  /* 15 SUPPLEMENTARY FULL NAME */ 'supplementary_full_name',
+  /* 16 ADDRESS (supplementary) */ 'supplementary_address',
+  /* 17 BIRTHDAY (supplementary) */ 'supplementary_birthday',
+  /* 18 AGE */ null,
+  /* 19 GENDER */ 'supplementary_gender',
+  /* 20 CITIZENSHIP */ 'supplementary_citizenship',
+  /* 21 CIVIL STATUS */ 'supplementary_civil_status',
+  /* 22 TIN NO. */ 'supplementary_tin_number',
+  /* 23 MOBILE NO. (supplementary) */ 'secondary_mobile',
+  /* 24 EMAIL ADDRESS (supplementary) */ 'secondary_email',
+  /* 25 OCCUPATION / BUSINESS NAME */ 'supplementary_occupation_business_name',
+  /* 26 OFFICE / BUSINESS ADDRESS */ 'supplementary_office_address',
+  /* 27 EMPLOYED POSITION */ 'supplementary_position',
+  /* 28 SVD */ 'svd_name',
+  /* 29 SSM */ 'ssm_name',
+  /* 30 SM */ 'sm_name',
+  /* 31 REFERRER */ 'referrer_name',
+  /* 32 VIP RECOMMENDER */ 'vip_recommender_name',
+  /* 33 CONTACT NO. */ 'related_contact_no',
+  /* 34 EMAIL ADDRESS (related persons) */ 'related_email',
+  /* 35 VIP PACKAGE */ 'vip_tier',
+  /* 36 PAYMENT TERMS */ 'payment_scheme',
+  /* 37 REGULAR PRICE */ 'stated_regular_price',
+  /* 38 DISCOUNT */ 'stated_discount',
+  /* 39 TOTAL AMOUNT */ 'stated_total_amount',
+  /* 40 RF */ 'stated_rf',
+  /* 41 PAYMENT TYPE */ 'payment_method',
+  /* 42 REF NO */ 'payment_reference',
+  /* 43 DATE */ 'payment_date',
+];
+
+/**
+ * The header text of the removed OST/IST NAME column, kept as the single
+ * source for recognizing files filled from a superseded 45-column download.
+ * Downloads no longer emit it; uploads still honor it (see
+ * LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP).
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_COLUMN = 'OST/IST NAME';
+
+/** Position in the superseded 45-column layout where the removed column sat. */
+export const LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX = 28;
+
+/**
+ * Positional mapping for the superseded 45-column layout: the current map
+ * with a `null` at the old OST/IST NAME position, so that column is reported
+ * as an ignored column (with a warning) instead of being stored. Legacy
+ * files still import fully; only fresh downloads stop carrying the column.
+ */
+export const LEGACY_MEMBERSHIP_TEMPLATE_POSITION_MAP: readonly (string | null)[] = [
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(0, LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+  null,
+  ...MEMBERSHIP_TEMPLATE_POSITION_MAP.slice(LEGACY_MEMBERSHIP_TEMPLATE_OST_IST_INDEX),
+];
+
+/* ------------------------------------------------------------------ */
+/* API shapes                                                          */
+/* ------------------------------------------------------------------ */
+
+export const customerImportJobSchema = z.object({
+  migrationRevalidationRequired: z.boolean().optional(),
+  revalidatedJobId: z.uuid().nullable().optional(),
+  revalidationOfJobId: z.uuid().nullable().optional(),
+  id: z.string().uuid(),
+  /** Public import job ID (AF-IMP-XXXXX). Nullish only pre-migration. */
+  jobNumber: z.string().nullish(),
+  sourceType: importSourceSchema,
+  sourceName: z.string(),
+  googleSheetId: z.string().nullable(),
+  status: importJobStatusSchema,
+  totalRows: z.number().int().nonnegative(),
+  validRows: z.number().int().nonnegative(),
+  invalidRows: z.number().int().nonnegative(),
+  insertedRows: z.number().int().nonnegative(),
+  updatedRows: z.number().int().nonnegative(),
+  skippedRows: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  validatedAt: z.string().nullable(),
+  committedAt: z.string().nullable(),
+  failedAt: z.string().nullable().default(null),
+  cancelledAt: z.string().nullable().default(null),
+  failedRows: z.number().int().nonnegative().default(0),
+});
+export type CustomerImportJob = z.infer<typeof customerImportJobSchema>;
+
+export const customerImportRowSchema = z.object({
+  id: z.string().uuid(),
+  rowNumber: z.number().int().positive(),
+  fields: z.record(z.string(), z.string()),
+  normalized: z.record(z.string(), z.unknown()),
+  validation: importValidationSchema,
+  errors: z.array(z.object({ field: z.string(), message: z.string() })),
+  warnings: z.array(z.object({ field: z.string(), message: z.string() })),
+  action: importRowActionSchema,
+  customerId: z.string().uuid().nullable(),
+  membershipId: z.string().uuid().nullable(),
+});
+export type CustomerImportRow = z.infer<typeof customerImportRowSchema>;
+
+export const customerImportReviewFileSchema = z.object({filename:z.string(),mime:z.literal('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),content:z.string()});
+export const customerImportParseResponseSchema = z.object({
+  reviewFile: customerImportReviewFileSchema.optional(),
+  job: customerImportJobSchema,
+  rows: z.array(customerImportRowSchema),
+  pageSize: z.number().int().positive().optional(),
+});
+export type CustomerImportParseResponse = z.infer<typeof customerImportParseResponseSchema>;
+
+export const customerImportCommitResponseSchema = z.object({
+  job: customerImportJobSchema,
+  committed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  rowResults: z.array(
+    z.object({
+      rowId: z.string().uuid(),
+      ok: z.boolean(),
+      customerId: z.string().uuid().nullable(),
+      membershipId: z.string().uuid().nullable(),
+      error: z.string().nullable(),
+      importContinuation: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+});
+export type CustomerImportCommitResponse = z.infer<typeof customerImportCommitResponseSchema>;
+
+/**
+ * Safe staff lookup: deliberately excludes contact, identity, Auth and payment fields.
+ *
+ * This is the MEMBER-TRANSACTION view. `membershipNumber` is present because the
+ * member-lookup screen is reached from a till, where the member reads their own
+ * number aloud to be matched against the card in hand. It is a different screen
+ * from general Customer Lookup - see `customerLookupSchema`.
+ */
+export const memberLookupSchema = z.object({
+  membershipNumber: z.string(),
+  memberName: z.string(),
+  customerNumber: z.string(),
+  tier: z.string(),
+  membershipStatus: z.string(),
+  category: customerCategorySchema,
+  activatedAt: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  availablePoints: z.string().regex(/^\d+$/),
+  mayUsePrivileges: z.boolean(),
+});
+export type MemberLookup = z.infer<typeof memberLookupSchema>;
+
+/**
+ * General Customer Lookup, for the GSD/Employee desk.
+ *
+ * Two rules separate this from `memberLookupSchema`, and both are deliberate:
+ *
+ * 1. NO `membershipNumber`. A Membership Code is a TRANSACTION credential, not a
+ *    customer-search key. This response deliberately makes it impossible for a
+ *    GSD screen to display one, so the separation cannot rot later - there is no
+ *    field to leak, and no test to forget. The member's status is shown instead.
+ * 2. Customer Status and Membership Status are SEPARATE fields, never conflated.
+ *    A customer can be `active` with a `suspended` membership, or a `prospect`
+ *    with no membership at all, and a screen that merges them tells a GSD
+ *    operator the wrong thing about which record they are looking at.
+ *
+ * No contact details, no government ID (not even masked), no Auth internals and
+ * no credential of any kind. Points are omitted too: this is a lookup, not a
+ * till, and available points invite a redemption that belongs on the
+ * Membership Transaction screen.
+ */
+export const customerLookupSchema = z.object({
+  /** Row UUID for detail navigation. Never displayed. */
+  customerId: z.string().uuid(),
+  /** Customer ID, `AF-CUS-XXXXX`. */
+  customerNumber: z.string(),
+  /** Customer Code, `AF-CC-XXXXXXXX`. Also not a credential. */
+  customerCode: z.string().nullable(),
+  fullName: z.string(),
+  /** Canonical customer lifecycle status, kept distinct from membership. */
+  customerStatus: customerStatusSchema,
+  /** Card plan code when the customer holds a membership, else null. */
+  tier: z.string().nullable(),
+  /** Membership status when a membership exists, else null. Never a code. */
+  membershipStatus: z.string().nullable(),
+  membershipExpiresAt: z.string().nullable(),
+  category: customerCategorySchema,
+  /** Derived payment state from the directory RPC; null when no sale exists. */
+  paymentStatus: z.enum(['no_payment', 'partially_paid', 'fully_paid']).nullable(),
+  /** Company-stated status, verbatim (never a server-computed total). */
+  companyStatus: z.string().nullable(),
+  /** Company-stated VIP package; fallback for `tier` when no membership exists. */
+  statedVipPackage: z.string().nullable(),
+  /** Supplementary member's name, when one is on file. */
+  supplementaryFullName: z.string().nullable(),
+});
+export type CustomerLookup = z.infer<typeof customerLookupSchema>;
+
+/**
+ * Strict GSD Customer Lookup projection.
+ *
+ * Only active customers with an active, unexpired VIP membership (BRONZE/SILVER/GOLD)
+ * may be represented. This permission-gated staff lookup returns names and card
+ * details; public search responses retain their separate privacy restrictions.
+ */
+export const gsdActiveVipLookupSchema = z.object({
+  /** Customer's given/first name. */
+  firstName: z.string().min(1),
+  /** Full surname for the authorized staff lookup. */
+  lastName: z.string().min(1),
+  /** Customer's RA number (company customer ID). */
+  raNumber: z.string().nullable().optional(),
+  /** Official VIP card number (YYMMDDNNNNNVTPMMS). */
+  vipCardNumber: z.string().nullable().optional(),
+  /** Authoritative VIP tier of the qualifying membership. */
+  vipTier: z.enum(['BRONZE', 'SILVER', 'GOLD']),
+  /** Authoritative `memberships.expires_at` formatted in Asia/Manila, `YYYY-MM-DD`. */
+  validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Total available points (from points_accounts.balance). */
+  totalAvailablePoints: z.number().int().nonnegative(),
+  /** Persisted weekend allowance after spending; null if unavailable. */
+  weekendAvailablePoints: z.number().int().nonnegative().nullable(),
+  /** Persisted weekday allowance after spending; null if unavailable. */
+  weekdayAvailablePoints: z.number().int().nonnegative().nullable(),
+  /** Short-lived signed URL for the customer's government ID image, or null. */
+  governmentIdImageUrl: z.string().nullable(),
+});
+export type GsdActiveVipLookup = z.infer<typeof gsdActiveVipLookupSchema>;
+
+export const customerSellerOptionSchema = z.object({ id: z.string().uuid(), name: z.string() });

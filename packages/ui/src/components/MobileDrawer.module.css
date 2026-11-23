@@ -8,6 +8,13 @@
   position: absolute;
   inset: 0;
   background-color: var(--color-overlay);
+  animation: backdrop-in var(--motion-200) var(--ease-out);
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .panel {
@@ -20,7 +27,7 @@
   width: min(320px, 86vw);
   background-color: var(--color-brand-deep);
   box-shadow: var(--shadow-lg);
-  animation: slide-in var(--transition-fast) ease;
+  animation: slide-in var(--motion-300) var(--ease-out);
 }
 
 .content {

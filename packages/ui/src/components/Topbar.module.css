@@ -10,7 +10,9 @@
   position: sticky;
   top: 0;
   z-index: var(--z-topbar);
-  backdrop-filter: saturate(1.2);
+  /* Frosted bar: content scrolling underneath stays faintly visible. */
+  background-color: color-mix(in srgb, var(--color-bg-surface-raised) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
 }
 
 .left {
@@ -20,9 +22,11 @@
   min-width: 0;
 }
 
+/* Phone-only: from 640px up the sidebar or drawer already carries the brand. */
 .mobileLeading {
   display: none;
   align-items: center;
+  min-width: 0;
 }
 
 .menuHiddenOnMobile {
@@ -62,6 +66,7 @@
     --color-text-primary: var(--color-on-dark);
     --color-text-secondary: var(--color-on-dark-muted);
     --color-text-muted: var(--color-on-dark-faint);
+    --color-brand-primary: var(--color-on-dark);
     --color-border-default: rgba(255, 255, 255, 0.12);
   }
 }

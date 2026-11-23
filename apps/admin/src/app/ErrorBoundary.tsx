@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
-import { Button, Icon } from '@jad/ui';
+import { Button, Icon } from '@afhomes/ui';
 import styles from './ErrorBoundary.module.css';
 
 interface ErrorBoundaryProps {

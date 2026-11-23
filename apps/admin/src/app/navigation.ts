@@ -1,344 +1,429 @@
-import type { Role, RoleRecord, StaffModule } from '@jad/contracts';
-import { resolveRoleModules } from '@jad/contracts';
-import type { BreadcrumbItem, SidebarItem } from '@jad/ui';
+import type { AfHomesModuleKey, AfHomesPermission } from '@afhomes/contracts';
+import type { BreadcrumbItem, SidebarItem } from '@afhomes/ui';
+import { isFeaturePathEnabled } from '@afhomes/shared';
 
-/**
- * Admin navigation registry (UI-UX §4.2 destinations). Categories group related
- * navlinks under a labeled header with a dropdown arrow. Each top-level
- * sidebar link has a unique icon; sub-items share the category visual style.
- * The mock session drives which items render, and the same registry guards
- * route access (RequireRole).
- * PROPOSED paths - no SSOT defines admin route paths yet.
- */
-/** Dropdown sub-item with its own module for per-link RBAC filtering. */
-export interface AdminNavSubItem {
+export type NavLink = {
   to: string;
   label: string;
+  module: AfHomesModuleKey;
+  /** Extra modules that also make this entry visible (any-of with `module`). */
+  alsoModules?: AfHomesModuleKey[];
+};
+export type AdminNavItem = {
+  to: string;
+  label: string;
+  icon?: SidebarItem['icon'];
   end?: boolean;
-  module: StaffModule;
-}
+  module: AfHomesModuleKey;
+  dropdown?: NavLink[];
+};
 
-/** Structural match of the ui `SidebarDivider` (renders as a horizontal rule). */
-export interface AdminNavDivider {
-  divider: true;
-}
-
-export type AdminNavDropdownItem = AdminNavSubItem | AdminNavDivider;
-
-export interface AdminNavItem extends SidebarItem {
-  roles: Role[];
-  /** RBAC module for this destination (single source: STAFF_PERMISSIONS matrix). */
-  module: StaffModule;
-  /** Optional dropdown sub-items when the item is a category header. */
-  dropdown?: AdminNavDropdownItem[];
-}
-
-/** Phase 1 fresh-start: admin role only (user → no admin nav). Legacy SUPER_ADMIN maps to admin via normalizeRole. */
-const ALL_STAFF: Role[] = ['admin'];
-const ADMINS_ONLY: Role[] = ['admin'];
-
-/**
- * Categorized admin navigation items. Each top-level entry is either a
- * single-page link or a category with a dropdown of sub-items. Every
- * top-level link receives a unique icon from the @jad/ui icon set.
- */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  /* Single-page link */
+  { to: '/admin', label: 'Dashboard', icon: 'home', end: true, module: 'dashboard.view' },
   {
-    to: '/admin',
-    label: 'Dashboard',
-    icon: 'grid',
-    end: true,
-    roles: ALL_STAFF,
-    module: 'dashboard',
+    // General Customer Lookup, for the GSD/Employee desk. Keyed on its OWN
+    // module (`operations.customer_lookup`), seeded by 20261131000003 with
+    // view grants for `employee` and `admin`, so the permission list shows the
+    // screen by name instead of borrowing `operations.redemption`. The nav is
+    // permission-driven: any role granted that view sees this entry, and no
+    // role can reach the screen without it.
+    //
+    // It REPLACES the old top-level "VIP Member Lookup", which presented a member
+    // TRANSACTION screen as a system-wide general lookup and displayed Membership
+    // Codes to anyone who could see the nav. That screen still exists at
+    // `/admin/member-lookup` and is reachable from Redemption, where a till belongs.
+    to: '/admin/customer-lookup',
+    label: 'Customer Lookup',
+    icon: 'search',
+    module: 'operations.customer_lookup',
   },
-
-  /* Category: Members - Registration + Members as dropdown */
-  {
-    to: '/admin/members',
-    label: 'Members',
-    icon: 'users',
-    roles: ADMINS_ONLY,
-    module: 'members',
-    dropdown: [
-      { to: '/admin/registrations', label: 'Registration', module: 'registrations' },
-      { to: '/admin/members', label: 'Members', module: 'members' },
-    ],
-  },
-
-  /* Category: Operations (dropdown) */
   {
     to: '/admin/sales',
-    label: 'Operations',
-    icon: 'wallet',
-    roles: ALL_STAFF,
-    module: 'sales',
+    label: 'Sales',
+    icon: 'file-text',
+    module: 'sales.card_sales',
     dropdown: [
-      { to: '/admin/sales', label: 'Sales', module: 'sales' },
-      { to: '/admin/payouts', label: 'Payouts', module: 'payouts' },
-      { to: '/admin/withdrawals', label: 'Withdrawals', module: 'withdrawals' },
-      { to: '/admin/reports', label: 'Reports', module: 'sales' },
-      { to: '/admin/vouchers', label: 'Vouchers', module: 'vouchers' },
+      { to: '/admin/customers', label: 'Customers', module: 'sales.customers' },
+      // Applications is the second view of the customers screen, but it keeps
+      // its OWN address: `findNavSubItem` and `breadcrumbItems` are given
+      // `pathname` only, so a search-parameter target could never be marked
+      // active and the breadcrumb would name the wrong page.
+      { to: '/admin/customers/applications', label: 'Applications', module: 'sales.customers' },
+      { to: '/admin/sales/reservations', label: 'Reservation', module: 'sales.card_sales' },
+      // Website contact and reservation-request form inbox (own key, 20270105000027).
+      { to: '/admin/sales/inquiries', label: 'Website Inquiries', module: 'sales.inquiries' },
+      { to: '/admin/products', label: 'Card Plans', module: 'sales.card_plans' },
+      {
+        to: '/admin/sales/payment-scheme-guide',
+        label: 'Scheme Guide',
+        module: 'sales.card_sales',
+      },
     ],
   },
-
-  /* Flat: Properties - transactional catalog + Content as top-level links (no dropdown) */
   {
-    to: '/admin/properties',
-    label: 'Properties',
-    icon: 'home',
-    roles: ADMINS_ONLY,
-    module: 'properties',
+    to: '/admin/finance',
+    label: 'Finance',
+    icon: 'dollar-sign',
+    module: 'finance.payment_verification',
+    dropdown: [
+      {
+        to: '/admin/finance/payments',
+        label: 'Payment List',
+        module: 'finance.payment_verification',
+      },
+      {
+        to: '/admin/finance/month-end',
+        label: 'Month-End Close',
+        module: 'finance.payroll',
+        alsoModules: ['finance.payroll_close'],
+      },
+      {
+        to: '/admin/finance/payroll',
+        label: 'IST Payroll',
+        module: 'finance.payroll',
+        alsoModules: ['finance.payroll_approval'],
+      },
+      {
+        to: '/admin/finance/activation',
+        label: 'Activation List',
+        module: 'finance.card_activation',
+      },
+      {
+        to: '/admin/finance/commissions',
+        label: 'Commissions',
+        module: 'network.commissions',
+        alsoModules: ['finance.commission_payouts'],
+      },
+      {
+        to: '/admin/commissions/settings',
+        label: 'Commission Settings',
+        module: 'network.commissions',
+      },
+      {
+        to: '/admin/memberships',
+        label: 'Memberships',
+        module: 'finance.card_activation',
+      },
+    ],
   },
   {
-    to: '/admin/marketing-tools',
-    label: 'Marketing Tools',
-    icon: 'image',
-    roles: ADMINS_ONLY,
-    module: 'marketing_tools',
+    to: '/admin/redemption',
+    label: 'Redemption',
+    icon: 'wallet',
+    module: 'operations.redemption',
+    dropdown: [
+      { to: '/admin/redemption', label: 'Points Claims', module: 'operations.redemption' },
+      {
+        to: '/admin/redemption/history',
+        label: 'Claim History',
+        module: 'operations.redemption',
+      },
+    ],
+  },
+  // Operational Services is SELLING, which is a different job from redeeming, so
+  // it gets its own group rather than another entry under Redemption. The pages
+  // are the ones that already exist and already work; this only groups them and
+  // re-keys them to the permission each one actually needs.
+  {
+    to: '/admin/points',
+    label: 'Services',
+    // Selling-desk group: must not share Finance's 'dollar-sign' icon.
+    icon: 'grid',
+    module: 'operations.sales',
+    dropdown: [
+      // The GSD screen. `operations.sales` view+create is what a seller holds;
+      // it grants no catalog, customer or verification authority.
+      { to: '/admin/points', label: 'New Sale', module: 'operations.sales' },
+      // Points spending is a POS act, not a redemption-desk one: it lives with
+      // the sale, keyed to the same `operations.sales` the seller holds, and
+      // nowhere near the earning-claim queue.
+      { to: '/admin/points/use', label: 'Use Points', module: 'operations.sales' },
+      // Admin only: products, tier discounts and earning rules.
+      { to: '/admin/points/rules', label: 'Catalog', module: 'operations.catalog' },
+      { to: '/admin/points/records', label: 'Sales Records', module: 'sales.customers' },
+      // Finance/Admin only: operational receipt verification AND the sales
+      // ledger. Keyed to `operations.payments`, which `employee` does not
+      // hold, so the seller cannot reach the screen that verifies their own
+      // receipt - and which is deliberately NOT the VIP-card
+      // `finance.payment_verification`.
+      {
+        to: '/admin/points/payments',
+        label: 'Verify Receipts',
+        module: 'operations.payments',
+      },
+    ],
   },
   {
-    to: '/admin/broadcasts',
-    label: 'Broadcasts',
-    icon: 'bell',
-    roles: ADMINS_ONLY,
-    module: 'marketing_tools',
+    to: '/admin/genealogy',
+    label: 'Sales Network',
+    icon: 'users',
+    module: 'network.genealogy',
+    dropdown: [
+      { to: '/admin/genealogy', label: 'Genealogy', module: 'network.genealogy' },
+      { to: '/admin/network/members', label: 'Members', module: 'network.members' },
+    ],
+  },
+  // Member engagement: service bookings and the member-facing notice and
+  // message desks. Each child keeps its own module key, so a role sees only
+  // the screens it was granted; the parent opens on its first visible child.
+  {
+    to: '/admin/bookings',
+    label: 'Bookings',
+    icon: 'clock',
+    module: 'operations.bookings',
+    // A group with one child (not a bare link): a bare top-level link resolves
+    // to the Dashboard in `findNavItem`, which would gate it on the wrong module.
+    dropdown: [
+      { to: '/admin/bookings', label: 'Service Bookings', module: 'operations.bookings' },
+    ],
   },
   {
     to: '/admin/messages',
-    label: 'Messages',
+    label: 'Communication',
     icon: 'message',
-    roles: ADMINS_ONLY,
-    module: 'messages',
-  },
-  {
-    to: '/admin/policies',
-    label: 'Policies',
-    icon: 'file-text',
-    roles: ADMINS_ONLY,
-    module: 'policies',
-  },
-
-  /* Category: System (dropdown) */
-  {
-    to: '/admin/config',
-    label: 'System',
-    icon: 'gear',
-    roles: ['admin'],
-    module: 'config',
+    module: 'communication.messages',
     dropdown: [
-      { to: '/admin/config', label: 'System Configuration', module: 'config' },
-      { to: '/admin/audit', label: 'Audit Log', module: 'audit' },
-      { to: '/admin/staff', label: 'Staff', module: 'staff' },
-      { to: '/admin/roles', label: 'Roles', module: 'staff' },
+      { to: '/admin/messages', label: 'Member Messages', module: 'communication.messages' },
+      {
+        to: '/admin/announcements',
+        label: 'Announcements',
+        module: 'communication.announcements',
+      },
     ],
   },
-
-  /* Category: Website CMS (Phase 1: Homepage, Phase 2: About, Phase 3: Properties, Phase 4: FAQs) */
+  {
+    to: '/admin/staff',
+    label: 'Organization',
+    icon: 'gear',
+    module: 'organization.staff',
+    dropdown: [
+      { to: '/admin/staff', label: 'Staff', module: 'organization.staff' },
+      { to: '/admin/departments', label: 'Departments', module: 'organization.departments' },
+      { to: '/admin/roles', label: 'Roles', module: 'organization.roles' },
+      { to: '/admin/settings/public-verification', label: 'Verification Settings', module: 'governance.config' },
+      { to: '/admin/settings/modules', label: 'Modules', module: 'governance.config' },
+    ],
+  },
+  // Phase 15 Reports and Audit Center. The group is keyed on `dashboard.view`
+  // (every staff role holds it) so each role sees the group; the Reports
+  // screen then offers only the reports the session's permissions allow, and
+  // the Audit Log child keeps its own `governance.audit` key so sellers,
+  // employees and customers never see it. The server re-checks everything.
+  {
+    to: '/admin/reports',
+    label: 'Reports',
+    icon: 'list',
+    module: 'dashboard.view',
+    dropdown: [
+      { to: '/admin/reports', label: 'Reports', module: 'dashboard.view' },
+      { to: '/admin/audit', label: 'Audit Log', module: 'governance.audit' },
+    ],
+  },
   {
     to: '/admin/cms',
     label: 'Website CMS',
-    icon: 'list',
-    roles: ADMINS_ONLY,
-    module: 'cms',
+    icon: 'image',
+    module: 'cms.pages',
     dropdown: [
-      { to: '/admin/cms/homepage', label: 'Homepage', module: 'cms' },
-      { to: '/admin/cms/about', label: 'About', module: 'cms' },
-      { to: '/admin/cms/properties', label: 'Properties', module: 'cms' },
-      { to: '/admin/cms/faqs', label: 'FAQs', module: 'cms' },
-      { to: '/admin/cms/contact', label: 'Contact', module: 'cms' },
-      { to: '/admin/inquiries', label: 'Inquiries', module: 'cms' },
-      { to: '/admin/cms/global', label: 'Global Content', module: 'cms' },
-      { divider: true },
-      { to: '/admin/cms/login', label: 'Login', module: 'cms' },
-      { to: '/admin/cms/register', label: 'Register', module: 'cms' },
+      { to: '/admin/cms/pages', label: 'Website Pages', module: 'cms.pages' },
+      { to: '/admin/cms/media', label: 'Media Library', module: 'cms.media' },
+      { to: '/admin/cms/stories', label: 'Stories', module: 'cms.pages' },
+      { to: '/admin/cms/experiences', label: 'Experiences', module: 'cms.pages' },
+      { to: '/admin/cms/faq', label: 'FAQ', module: 'cms.pages' },
+      { to: '/admin/cms/vip', label: 'VIP Website Content', module: 'cms.pages' },
+      { to: '/admin/cms/site-settings', label: 'Site Settings', module: 'cms.settings' },
+      { to: '/admin/cms/seo', label: 'SEO', module: 'cms.settings' },
+      { to: '/admin/cms/history', label: 'History', module: 'cms.history' },
     ],
   },
 ];
 
-export const ROLE_LABELS: Record<Role, string> = {
-  user: 'User',
-  admin: 'Admin',
-};
+export const canViewModule = (
+  permissions: readonly AfHomesPermission[] | undefined,
+  key: AfHomesModuleKey,
+) => permissions?.some((permission) => permission.moduleKey === key && permission.canView) === true;
 
-/** Find the nav item whose `to` matches the given pathname (supports nested detail routes). */
-export function findNavItem(pathname: string): AdminNavItem | undefined {
-  const exact = ADMIN_NAV_ITEMS.find((item) => item.to === pathname);
-  if (exact) return exact;
-  // Check dropdown children first for more specific match
-  for (const item of ADMIN_NAV_ITEMS) {
-    if (
-      item.dropdown?.some(
-        (sub) => !('divider' in sub) && (pathname === sub.to || pathname.startsWith(`${sub.to}/`)),
-      )
-    ) {
-      return item;
-    }
-    if (pathname.startsWith(`${item.to}/`) && item.to !== '/admin') {
-      return item;
-    }
-  }
-  return undefined;
-}
+const canViewNavLink = (permissions: readonly AfHomesPermission[] | undefined, link: NavLink) =>
+  [link.module, ...(link.alsoModules ?? [])].some((key) => canViewModule(permissions, key));
 
-/** Find the specific sub-item matching a pathname (for breadcrumb detail labels). */
-export function findNavSubItem(
-  pathname: string,
-): { parent: AdminNavItem; sub: AdminNavSubItem } | undefined {
-  for (const item of ADMIN_NAV_ITEMS) {
-    const sub = item.dropdown?.find(
-      (s) => !('divider' in s) && (pathname === s.to || pathname.startsWith(`${s.to}/`)),
-    );
-    if (sub && !('divider' in sub)) return { parent: item, sub };
-  }
-  return undefined;
-}
+const REPORT_MODULES:readonly AfHomesModuleKey[] = [
+  'sales.card_sales',
+  'sales.customers',
+  'sales.card_plans',
+  'finance.payment_verification',
+  'finance.card_activation',
+  'finance.points',
+  'network.commissions',
+  'finance.commission_payouts',
+  'operations.redemption',
+  'network.genealogy',
+  'network.ost_registrations',
+  'network.ost_members',
+];
 
-/**
- * Breadcrumb trail for a pathname - the single source for AdminLayout's bar
- * so page-level trails never duplicate it (UI-UX §4.3/§4.7). Trail shapes:
- * - exact sub/list page: Dashboard(link) > Category > Current
- *   (category span collapses when it would duplicate the page label).
- * - detail page under a sub or plain item: Dashboard(link) > List(link) >
- *   Details (current) - the list link stays clickable because it is not the
- *   last crumb.
- * - unmatched routes: `null` (suppress the bar) - except /admin/profile
- *   (My Account, outside the nav registry).
- */
-export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
-  if (pathname === '/admin') return [{ label: 'Dashboard' }];
-  if (pathname === '/admin/profile') {
-    return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
-  }
-  const dashboardLink: BreadcrumbItem = { label: 'Dashboard', to: '/admin' };
-  const subs = ADMIN_NAV_ITEMS.flatMap((item) =>
-    (item.dropdown ?? []).filter((s): s is AdminNavSubItem => !('divider' in s)),
-  );
-  // Exact sub matches first so nested sub routes resolve to their own label
-  // instead of a longer parent's detail trail.
-  const exactSub = subs.find((sub) => sub.to === pathname);
-  if (exactSub) {
-    if (exactSub.to === '/admin/members') {
-      // The Members category and its sub share the label/path - single crumb.
-      return [dashboardLink, { label: exactSub.label }];
-    }
-    const parent = ADMIN_NAV_ITEMS.find((item) =>
-      item.dropdown?.some((s) => !('divider' in s) && 'to' in s && s.to === exactSub.to),
-    );
-    if (parent && parent.label !== exactSub.label) {
-      return [dashboardLink, { label: parent.label }, { label: exactSub.label }];
-    }
-    return [dashboardLink, { label: exactSub.label }];
-  }
-  const detailSub = subs.find((sub) => pathname.startsWith(`${sub.to}/`));
-  if (detailSub) {
-    return [dashboardLink, { label: detailSub.label, to: detailSub.to }, { label: 'Details' }];
-  }
-  for (const item of ADMIN_NAV_ITEMS) {
-    if (item.dropdown || item.to === '/admin') continue;
-    if (pathname === item.to) {
-      return [dashboardLink, { label: item.label }];
-    }
-    if (pathname.startsWith(`${item.to}/`)) {
-      return [dashboardLink, { label: item.label, to: item.to }, { label: 'Details' }];
-    }
-  }
-  return null;
-}
+const canViewReports = (permissions?: readonly AfHomesPermission[]) =>
+  REPORT_MODULES.some((key) => canViewModule(permissions, key));
 
-/** Check whether a role can access a nav item (includes categories). */
-export function canAccess(role: Role | null, item: AdminNavItem): boolean {
-  return role !== null && item.roles.includes(role);
-}
-
-/**
- * Check whether a role id can access a nav item's module (records + matrix
- * fallback). `sessionModules` - when provided by the server-resolved
- * session - is authoritative and wins over records (see resolveRoleModules).
- */
-export function canAccessModule(
-  roleId: string | null,
-  roles: readonly RoleRecord[] | undefined,
-  item: AdminNavItem,
-  sessionModules?: readonly StaffModule[],
-): boolean {
-  if (roleId === null) return false;
-  return resolveRoleModules(roles, roleId, sessionModules).includes(item.module);
-}
-
-/** Check whether a role id can access a dropdown sub-item's module. */
-export function canAccessSubModule(
-  roleId: string | null,
-  roles: readonly RoleRecord[] | undefined,
-  sub: AdminNavSubItem,
-  sessionModules?: readonly StaffModule[],
-): boolean {
-  if (roleId === null) return false;
-  return resolveRoleModules(roles, roleId, sessionModules).includes(sub.module);
-}
-
-/**
- * Filter a dropdown to the sub-items visible to a role id, dropping
- * dividers left orphaned at the edges or doubled up by the filtering.
- */
-export function filterDropdownForStaffRole(
-  dropdown: AdminNavDropdownItem[] | undefined,
-  roleId: string | null,
-  roles?: readonly RoleRecord[],
-  sessionModules?: readonly StaffModule[],
-): AdminNavDropdownItem[] | undefined {
-  if (!dropdown) return undefined;
-  if (roleId === null) return dropdown;
-  const visible = dropdown.filter(
-    (sub) => 'divider' in sub || canAccessSubModule(roleId, roles, sub, sessionModules),
-  );
-  const cleaned: AdminNavDropdownItem[] = [];
-  for (const sub of visible) {
-    const prev = cleaned[cleaned.length - 1];
-    if ('divider' in sub && (prev === undefined || 'divider' in prev)) continue;
-    cleaned.push(sub);
-  }
-  while (cleaned.length > 0 && 'divider' in cleaned[cleaned.length - 1]!) cleaned.pop();
-  return cleaned;
-}
-
-/** Extract SidebarItem list, preserving dropdown metadata for the renderer. */
-export function navItemsForRole(
-  role: Role | null,
-  roleId?: string | null,
-  roles?: readonly RoleRecord[],
-  sessionModules?: readonly StaffModule[],
+export function navItemsForPermissions(
+  permissions?: readonly AfHomesPermission[],
+  items = ADMIN_NAV_ITEMS,
 ): SidebarItem[] {
-  if (role === null) return [];
-  const items = ADMIN_NAV_ITEMS.filter((item) => canAccess(role, item));
-  if (roleId === undefined) {
-    return items.map((item) => ({
-      to: item.to,
-      label: item.label,
-      icon: item.icon,
-      end: item.end,
-      badge: item.badge,
-      /** Pass through dropdown so the Sidebar can render a category header. */
-      dropdown: item.dropdown,
-    }));
-  }
-  if (roleId === null) return [];
   return items.flatMap((item) => {
-    const dropdown = filterDropdownForStaffRole(item.dropdown, roleId, roles, sessionModules);
-    // A category stays visible when its own module is allowed or when at
-    // least one sub-item link remains (e.g. merchant sees Operations for
-    // Vouchers even though the Operations/Sales module itself is denied).
-    const hasVisibleLink = dropdown?.some((sub) => !('divider' in sub)) ?? false;
-    if (!canAccessModule(roleId, roles, item, sessionModules) && !hasVisibleLink) return [];
-    return [
-      {
-        to: item.to,
-        label: item.label,
-        icon: item.icon,
-        end: item.end,
-        badge: item.badge,
-        dropdown,
-      },
-    ];
+    // A switched-off parent can still hold a child that no switch hides (the Audit
+    // Log under Reports); the group then opens on its first visible child.
+    const dropdown = item.dropdown?.filter(
+      (child) =>
+        isFeaturePathEnabled(child.to) &&
+        (child.to === '/admin/reports'
+          ? canViewReports(permissions)
+          : canViewNavLink(permissions, child)),
+    );
+    const parentEnabled = isFeaturePathEnabled(item.to);
+    const canViewParent =
+      parentEnabled &&
+      (item.to === '/admin/reports'
+        ? canViewReports(permissions)
+        : canViewModule(permissions, item.module));
+    if (!canViewParent && !dropdown?.length) return [];
+    const to = parentEnabled ? item.to : (dropdown?.[0]?.to ?? item.to);
+    return [{ to, label: item.label, icon: item.icon, end: item.end, dropdown }];
   });
+}
+
+export function istNavItemsForPermissions(permissions?: readonly AfHomesPermission[]): SidebarItem[] {
+  return navItemsForPermissions(permissions, [
+    ADMIN_NAV_ITEMS[0]!,
+    {
+      to: '/admin/ist/my-sales', label: 'Sales', icon: 'file-text', module: 'sales.card_sales',
+      dropdown: [
+        { to: '/admin/ist/my-sales', label: 'My Sales', module: 'sales.card_sales' },
+        { to: '/admin/ist/team-sales', label: 'Team Sales', module: 'sales.card_sales' },
+      ],
+    },
+    {
+      to: '/admin/ist/my-commissions', label: 'Commissions', icon: 'wallet', module: 'network.commissions',
+      dropdown: [
+        { to: '/admin/ist/my-commissions', label: 'My Commissions', module: 'network.commissions' },
+        { to: '/admin/ist/team-commissions', label: 'Team Commissions', module: 'network.commissions' },
+      ],
+    },
+    ADMIN_NAV_ITEMS.find((item) => item.to === '/admin/genealogy')!,
+    { to: '/admin/profile', label: 'Profile', icon: 'user', module: 'dashboard.view' },
+  ]);
+}
+
+/**
+ * Explicit path -> module gate for console screens that are NOT (or not only)
+ * nav entries: `/admin/member-lookup` is reached from Redemption, the documents
+ * screens are compatibility-only after leaving the sidebar, and the customer
+ * import/export workspace is reached from the Applications list action.
+ *
+ * ONE table, so the guard below and the coverage spec cannot drift: every
+ * module referenced here is asserted to exist in the module catalog, which is
+ * what keeps every page in the Roles listing.
+ */
+export const EXTRA_GATED_ROUTES: readonly {
+  pathPrefix: string;
+  module: AfHomesModuleKey;
+}[] = [
+  { pathPrefix: '/admin/ist/my-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/team-sales', module: 'sales.card_sales' },
+  { pathPrefix: '/admin/ist/my-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/team-commissions', module: 'network.commissions' },
+  { pathPrefix: '/admin/ist/accreditation', module: 'dashboard.view' },
+  { pathPrefix: '/admin/member-lookup', module: 'operations.redemption' },
+  { pathPrefix: '/admin/customer-lookup', module: 'operations.customer_lookup' },
+  // `/admin/documents` list/review route removed; the scan travels with the
+  // application. The `sales.id_documents` module still gates the image on the
+  // customer record.
+  {
+    pathPrefix: '/admin/customers/applications/import-export',
+    module: 'governance.customer_import',
+  },
+  // OST onboarding screens left the sidebar but kept their routes. Without an
+  // entry here they fell through to the Dashboard catch-all (`/admin` covers
+  // every console path) and opened for any `dashboard.view` session. Keys are
+  // the ones their removed nav entries carried.
+  { pathPrefix: '/admin/ost/applications', module: 'network.ost_registrations' },
+  { pathPrefix: '/admin/ost/members', module: 'network.ost_members' },
+  { pathPrefix: '/admin/ost/referral-code', module: 'network.referrals' },
+];
+
+export function canAccessNavTarget(
+  permissions: readonly AfHomesPermission[] | undefined,
+  pathname: string,
+): boolean {
+  if (!isFeaturePathEnabled(pathname)) return false;
+  // `/admin/reports` is visible on ANY report permission, not one key: the
+  // screen then offers only the reports the session allows.
+  if (pathname === '/admin/reports') return canViewReports(permissions);
+  const extra = EXTRA_GATED_ROUTES.find(
+    (entry) => pathname === entry.pathPrefix || pathname.startsWith(`${entry.pathPrefix}/`),
+  );
+  if (extra) return canViewModule(permissions, extra.module);
+  const sub = findNavSubItem(pathname);
+  const item = findNavItem(pathname);
+  if (sub) return canViewNavLink(permissions, sub.sub);
+  const key = item?.module;
+  return !key || canViewModule(permissions, key);
+}
+
+/**
+ * Does `pathname` fall under this nav target?
+ *
+ * The LONGEST matching target wins. Prefix matching alone is wrong once a
+ * group holds both a parent route and a nested child: `/admin/points/rules`
+ * starts with `/admin/points/`, so a first-match search resolves the catalog
+ * screen to the WORKFLOW's module key and checks the wrong permission. Choosing
+ * the most specific match keeps a nested screen gated on its OWN module.
+ */
+const covers = (target: string, pathname: string): boolean =>
+  pathname === target || pathname.startsWith(`${target}/`);
+
+const mostSpecific = <T extends { to: string }>(
+  targets: readonly T[],
+  pathname: string,
+): T | undefined =>
+  targets
+    .filter((target) => covers(target.to, pathname))
+    .sort((a, b) => b.to.length - a.to.length)[0];
+
+export function findNavItem(pathname: string) {
+  return ADMIN_NAV_ITEMS.find(
+    (item) =>
+      covers(item.to, pathname) ||
+      (item.dropdown ?? []).some((child) => covers(child.to, pathname)),
+  );
+}
+
+export function findNavSubItem(pathname: string) {
+  let best: { parent: AdminNavItem; sub: NavLink } | undefined;
+  for (const parent of ADMIN_NAV_ITEMS) {
+    const sub = mostSpecific(parent.dropdown ?? [], pathname);
+    if (!sub) continue;
+    if (!best || sub.to.length > best.sub.to.length) best = { parent, sub };
+  }
+  return best;
+}
+export function breadcrumbItems(pathname: string): BreadcrumbItem[] | null {
+  // The dashboard is the console home: a self-referencing "Dashboard" crumb
+  // adds a redundant label above Operations Overview, so no trail renders here.
+  // Deeper pages keep their `Dashboard -> …` home link untouched.
+  if (pathname === '/admin') return null;
+  if (pathname === '/admin/profile')
+    return [{ label: 'Dashboard', to: '/admin' }, { label: 'My Account' }];
+  const found = findNavSubItem(pathname);
+  if (!found) return null;
+  const exact = pathname === found.sub.to;
+  return exact
+    ? [
+        { label: 'Dashboard', to: '/admin' },
+        { label: found.parent.label },
+        { label: found.sub.label },
+      ]
+    : [
+        { label: 'Dashboard', to: '/admin' },
+        { label: found.sub.label, to: found.sub.to },
+        { label: 'Details' },
+      ];
 }
