@@ -168,3 +168,11 @@
     --header-height: 70px;
   }
 }
+
+/* Touch screens: every shared control reaches the 44px comfortable target. */
+@media (pointer: coarse) {
+  :root {
+    --control-sm: 2.75rem;
+    --control-md: 2.75rem;
+  }
+}

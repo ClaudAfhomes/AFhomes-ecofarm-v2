@@ -13670,6 +13670,29 @@ async function main(): Promise<void> {
           ).record.id,
           reservation.customerId,
         );
+        // Name search matches every typed word in any order: a double space, a
+        // comma and a reversed name all find the same customer (20270106000001).
+        for (const typed of ['reservation  release', 'RESERVATION, Release', 'release reserv']) {
+          eq(
+            'name search by words in any order finds the customer: ' + typed,
+            (
+              await one<{ record: { id: string } }>('select record from customer_directory($1)', [
+                JSON.stringify({ search: typed, seller: actor, limit: 1 }),
+              ])
+            ).record.id,
+            reservation.customerId,
+          );
+        }
+        eq(
+          'name search requires every typed word to match',
+          (
+            await one<{ n: number }>(
+              'select count(*)::int as n from customer_directory($1)',
+              [JSON.stringify({ search: 'release zzznomatchzzz', seller: actor })],
+            )
+          ).n,
+          0,
+        );
         await reseatFixtureSale(
           "update card_sales set seller_type='staff',seller_staff_id=$1,seller_ost_id=null where id=$2",
           [staff['ost'], reservation.saleId],

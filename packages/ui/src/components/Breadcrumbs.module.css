@@ -44,3 +44,9 @@
   color: var(--color-text-primary);
   font-weight: 600;
 }
+
+@media (pointer: coarse) {
+  .link {
+    min-height: 2.75rem;
+  }
+}
