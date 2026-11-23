@@ -1,5 +1,5 @@
-import { useState, lazy, Suspense } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, lazy, Suspense } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AnalyticsOverview, AnalyticsPeriod } from '@afhomes/contracts';
 import { paymentSchemeLabel } from '@afhomes/contracts';
 import { compareMoney, formatCount, formatMoney } from '@afhomes/shared';
@@ -22,6 +22,7 @@ import {
 import type { IconName } from '@afhomes/ui';
 import { TrendChartSkeleton } from './AfHomesTrendChartSkeleton';
 import { getAnalyticsOverview } from './services';
+import { afHomesSalesTrendQuery } from './useAfHomesSalesTrend';
 import { canViewModule } from '../../app/navigation';
 import { useSession } from '../../lib/session';
 import { SaleTeamAccreditationCard } from './SaleTeamAccreditationCard';
@@ -304,6 +305,12 @@ function ShareCell({
 }
 
 function Trend() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    // This component is already gated by sales visibility and the returned scope.
+    // Overlap the default read with chart code; the chart consumes the same cached query.
+    void queryClient.prefetchQuery(afHomesSalesTrendQuery('month'));
+  }, [queryClient]);
   return (
     <Suspense fallback={<TrendChartSkeleton />}>
       <AfHomesTrendChart />
