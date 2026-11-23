@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import {
   Button,
   ConfirmDialog,
@@ -17,7 +18,7 @@ import {
   useCustomerProfileQuery,
   useReissueCredentials,
 } from './queries';
-import { isForbidden, isNotFound } from './http';
+import { isForbidden } from './http';
 import { PortalSection, formatDate, isNoCard, statusTone, styles, ui } from './portal-ui';
 import { vipTier } from './vip-tier';
 import type { CustomerCredentials } from './services';
@@ -65,16 +66,32 @@ export function CustomerMembershipPage() {
   if (membership.isLoading && !isNoCard(membership)) {
     return <p role="status">Loading your card…</p>;
   }
-  if (membership.isError || isNoCard(membership)) {
+  if (isNoCard(membership)) {
+    return (
+      <div className={m.noCard}>
+        <span className={m.noCardIcon} aria-hidden="true">
+          <Icon name="card" size={28} />
+        </span>
+        <h2 className={m.noCardTitle}>Your VIP card is on its way</h2>
+        <p className={m.noCardText}>You do not have an active membership yet.</p>
+        <p className={m.noCardHint}>
+          Your card appears here once your membership is fully paid and activated. Questions about
+          where yours stands? Send us a message.
+        </p>
+        <Link className={m.noCardAction} to="/customer/messages">
+          Message AF Homes
+        </Link>
+      </div>
+    );
+  }
+  if (membership.isError) {
     return (
       <ErrorState
         title="Card unavailable"
         message={
           isForbidden(membership.error)
             ? 'Your account is not active, so your card is not available. Contact AFhomes Ecofarm to restore access.'
-            : isNotFound(membership.failureReason)
-              ? 'You do not have an active membership yet.'
-              : 'We could not load your card. Please try again in a moment.'
+            : 'We could not load your card. Please try again in a moment.'
         }
       />
     );

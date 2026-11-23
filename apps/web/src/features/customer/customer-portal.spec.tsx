@@ -1423,6 +1423,12 @@ describe('member without an active membership', () => {
       await screen.findByText('You do not have an active membership yet.'),
     ).toBeInTheDocument();
     expect(screen.queryByText('Loading your card…')).not.toBeInTheDocument();
+    // Not an error: a welcoming state with one next step, never an alert.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Message AF Homes' })).toHaveAttribute(
+      'href',
+      '/customer/messages',
+    );
   });
 
   it('does not word the points screen as a failure', async () => {
