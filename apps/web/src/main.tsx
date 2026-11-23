@@ -8,6 +8,7 @@ import { preloadInitialRoute } from './app/initial-route';
 import { loadFeatureFlags } from './lib/feature-flags';
 import { CustomerSessionProvider } from './lib/customer-session';
 import { queryClient } from './lib/query';
+import { getSupabaseClient } from './lib/supabase';
 
 import '@afhomes/ui/tokens.css';
 import '@afhomes/ui/base.css';
@@ -18,7 +19,9 @@ if (!rootElement) {
   throw new Error('Root element #root not found');
 }
 
-// Module switches decide which routes and links exist, so they load first.
+// Module switches decide which routes and links exist, so rendering waits for them.
+// Restore/refresh the cached SDK session alongside settings, without rendering account content.
+getSupabaseClient();
 // Fetch only this entry's code in parallel; no account data or route renders early.
 void preloadInitialRoute(window.location.pathname);
 void loadFeatureFlags().then(() =>

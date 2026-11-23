@@ -8,6 +8,7 @@ import { preloadAdminShell } from './app/preload-shell';
 import { loadFeatureFlags } from './lib/feature-flags';
 import { queryClient } from './lib/query';
 import { SessionProvider } from './lib/session';
+import { getSupabaseClient } from './lib/supabase';
 
 import '@afhomes/ui/tokens.css';
 import '@afhomes/ui/base.css';
@@ -20,7 +21,10 @@ if (!rootElement) {
   throw new Error('Root element #root not found');
 }
 
-// Module switches decide which routes and links exist, so they load first.
+// Module switches decide which routes and links exist, so rendering waits for them.
+// The cached Auth client restores/refreshes its session independently of module switches.
+// Begin that work now; rendering still waits for settings and server authorization.
+getSupabaseClient();
 // Protected entries need the shell; overlap its download without loading it on public entries.
 void preloadAdminShell(window.location.pathname).catch(() => {
   // The routed import retains the normal error-boundary path if this speculative fetch fails.
