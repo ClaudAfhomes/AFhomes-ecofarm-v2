@@ -13,7 +13,11 @@ export interface BottomNavItem {
 export interface BottomNavProps {
   items: BottomNavItem[];
   /** "More" affordance opening the full navigation drawer. */
-  moreItem?: { label: string; onClick: () => void };
+  moreItem?: {
+    label: string;
+    onClick: () => void;
+    /** True when the current page is reached through More. */ active?: boolean;
+  };
   label?: string;
 }
 
@@ -46,7 +50,8 @@ export function BottomNav({ items, moreItem, label = 'Primary' }: BottomNavProps
           <li className={styles.item}>
             <button
               type="button"
-              className={styles.link}
+              className={`${styles.link} ${moreItem.active ? styles.active : ''}`}
+              data-active={moreItem.active ? 'true' : undefined}
               onClick={moreItem.onClick}
               aria-haspopup="dialog"
             >

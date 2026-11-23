@@ -70,7 +70,7 @@ export function CustomerPaymentsPage() {
     <MoneyPanel
       title="Payment history"
       description={
-        rows.length > 0 ? 'Only verified payments count toward your balance.' : undefined
+        rows.length > 0 ? 'Only verified payments are counted as received.' : undefined
       }
     >
       {rows.length === 0 ? (

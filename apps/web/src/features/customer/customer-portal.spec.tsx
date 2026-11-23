@@ -1079,6 +1079,35 @@ describe('portal navigation', () => {
       );
     });
 
+    it('marks More as current only on a page that lives inside it', async () => {
+      render('/customer/redemptions');
+      const more = await within(await screen.findByRole('navigation', MOBILE)).findByRole(
+        'button',
+        {
+          name: 'More',
+        },
+      );
+      expect(more).toHaveAttribute('data-active', 'true');
+    });
+
+    it('does not mark More as current on an everyday destination', async () => {
+      render('/customer');
+      const more = await within(await screen.findByRole('navigation', MOBILE)).findByRole(
+        'button',
+        {
+          name: 'More',
+        },
+      );
+      expect(more).not.toHaveAttribute('data-active');
+    });
+
+    it('offers a skip link that targets the main content', async () => {
+      render('/customer');
+      const skip = await screen.findByRole('link', { name: 'Skip to content' });
+      expect(skip).toHaveAttribute('href', '#customer-main');
+      expect(screen.getByRole('main')).toHaveAttribute('id', 'customer-main');
+    });
+
     it('opens a sheet with the remaining routes and Sign out', async () => {
       const user = userEvent.setup();
       render('/customer');

@@ -154,6 +154,9 @@ function CustomerShell() {
 
   return (
     <div className={styles.shell}>
+      <a href="#customer-main" className="skip-link">
+        Skip to content
+      </a>
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <div className={styles.brand}>
@@ -207,7 +210,11 @@ function CustomerShell() {
         <BottomNav
           label="Customer portal mobile"
           items={bottomItems()}
-          moreItem={{ label: 'More', onClick: () => setMoreOpen(true) }}
+          moreItem={{
+            label: 'More',
+            onClick: () => setMoreOpen(true),
+            active: moreItems().some((item) => pathname.startsWith(item.to)),
+          }}
         />
       </div>
 
@@ -238,7 +245,7 @@ function CustomerShell() {
         </button>
       </Dialog>
 
-      <main className={`${styles.main} afh-route`}>
+      <main id="customer-main" tabIndex={-1} className={`${styles.main} afh-route`}>
         {tab ? <h1 className="sr-only">{tab.label}</h1> : null}
         <Outlet />
       </main>

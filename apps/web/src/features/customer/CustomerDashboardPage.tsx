@@ -175,7 +175,11 @@ export function CustomerDashboardPage() {
       )}
 
       <PortalSection title="Quick actions">
-        <QuickActions hasMembership={Boolean(membership.data)} />
+        {membership.isLoading && !noCard ? (
+          <Skeleton className={styles.actionsSkeleton} />
+        ) : (
+          <QuickActions hasMembership={Boolean(membership.data)} />
+        )}
       </PortalSection>
 
       <DashboardAnnouncements />

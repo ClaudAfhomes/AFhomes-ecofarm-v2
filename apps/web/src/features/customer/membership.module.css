@@ -20,7 +20,11 @@
   justify-content: center;
   padding: var(--space-6) var(--space-5);
   background:
-    radial-gradient(90% 100% at 50% 0%, rgba(255, 255, 255, 0.1), transparent 70%),
+    radial-gradient(
+      90% 100% at 50% 0%,
+      color-mix(in srgb, var(--color-on-dark) 10%, transparent),
+      transparent 70%
+    ),
     linear-gradient(160deg, var(--color-brand-deep), var(--color-brand-primary));
 }
 
@@ -54,7 +58,7 @@
   border-radius: var(--radius-md);
   box-shadow:
     var(--shadow-lg),
-    0 0 0 1px rgba(255, 255, 255, 0.12);
+    0 0 0 1px color-mix(in srgb, var(--color-on-dark) 12%, transparent);
 }
 
 .facts {
@@ -114,7 +118,8 @@
   padding: var(--space-3);
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  /* Stays white on purpose: a QR code needs maximum contrast to scan. */
+  background: var(--color-on-dark);
 }
 
 .qrTile img {
